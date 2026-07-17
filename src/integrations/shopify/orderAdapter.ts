@@ -130,6 +130,7 @@ export const shopifyOrderAdapter: OrderAdapter = {
     // реализован в рабочем потоке как `syncOrderToShopify(orderId)` (pushUpdate.ts),
     // вызываемом из server actions. Здесь — skeleton единого контракта: подключение
     // к реестру произойдёт вместе с переносом ingest на нормализованный путь (backlog A).
-    console.log(`[shopify] OrderAdapter.pushUpdate skeleton ${externalId}`, changes);
+    // Логируем ТОЛЬКО ключи полей (не значения) — значения могут содержать PII (адрес/открытка).
+    console.log(`[shopify] OrderAdapter.pushUpdate skeleton ${externalId}, поля: ${Object.keys(changes).join(", ")}`);
   },
 };

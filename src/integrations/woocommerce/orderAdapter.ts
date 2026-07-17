@@ -142,6 +142,7 @@ export const wooCommerceOrderAdapter: OrderAdapter = {
       return;
     }
     // TODO(этап 2): PUT /wp-json/wc/v3/orders/{externalId} с разрешёнными полями.
-    console.log(`[woo] pushUpdate ${externalId}`, changes);
+    // Логируем ТОЛЬКО ключи полей (не значения) — значения могут содержать PII.
+    console.log(`[woo] pushUpdate ${externalId}, поля: ${Object.keys(changes).join(", ")}`);
   },
 };
