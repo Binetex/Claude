@@ -8,6 +8,7 @@ const sampleWoo: WooOrder = {
   number: "812",
   status: "processing",
   date_created: "2026-07-17T10:00:00",
+  date_created_gmt: "2026-07-17T17:00:00",
   billing: { first_name: "Jane", last_name: "Doe", phone: "+1 555 111 2222", email: "jane@example.com" },
   shipping: { first_name: "John", last_name: "Roe", phone: "555-333-4444", address_1: "10 Rose St", address_2: "Apt 4", city: "Portland", postcode: "97201", country: "US" },
   line_items: [
@@ -39,6 +40,14 @@ describe("WooCommerce OrderAdapter — нормализация заказа", (
     expect(o.deliveryDate).toBe("2026-07-19");
   });
 
+  it("createdAt берётся из date_created_gmt с суффиксом Z (таймзона-корректно)", () => {
+    const o = parseWooOrder(sampleWoo);
+    expect(o.createdAt).toBe("2026-07-17T17:00:00Z");
+    // Fallback на date_created, если gmt отсутствует.
+    const noGmt = parseWooOrder({ ...sampleWoo, date_created_gmt: undefined });
+    expect(noGmt.createdAt).toBe("2026-07-17T10:00:00");
+  });
+
   it("извлекает суммы как числа", () => {
     const o = parseWooOrder(sampleWoo);
     expect(o.money.total).toBe(110.5);
@@ -56,6 +65,9 @@ describe("mapWooStatus — маппинг статусов Woo → внутре�
   it("cancelled/failed → отменён", () => {
     expect(mapWooStatus("cancelled").order).toBe("CANCELLED");
     expect(mapWooStatus("failed").order).toBe("CANCELLED");
+  });
+  it("refunded → оплата REFUNDED, заказ CANCELLED (не возвращается в активную работу)", () => {
+    expect(mapWooStatus("refunded")).toEqual({ payment: "REFUNDED", order: "CANCELLED", delivery: null });
   });
   it("неизвестный статус не роняет и даёт AWAITING_PAYMENT", () => {
     expect(mapWooStatus("some-custom-status").order).toBe("AWAITING_PAYMENT");

@@ -11,8 +11,12 @@ import { verifyHmacBase64 } from "@/integrations/webhookVerify";
  * уже корректна и покрыта тестами, чтобы приём был безопасным с первого дня.
  */
 function header(input: WebhookInput, name: string): string | null {
-  const v = input.headers[name] ?? input.headers[name.toLowerCase()];
-  return v ?? null;
+  // Регистронезависимый поиск заголовка (см. shopify/webhookAdapter.header).
+  const target = name.toLowerCase();
+  for (const key of Object.keys(input.headers)) {
+    if (key.toLowerCase() === target) return input.headers[key] ?? null;
+  }
+  return null;
 }
 
 export const wooCommerceWebhookAdapter: WebhookAdapter = {

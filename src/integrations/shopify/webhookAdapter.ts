@@ -11,7 +11,13 @@ import { verifyHmacBase64 } from "@/integrations/webhookVerify";
  * этот адаптер даёт единый контракт для реестра и переносится в route позже (см. backlog).
  */
 function header(input: WebhookInput, name: string): string | null {
-  return input.headers[name] ?? input.headers[name.toLowerCase()] ?? null;
+  // Регистронезависимый поиск: заголовки могут прийти как в оригинальном, так и в
+  // нижнем регистре в зависимости от того, как route их сериализует.
+  const target = name.toLowerCase();
+  for (const key of Object.keys(input.headers)) {
+    if (key.toLowerCase() === target) return input.headers[key] ?? null;
+  }
+  return null;
 }
 
 export const shopifyWebhookAdapter: WebhookAdapter = {

@@ -97,15 +97,23 @@ export class EventBus {
 
     for (const reg of list) {
       const at = new Date().toISOString();
+      // Реальный номер попытки: обновляется перед каждым вызовом хендлера, чтобы и сам
+      // хендлер (через envelope.attempt), и запись журнала видели фактическое число попыток.
+      let attempt = 0;
       try {
         // runWithRetry сам повторяет ТОЛЬКО ретраябельные ошибки (см. errors.ts);
         // permanent/обычные — пробрасываются сразу. Так достигается изоляция:
         // ошибка одного хендлера не прерывает цикл по остальным.
-        await runWithRetry(async () => reg.handler(payload, envelope as EventEnvelope), {
-          sleep: this.sleep,
-        });
+        await runWithRetry(
+          async () => {
+            attempt++;
+            envelope.attempt = attempt;
+            return reg.handler(payload, envelope as EventEnvelope);
+          },
+          { sleep: this.sleep }
+        );
         handled++;
-        entries.push({ name, idempotencyKey: opts.idempotencyKey, handler: reg.name, ok: true, attempt: 1, at });
+        entries.push({ name, idempotencyKey: opts.idempotencyKey, handler: reg.name, ok: true, attempt, at });
       } catch (err) {
         failed++;
         entries.push({
@@ -114,7 +122,7 @@ export class EventBus {
           handler: reg.name,
           ok: false,
           error: err instanceof Error ? err.message : String(err),
-          attempt: 1,
+          attempt,
           at,
         });
       }

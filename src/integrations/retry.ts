@@ -64,7 +64,9 @@ export async function runWithRetry<T>(
 
       const retryAfter =
         err instanceof IntegrationError && err.retryAfterMs != null
-          ? err.retryAfterMs
+          ? // Уважаем Retry-After провайдера, но ограничиваем maxDelayMs — чтобы враждебный/
+            // ошибочный upstream не заставил ждать произвольно долго.
+            Math.min(policy.maxDelayMs, err.retryAfterMs)
           : computeBackoffMs(attempt, policy, rand);
       options.onRetry?.({ attempt, delayMs: retryAfter, error: err });
       await sleep(retryAfter);

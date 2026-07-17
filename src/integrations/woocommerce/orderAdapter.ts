@@ -43,7 +43,8 @@ export type WooOrder = {
   id: number | string;
   number?: string;
   status?: WooOrderStatus;
-  date_created?: string;
+  date_created?: string; // store-local время БЕЗ таймзоны — использовать только как fallback
+  date_created_gmt?: string; // UTC без суффикса — предпочтительно (см. createdAt ниже)
   billing?: WooAddress;
   shipping?: WooAddress;
   line_items?: WooLineItem[];
@@ -105,7 +106,12 @@ export function parseWooOrder(order: WooOrder): NormalizedOrder {
     platform: "WOOCOMMERCE",
     externalId: String(order.id),
     externalNumber: order.number ?? null,
-    createdAt: order.date_created ?? new Date().toISOString(),
+    // WooCommerce отдаёт `date_created` в store-local времени БЕЗ таймзоны — если передать
+    // его как «ISO», `new Date()` у потребителя сместит момент на смещение магазина (вплоть
+    // до смены суток). Предпочитаем `date_created_gmt` (UTC) + суффикс "Z". Fallback — как есть.
+    createdAt: order.date_created_gmt
+      ? `${order.date_created_gmt}Z`
+      : (order.date_created ?? new Date().toISOString()),
     deliveryDate: metaValue(order, /delivery.*date/i),
     deliveryWindow: metaValue(order, /delivery.*(time|window)/i),
     sender: {

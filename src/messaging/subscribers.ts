@@ -53,7 +53,19 @@ export function registerDeliveryNotifications(
         commands.push({ ...base, channel: "EMAIL", to: ctx.senderEmail, idempotencyKey: `${env.idempotencyKey}:email` });
       }
 
-      if (commands.length) await service.sendMany(commands);
+      if (commands.length) {
+        const results = await service.sendMany(commands);
+        // Не роняем событие из-за сбоя канала, но и не глотаем молча: логируем провалы
+        // для наблюдаемости. Гарантированная доставка/повтор — через персистентный outbox
+        // (см. docs/PROPOSED_SCHEMA_CHANGES.md §3), пока шина in-process.
+        const failures = results.filter((r) => r.status === "failed");
+        if (failures.length) {
+          console.warn(
+            `[notify] order.delivery.completed ${orderId}: не доставлено ${failures.length}/${results.length} ` +
+              `(${failures.map((f) => `${f.channel}${f.retryable ? ":retryable" : ""}`).join(", ")})`
+          );
+        }
+      }
       if (deps.onCompletionSync) await deps.onCompletionSync(orderId);
     },
     "deliveryNotifications"

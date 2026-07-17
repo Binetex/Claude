@@ -68,8 +68,10 @@ describe("EventBus — изоляция и повторы", () => {
   it("повторяет ретраябельную ошибку хендлера и в итоге успевает", async () => {
     const b = bus();
     let calls = 0;
-    b.on("order.assigned", () => {
+    let lastSeenAttempt = 0;
+    b.on("order.assigned", (_p, env) => {
       calls++;
+      lastSeenAttempt = env.attempt;
       if (calls < 3) throw new IntegrationError("temp", { kind: "retryable", platform: "test" });
     }, "flaky");
 
@@ -77,6 +79,9 @@ describe("EventBus — изоляция и повторы", () => {
     expect(calls).toBe(3);
     expect(res.handled).toBe(1);
     expect(res.failed).toBe(0);
+    // Реальный номер попытки виден и хендлеру (envelope.attempt), и журналу (не всегда 1).
+    expect(lastSeenAttempt).toBe(3);
+    expect(b.getLog().find((e) => e.handler === "flaky")?.attempt).toBe(3);
   });
 
   it("обычная (не ретраябельная) ошибка не повторяется", async () => {
