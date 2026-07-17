@@ -255,8 +255,38 @@ production-класс). До того как я остановил сервер,
 копировались. Порт PGlite эфемерен (меняется при рестарте `prisma dev`) — при следующем запуске
 переустановить `DATABASE_URL` из `prisma dev ls`.
 
+### Независимое ревью субагентом + фиксы (проход 1/2) ✅
+Запущен субагент (independent review) по чартерам code/security/typescript/integration-reviewer.
+Вердикт: changeset «genuinely careful, well-tested»; HMAC/PII/секреты/exhaustiveness/сериализация
+на клиентской границе — корректны; в UI-изменениях, errors/retry core, normalized, registry,
+messaging — существенных проблем нет. Найдены и **исправлены** латентные дефекты (нормализованный
+путь ещё не в live, но починил сразу):
+1. **[MEDIUM]** Woo `createdAt` брался из `date_created` (store-local без TZ) → сдвиг времени у
+   потребителя. Теперь из `date_created_gmt` + суффикс `Z`. +тест.
+2. **[LOW-MED]** Woo `refunded` маппился в `CONFIRMED` (возвращал возвращённый заказ в активную
+   работу). Теперь `payment=REFUNDED, order=CANCELLED`, задокументировано как черновик под владельца. +тест.
+3. **[LOW]** `EventEnvelope.attempt`/журнал всегда были `1` несмотря на повторы. Теперь пишется
+   реальный номер попытки (виден и хендлеру, и журналу). +тест.
+4. Retry-After ограничен `maxDelayMs` (защита от враждебного upstream).
+5. Фан-аут `order.delivery.completed` больше не глотает сбои каналов молча — логирует провалы.
+6. Поиск заголовков вебхука сделан регистронезависимым (future-proof для подключения route).
+Коммит: `fix(integrations,events): woo createdAt tz ...`. Проход 2 не требовался — код валиден.
+
 ### Финальный статус проверок (после продолжения)
-typecheck ✅ · lint ✅ · build ✅ · тесты 71 passed (+8 assignments на локальной БД); 4 падения
-composition — ограничение PGlite, не код. UI проверен визуально на локальной БД. Прод не затронут
-(кроме одного непреднамеренного read-запроса, описанного выше). Пуш/деплой/новые миграции — не делались.
+typecheck ✅ · lint ✅ · build ✅ · тесты: **73 passed** на локальной БД (58 unit/contract вне БД
++ assignments 8 + прочие; +новые тесты фиксов). 4 падения `composition` — ограничение PGlite
+(параметризованные запросы), не код; на реальном Postgres проходит. UI проверен визуально на
+локальной БД (owner desktop+mobile, order detail, florist mobile, empty state; консоль без ошибок;
+ролевая видимость подтверждена). Прод не затронут (кроме одного непреднамеренного read-запроса,
+описанного выше). Пуш/деплой/новые миграции — не делались.
+
+### Как воспроизвести локальную проверку (утром)
+1. `nvm use 24 && npm ci && npx prisma generate`.
+2. Локальная БД: `npx prisma dev --name floremart-local -d` → взять TCP-URL из `npx prisma dev ls`
+   (`postgres://postgres:postgres@localhost:PORT/template1?sslmode=disable`).
+3. `DATABASE_URL=<tcp-url> npx prisma migrate deploy` (существующие миграции в ЛОКАЛЬНУЮ БД).
+4. `DATABASE_URL=<tcp-url> npm run db:seed` (демо: owner@demo.local / password123).
+5. Запуск приложения: `next dev <project-dir> --port 3001` с `DATABASE_URL`/`AUTH_SECRET` в env
+   (или через `.env.local`). НЕ использовать здесь preview-инструмент (резолвит исходную папку).
+6. `DATABASE_URL=<tcp-url> npm run test` — БД-тесты пройдут (кроме composition на PGlite).
 
