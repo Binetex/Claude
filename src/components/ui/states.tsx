@@ -82,3 +82,24 @@ export function LoadingState({ label = "Загрузка…", className }: { lab
     </div>
   );
 }
+
+/** Скелетон списка карточек — плейсхолдер контента дашборда во время загрузки маршрута. */
+export function CardListSkeleton({ rows = 5, className }: { rows?: number; className?: string }) {
+  return (
+    <div className={cn("space-y-3", className)} aria-hidden>
+      <Skeleton className="h-8 w-40" />
+      {Array.from({ length: rows }).map((_, i) => (
+        <div key={i} className="rounded-xl border border-slate-200 bg-white p-4">
+          <div className="flex items-center gap-4">
+            <Skeleton className="h-[60px] w-[60px] rounded" />
+            <div className="flex-1 space-y-2">
+              <Skeleton className="h-4 w-1/3" />
+              <Skeleton className="h-3 w-1/2" />
+            </div>
+            <Skeleton className="h-4 w-16" />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
