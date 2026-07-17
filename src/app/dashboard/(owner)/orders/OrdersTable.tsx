@@ -34,7 +34,7 @@ function ItemsList({ o, imgSize = "h-6 w-6", nameClass = "text-[11px]" }: { o: O
       {o.items.map((it) => (
         <div key={it.id} className="flex items-center gap-1.5">
           {it.image ? (
-            <ZoomableImage src={it.image} alt="" className={`${imgSize} shrink-0 rounded object-cover`} />
+            <ZoomableImage src={it.image} alt={it.name} className={`${imgSize} shrink-0 rounded object-cover`} />
           ) : (
             <span className={`${imgSize} shrink-0 rounded bg-slate-100`} />
           )}

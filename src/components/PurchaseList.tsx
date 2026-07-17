@@ -31,7 +31,13 @@ export function PurchaseList({ items, text }: { items: PurchaseItem[]; text: str
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-1">
           <Tooltip content={mode === "compact" ? "Развернуть" : "Свернуть"}>
-            <button onClick={() => setMode(mode === "compact" ? "detailed" : "compact")} className={iconBtn}>
+            <button
+              type="button"
+              aria-label={mode === "compact" ? "Развернуть список закупок" : "Свернуть список закупок"}
+              aria-expanded={mode === "detailed"}
+              onClick={() => setMode(mode === "compact" ? "detailed" : "compact")}
+              className={iconBtn}
+            >
               {mode === "compact" ? <ChevronRight size={16} /> : <ChevronDown size={16} />}
             </button>
           </Tooltip>
@@ -41,12 +47,12 @@ export function PurchaseList({ items, text }: { items: PurchaseItem[]; text: str
         </div>
         <div className="flex items-center gap-0.5">
           <Tooltip content="Копировать список">
-            <button onClick={copy} className={iconBtn}>
+            <button type="button" aria-label="Копировать список закупок" onClick={copy} className={iconBtn}>
               {copied ? <Check size={16} className="text-emerald-600" /> : <Copy size={16} />}
             </button>
           </Tooltip>
           <Tooltip content="Обновить">
-            <button onClick={() => router.refresh()} className={iconBtn}>
+            <button type="button" aria-label="Обновить список закупок" onClick={() => router.refresh()} className={iconBtn}>
               <RefreshCw size={16} />
             </button>
           </Tooltip>

@@ -18,6 +18,7 @@ export function ZoomableImage({ src, alt, className }: { src: string; alt: strin
     <>
       <button
         type="button"
+        aria-label={alt ? `Увеличить изображение: ${alt}` : "Увеличить изображение"}
         onClick={(e) => {
           e.preventDefault();
           e.stopPropagation();
