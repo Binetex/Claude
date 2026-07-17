@@ -11,7 +11,6 @@ export const wooCommerceCatalogAdapter: CatalogAdapter = {
   async countProducts() {
     return null;
   },
-  // eslint-disable-next-line require-yield
   async *fetchProducts() {
     throw new Error("WooCommerce каталог ещё не реализован (этап 2).");
   },

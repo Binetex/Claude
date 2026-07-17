@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { prisma } from "@/lib/db";
 import { Prisma } from "@/generated/prisma/client";
 import type { ProductStatus } from "@/generated/prisma/enums";
@@ -188,7 +189,7 @@ export default async function ProductsPage({ searchParams }: { searchParams: Pro
           </label>
           <Button type="submit">Применить</Button>
           <Button asChild variant="ghost" size="sm">
-            <a href="/dashboard/products">Сбросить</a>
+            <Link href="/dashboard/products">Сбросить</Link>
           </Button>
         </form>
       </Card>
