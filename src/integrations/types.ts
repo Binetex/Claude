@@ -3,6 +3,11 @@
  * Бизнес-логика зависит ТОЛЬКО от этих интерфейсов, а не от конкретных API.
  * На этапе 1 реализации — заглушки; позже подключаются реальные Shopify/Woo/Quo/Burq.
  */
+import type {
+  IntegrationPlatform,
+  NormalizedOrder,
+  NormalizedDeliveryEvent,
+} from "@/integrations/normalized";
 
 export type ExternalOrderPayload = {
   externalId: string;
@@ -78,4 +83,72 @@ export interface CatalogAdapter {
   countProducts(site: CatalogSite): Promise<number | null>;
   /** Постранично отдаёт нормализованные товары со ВСЕМИ вариантами. */
   fetchProducts(site: CatalogSite): AsyncGenerator<NormalizedProduct, void, unknown>;
+}
+
+// ───────────────────────────  ЗАКАЗЫ / ВЕБХУКИ / ПОДКЛЮЧЕНИЕ  ───────────────────────────
+//
+// Единые контракты для источников заказов, приёма вебхуков и управления подключением.
+// Добавлены рядом с существующим `OrderSourceAdapter` (обратная совместимость сохранена):
+// `OrderAdapter` расширяет его до нормализованного `NormalizedOrder`. Внедряются по мере
+// появления второго реального потребителя — см. docs/INTEGRATION_ARCHITECTURE.md.
+
+/** Результат проверки подписи вебхука. */
+export type WebhookVerification =
+  | { ok: true }
+  | { ok: false; reason: "missing_signature" | "invalid_signature" | "replay" | "no_secret" };
+
+/** Входные данные для проверки вебхука: сырое тело + заголовки + секрет. */
+export type WebhookInput = {
+  rawBody: string;
+  headers: Record<string, string | null | undefined>;
+  secret: string | null | undefined;
+};
+
+/**
+ * Проверка и идентификация входящих вебхуков платформы. Подпись считается по СЫРОМУ телу
+ * до парсинга; `extractEventId` даёт стабильный ключ для идемпотентности/дедупликации.
+ */
+export interface WebhookAdapter {
+  platform: IntegrationPlatform;
+  verify(input: WebhookInput): WebhookVerification;
+  /** Стабильный id события/заказа для дедупа (напр. из заголовка или тела). null — если не извлекаем. */
+  extractEventId(input: WebhookInput): string | null;
+}
+
+/**
+ * Источник заказов с нормализацией. Расширяет назначение `OrderSourceAdapter`, но отдаёт
+ * полноценный `NormalizedOrder`, а не только `{externalId, raw}`.
+ */
+export interface OrderAdapter {
+  platform: IntegrationPlatform;
+  /** Разобрать сырое тело вебхука в нормализованный заказ. */
+  parseWebhook(rawBody: unknown, topic?: string): NormalizedOrder;
+  /** Отправить разрешённые локальные изменения обратно (адрес/открытка/статус). Идемпотентно. */
+  pushUpdate(externalId: string, changes: Record<string, unknown>): Promise<void>;
+}
+
+/** Минимальная форма credentials подключения сайта (без завязки на Prisma-модель). */
+export type ConnectionCredentials = {
+  platform: IntegrationPlatform;
+  shopDomain: string | null;
+  accessToken: string | null;
+};
+
+export type ConnectionState = "CONNECTED" | "DISCONNECTED" | "PENDING";
+
+/**
+ * Управление подключением сайта к платформе. Реальные сетевые вызовы — под фиче-флагом;
+ * ночью реализуется как skeleton без production-обращений.
+ */
+export interface ConnectionAdapter {
+  platform: IntegrationPlatform;
+  /** Проверить доступность подключения по credentials (например, ping shop.json). */
+  checkStatus(creds: ConnectionCredentials): Promise<ConnectionState>;
+}
+
+/** Приёмник событий доставки (Burq и др.). */
+export interface DeliveryWebhookAdapter {
+  provider: string;
+  verify(input: WebhookInput): WebhookVerification;
+  parseEvent(rawBody: unknown): NormalizedDeliveryEvent;
 }
