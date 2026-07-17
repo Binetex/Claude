@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { Card } from "@/components/ui/Card";
+import { EmptyState } from "@/components/ui/states";
 import { ZoomableImage } from "@/components/ImageLightbox";
 import { formatMoney } from "@/lib/money";
 import { fmtDate, formatOrderNumber } from "@/lib/format";
@@ -168,13 +169,13 @@ export function OrdersTable({ orders, groupByDay = false }: { orders: OwnerOrder
       {/* Десктоп — плашки заказов */}
       <div className="hidden space-y-3 md:block">
         {desktopItems}
-        {orders.length === 0 && <div className="py-8 text-center text-sm text-slate-400">Заказов не найдено</div>}
+        {orders.length === 0 && <EmptyState title="Заказов не найдено" />}
       </div>
 
       {/* Мобайл — карточки */}
       <div className="space-y-2.5 md:hidden">
         {mobileItems}
-        {orders.length === 0 && <div className="py-8 text-center text-sm text-slate-400">Заказов не найдено</div>}
+        {orders.length === 0 && <EmptyState title="Заказов не найдено" />}
       </div>
     </>
   );
