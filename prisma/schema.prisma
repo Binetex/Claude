@@ -1,0 +1,458 @@
+// Florist Dashboard — единый дашборд управления заказами.
+// Ключевые принципы (см. ТЗ):
+//  - раздельные статусы: оплата / заказ / назначение / доставка / синхронизация;
+//  - раздельные финансовые поля;
+//  - цена флориста фиксируется в заказе снимком в момент назначения;
+//  - открытка и заметка клиента хранятся с оригиналами и не меняются автоматически.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─────────────────────────────  ENUMS  ─────────────────────────────
+
+enum Role {
+  OWNER
+  FLORIST
+  CALL_CENTER
+}
+
+enum Platform {
+  WOOCOMMERCE
+  SHOPIFY
+}
+
+enum ConnectionStatus {
+  CONNECTED
+  DISCONNECTED
+  PENDING
+}
+
+enum PaymentStatus {
+  UNPAID
+  PAID
+  REFUNDED
+  PARTIALLY_REFUNDED
+}
+
+// Статус самого заказа (жизненный цикл). "Новый" не используется — оплаченный сразу CONFIRMED.
+enum OrderStatus {
+  AWAITING_PAYMENT
+  CONFIRMED
+  ASSIGNED
+  FLORIST_ACCEPTED
+  IN_PROGRESS
+  READY
+  AWAITING_COURIER
+  IN_TRANSIT
+  DELIVERED
+  PROBLEM
+  CANCELLED
+}
+
+// Текущее состояние назначения на уровне заказа (отдельно от истории назначений).
+enum AssignmentStatus {
+  UNASSIGNED // требует назначения (никого нет / все отказались)
+  ASSIGNED // назначен, ждём реакции флориста
+  ACCEPTED // флорист принял
+}
+
+// Состояние конкретной записи назначения (история).
+enum AssignmentState {
+  ASSIGNED
+  ACCEPTED
+  DECLINED
+  REASSIGNED
+}
+
+enum DeliveryStatus {
+  PENDING
+  SCHEDULED
+  IN_TRANSIT
+  DELIVERED
+  FAILED
+}
+
+enum SyncStatus {
+  LOCAL // создан внутри системы / тестовый
+  SYNCED
+  PENDING
+  ERROR
+}
+
+enum PriceMode {
+  AUTO
+  MANUAL
+}
+
+// Что флорист видит по финансам заказа. Не влияет на видимость чужих цен
+// или прибыли владельца — те скрыты от флориста в любом режиме (см. CLAUDE.md).
+enum FloristFinanceVisibility {
+  MAKER_ONLY // видит только назначенную ему цену изготовления (по умолчанию)
+  FULL // дополнительно видит налог, доставку клиента, чаевые и итог клиента
+}
+
+enum MessageChannel {
+  SMS
+  EMAIL
+}
+
+enum MessageDirection {
+  OUTBOUND
+  INBOUND
+}
+
+enum MessageParty {
+  SENDER
+  RECIPIENT
+}
+
+// Статус товара — источник истины Shopify (active/draft/archived).
+enum ProductStatus {
+  ACTIVE
+  DRAFT
+  ARCHIVED
+}
+
+// Тип фоновой синхронизации сайта (универсально для Shopify/WooCommerce).
+enum SyncKind {
+  PRODUCTS
+  ORDERS
+}
+
+enum SiteSyncStatus {
+  RUNNING
+  DONE
+  ERROR
+}
+
+// ─────────────────────────────  ПОЛЬЗОВАТЕЛИ  ─────────────────────────────
+
+model User {
+  id           String   @id @default(cuid())
+  name         String
+  email        String   @unique
+  phone        String?
+  role         Role
+  telegramId   String?
+  active       Boolean  @default(true)
+  passwordHash String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  florist Florist?
+
+  @@index([role])
+}
+
+// Профиль флориста (привязан к User с ролью FLORIST).
+model Florist {
+  id                String                    @id @default(cuid())
+  userId            String                    @unique
+  user              User                      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  active            Boolean                   @default(true)
+  financeVisibility FloristFinanceVisibility  @default(MAKER_ONLY)
+  createdAt         DateTime                  @default(now())
+
+  sitePriorities SiteFloristPriority[]
+  productPrices  FloristProductPrice[]
+  currentOrders  Order[]               @relation("CurrentFlorist")
+  assignments    OrderAssignment[]
+}
+
+// ─────────────────────────────  САЙТЫ  ─────────────────────────────
+
+model Site {
+  id               String           @id @default(cuid())
+  name             String
+  shortName        String
+  platform         Platform
+  connectionStatus ConnectionStatus @default(PENDING)
+  logo             String?
+  colorTag         String           @default("#64748b")
+  createdAt        DateTime         @default(now())
+
+  // Credentials интеграции Shopify. Само приложение (client_id/client_secret)
+  // общее на все магазины — эти поля хранят только то, что специфично для
+  // КОНКРЕТНОГО магазина (получено после установки через OAuth).
+  shopifyShopDomain  String? @unique // "example.myshopify.com"
+  shopifyAccessToken String? // shpat_... — выдан этому магазину при установке
+  timezone           String? // IANA-таймзона магазина (из Shopify shop.json) — для «сегодня» в списке закупки
+
+  floristPriorities SiteFloristPriority[]
+  products          Product[]
+  orders            Order[]
+  syncs             SiteSync[]
+}
+
+// Прогресс фоновой синхронизации по сайту и типу (товары/заказы). Одна актуальная
+// строка на (siteId, kind) — обновляется по ходу импорта, читается UI для прогресса.
+model SiteSync {
+  id           String         @id @default(cuid())
+  siteId       String
+  site         Site           @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  kind         SyncKind
+  status       SiteSyncStatus @default(RUNNING)
+  total        Int? // всего к обработке, если известно (для «X из Y»)
+  processed    Int            @default(0)
+  created      Int            @default(0)
+  updated      Int            @default(0)
+  skipped      Int            @default(0)
+  errors       Int            @default(0)
+  errorMessage String?
+  startedAt    DateTime       @default(now())
+  finishedAt   DateTime?
+
+  @@unique([siteId, kind])
+  @@index([siteId])
+}
+
+// Упорядоченный список приоритетов флористов для конкретного сайта.
+// position 0 = основной, дальше по возрастанию — резервные.
+model SiteFloristPriority {
+  id        String  @id @default(cuid())
+  siteId    String
+  site      Site    @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  floristId String
+  florist   Florist @relation(fields: [floristId], references: [id], onDelete: Cascade)
+  position  Int
+
+  @@unique([siteId, floristId])
+  @@unique([siteId, position])
+  @@index([siteId])
+}
+
+// ─────────────────────────────  ТОВАРЫ И ЦЕНЫ  ─────────────────────────────
+
+// Карточка товара (агрегат). Точные цены сайта живут в ProductVariant;
+// здесь только агрегаты minPrice/maxPrice по активным неудалённым вариантам.
+model Product {
+  id            String        @id @default(cuid())
+  name          String
+  image         String?
+  defaultFloristComposition String? // шаблон состава букета; НЕ используется в заказе напрямую (только для заполнения вариантов)
+  siteId        String
+  site          Site          @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  externalId    String // Shopify product id
+  status        ProductStatus @default(ACTIVE) // источник истины — Shopify
+  productType   String?
+  adminUrl      String? // ссылка на товар в Shopify Admin (или Woo в будущем)
+  floristPrice  Decimal?      @db.Decimal(10, 2) // базовая себестоимость; NULL = не задана → флорист получает полную стоимость заказа
+  minPrice      Decimal?      @db.Decimal(10, 2) // агрегат по активным вариантам
+  maxPrice      Decimal?      @db.Decimal(10, 2)
+  remoteDeleted Boolean       @default(false) // пропал из внешнего API
+  deletedAt     DateTime?
+  lastSyncedAt  DateTime?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  variants      ProductVariant[]
+  floristPrices FloristProductPrice[]
+
+  @@unique([siteId, externalId])
+  @@index([siteId])
+}
+
+// Конкретная вариация товара (Shopify variant). Хранится отдельно от Product
+// для единой модели даже при единственном варианте "Default Title".
+model ProductVariant {
+  id             String    @id @default(cuid())
+  productId      String
+  product        Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+  externalId     String // Shopify variant id
+  title          String // напр. "Small / Red" или "Default Title"
+  sku            String?
+  listPrice      Decimal   @db.Decimal(10, 2) // цена сайта
+  compareAtPrice Decimal?  @db.Decimal(10, 2)
+  image          String?
+  option1        String?
+  option2        String?
+  option3        String?
+  inventoryQty   Int? // если доступно текущими scopes
+  available      Boolean   @default(true) // статус доступности
+  floristComposition String? // локальный состав букета для флориста (многострочный текст) — Shopify не трогает
+  floristPrice   Decimal?  @db.Decimal(10, 2) // необязательная цена флориста для варианта
+  position       Int?
+  adminUrl       String? // ссылка на вариант в Admin, если доступна
+  lastSyncedAt   DateTime?
+  remoteDeleted  Boolean   @default(false)
+  deletedAt      DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  floristPrices FloristProductPrice[]
+
+  @@unique([productId, externalId])
+  @@index([productId])
+}
+
+// Индивидуальный override цены флориста. variantId = null → override на весь товар;
+// заданный variantId → override на конкретный вариант. Приоритет резолва — см.
+// modules/pricing/service.ts. UI для флорист-оверрайдов пока не строится (задел на будущее).
+model FloristProductPrice {
+  id        String          @id @default(cuid())
+  productId String
+  product   Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
+  variantId String?
+  variant   ProductVariant? @relation(fields: [variantId], references: [id], onDelete: Cascade)
+  floristId String
+  florist   Florist         @relation(fields: [floristId], references: [id], onDelete: Cascade)
+  makeCost  Decimal         @db.Decimal(10, 2)
+
+  @@unique([floristId, productId, variantId])
+  @@index([productId])
+  @@index([variantId])
+}
+
+// ─────────────────────────────  ЗАКАЗЫ  ─────────────────────────────
+
+model Order {
+  id          String @id @default(cuid())
+  orderNumber String @unique
+
+  siteId String
+  site   Site   @relation(fields: [siteId], references: [id])
+  source String // источник заказа (напр. "Website", "Phone")
+
+  // Даты
+  externalCreatedAt DateTime // дата создания заказа на сайте
+  deliveryDate      DateTime
+  deliveryWindow    String // напр. "14:00 – 18:00"
+
+  // Отправитель
+  senderName  String
+  senderPhone String
+  senderEmail String?
+
+  // Получатель
+  recipientName  String
+  recipientPhone String
+  recipientEmail String?
+  addressLine    String
+  apartment      String?
+  city           String
+  zip            String
+
+  // Открытка и заметка — с оригиналами, автоматически не меняются
+  cardMessage          String @default("")
+  originalCardMessage  String @default("")
+  customerNote         String @default("")
+  originalCustomerNote String @default("")
+
+  // Финансы (раздельно) — доступны только владельцу
+  itemsTotal           Decimal @db.Decimal(10, 2)
+  tax                  Decimal @default(0) @db.Decimal(10, 2)
+  tip                  Decimal @default(0) @db.Decimal(10, 2)
+  discount             Decimal @default(0) @db.Decimal(10, 2)
+  deliveryCustomerCost Decimal @default(0) @db.Decimal(10, 2)
+  customerTotal        Decimal @db.Decimal(10, 2)
+  floristTotal         Decimal @default(0) @db.Decimal(10, 2) // снимок суммы флористу
+  deliveryActualCost   Decimal @default(0) @db.Decimal(10, 2)
+  estimatedProfit      Decimal @default(0) @db.Decimal(10, 2)
+
+  // Пять раздельных статусов
+  paymentStatus    PaymentStatus    @default(UNPAID)
+  orderStatus      OrderStatus      @default(AWAITING_PAYMENT)
+  assignmentStatus AssignmentStatus @default(UNASSIGNED)
+  deliveryStatus   DeliveryStatus   @default(PENDING)
+  syncStatus       SyncStatus       @default(LOCAL)
+
+  // Назначенный флорист (снимок цены — в floristTotal и в позициях)
+  currentFloristId String?
+  currentFlorist   Florist?  @relation("CurrentFlorist", fields: [currentFloristId], references: [id])
+  priceMode        PriceMode @default(AUTO)
+
+  // Производство и доставка
+  readyAt          DateTime?
+  bouquetPhotoUrl  String?
+  deliveryPhotoUrl String?
+  trackingUrl      String?
+
+  // Синхронизация (готовим под интеграции)
+  externalId   String?
+  platform     Platform
+  lastSyncedAt DateTime?
+  syncError    String?
+
+  // true — заказ подтянут разовым backfill-скриптом истории Shopify (не через
+  // "живой" вебхук). Используется, чтобы показывать его в отдельной вкладке
+  // "Старые заказы", а не смешивать с обычной лентой (см. scripts/backfill-shopify-orders.ts).
+  isBackfilled Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  items       OrderItem[]
+  assignments OrderAssignment[]
+  messages    Message[]
+
+  // NULL допустим много раз (Postgres: NULL != NULL) — не мешает заказам без внешнего источника.
+  // Источник истины для идемпотентности вебхуков (см. ingestShopifyOrder) — не полагаемся
+  // только на проверку в коде перед созданием.
+  @@unique([siteId, externalId])
+  @@index([siteId])
+  @@index([deliveryDate])
+  @@index([currentFloristId])
+  @@index([orderStatus])
+  @@index([isBackfilled])
+}
+
+model OrderItem {
+  id                String  @id @default(cuid())
+  orderId           String
+  order             Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  // Ссылки/снимки на товар и вариант. Свободные строки (не FK) — снимок должен
+  // переживать физическое исчезновение товара/варианта; резолв цены — по этим id.
+  productId         String? // наш Product.id (для авто-цены)
+  variantId         String? // наш ProductVariant.id (для авто-цены варианта)
+  productExternalId String? // снимок Shopify product id
+  variantExternalId String? // снимок Shopify variant id
+  name              String // снимок названия товара
+  variantName       String? // снимок названия варианта
+  sku               String? // снимок SKU
+  image             String?
+  floristCompositionSnapshot String? // снимок состава варианта на момент заказа (не Shopify description)
+  quantity          Int     @default(1)
+  options           String  @default("") // выбранные параметры (текст)
+  externalPrice     Decimal @db.Decimal(10, 2) // цена покупателю за позицию (только владелец)
+  floristItemPrice  Decimal @default(0) @db.Decimal(10, 2) // снимок цены флориста за позицию
+
+  @@index([orderId])
+}
+
+// История назначений заказа флористам. Активное состояние заказа — в Order.assignmentStatus.
+model OrderAssignment {
+  id                   String          @id @default(cuid())
+  orderId              String
+  order                Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  floristId            String
+  florist              Florist         @relation(fields: [floristId], references: [id], onDelete: Cascade)
+  state                AssignmentState @default(ASSIGNED)
+  priceMode            PriceMode       @default(AUTO)
+  floristTotalSnapshot Decimal         @default(0) @db.Decimal(10, 2)
+  assignedAt           DateTime        @default(now())
+  respondedAt          DateTime?
+
+  @@index([orderId])
+  @@index([floristId])
+}
+
+// ─────────────────────────────  СООБЩЕНИЯ (тестовые на этапе 1)  ─────────────────────────────
+
+model Message {
+  id        String           @id @default(cuid())
+  orderId   String
+  order     Order            @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  channel   MessageChannel
+  direction MessageDirection
+  party     MessageParty
+  body      String
+  createdAt DateTime         @default(now())
+
+  @@index([orderId])
+}
