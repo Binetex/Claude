@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { Toaster } from "sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -17,6 +17,15 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Floremart — единый дашборд заказов",
   description: "Управление заказами флористических магазинов",
+  // Внутренний рабочий инструмент — не индексируется поисковиками.
+  robots: { index: false, follow: false },
+};
+
+// Корректный мобильный viewport (флористы работают с телефона) + тема статус-бара.
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  themeColor: "#ffffff",
 };
 
 export default function RootLayout({
