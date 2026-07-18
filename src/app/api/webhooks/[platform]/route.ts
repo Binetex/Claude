@@ -1,14 +1,15 @@
 import { NextResponse } from "next/server";
 import { verifyWebhookHmac } from "@/integrations/shopify/webhookAuth";
 import { ingestShopifyOrder } from "@/integrations/shopify/ingestOrder";
+import { intakeShopifyCustomAppWebhook } from "@/integrations/shopify/customApp/webhookIntake";
 import { featureFlags } from "@/lib/featureFlags";
 
 /**
  * Приём вебхуков от Woo/Shopify.
  *
- * Для Shopify: проверяем подпись (X-Shopify-Hmac-Sha256) по СЫРОМУ телу до парсинга,
- * затем идемпотентно создаём/обновляем заказ (см. ingestShopifyOrder) и отвечаем быстро —
- * никаких SMS/email/Telegram здесь не отправляется (это в фоне, см. src/lib/jobs.ts).
+ * Shopify Custom App (основной путь): per-Site проверка подписи (secret приложения этого
+ * магазина), дедуп по X-Shopify-Webhook-Id, быстрая публикация в persistent outbox, 200.
+ * Legacy global-OAuth (fallback): старый путь с глобальным secret и inline-ingest.
  *
  * WooCommerce — каркас, реальный парсинг ещё не подключён.
  */
@@ -24,6 +25,14 @@ export async function POST(
   const rawBody = await request.text();
 
   if (platform === "shopify") {
+    // 1) Основной путь — Custom App (per-Site secret). handled=false → магазин не custom-app.
+    const headers = Object.fromEntries(request.headers.entries());
+    const intake = await intakeShopifyCustomAppWebhook({ rawBody, headers });
+    if (intake.handled) {
+      return NextResponse.json(intake.body, { status: intake.status });
+    }
+
+    // 2) Fallback — legacy global-OAuth приложение.
     if (!featureFlags.shopify) {
       return NextResponse.json({ error: "Shopify integration disabled" }, { status: 503 });
     }
