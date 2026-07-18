@@ -329,3 +329,65 @@ typecheck ✅ · lint ✅ · build ✅ · **81 тест passed** (+ новые r
    (или через `.env.local`). НЕ использовать здесь preview-инструмент (резолвит исходную папку).
 6. `DATABASE_URL=<tcp-url> npm run test` — БД-тесты пройдут (кроме composition на PGlite).
 
+---
+
+## ПРОДОЛЖЕНИЕ 3: Persistent outbox & worker (надёжная фоновая доставка)
+
+Задача: убрать зависимость будущих интеграций от fire-and-forget Promise и потери событий при
+рестарте PM2. Полностью — в `docs/OUTBOX_AND_WORKER.md`. Ограничения соблюдены: миграции НЕ
+применялись, prod НЕ затрагивался, реальные сообщения НЕ отправлялись (mock), PM2 не запускался,
+`ecosystem.config.js` не менялся, бизнес-логика заказов/цен/ролей/статусов не тронута.
+
+### Аудит (было)
+In-process шина `events/bus.ts` (singleton, всё в памяти): события НЕ персистятся, идемпотентность
+и журнал — в RAM, обработка инлайн в запросе. При рестарте теряются: неотработанные события,
+дедуп (риск повторной SMS), журнал, in-flight ретраи.
+
+### Реализовано (стало)
+- **Persistent outbox** (`src/outbox/`): `OutboxRepository` + in-memory и Prisma реализации;
+  статусы PENDING/PROCESSING/PROCESSED/FAILED/DEAD_LETTER; поля id/eventType/aggregate*/payload/
+  idempotencyKey/status/attempts/maxAttempts/availableAt/lockedAt/lockedBy/processedAt/lastError/
+  createdAt/updatedAt.
+- **Worker** (`worker.ts` + `scripts/outbox-worker.ts`): отдельный процесс; recoverStuck →
+  claimBatch (`FOR UPDATE SKIP LOCKED`, attempts++, lease) → handler → PROCESSED/FAILED(backoff)/
+  DEAD_LETTER; graceful shutdown (SIGTERM/SIGINT).
+- **Idempotency** (`idempotency.ts` + `ProcessedOperation`): `runOnce` — ровно один сайд-эффект
+  даже при повторной доставке (не вторая SMS/Telegram, не повторный fulfillment/Burq).
+- **Messaging**: результат провайдера дополнен `externalMessageId` + `deliveryStatus`; contract-сюита
+  провайдеров для всех каналов.
+- **Domain events**: типобезопасный `publishEvent` (bridge реестра в outbox); `order.delivery.completed`
+  фан-аутит SMS/Telegram/email/push/completion-sync НЕЗАВИСИМО (сбой одного не блокирует другие).
+- **Observability**: структурированный PII-безопасный логгер (queued/processing/succeeded/failed/
+  retry_scheduled/dead_letter) — без payload/адреса/телефона/открытки/секретов.
+- **Admin**: read-only `/dashboard/system-events` (владелец) — тип/статус/попытки/время/последняя
+  безопасная ошибка + «Повторить» для FAILED/DEAD_LETTER; defensive при неприменённой миграции;
+  в навигацию НЕ добавлена.
+- **PM2**: пример `ecosystem.worker.example.js` (`floremart-worker`) + предложенный diff (не применён).
+
+### Точные Prisma-изменения / миграция
+`prisma/schema.prisma` (+`OutboxStatus`, `OutboxEvent`, `ProcessedOperation` — additive) и
+offline `prisma/migrations/20260718040000_outbox_events/migration.sql` (сгенерирован `migrate diff`,
+**не применён**). Полный SQL и diff — в `OUTBOX_AND_WORKER.md`.
+
+### Env / запуск worker'а
+Новых обязательных env нет (кроме уже существующего `DATABASE_URL`). Настройка: `WORKER_ID`,
+`OUTBOX_BATCH_SIZE`, `OUTBOX_POLL_MS`, `OUTBOX_STUCK_MS`. Запуск: `npm run worker`
+(= `NODE_OPTIONS=--conditions=react-server tsx scripts/outbox-worker.ts`).
+
+### Тесты (§9) — все на in-memory реализациях, без БД
+31 тест outbox + messaging contract + publisher: событие сохраняется до обработки; успех→PROCESSED;
+retryable→повтор; non-retryable/исчерпание→DEAD_LETTER; зависший PROCESSING восстанавливается;
+два worker'а не берут одно событие; повтор не вызывает второй сайд-эффект; сбой Telegram не
+блокирует SMS; graceful shutdown; payload не попадает в логи.
+
+### Проверки
+typecheck ✅ · lint ✅ · build ✅ (роут `/dashboard/system-events` в сборке) · outbox/messaging/
+publisher тесты — все зелёные. Визуально проверена admin-страница (graceful «таблица не создана»).
+Не мой код: `composition`/`assignments` БД-тесты флейкуют на PGlite (prepared statements) —
+задокументированное ограничение, не регрессия.
+
+### Осталось (за подтверждением владельца)
+Применить миграцию (dev→prod через `deploy.sh` + бэкап); заменить `eventBus.publish` на
+`publishEvent` в реальных потоках за фиче-флагом; реальные провайдеры и completion-sync за флагами;
+запустить `floremart-worker` в PM2; добавить поля подписок (Telegram/push) в `PROPOSED_SCHEMA_CHANGES`.
+
