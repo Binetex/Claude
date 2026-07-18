@@ -9,8 +9,24 @@ import { prisma } from "@/lib/db";
 import { shopifyAdminGraphQL } from "./client";
 import { getAppUrl } from "@/lib/appUrl";
 
-/** Топики, которые нужны Floremart (минимум). */
-export const REQUIRED_WEBHOOK_TOPICS = ["ORDERS_CREATE", "ORDERS_UPDATED", "ORDERS_CANCELLED"] as const;
+/**
+ * Топики, которые нужны Floremart. Полный набор, для КАЖДОГО есть рабочий handler в
+ * buildShopifyWebhookHandler (worker). Enum-имена сверены с официальной Shopify GraphQL-схемой
+ * (WebhookSubscriptionTopic). Требуемые scopes покрыты grantedScopes магазина:
+ *  - ORDERS_x и REFUNDS_CREATE → read_orders; PRODUCTS_x → read_products; APP_x → без scope.
+ */
+export const REQUIRED_WEBHOOK_TOPICS = [
+  "ORDERS_CREATE",
+  "ORDERS_UPDATED",
+  "ORDERS_CANCELLED",
+  "ORDERS_FULFILLED",
+  "REFUNDS_CREATE",
+  "PRODUCTS_CREATE",
+  "PRODUCTS_UPDATE",
+  "PRODUCTS_DELETE",
+  "APP_UNINSTALLED",
+  "APP_SCOPES_UPDATE",
+] as const;
 export type WebhookTopic = (typeof REQUIRED_WEBHOOK_TOPICS)[number];
 
 function callbackUrl(): string {
