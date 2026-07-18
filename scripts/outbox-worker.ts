@@ -21,6 +21,8 @@ import { buildDeliveryCompletedHandler } from "@/outbox/handlers";
 import { createDeliveryResolver } from "@/outbox/deliveryResolver";
 import { buildShopifyWebhookHandler } from "@/integrations/shopify/customApp/webhookHandler";
 import { shopifyWebhookHandlerDeps } from "@/integrations/shopify/customApp/webhookHandlerDeps";
+import { buildWooWebhookHandler } from "@/integrations/woocommerce/webhookHandler";
+import { buildWooSyncHandler } from "@/integrations/woocommerce/syncDispatch";
 import { MessagingService } from "@/messaging/service";
 import { createMockProviders } from "@/messaging/providers/mock";
 
@@ -53,6 +55,9 @@ async function main() {
     }),
     // Shopify Custom App: приём заказов/товаров/событий приложения из webhook (per-Site credentials).
     "shopify.webhook.received": buildShopifyWebhookHandler(shopifyWebhookHandlerDeps),
+    // WooCommerce: приём заказов/товаров из webhook и фоновая синхронизация (per-Site credentials).
+    "woo.webhook.received": buildWooWebhookHandler(),
+    "woo.sync.requested": buildWooSyncHandler(),
   };
 
   const worker = new OutboxWorker({

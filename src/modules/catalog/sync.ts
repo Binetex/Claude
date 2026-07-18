@@ -154,12 +154,15 @@ export async function syncProducts(siteId: string): Promise<ProductSyncResult> {
   // remoteDeleted только после ПОЛНОГО успешного прохода (см. ниже).
   const runId = crypto.randomUUID();
   let catalogSite: CatalogSite = { id: site.id, shopifyShopDomain: site.shopifyShopDomain, shopifyAccessToken: site.shopifyAccessToken };
-  try {
-    const c = await resolveShopifyAccessToken(site.id);
-    catalogSite = { id: site.id, shopifyShopDomain: c.shopDomain, shopifyAccessToken: c.accessToken };
-  } catch {
-    // legacy без резолвера / не подключён — оставляем site как есть (адаптер обработает).
+  if (site.platform === "SHOPIFY") {
+    try {
+      const c = await resolveShopifyAccessToken(site.id);
+      catalogSite = { id: site.id, shopifyShopDomain: c.shopDomain, shopifyAccessToken: c.accessToken };
+    } catch {
+      // legacy без резолвера / не подключён — оставляем site как есть (адаптер обработает).
+    }
   }
+  // WOOCOMMERCE: адаптер каталога сам резолвит credentials по site.id (shopify-поля не нужны).
 
   const adapter = getCatalogAdapter(site.platform);
   let created = 0;

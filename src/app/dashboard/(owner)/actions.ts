@@ -3,6 +3,8 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import crypto from "crypto";
 import { requireRole } from "@/lib/rbac";
+import { ownerSetCardMessage } from "@/modules/print/cardEdit";
+import { CARD_MESSAGE_MAX } from "@/lib/print/cardText";
 import { hashPassword } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { Prisma } from "@/generated/prisma/client";
@@ -30,6 +32,20 @@ import { normalizePhone } from "@/lib/phone";
 
 async function ownerOnly() {
   await requireRole("OWNER");
+}
+
+/**
+ * Владелец меняет ТЕКСТ ОТКРЫТКИ (cardMessage) для печати. В отличие от ownerUpdateCardAndNote,
+ * НЕ пушит в Shopify/Woo и меняет только cardMessage — используется во вкладке печати открыток.
+ */
+export async function ownerUpdateCardMessage(orderId: string, cardMessage: string): Promise<{ ok?: boolean; error?: string; message?: string }> {
+  await requireRole("OWNER");
+  if (typeof cardMessage !== "string") return { error: "Некорректный текст." };
+  if (cardMessage.length > CARD_MESSAGE_MAX + 1000) return { error: `Текст слишком длинный (максимум ${CARD_MESSAGE_MAX}).` };
+  const { ok } = await ownerSetCardMessage(orderId, cardMessage);
+  if (!ok) return { error: "Заказ не найден." };
+  revalidatePath("/dashboard/print-cards");
+  return { ok: true, message: "Текст открытки сохранён." };
 }
 
 export async function ownerSetOrderStatus(orderId: string, status: OrderStatus) {

@@ -5,6 +5,9 @@ import { SiteConnectPanel } from "./SiteConnectPanel";
 import { SiteCardActions } from "./SiteCardActions";
 import { SiteNameForm } from "./SiteNameForm";
 import { SiteSyncControls } from "./SiteSyncControls";
+import { WooSiteControls } from "./WooSiteControls";
+import { WooSettings } from "./WooSettings";
+import { SiteTimezoneSetting } from "./SiteTimezoneSetting";
 import { diffScopes } from "@/integrations/shopify/customApp/scopes";
 import type { SyncStatusSnapshot } from "@/app/dashboard/(owner)/actions";
 
@@ -24,7 +27,7 @@ export default async function SitesPage() {
   const sites = await prisma.site.findMany({
     select: {
       id: true, name: true, shortName: true, platform: true, colorTag: true,
-      connectionStatus: true, shopifyShopDomain: true,
+      connectionStatus: true, shopifyShopDomain: true, timezone: true,
       authMode: true, shopifyConnStatus: true, lastConnectionCheckAt: true, lastSyncAt: true,
       grantedScopes: true, connectionError: true,
       floristPriorities: {
@@ -37,7 +40,17 @@ export default async function SitesPage() {
           updated: true, skipped: true, errors: true, errorMessage: true, finishedAt: true,
         },
       },
-      _count: { select: { orders: true, products: true } },
+      // WooCommerce: НЕ тянем зашифрованные секреты — только отображаемые поля + маску.
+      wooConnection: {
+        select: {
+          storeUrl: true, apiBaseUrl: true, connStatus: true, connectionError: true,
+          storeName: true, currency: true, wooVersion: true, wpVersion: true,
+          consumerSecretMask: true, lastConnectionCheckAt: true, lastProductSyncAt: true, lastOrderSyncAt: true,
+          orderMetaMapping: true, airwallexEnabled: true, klarnaPayLaterPendingIsConfirmed: true,
+          airwallexPaymentMethodIds: true, airwallexMetaKeys: true, payLaterMaxWaitMinutes: true, unknownBehavior: true,
+        },
+      },
+      _count: { select: { orders: true, products: true, wooWebhooks: true } },
     },
     orderBy: { name: "asc" },
   });
@@ -66,7 +79,7 @@ export default async function SitesPage() {
       <h1 className="text-lg font-semibold text-slate-900">Сайты</h1>
 
       <Card className="p-4">
-        <div className="mb-2 text-sm font-semibold text-slate-700">Подключить новый магазин Shopify</div>
+        <div className="mb-2 text-sm font-semibold text-slate-700">Подключить новый магазин</div>
         <SiteConnectPanel />
       </Card>
 
@@ -93,6 +106,40 @@ export default async function SitesPage() {
                   </div>
                 )}
               </div>
+              {s.platform === "WOOCOMMERCE" && s.wooConnection && (
+                <div className="space-y-2 border-t border-slate-100 pt-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-xs text-slate-400">Подключение:</span>
+                    <Badge className="bg-slate-100 text-slate-700 border-slate-200">WooCommerce</Badge>
+                    <Badge className={(connStatusMeta[s.wooConnection.connStatus] ?? connStatusMeta.DISCONNECTED).className}>
+                      {(connStatusMeta[s.wooConnection.connStatus] ?? { label: s.wooConnection.connStatus }).label}
+                    </Badge>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 text-xs text-slate-500">
+                    <div className="col-span-2"><span className="text-slate-400">URL:</span> {s.wooConnection.storeUrl}</div>
+                    <div><span className="text-slate-400">Валюта:</span> {s.wooConnection.currency ?? "—"}</div>
+                    <div><span className="text-slate-400">WooCommerce:</span> {s.wooConnection.wooVersion ?? "—"}</div>
+                    <div><span className="text-slate-400">Webhooks:</span> {s._count.wooWebhooks}</div>
+                    <div><span className="text-slate-400">Проверка:</span> {s.wooConnection.lastConnectionCheckAt ? new Intl.DateTimeFormat("ru-RU", { dateStyle: "short", timeStyle: "short" }).format(s.wooConnection.lastConnectionCheckAt) : "—"}</div>
+                    <div><span className="text-slate-400">Секрет:</span> {s.wooConnection.consumerSecretMask || "—"}</div>
+                  </div>
+                  {s.wooConnection.connectionError && <div className="text-xs text-orange-700">{s.wooConnection.connectionError}</div>}
+                  <WooSiteControls siteId={s.id} snapshot={snapshot(s.syncs)} connected={s.wooConnection.connStatus === "CONNECTED" || s.wooConnection.connStatus === "DEGRADED"} storeUrl={s.wooConnection.storeUrl} />
+                  <WooSettings
+                    siteId={s.id}
+                    metaMapping={(s.wooConnection.orderMetaMapping as Record<string, string> | null) ?? null}
+                    payment={{
+                      airwallexEnabled: s.wooConnection.airwallexEnabled,
+                      klarnaPayLaterPendingIsConfirmed: s.wooConnection.klarnaPayLaterPendingIsConfirmed,
+                      airwallexPaymentMethodIds: s.wooConnection.airwallexPaymentMethodIds,
+                      paymentIntentStatusKey: (s.wooConnection.airwallexMetaKeys as { paymentIntentStatusKey?: string } | null)?.paymentIntentStatusKey ?? null,
+                      payLaterMaxWaitMinutes: s.wooConnection.payLaterMaxWaitMinutes,
+                      unknownBehavior: s.wooConnection.unknownBehavior,
+                    }}
+                  />
+                </div>
+              )}
+
               {s.authMode === "CUSTOM_APP" && (
                 <div className="space-y-2 border-t border-slate-100 pt-3">
                   <div className="flex flex-wrap items-center gap-2">
@@ -119,6 +166,8 @@ export default async function SitesPage() {
                 </div>
               )}
 
+              <SiteTimezoneSetting siteId={s.id} current={s.timezone} />
+
               <div>
                 <div className="mb-1 text-xs text-slate-400">Приоритет флористов</div>
                 <ol className="space-y-1">
@@ -131,7 +180,7 @@ export default async function SitesPage() {
                   ))}
                 </ol>
               </div>
-              {s.connectionStatus === "CONNECTED" && (
+              {s.platform !== "WOOCOMMERCE" && s.connectionStatus === "CONNECTED" && (
                 <div className="border-t border-slate-100 pt-3">
                   <div className="mb-1.5 text-xs text-slate-400">Синхронизация</div>
                   <SiteSyncControls siteId={s.id} initial={snapshot(s.syncs)} />

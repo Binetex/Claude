@@ -30,7 +30,10 @@ export default async function FloristHome({
 
   return (
     <div className="mx-auto max-w-2xl space-y-4">
-      <h1 className="text-xl font-bold text-slate-800">Мои заказы</h1>
+      <div className="flex items-center justify-between">
+        <h1 className="text-xl font-bold text-slate-800">Мои заказы</h1>
+        <Link href="/dashboard/f/print-notes" className="rounded-md bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white">Открытки для печати</Link>
+      </div>
 
       {/* Список закупки на сегодня — только назначенные этому флористу заказы */}
       <PurchaseListBlock floristId={user.floristId} />

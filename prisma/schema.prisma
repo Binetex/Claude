@@ -48,9 +48,19 @@ enum ShopifyConnStatus {
   DISCONNECTED // отключён владельцем (история и товары сохранены)
 }
 
+// Статус подключения WooCommerce-магазина (отдельно от Shopify — свой жизненный цикл).
+enum WooConnStatus {
+  CONNECTING // введены credentials, идёт первичная проверка REST API
+  CONNECTED // REST API доступен, права read/write подтверждены
+  DEGRADED // подключён, но часть прав/эндпоинтов недоступна
+  REAUTH_REQUIRED // 401/403 — credentials недействительны или отозваны
+  DISCONNECTED // отключён владельцем (история и товары сохранены)
+}
+
 enum PaymentStatus {
   UNPAID
   PAID
+  PAY_LATER_APPROVED // BNPL (Klarna/Airwallex) авторизован: заказ валиден, оплата поступит позже — НЕ считать неоплатой
   REFUNDED
   PARTIALLY_REFUNDED
 }
@@ -167,12 +177,12 @@ model User {
 
 // Профиль флориста (привязан к User с ролью FLORIST).
 model Florist {
-  id                String                    @id @default(cuid())
-  userId            String                    @unique
-  user              User                      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  active            Boolean                   @default(true)
-  financeVisibility FloristFinanceVisibility  @default(MAKER_ONLY)
-  createdAt         DateTime                  @default(now())
+  id                String                   @id @default(cuid())
+  userId            String                   @unique
+  user              User                     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  active            Boolean                  @default(true)
+  financeVisibility FloristFinanceVisibility @default(MAKER_ONLY)
+  createdAt         DateTime                 @default(now())
 
   sitePriorities SiteFloristPriority[]
   productPrices  FloristProductPrice[]
@@ -200,29 +210,33 @@ model Site {
 
   // ── CUSTOM APP (Dev Dashboard app + client_credentials, отдельное приложение на магазин) ──
   // Все секреты — ТОЛЬКО в зашифрованном виде (AES-256-GCM, см. lib/crypto/secretBox).
-  authMode              ShopifyAuthMode?  // CUSTOM_APP для новых подключений; null = LEGACY
-  normalizedShopDomain  String?           // канонический "*.myshopify.com" — идентификатор магазина
-  clientIdEncrypted     String?
-  clientSecretEncrypted String?
-  clientSecretMask      String?           // "********abcd" — для UI без расшифровки
+  authMode                      ShopifyAuthMode? // CUSTOM_APP для новых подключений; null = LEGACY
+  normalizedShopDomain          String? // канонический "*.myshopify.com" — идентификатор магазина
+  clientIdEncrypted             String?
+  clientSecretEncrypted         String?
+  clientSecretMask              String? // "********abcd" — для UI без расшифровки
   // Окно ротации Client Secret: старый secret валиден для входящих webhook до previousSecretValidUntil.
   previousClientSecretEncrypted String?
   previousSecretValidUntil      DateTime?
-  accessTokenEncrypted  String?
-  accessTokenMask       String?           // маска токена для UI без расшифровки
-  accessTokenExpiresAt  DateTime?         // client_credentials: now + 86399s
-  apiVersion            String?           // напр. "2026-07"
-  grantedScopes         String[]          @default([]) // фактические scopes из Shopify (не из формы)
-  lastConnectionCheckAt DateTime?
-  lastSyncAt            DateTime?
-  shopifyConnStatus     ShopifyConnStatus? // CONNECTING|CONNECTED|DEGRADED|REAUTH_REQUIRED|DISCONNECTED
-  connectionError       String?            // безопасный текст (без секретов)
+  accessTokenEncrypted          String?
+  accessTokenMask               String? // маска токена для UI без расшифровки
+  accessTokenExpiresAt          DateTime? // client_credentials: now + 86399s
+  apiVersion                    String? // напр. "2026-07"
+  grantedScopes                 String[]           @default([]) // фактические scopes из Shopify (не из формы)
+  lastConnectionCheckAt         DateTime?
+  lastSyncAt                    DateTime?
+  shopifyConnStatus             ShopifyConnStatus? // CONNECTING|CONNECTED|DEGRADED|REAUTH_REQUIRED|DISCONNECTED
+  connectionError               String? // безопасный текст (без секретов)
 
   floristPriorities SiteFloristPriority[]
   products          Product[]
   orders            Order[]
   syncs             SiteSync[]
   webhooks          ShopifyWebhook[]
+  // WooCommerce: платформенные credentials/настройки вынесены в отдельную 1:1 модель
+  // (Shopify-поля выше НЕ переносятся и не рефакторятся).
+  wooConnection     WooCommerceConnection?
+  wooWebhooks       WooCommerceWebhook[]
 
   // Запрет двух активных Site одного платформенного домена (двойное подключение).
   @@unique([platform, normalizedShopDomain])
@@ -270,25 +284,25 @@ model SiteFloristPriority {
 // Карточка товара (агрегат). Точные цены сайта живут в ProductVariant;
 // здесь только агрегаты minPrice/maxPrice по активным неудалённым вариантам.
 model Product {
-  id            String        @id @default(cuid())
-  name          String
-  image         String?
+  id                        String        @id @default(cuid())
+  name                      String
+  image                     String?
   defaultFloristComposition String? // шаблон состава букета; НЕ используется в заказе напрямую (только для заполнения вариантов)
-  siteId        String
-  site          Site          @relation(fields: [siteId], references: [id], onDelete: Cascade)
-  externalId    String // Shopify product id
-  status        ProductStatus @default(ACTIVE) // источник истины — Shopify
-  productType   String?
-  adminUrl      String? // ссылка на товар в Shopify Admin (или Woo в будущем)
-  floristPrice  Decimal?      @db.Decimal(10, 2) // базовая себестоимость; NULL = не задана → флорист получает полную стоимость заказа
-  minPrice      Decimal?      @db.Decimal(10, 2) // агрегат по активным вариантам
-  maxPrice      Decimal?      @db.Decimal(10, 2)
-  remoteDeleted Boolean       @default(false) // пропал из внешнего API
-  deletedAt     DateTime?
-  lastSyncedAt  DateTime?
-  lastSeenSyncRunId String?   // id последнего sync-прогона, где товар встретился (для безопасной пометки remoteDeleted только после DONE)
-  createdAt     DateTime      @default(now())
-  updatedAt     DateTime      @updatedAt
+  siteId                    String
+  site                      Site          @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  externalId                String // Shopify product id
+  status                    ProductStatus @default(ACTIVE) // источник истины — Shopify
+  productType               String?
+  adminUrl                  String? // ссылка на товар в Shopify Admin (или Woo в будущем)
+  floristPrice              Decimal?      @db.Decimal(10, 2) // базовая себестоимость; NULL = не задана → флорист получает полную стоимость заказа
+  minPrice                  Decimal?      @db.Decimal(10, 2) // агрегат по активным вариантам
+  maxPrice                  Decimal?      @db.Decimal(10, 2)
+  remoteDeleted             Boolean       @default(false) // пропал из внешнего API
+  deletedAt                 DateTime?
+  lastSyncedAt              DateTime?
+  lastSeenSyncRunId         String? // id последнего sync-прогона, где товар встретился (для безопасной пометки remoteDeleted только после DONE)
+  createdAt                 DateTime      @default(now())
+  updatedAt                 DateTime      @updatedAt
 
   variants      ProductVariant[]
   floristPrices FloristProductPrice[]
@@ -300,30 +314,30 @@ model Product {
 // Конкретная вариация товара (Shopify variant). Хранится отдельно от Product
 // для единой модели даже при единственном варианте "Default Title".
 model ProductVariant {
-  id             String    @id @default(cuid())
-  productId      String
-  product        Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
-  externalId     String // Shopify variant id
-  title          String // напр. "Small / Red" или "Default Title"
-  sku            String?
-  listPrice      Decimal   @db.Decimal(10, 2) // цена сайта
-  compareAtPrice Decimal?  @db.Decimal(10, 2)
-  image          String?
-  option1        String?
-  option2        String?
-  option3        String?
-  inventoryQty   Int? // если доступно текущими scopes
-  available      Boolean   @default(true) // статус доступности
+  id                 String    @id @default(cuid())
+  productId          String
+  product            Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+  externalId         String // Shopify variant id
+  title              String // напр. "Small / Red" или "Default Title"
+  sku                String?
+  listPrice          Decimal   @db.Decimal(10, 2) // цена сайта
+  compareAtPrice     Decimal?  @db.Decimal(10, 2)
+  image              String?
+  option1            String?
+  option2            String?
+  option3            String?
+  inventoryQty       Int? // если доступно текущими scopes
+  available          Boolean   @default(true) // статус доступности
   floristComposition String? // локальный состав букета для флориста (многострочный текст) — Shopify не трогает
-  floristPrice   Decimal?  @db.Decimal(10, 2) // необязательная цена флориста для варианта
-  position       Int?
-  adminUrl       String? // ссылка на вариант в Admin, если доступна
-  lastSyncedAt   DateTime?
-  lastSeenSyncRunId String? // см. Product.lastSeenSyncRunId
-  remoteDeleted  Boolean   @default(false)
-  deletedAt      DateTime?
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
+  floristPrice       Decimal?  @db.Decimal(10, 2) // необязательная цена флориста для варианта
+  position           Int?
+  adminUrl           String? // ссылка на вариант в Admin, если доступна
+  lastSyncedAt       DateTime?
+  lastSeenSyncRunId  String? // см. Product.lastSeenSyncRunId
+  remoteDeleted      Boolean   @default(false)
+  deletedAt          DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
 
   floristPrices FloristProductPrice[]
 
@@ -414,11 +428,21 @@ model Order {
   trackingUrl      String?
 
   // Синхронизация (готовим под интеграции)
-  externalId   String?
-  platform     Platform
-  lastSyncedAt DateTime?
-  externalUpdatedAt DateTime? // Shopify updated_at — защита от применения устаревших webhook/sync (out-of-order)
-  syncError    String?
+  externalId        String?
+  platform          Platform
+  lastSyncedAt      DateTime?
+  externalUpdatedAt DateTime? // Shopify updated_at / Woo date_modified_gmt — защита от out-of-order
+  syncError         String?
+
+  // Внешний статус и платёжные данные платформы (заполняются WooCommerce; Shopify не трогает).
+  externalStatus        String? // сырой статус платформы: "pending" | "processing" | ...
+  paymentMethod         String? // order.payment_method (напр. "airwallex_klarna")
+  paymentMethodTitle    String? // order.payment_method_title (напр. "Klarna Pay Later")
+  paymentClassification String? // результат classifyWooPayment: PAID|PAY_LATER_APPROVED|PAYMENT_PENDING|PAYMENT_FAILED|REFUNDED|UNKNOWN
+  paymentWarning        String? // безопасное предупреждение владельцу (без PII), если статус неоднозначен
+  // Внешнее удаление/архивация (order.deleted / trash): физически заказ НЕ удаляем.
+  remoteDeleted         Boolean   @default(false)
+  deletedAt             DateTime?
 
   // true — заказ подтянут разовым backfill-скриптом истории Shopify (не через
   // "живой" вебхук). Используется, чтобы показывать его в отдельной вкладке
@@ -444,24 +468,24 @@ model Order {
 }
 
 model OrderItem {
-  id                String  @id @default(cuid())
-  orderId           String
-  order             Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  id                         String  @id @default(cuid())
+  orderId                    String
+  order                      Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
   // Ссылки/снимки на товар и вариант. Свободные строки (не FK) — снимок должен
   // переживать физическое исчезновение товара/варианта; резолв цены — по этим id.
-  productId         String? // наш Product.id (для авто-цены)
-  variantId         String? // наш ProductVariant.id (для авто-цены варианта)
-  productExternalId String? // снимок Shopify product id
-  variantExternalId String? // снимок Shopify variant id
-  name              String // снимок названия товара
-  variantName       String? // снимок названия варианта
-  sku               String? // снимок SKU
-  image             String?
+  productId                  String? // наш Product.id (для авто-цены)
+  variantId                  String? // наш ProductVariant.id (для авто-цены варианта)
+  productExternalId          String? // снимок Shopify product id
+  variantExternalId          String? // снимок Shopify variant id
+  name                       String // снимок названия товара
+  variantName                String? // снимок названия варианта
+  sku                        String? // снимок SKU
+  image                      String?
   floristCompositionSnapshot String? // снимок состава варианта на момент заказа (не Shopify description)
-  quantity          Int     @default(1)
-  options           String  @default("") // выбранные параметры (текст)
-  externalPrice     Decimal @db.Decimal(10, 2) // цена покупателю за позицию (только владелец)
-  floristItemPrice  Decimal @default(0) @db.Decimal(10, 2) // снимок цены флориста за позицию
+  quantity                   Int     @default(1)
+  options                    String  @default("") // выбранные параметры (текст)
+  externalPrice              Decimal @db.Decimal(10, 2) // цена покупателю за позицию (только владелец)
+  floristItemPrice           Decimal @default(0) @db.Decimal(10, 2) // снимок цены флориста за позицию
 
   @@index([orderId])
 }
@@ -510,6 +534,78 @@ model ShopifyWebhook {
   lastError        String?
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
+
+  @@unique([siteId, topic])
+  @@index([siteId])
+}
+
+// ─────────────────────────────  WOOCOMMERCE  ─────────────────────────────
+//
+// Платформенные credentials и настройки WooCommerce — отдельная 1:1 модель к Site.
+// Shopify-поля остаются inline в Site и НЕ рефакторятся (Shopify уже на production).
+// Все секреты — ТОЛЬКО зашифрованы (AES-256-GCM, тот же lib/crypto/secretBox, что и Shopify).
+
+model WooCommerceConnection {
+  id     String @id @default(cuid())
+  siteId String @unique
+  site   Site   @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  // URL нормализуется сервером: только HTTPS, без credentials/query/hash, без trailing slash.
+  // @unique — DB-гарантия, что один магазин нельзя подключить дважды (идемпотентность подключения).
+  storeUrl   String @unique // "https://example.com"
+  apiBaseUrl String // storeUrl + "/wp-json/" + apiVersion — собирается сервером
+  apiVersion String @default("wc/v3")
+
+  consumerKeyEncrypted    String
+  consumerSecretEncrypted String
+  consumerSecretMask      String // "********abcd" — для UI без расшифровки
+  // Уникальный webhook secret этого Site (генерируем сами, НЕ равен consumer secret).
+  webhookSecretEncrypted  String?
+
+  connStatus      WooConnStatus @default(CONNECTING)
+  connectionError String? // безопасный текст (без секретов/PII)
+
+  storeName  String?
+  currency   String?
+  timezone   String?
+  wooVersion String?
+  wpVersion  String?
+
+  lastConnectionCheckAt DateTime?
+  lastProductSyncAt     DateTime?
+  lastOrderSyncAt       DateTime?
+
+  // Конфигурируемый маппинг «внутреннее поле Floremart → Woo meta key». JSON, per-Site.
+  // Напр. { "deliveryDate": "_delivery_date", "cardMessage": "card_message" }.
+  orderMetaMapping Json?
+
+  // ── Airwallex / Klarna BNPL (см. classifyWooPayment) ── ничего не хардкодим.
+  airwallexEnabled                 Boolean  @default(false)
+  klarnaPayLaterPendingIsConfirmed Boolean  @default(false)
+  airwallexPaymentMethodIds        String[] @default([]) // напр. ["airwallex_klarna", "airwallex_paylater"]
+  airwallexMetaKeys                Json? // { "paymentIntentStatus": "_airwallex_payment_status", ... }
+  payLaterMaxWaitMinutes           Int      @default(1440) // сколько ждём финального статуса, иначе предупреждение
+  unknownBehavior                  String   @default("HOLD") // HOLD | AWAITING_PAYMENT — поведение при UNKNOWN
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// Зарегистрированные WooCommerce webhook-подписки по Site. Отдельно от ShopifyWebhook:
+// у платформ разные external ID/topics/HMAC/жизненный цикл (общий интерфейс — на уровне
+// TS-адаптера, хранение раздельное). Одна запись на (siteId, topic).
+model WooCommerceWebhook {
+  id             String    @id @default(cuid())
+  siteId         String
+  site           Site      @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  topic          String // "order.created" | "product.updated" | ...
+  externalId     String? // id вебхука в WooCommerce
+  deliveryUrl    String
+  status         String    @default("ACTIVE") // ACTIVE | FAILED | DELETED
+  lastDeliveryAt DateTime?
+  lastError      String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
 
   @@unique([siteId, topic])
   @@index([siteId])

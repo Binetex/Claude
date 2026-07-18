@@ -34,6 +34,7 @@ export const orderStatusMeta: Record<OrderStatus, Meta> = {
 export const paymentStatusMeta: Record<PaymentStatus, Meta> = {
   UNPAID: { label: "Не оплачен", className: "bg-amber-100 text-amber-800 border-amber-200" },
   PAID: { label: "Оплачен", className: "bg-emerald-100 text-emerald-800 border-emerald-200" },
+  PAY_LATER_APPROVED: { label: "Оплата позже (одобрено)", className: "bg-teal-100 text-teal-800 border-teal-200" },
   REFUNDED: { label: "Возврат", className: "bg-slate-200 text-slate-700 border-slate-300" },
   PARTIALLY_REFUNDED: { label: "Частичный возврат", className: "bg-orange-100 text-orange-800 border-orange-200" },
 };

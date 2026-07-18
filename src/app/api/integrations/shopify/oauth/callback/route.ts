@@ -42,17 +42,16 @@ export async function GET(request: Request) {
 
   const accessToken = await exchangeCodeForToken(shop, code);
 
-  // Красивое имя магазина и таймзона (для «сегодня» в списке закупки) — не критично.
+  // Красивое имя магазина — не критично. Таймзону из API НЕ берём: Site.timezone — ручная
+  // настройка Floremart (владелец задаёт в карточке сайта).
   let shopName = shop.replace(".myshopify.com", "");
-  let timezone: string | null = null;
   try {
     const shopInfoRes = await fetch(`https://${shop}/admin/api/2026-07/shop.json`, {
       headers: { "X-Shopify-Access-Token": accessToken },
     });
     if (shopInfoRes.ok) {
-      const data = (await shopInfoRes.json()) as { shop?: { name?: string; iana_timezone?: string } };
+      const data = (await shopInfoRes.json()) as { shop?: { name?: string } };
       if (data.shop?.name) shopName = data.shop.name;
-      if (data.shop?.iana_timezone) timezone = data.shop.iana_timezone;
     }
   } catch {
     // Не критично — оставляем производное от домена имя.
@@ -65,7 +64,6 @@ export async function GET(request: Request) {
     update: {
       shopifyAccessToken: accessToken,
       connectionStatus: "CONNECTED",
-      ...(timezone ? { timezone } : {}),
     },
     create: {
       name: shopName,
@@ -74,7 +72,6 @@ export async function GET(request: Request) {
       connectionStatus: "CONNECTED",
       shopifyShopDomain: shop,
       shopifyAccessToken: accessToken,
-      timezone,
     },
   });
 

@@ -9,8 +9,24 @@ import {
 } from "@/integrations/shopify/customApp/management";
 import { checkConnection } from "@/integrations/shopify/customApp/connection";
 import { isCredentialCryptoConfigured } from "@/lib/crypto/secretBox";
+import { prisma } from "@/lib/db";
+import { isValidTimeZone } from "@/lib/tz";
 
 type FormState = { error?: string; ok?: boolean; message?: string } | null;
+
+/**
+ * Ручная настройка часового пояса магазина (Site.timezone) — общая для всех платформ.
+ * Таймзона НЕ берётся из Shopify/WooCommerce API; владелец задаёт её сам. Site.timezone
+ * используется во всей date-логике (список закупки, «сегодня», дашборд) — см. lib/tz.
+ */
+export async function ownerSetSiteTimezone(siteId: string, timezone: string): Promise<FormState> {
+  await requireRole("OWNER");
+  if (!isValidTimeZone(timezone)) return { error: "Неверная таймзона (нужен IANA-идентификатор, напр. America/Los_Angeles)." };
+  await prisma.site.update({ where: { id: siteId }, data: { timezone } });
+  revalidatePath("/dashboard/sites");
+  revalidatePath("/dashboard");
+  return { ok: true, message: `Часовой пояс: ${timezone}` };
+}
 
 function guardCrypto(): string | null {
   return isCredentialCryptoConfigured()

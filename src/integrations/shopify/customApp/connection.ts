@@ -10,12 +10,12 @@ import { deriveConnectionResult, type ConnectionResult } from "./connectionLogic
 import { ShopifyAuthError } from "./tokenClient";
 
 const CHECK_QUERY = `{
-  shop { name myshopifyDomain ianaTimezone }
+  shop { name myshopifyDomain }
   currentAppInstallation { accessScopes { handle } }
 }`;
 
 type CheckData = {
-  shop: { name: string; myshopifyDomain: string; ianaTimezone?: string | null };
+  shop: { name: string; myshopifyDomain: string };
   currentAppInstallation: { accessScopes: { handle: string }[] };
 };
 
@@ -63,8 +63,7 @@ export async function checkConnection(siteId: string): Promise<ConnectionResult>
       grantedScopes: result.grantedScopes,
       connectionError: result.error,
       lastConnectionCheckAt: new Date(),
-      // timezone магазина обновляем только при успешной сверке домена.
-      ...(result.domainMatches && data.shop.ianaTimezone ? { timezone: data.shop.ianaTimezone } : {}),
+      // timezone из Shopify API НЕ берём — Site.timezone задаётся владельцем вручную в карточке.
     },
   });
 
