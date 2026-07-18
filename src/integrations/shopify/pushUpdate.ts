@@ -1,5 +1,6 @@
 import "server-only";
 import { prisma } from "@/lib/db";
+import { resolveShopifyAccessToken } from "./customApp/credentials";
 
 const API_VERSION = "2026-07";
 
@@ -68,10 +69,19 @@ export async function pushOrderUpdate(
 export async function syncOrderToShopify(orderId: string): Promise<void> {
   const order = await prisma.order.findUnique({ where: { id: orderId }, include: { site: true } });
   if (!order || order.platform !== "SHOPIFY" || !order.externalId) return;
-  const { site } = order;
-  if (!site.shopifyShopDomain || !site.shopifyAccessToken) return;
 
-  await pushOrderUpdate(site.shopifyShopDomain, site.shopifyAccessToken, order.externalId, {
+  // Credentials — через единый resolver (CUSTOM_APP: token из tokenManager; legacy: stored).
+  let shopDomain: string;
+  let accessToken: string;
+  try {
+    const c = await resolveShopifyAccessToken(order.siteId);
+    shopDomain = c.shopDomain;
+    accessToken = c.accessToken;
+  } catch {
+    return; // нет доступа — push не выполняем (не роняем server action)
+  }
+
+  await pushOrderUpdate(shopDomain, accessToken, order.externalId, {
     recipientName: order.recipientName,
     recipientPhone: order.recipientPhone,
     addressLine: order.addressLine,

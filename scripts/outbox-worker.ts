@@ -19,6 +19,8 @@ import { OutboxWorker, type OutboxHandler } from "@/outbox/worker";
 import { OutboxLogger } from "@/outbox/logger";
 import { buildDeliveryCompletedHandler } from "@/outbox/handlers";
 import { createDeliveryResolver } from "@/outbox/deliveryResolver";
+import { buildShopifyWebhookHandler } from "@/integrations/shopify/customApp/webhookHandler";
+import { shopifyWebhookHandlerDeps } from "@/integrations/shopify/customApp/webhookHandlerDeps";
 import { MessagingService } from "@/messaging/service";
 import { createMockProviders } from "@/messaging/providers/mock";
 
@@ -49,6 +51,8 @@ async function main() {
         log("completion_sync.placeholder", { orderId });
       },
     }),
+    // Shopify Custom App: приём заказов/товаров/событий приложения из webhook (per-Site credentials).
+    "shopify.webhook.received": buildShopifyWebhookHandler(shopifyWebhookHandlerDeps),
   };
 
   const worker = new OutboxWorker({

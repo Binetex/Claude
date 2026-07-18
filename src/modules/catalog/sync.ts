@@ -1,8 +1,11 @@
 import "server-only";
+import crypto from "crypto";
 import { prisma } from "@/lib/db";
 import { Prisma } from "@/generated/prisma/client";
 import { getCatalogAdapter } from "@/integrations/catalog";
+import { resolveShopifyAccessToken } from "@/integrations/shopify/customApp/credentials";
 import type { NormalizedProduct, NormalizedVariant } from "@/integrations/types";
+import type { CatalogSite } from "@/integrations/types";
 
 export type ProductSyncResult = {
   started: boolean; // false — если синхронизация уже шла и мы не запускали вторую
@@ -39,7 +42,8 @@ function priceRange(variants: NormalizedVariant[]): { min: Prisma.Decimal | null
 async function upsertProduct(
   siteId: string,
   np: NormalizedProduct,
-  now: Date
+  now: Date,
+  runId: string
 ): Promise<{ created: boolean; seenVariantExternalIds: Set<string> }> {
   const { min, max } = priceRange(np.variants);
 
@@ -52,6 +56,7 @@ async function upsertProduct(
     minPrice: min,
     maxPrice: max,
     lastSyncedAt: now,
+    lastSeenSyncRunId: runId, // помечаем «виден в этом прогоне»
     remoteDeleted: false,
     deletedAt: null,
   };
@@ -82,6 +87,7 @@ async function upsertProduct(
       position: v.position,
       adminUrl: v.adminUrl,
       lastSyncedAt: now,
+      lastSeenSyncRunId: runId,
       remoteDeleted: false,
       deletedAt: null,
     };
@@ -143,6 +149,18 @@ export async function syncProducts(siteId: string): Promise<ProductSyncResult> {
     },
   });
 
+  // Credentials — через единый resolver (CUSTOM_APP: token из tokenManager; legacy: stored).
+  // runId помечает товары/варианты, встреченные в ЭТОМ прогоне; отсутствующие пометим
+  // remoteDeleted только после ПОЛНОГО успешного прохода (см. ниже).
+  const runId = crypto.randomUUID();
+  let catalogSite: CatalogSite = { id: site.id, shopifyShopDomain: site.shopifyShopDomain, shopifyAccessToken: site.shopifyAccessToken };
+  try {
+    const c = await resolveShopifyAccessToken(site.id);
+    catalogSite = { id: site.id, shopifyShopDomain: c.shopDomain, shopifyAccessToken: c.accessToken };
+  } catch {
+    // legacy без резолвера / не подключён — оставляем site как есть (адаптер обработает).
+  }
+
   const adapter = getCatalogAdapter(site.platform);
   let created = 0;
   let updated = 0;
@@ -150,23 +168,17 @@ export async function syncProducts(siteId: string): Promise<ProductSyncResult> {
   let errors = 0;
   let processed = 0;
   let total: number | null = null;
-  const seenProductExternalIds = new Set<string>();
-  const seenVariantsByProductExtId = new Map<string, Set<string>>();
 
   try {
-    total = await adapter.countProducts(site);
+    total = await adapter.countProducts(catalogSite);
     if (total != null) await writeProgress(siteId, { total });
 
-    for await (const np of adapter.fetchProducts(site)) {
+    for await (const np of adapter.fetchProducts(catalogSite)) {
       try {
         if (!np.variants.length) {
-          // Товар без вариантов не с чем показать/оценить — пропускаем, но фиксируем как виденный.
-          seenProductExternalIds.add(np.externalId);
           skipped++;
         } else {
-          const { created: isNew, seenVariantExternalIds } = await upsertProduct(siteId, np, now);
-          seenProductExternalIds.add(np.externalId);
-          seenVariantsByProductExtId.set(np.externalId, seenVariantExternalIds);
+          const { created: isNew } = await upsertProduct(siteId, np, now, runId);
           if (isNew) created++;
           else updated++;
         }
@@ -180,9 +192,10 @@ export async function syncProducts(siteId: string): Promise<ProductSyncResult> {
       }
     }
 
-    // Пометка исчезнувших — только после полностью успешного прохода и если что-то реально пришло.
-    if (processed > 0 && seenProductExternalIds.size > 0) {
-      await markRemoteDeleted(siteId, seenProductExternalIds, seenVariantsByProductExtId, now);
+    // Пометка исчезнувших — ТОЛЬКО после полностью успешного прохода и если что-то реально пришло
+    // (processed>0 защищает от «пустого» ответа, скрывающего весь каталог). При ошибке — см. catch.
+    if (processed > 0) {
+      await markRemoteDeleted(siteId, runId, now);
     }
 
     await prisma.siteSync.update({
@@ -211,34 +224,22 @@ export async function syncProducts(siteId: string): Promise<ProductSyncResult> {
   }
 }
 
-/** Помечает remoteDeleted товары/варианты, которых больше нет во внешнем каталоге. */
-async function markRemoteDeleted(
-  siteId: string,
-  seenProductExternalIds: Set<string>,
-  seenVariantsByProductExtId: Map<string, Set<string>>,
-  now: Date
-): Promise<void> {
-  // 1. Товары, которых не вернул API.
+/**
+ * Помечает remoteDeleted всё, что НЕ встретилось в текущем прогоне `runId`
+ * (lastSeenSyncRunId != runId). Локальные floristPrice/composition НЕ трогаются.
+ * Вызывается только после полного успешного прохода (см. syncProducts).
+ */
+async function markRemoteDeleted(siteId: string, runId: string, now: Date): Promise<void> {
+  // Товары, не виденные в этом прогоне.
   await prisma.product.updateMany({
-    where: { siteId, externalId: { notIn: [...seenProductExternalIds] }, remoteDeleted: false },
+    where: { siteId, remoteDeleted: false, OR: [{ lastSeenSyncRunId: { not: runId } }, { lastSeenSyncRunId: null }] },
     data: { remoteDeleted: true, deletedAt: now },
   });
-  // 2. Все варианты у только что удалённых товаров.
+  // Варианты, не виденные в этом прогоне (исчезнувшие у существующих товаров ИЛИ у удалённых).
   await prisma.productVariant.updateMany({
-    where: { product: { siteId, remoteDeleted: true }, remoteDeleted: false },
+    where: { product: { siteId }, remoteDeleted: false, OR: [{ lastSeenSyncRunId: { not: runId } }, { lastSeenSyncRunId: null }] },
     data: { remoteDeleted: true, deletedAt: now },
   });
-  // 3. Варианты, исчезнувшие у ещё существующих товаров.
-  for (const [extId, seenVariants] of seenVariantsByProductExtId) {
-    await prisma.productVariant.updateMany({
-      where: {
-        product: { siteId, externalId: extId },
-        externalId: { notIn: [...seenVariants] },
-        remoteDeleted: false,
-      },
-      data: { remoteDeleted: true, deletedAt: now },
-    });
-  }
 }
 
 /**

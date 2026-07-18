@@ -4,6 +4,7 @@ import { Prisma } from "@/generated/prisma/client";
 import type { PaymentStatus, OrderStatus, DeliveryStatus } from "@/generated/prisma/enums";
 import { assignInitial } from "@/modules/assignments/service";
 import { createProductImageCache, resolveLineItemImages, type ProductImageCache } from "./productImages";
+import { resolveShopifyAccessToken } from "./customApp/credentials";
 import { normalizePhone } from "@/lib/phone";
 
 type Site = { id: string; shortName: string; shopifyShopDomain: string | null; shopifyAccessToken: string | null };
@@ -44,6 +45,7 @@ export type ShopifyOrder = {
   fulfillment_status?: string | null;
   cancelled_at?: string | null;
   created_at?: string;
+  updated_at?: string;
   customer?: { first_name?: string; last_name?: string; phone?: string } | null;
   billing_address?: ShopifyAddress;
   shipping_address?: ShopifyAddress;
@@ -281,6 +283,7 @@ function buildOrderData(
     source: "Shopify",
     externalId,
     externalCreatedAt: payload.created_at ? new Date(payload.created_at) : new Date(),
+    externalUpdatedAt: payload.updated_at ? new Date(payload.updated_at) : null,
     deliveryDate,
     deliveryWindow,
     senderName: fullName(payload.billing_address) || [payload.customer?.first_name, payload.customer?.last_name].filter(Boolean).join(" ") || "—",
@@ -396,9 +399,22 @@ async function fetchLiveImages(
   payload: ShopifyOrder,
   imageCache: ProductImageCache
 ): Promise<{ images: Map<string, string> }> {
-  if (!site.shopifyShopDomain || !site.shopifyAccessToken) return { images: new Map() };
+  // Credentials — через единый resolver: CUSTOM_APP получает token из tokenManager,
+  // legacy — stored token. Никакого прямого чтения токена здесь.
+  let shopDomain = site.shopifyShopDomain;
+  let accessToken = site.shopifyAccessToken;
+  if (!accessToken) {
+    try {
+      const c = await resolveShopifyAccessToken(site.id);
+      shopDomain = c.shopDomain;
+      accessToken = c.accessToken;
+    } catch {
+      return { images: new Map() }; // нет доступа — картинки просто не подтянутся (не роняем приём)
+    }
+  }
+  if (!shopDomain || !accessToken) return { images: new Map() };
   const lineItems = payload.line_items ?? [];
-  const images = await resolveLineItemImages(site.shopifyShopDomain, site.shopifyAccessToken, lineItems, imageCache);
+  const images = await resolveLineItemImages(shopDomain, accessToken, lineItems, imageCache);
   return { images };
 }
 
