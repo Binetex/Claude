@@ -38,11 +38,16 @@ const consoleSink: LogSink = (line) => {
   method(JSON.stringify(line));
 };
 
-/** Усекает и обезличивает сообщение об ошибке для безопасного лога. */
+/** Усекает и ОБЕЗЛИЧИВАЕТ сообщение об ошибке для безопасного лога/`lastError`/admin-UI. */
 export function safeError(err: unknown, max = 300): string {
   const msg = err instanceof Error ? err.message : String(err);
-  const collapsed = msg.replace(/\s+/g, " ").trim();
-  return collapsed.length > max ? collapsed.slice(0, max) + "…" : collapsed;
+  const redacted = msg
+    .replace(/\s+/g, " ")
+    .trim()
+    // Провайдеры (SMS/email) нередко кладут адресата в текст ошибки — вырезаем email и телефон.
+    .replace(/[\w.+-]+@[\w-]+\.[\w.-]+/g, "[email]")
+    .replace(/\+?\d[\d\s().-]{7,}\d/g, "[phone]");
+  return redacted.length > max ? redacted.slice(0, max) + "…" : redacted;
 }
 
 export class OutboxLogger {

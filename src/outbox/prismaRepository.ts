@@ -133,10 +133,14 @@ export class PrismaOutboxRepository implements OutboxRepository {
       where: { status: "PROCESSING", lockedAt: { lt: opts.olderThan } },
       select: { id: true, attempts: true, maxAttempts: true },
     });
+    let recovered = 0;
     for (const s of stuck) {
       const deadLetter = s.attempts >= s.maxAttempts;
-      await this.prisma.outboxEvent.update({
-        where: { id: s.id },
+      // Атомарный guard `status='PROCESSING' AND lockedAt<olderThan`: если владелец lease
+      // за это время успел завершить событие (markProcessed → PROCESSED), updateMany не
+      // затронет строк и мы НЕ воскресим уже обработанное событие (защита от lost update).
+      const res = await this.prisma.outboxEvent.updateMany({
+        where: { id: s.id, status: "PROCESSING", lockedAt: { lt: opts.olderThan } },
         data: {
           status: deadLetter ? "DEAD_LETTER" : "FAILED",
           availableAt: now,
@@ -145,8 +149,9 @@ export class PrismaOutboxRepository implements OutboxRepository {
           lockedBy: null,
         },
       });
+      recovered += res.count;
     }
-    return stuck.length;
+    return recovered;
   }
 
   async list(opts: AdminListOptions = {}): Promise<OutboxRecord[]> {

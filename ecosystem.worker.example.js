@@ -10,11 +10,12 @@ module.exports = {
   apps: [
     {
       name: "floremart-worker",
+      // tsx запускается НАПРЯМУЮ (interpreter: none) — его shebang сам поднимает node.
+      // Так сигналы PM2 (SIGINT/SIGTERM) доходят прямо до процесса → graceful shutdown работает.
       script: "./node_modules/.bin/tsx",
       args: "scripts/outbox-worker.ts",
+      interpreter: "none",
       cwd: __dirname,
-      interpreter: process.execPath,
-      node_args: "--conditions=react-server",
       instances: 1, // ВАЖНО: один инстанс на очередь (lease защищает и от нескольких, но так проще)
       exec_mode: "fork",
       autorestart: true,
@@ -23,6 +24,9 @@ module.exports = {
       kill_timeout: 10000, // дать батчу завершиться до SIGKILL
       env: {
         NODE_ENV: "production",
+        // Условие react-server нужно, чтобы server-only-модули (Prisma-слой) резолвились
+        // как серверные — так же, как в других скриптах проекта.
+        NODE_OPTIONS: "--conditions=react-server",
         // DATABASE_URL берётся из окружения/.env — тот же, что у основного приложения.
         OUTBOX_BATCH_SIZE: "20",
         OUTBOX_POLL_MS: "1000",
