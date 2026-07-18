@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { backfillShopifyOrder } from "@/integrations/shopify/ingestOrder";
 import { createProductImageCache } from "@/integrations/shopify/productImages";
 import { countOrdersSince, fetchOrdersSince } from "@/integrations/shopify/orders";
+import { resolveShopifyAccessToken } from "@/integrations/shopify/customApp/credentials";
 
 const STALE_RUNNING_MS = 15 * 60 * 1000;
 const PROGRESS_EVERY = 10;
@@ -42,10 +43,11 @@ export async function syncOrders(siteId: string): Promise<void> {
 
   try {
     if (site.platform !== "SHOPIFY") throw new Error(`Синхронизация заказов для ${site.platform} ещё не реализована (этап 2).`);
-    if (!site.shopifyShopDomain || !site.shopifyAccessToken) throw new Error("У сайта нет домена/токена Shopify — переподключите магазин.");
+    // Credentials — через единый resolver (CUSTOM_APP: token из tokenManager; legacy: stored).
+    const { shopDomain, accessToken } = await resolveShopifyAccessToken(siteId);
 
     const sinceIso = new Date(Date.now() - WINDOW_DAYS * 24 * 60 * 60 * 1000).toISOString();
-    total = await countOrdersSince(site.shopifyShopDomain, site.shopifyAccessToken, sinceIso);
+    total = await countOrdersSince(shopDomain, accessToken, sinceIso);
     if (total != null) {
       await prisma.siteSync.update({ where: { siteId_kind: { siteId, kind: "ORDERS" } }, data: { total } });
     }
@@ -54,11 +56,11 @@ export async function syncOrders(siteId: string): Promise<void> {
     const siteLite = {
       id: site.id,
       shortName: site.shortName,
-      shopifyShopDomain: site.shopifyShopDomain,
-      shopifyAccessToken: site.shopifyAccessToken,
+      shopifyShopDomain: shopDomain,
+      shopifyAccessToken: accessToken,
     };
 
-    for await (const order of fetchOrdersSince(site.shopifyShopDomain, site.shopifyAccessToken, sinceIso)) {
+    for await (const order of fetchOrdersSince(shopDomain, accessToken, sinceIso)) {
       try {
         const res = await backfillShopifyOrder(siteLite, order, imageCache);
         if (res.status === "created") created++;
