@@ -17,20 +17,23 @@ const params = { shopDomain: "demo.myshopify.com", clientId: "cid", clientSecret
 
 describe("mintClientCredentialsToken", () => {
   it("успех: возвращает токен и вычисляет expiresAt (now + expires_in)", async () => {
-    const fetchImpl = vi.fn((_url: string, _init: RequestInit) =>
-      Promise.resolve(jsonResponse(200, { access_token: "shpat_abc", expires_in: 86399 }))
-    );
+    let capturedUrl = "";
+    let capturedInit: RequestInit | undefined;
+    const fetchImpl = vi.fn((url: string, init: RequestInit) => {
+      capturedUrl = url;
+      capturedInit = init;
+      return Promise.resolve(jsonResponse(200, { access_token: "shpat_abc", expires_in: 86399 }));
+    });
     const t = await mintClientCredentialsToken(params, fetchImpl, now);
     expect(t.accessToken).toBe("shpat_abc");
     expect(t.expiresIn).toBe(86399);
     expect(t.expiresAt.getTime()).toBe(T0.getTime() + 86399 * 1000);
 
     // Проверяем корректность запроса (endpoint, content-type, grant_type).
-    const [url, init] = fetchImpl.mock.calls[0];
-    expect(url).toBe("https://demo.myshopify.com/admin/oauth/access_token");
-    expect((init.headers as Record<string, string>)["Content-Type"]).toBe("application/x-www-form-urlencoded");
-    expect(String(init.body)).toContain("grant_type=client_credentials");
-    expect(String(init.body)).toContain("client_id=cid");
+    expect(capturedUrl).toBe("https://demo.myshopify.com/admin/oauth/access_token");
+    expect((capturedInit!.headers as Record<string, string>)["Content-Type"]).toBe("application/x-www-form-urlencoded");
+    expect(String(capturedInit!.body)).toContain("grant_type=client_credentials");
+    expect(String(capturedInit!.body)).toContain("client_id=cid");
   });
 
   it("по умолчанию expires_in = 86399, если не пришёл", async () => {

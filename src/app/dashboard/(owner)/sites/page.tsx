@@ -1,10 +1,20 @@
 import { prisma } from "@/lib/db";
 import { Card, CardHeader, CardBody } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
-import { ConnectShopifyForm } from "./ConnectShopifyForm";
+import { SiteConnectPanel } from "./SiteConnectPanel";
+import { SiteCardActions } from "./SiteCardActions";
 import { SiteNameForm } from "./SiteNameForm";
 import { SiteSyncControls } from "./SiteSyncControls";
+import { diffScopes } from "@/integrations/shopify/customApp/scopes";
 import type { SyncStatusSnapshot } from "@/app/dashboard/(owner)/actions";
+
+const connStatusMeta: Record<string, { label: string; className: string }> = {
+  CONNECTING: { label: "Проверка…", className: "bg-amber-100 text-amber-800 border-amber-200" },
+  CONNECTED: { label: "Подключён", className: "bg-emerald-100 text-emerald-800 border-emerald-200" },
+  DEGRADED: { label: "Ограниченный доступ", className: "bg-orange-100 text-orange-800 border-orange-200" },
+  REAUTH_REQUIRED: { label: "Требуется переподключение", className: "bg-red-100 text-red-800 border-red-200" },
+  DISCONNECTED: { label: "Отключён", className: "bg-slate-100 text-slate-600 border-slate-200" },
+};
 
 export const dynamic = "force-dynamic";
 
@@ -43,7 +53,7 @@ export default async function SitesPage() {
 
       <Card className="p-4">
         <div className="mb-2 text-sm font-semibold text-slate-700">Подключить новый магазин Shopify</div>
-        <ConnectShopifyForm />
+        <SiteConnectPanel />
       </Card>
 
       <div className="grid gap-4 md:grid-cols-2">
@@ -69,6 +79,32 @@ export default async function SitesPage() {
                   </div>
                 )}
               </div>
+              {s.authMode === "CUSTOM_APP" && (
+                <div className="space-y-2 border-t border-slate-100 pt-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-xs text-slate-400">Подключение:</span>
+                    <Badge className="bg-slate-100 text-slate-700 border-slate-200">Custom App</Badge>
+                    {s.shopifyConnStatus && (
+                      <Badge className={(connStatusMeta[s.shopifyConnStatus] ?? connStatusMeta.DISCONNECTED).className}>
+                        {(connStatusMeta[s.shopifyConnStatus] ?? { label: s.shopifyConnStatus }).label}
+                      </Badge>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 text-xs text-slate-500">
+                    <div><span className="text-slate-400">Последняя проверка:</span> {s.lastConnectionCheckAt ? new Intl.DateTimeFormat("ru-RU", { dateStyle: "short", timeStyle: "short" }).format(s.lastConnectionCheckAt) : "—"}</div>
+                    <div><span className="text-slate-400">Последняя синхр.:</span> {s.lastSyncAt ? new Intl.DateTimeFormat("ru-RU", { dateStyle: "short", timeStyle: "short" }).format(s.lastSyncAt) : "—"}</div>
+                  </div>
+                  {(() => {
+                    const missing = diffScopes(s.grantedScopes).missing;
+                    return missing.length ? (
+                      <div className="text-xs text-orange-700">Не хватает scopes: {missing.join(", ")}</div>
+                    ) : null;
+                  })()}
+                  {s.connectionError && <div className="text-xs text-red-600">{s.connectionError}</div>}
+                  <SiteCardActions siteId={s.id} />
+                </div>
+              )}
+
               <div>
                 <div className="mb-1 text-xs text-slate-400">Приоритет флористов</div>
                 <ol className="space-y-1">
