@@ -192,9 +192,11 @@ export async function syncProducts(siteId: string): Promise<ProductSyncResult> {
       }
     }
 
-    // Пометка исчезнувших — ТОЛЬКО после полностью успешного прохода и если что-то реально пришло
-    // (processed>0 защищает от «пустого» ответа, скрывающего весь каталог). При ошибке — см. catch.
-    if (processed > 0) {
+    // Пометка исчезнувших — ТОЛЬКО после ПОЛНОСТЬЮ чистого прохода:
+    //  - processed>0: защита от «пустого» успешного ответа, скрывающего весь каталог;
+    //  - errors===0: транзиентный сбой upsert'а отдельного товара НЕ должен пометить его
+    //    remoteDeleted (его lastSeenSyncRunId не обновился) — ждём следующего чистого прогона.
+    if (processed > 0 && errors === 0) {
       await markRemoteDeleted(siteId, runId, now);
     }
 

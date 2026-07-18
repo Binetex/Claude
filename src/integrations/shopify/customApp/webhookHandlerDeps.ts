@@ -10,9 +10,13 @@ import { prisma } from "@/lib/db";
 import { Prisma } from "@/generated/prisma/client";
 import type { ProductStatus } from "@/generated/prisma/enums";
 import { ingestShopifyOrder, type ShopifyOrder } from "@/integrations/shopify/ingestOrder";
-import { isStaleUpdate, isForbiddenStatusTransition } from "./webhookVerifyLogic";
+import { isStaleUpdate } from "./webhookVerifyLogic";
 import type { ShopifyWebhookHandlerDeps } from "./webhookHandler";
 
+// Anti-rollback: терминальные внутренние статусы (CANCELLED/DELIVERED) не откатываем ранним
+// рабочим webhook. Более тонкий guard isForbiddenStatusTransition (в webhookVerifyLogic,
+// покрыт тестами) применится, когда добавим прямое применение внешнего статуса; текущий ingest
+// не меняет orderStatus произвольно на update, поэтому TERMINAL-проверки достаточно.
 const TERMINAL = new Set(["CANCELLED", "DELIVERED"]);
 
 /** Приём заказа из webhook с защитой от устаревших событий и откатов терминальных статусов. */
@@ -36,7 +40,7 @@ async function ingestOrder(siteId: string, topic: string, shopify: unknown): Pro
     if (topic !== "orders/cancelled" && TERMINAL.has(existing.orderStatus)) return;
   }
 
-  await ingestShopifyOrder(topic.replace("orders/", "orders/"), shopDomain, payload);
+  await ingestShopifyOrder(topic, shopDomain, payload);
 
   // Фиксируем externalUpdatedAt (ingest create уже проставляет; для update-пути — здесь).
   if (payload.updated_at) {

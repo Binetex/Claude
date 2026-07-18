@@ -67,6 +67,9 @@ export async function connectCustomApp(input: ConnectInput, opts: { allowReconne
     authMode: "CUSTOM_APP" as const,
     normalizedShopDomain: domain,
     shopifyShopDomain: domain,
+    // Обнуляем legacy plain-токен: CUSTOM_APP работает только через зашифрованный accessToken
+    // (иначе при миграции legacy→custom app остался бы устаревший общий токен).
+    shopifyAccessToken: null,
     clientIdEncrypted: encryptSecret(input.clientId.trim()),
     clientSecretEncrypted: encryptSecret(input.clientSecret.trim()),
     clientSecretMask: maskSecret(input.clientSecret.trim()),
