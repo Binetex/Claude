@@ -11,7 +11,7 @@ import { prisma } from "@/lib/db";
 import { encryptSecret, maskSecret } from "@/lib/crypto/secretBox";
 import { parseMyshopifyDomain } from "./domain";
 import { checkConnection } from "./connection";
-import { DEFAULT_SHOPIFY_API_VERSION } from "./client";
+import { DEFAULT_SHOPIFY_API_VERSION } from "./config";
 import type { ConnectionResult } from "./connectionLogic";
 
 export type ConnectInput = {

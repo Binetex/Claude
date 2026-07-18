@@ -6,8 +6,7 @@ import "server-only";
  */
 import { prisma } from "@/lib/db";
 import { getValidAccessToken } from "./tokenManager";
-
-export const DEFAULT_SHOPIFY_API_VERSION = "2026-07";
+import { DEFAULT_SHOPIFY_API_VERSION } from "./config";
 
 export class ShopifyReauthRequiredError extends Error {
   constructor(public readonly siteId: string) {

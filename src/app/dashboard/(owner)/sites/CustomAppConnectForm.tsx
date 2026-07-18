@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { ConnectionInstructions } from "./ConnectionInstructions";
-import { DEFAULT_SHOPIFY_API_VERSION } from "@/integrations/shopify/customApp/client";
+import { DEFAULT_SHOPIFY_API_VERSION } from "@/integrations/shopify/customApp/config";
 
 /**
  * Форма ручного подключения Shopify Custom App. Секреты (Client Secret) не отображаются после
