@@ -36,6 +36,7 @@ export async function shopifyAdminGraphQL<T = unknown>(
       method: "POST",
       headers: { "X-Shopify-Access-Token": token, "Content-Type": "application/json", Accept: "application/json" },
       body: JSON.stringify({ query, variables }),
+      signal: AbortSignal.timeout(15_000),
     });
 
   let res = await call(await getValidAccessToken(siteId));

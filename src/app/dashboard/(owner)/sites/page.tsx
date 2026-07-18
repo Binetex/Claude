@@ -19,10 +19,24 @@ const connStatusMeta: Record<string, { label: string; className: string }> = {
 export const dynamic = "force-dynamic";
 
 export default async function SitesPage() {
+  // Явный select: НЕ тянем зашифрованные секреты (clientSecretEncrypted/accessTokenEncrypted/…)
+  // и лишние поля (user.passwordHash) в серверную память — только то, что реально рендерится.
   const sites = await prisma.site.findMany({
-    include: {
-      floristPriorities: { orderBy: { position: "asc" }, include: { florist: { include: { user: true } } } },
-      syncs: true,
+    select: {
+      id: true, name: true, shortName: true, platform: true, colorTag: true,
+      connectionStatus: true, shopifyShopDomain: true,
+      authMode: true, shopifyConnStatus: true, lastConnectionCheckAt: true, lastSyncAt: true,
+      grantedScopes: true, connectionError: true,
+      floristPriorities: {
+        orderBy: { position: "asc" },
+        select: { id: true, position: true, florist: { select: { user: { select: { name: true } } } } },
+      },
+      syncs: {
+        select: {
+          kind: true, status: true, total: true, processed: true, created: true,
+          updated: true, skipped: true, errors: true, errorMessage: true, finishedAt: true,
+        },
+      },
       _count: { select: { orders: true, products: true } },
     },
     orderBy: { name: "asc" },

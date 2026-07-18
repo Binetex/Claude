@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { mintClientCredentialsToken, needsRefresh, ShopifyAuthError, TOKEN_REFRESH_BUFFER_MS } from "./tokenClient";
+import { mintClientCredentialsToken, needsRefresh, isStoredTokenFresh, ShopifyAuthError, TOKEN_REFRESH_BUFFER_MS } from "./tokenClient";
 
 const T0 = new Date("2026-07-18T00:00:00Z");
 const now = () => T0;
@@ -87,5 +87,22 @@ describe("needsRefresh", () => {
   it("false, если ещё долго жить", () => {
     const later = new Date(T0.getTime() + 3600 * 1000);
     expect(needsRefresh(later, T0)).toBe(false);
+  });
+});
+
+describe("isStoredTokenFresh — double-check под lock (регрессия HIGH: forceRefresh)", () => {
+  const later = new Date(T0.getTime() + 3600 * 1000); // ещё валиден по времени
+  it("обычный refresh: валидный по времени токен считается свежим", () => {
+    expect(isStoredTokenFresh({ storedToken: "tok", storedExpiresAt: later, forced: false, now: T0 })).toBe(true);
+  });
+  it("forceRefresh: тот же (протухший) токен НЕ свежий → будет перемит", () => {
+    // ключевой кейс бага: токен не истёк по времени, но 401 → форсим; нельзя вернуть тот же.
+    expect(isStoredTokenFresh({ storedToken: "dead", storedExpiresAt: later, forced: true, staleToken: "dead", now: T0 })).toBe(false);
+  });
+  it("forceRefresh: если другой поток уже перемитил (токен изменился) → свежий", () => {
+    expect(isStoredTokenFresh({ storedToken: "new", storedExpiresAt: later, forced: true, staleToken: "dead", now: T0 })).toBe(true);
+  });
+  it("нет токена → не свежий", () => {
+    expect(isStoredTokenFresh({ storedToken: null, storedExpiresAt: null, forced: false })).toBe(false);
   });
 });

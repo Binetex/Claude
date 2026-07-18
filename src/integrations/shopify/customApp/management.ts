@@ -8,6 +8,7 @@ import "server-only";
  * - Disconnect не удаляет Site и историю; лишь очищает credentials и деактивирует webhooks.
  */
 import { prisma } from "@/lib/db";
+import { Prisma } from "@/generated/prisma/client";
 import { encryptSecret, maskSecret } from "@/lib/crypto/secretBox";
 import { parseMyshopifyDomain } from "./domain";
 import { checkConnection } from "./connection";
@@ -85,17 +86,31 @@ export async function connectCustomApp(input: ConnectInput, opts: { allowReconne
     siteId = existing.id;
     reconnected = true;
   } else {
-    const site = await prisma.site.create({
-      data: {
-        name: input.name.trim() || domain,
-        shortName: shortNameFrom(input.name || domain),
-        platform: "SHOPIFY",
-        connectionStatus: "PENDING",
-        ...creds,
-      },
-      select: { id: true },
-    });
-    siteId = site.id;
+    try {
+      const site = await prisma.site.create({
+        data: {
+          name: input.name.trim() || domain,
+          shortName: shortNameFrom(input.name || domain),
+          platform: "SHOPIFY",
+          connectionStatus: "PENDING",
+          ...creds,
+        },
+        select: { id: true },
+      });
+      siteId = site.id;
+    } catch (err) {
+      // Гонка первого подключения: параллельный create того же домена нарушил
+      // @@unique([platform, normalizedShopDomain]) → находим уже созданный Site и обновляем.
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
+        const race = await prisma.site.findFirst({ where: { platform: "SHOPIFY", normalizedShopDomain: domain }, select: { id: true } });
+        if (!race) throw err;
+        await prisma.site.update({ where: { id: race.id }, data: creds });
+        siteId = race.id;
+        reconnected = true;
+      } else {
+        throw err;
+      }
+    }
   }
 
   // Первичная проверка: минтит токен, сверяет домен и scopes, ставит статус.

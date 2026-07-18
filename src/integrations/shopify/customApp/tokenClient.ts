@@ -75,6 +75,8 @@ export async function mintClientCredentialsToken(
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
     body: body.toString(),
+    // Таймаут короче транзакционного (20с): зависший upstream быстро освобождает row-lock.
+    signal: AbortSignal.timeout(10_000),
   });
 
   if (!res.ok) {
@@ -113,4 +115,23 @@ export function needsRefresh(
 ): boolean {
   if (!expiresAt) return true;
   return expiresAt.getTime() - now.getTime() <= bufferMs;
+}
+
+/**
+ * Решает (после захвата lock), актуален ли уже сохранённый токен и можно ли вернуть его
+ * без повторного минта. Ключевое: при `forced` (после 401) «свежим» считается ТОЛЬКО
+ * изменившийся токен (кто-то другой уже перемитил) — иначе 401-recovery переиспользовал бы
+ * тот же мёртвый токен. Чистая функция — покрыта тестами.
+ */
+export function isStoredTokenFresh(params: {
+  storedToken: string | null | undefined;
+  storedExpiresAt: Date | null | undefined;
+  forced: boolean;
+  staleToken?: string | null;
+  now?: Date;
+  bufferMs?: number;
+}): boolean {
+  if (!params.storedToken) return false;
+  if (params.forced) return params.storedToken !== params.staleToken;
+  return !needsRefresh(params.storedExpiresAt, params.now, params.bufferMs);
 }

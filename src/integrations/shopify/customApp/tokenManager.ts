@@ -11,7 +11,7 @@ import "server-only";
  */
 import { prisma } from "@/lib/db";
 import { decryptSecret, encryptSecret, maskSecret } from "@/lib/crypto/secretBox";
-import { mintClientCredentialsToken, needsRefresh, ShopifyAuthError, type MintedToken } from "./tokenClient";
+import { mintClientCredentialsToken, needsRefresh, isStoredTokenFresh, ShopifyAuthError, type MintedToken } from "./tokenClient";
 
 export class SiteNotConnectedError extends Error {
   constructor(public readonly siteId: string, message: string) {
@@ -52,11 +52,14 @@ export async function getValidAccessToken(siteId: string, opts: { forceRefresh?:
   if (!opts.forceRefresh && site.accessTokenEncrypted && !needsRefresh(site.accessTokenExpiresAt)) {
     return decryptSecret(site.accessTokenEncrypted);
   }
-  return refreshWithLock(siteId);
+  // При forceRefresh (после 401) передаём «протухший» шифртекст: под lock перемитим, если
+  // никто другой уже не заменил его на новый — иначе 401-recovery переиспользовал бы мёртвый токен.
+  return refreshWithLock(siteId, opts.forceRefresh ? { staleToken: site.accessTokenEncrypted } : {});
 }
 
 /** Обновление токена под блокировкой строки Site. Кидает ShopifyAuthError при неверных credentials. */
-export async function refreshWithLock(siteId: string): Promise<string> {
+export async function refreshWithLock(siteId: string, opts: { staleToken?: string | null } = {}): Promise<string> {
+  const forced = "staleToken" in opts;
   return prisma.$transaction(
     async (tx) => {
       // Захватываем эксклюзивную блокировку строки Site — сериализуем обновления токена.
@@ -73,8 +76,15 @@ export async function refreshWithLock(siteId: string): Promise<string> {
       if (!site) throw new SiteNotConnectedError(siteId, "Site не найден");
 
       // Double-check после захвата lock: возможно, другой поток уже обновил токен.
-      if (site.accessTokenEncrypted && !needsRefresh(site.accessTokenExpiresAt)) {
-        return decryptSecret(site.accessTokenEncrypted);
+      if (
+        isStoredTokenFresh({
+          storedToken: site.accessTokenEncrypted,
+          storedExpiresAt: site.accessTokenExpiresAt,
+          forced,
+          staleToken: opts.staleToken,
+        })
+      ) {
+        return decryptSecret(site.accessTokenEncrypted!);
       }
       if (!site.clientIdEncrypted || !site.clientSecretEncrypted || !site.normalizedShopDomain) {
         throw new SiteNotConnectedError(siteId, "Не заданы credentials Custom App");
