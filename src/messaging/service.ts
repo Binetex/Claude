@@ -36,9 +36,15 @@ export class MessagingService {
     }
 
     try {
-      const { providerId } = await provider.send(rendered, command);
+      const { providerId, deliveryStatus } = await provider.send(rendered, command);
       this.seen.add(command.idempotencyKey); // фиксируем успех — повтор не отправит дубль
-      return { status: "sent", channel: command.channel, providerId };
+      return {
+        status: "sent",
+        channel: command.channel,
+        externalMessageId: providerId,
+        providerId, // обратная совместимость
+        deliveryStatus: deliveryStatus ?? "sent",
+      };
     } catch (err) {
       const retryable = err instanceof IntegrationError ? err.isRetryable : false;
       return { status: "failed", channel: command.channel, reason: err instanceof Error ? err.message : "send_error", retryable };

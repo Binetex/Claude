@@ -4,7 +4,13 @@
  * ночью (Quo/Telegram — skeleton без production-вызовов). Реальные провайдеры заменят
  * их за тем же интерфейсом `MessageProvider`.
  */
-import type { MessageChannel, MessageProvider, RenderedMessage, MessageCommand } from "../types";
+import type {
+  MessageChannel,
+  MessageProvider,
+  RenderedMessage,
+  MessageCommand,
+  ProviderDeliveryState,
+} from "../types";
 
 export type SentRecord = { message: RenderedMessage; command: MessageCommand; providerId: string };
 
@@ -19,11 +25,14 @@ export class MockMessageProvider implements MessageProvider {
     this.channel = channel;
   }
 
-  async send(message: RenderedMessage, command: MessageCommand): Promise<{ providerId: string }> {
+  async send(
+    message: RenderedMessage,
+    command: MessageCommand
+  ): Promise<{ providerId: string; deliveryStatus: ProviderDeliveryState }> {
     if (this.failWith) throw this.failWith;
     const providerId = `mock-${this.channel.toLowerCase()}-${++this.seq}`;
     this.sent.push({ message, command, providerId });
-    return { providerId };
+    return { providerId, deliveryStatus: "sent" };
   }
 }
 

@@ -25,13 +25,21 @@ export type MessageCommand = {
   idempotencyKey: string;
 };
 
+/** Итог операции отправки (наш уровень). */
 export type MessageDeliveryStatus = "sent" | "skipped" | "failed";
+
+/** Состояние доставки у провайдера (обновляется вебхуками провайдера позже). */
+export type ProviderDeliveryState = "queued" | "sent" | "delivered" | "failed";
 
 export type MessageResult = {
   status: MessageDeliveryStatus;
   channel: MessageChannel;
-  /** id во внешней системе провайдера (если отправлено). */
+  /** id сообщения во внешней системе провайдера (если отправлено). Канонический идентификатор. */
+  externalMessageId?: string;
+  /** @deprecated используйте `externalMessageId` — оставлено для обратной совместимости. */
   providerId?: string;
+  /** Состояние доставки у провайдера (queued/sent/delivered/failed). */
+  deliveryStatus?: ProviderDeliveryState;
   /** Причина skipped/failed. */
   reason?: string;
   /** Для failed: можно ли повторить (классификация из IntegrationError). */
@@ -52,5 +60,8 @@ export type RenderedMessage = {
  */
 export interface MessageProvider {
   channel: MessageChannel;
-  send(message: RenderedMessage, command: MessageCommand): Promise<{ providerId: string }>;
+  send(
+    message: RenderedMessage,
+    command: MessageCommand
+  ): Promise<{ providerId: string; deliveryStatus?: ProviderDeliveryState }>;
 }
