@@ -33,6 +33,21 @@ enum ConnectionStatus {
   PENDING
 }
 
+// Режим аутентификации Shopify конкретного Site. Новый сценарий — CUSTOM_APP
+// (Dev Dashboard app + client_credentials, отдельное приложение на каждый магазин).
+enum ShopifyAuthMode {
+  CUSTOM_APP
+}
+
+// Детальный статус подключения Shopify Custom App.
+enum ShopifyConnStatus {
+  CONNECTING // введены credentials, идёт первичная проверка
+  CONNECTED // токен получен, домен и обязательные scopes подтверждены
+  DEGRADED // подключён, но не хватает части обязательных scopes
+  REAUTH_REQUIRED // credentials больше не действуют (повторный 401 / отзыв secret / удалён app)
+  DISCONNECTED // отключён владельцем (история и товары сохранены)
+}
+
 enum PaymentStatus {
   UNPAID
   PAID
@@ -177,17 +192,40 @@ model Site {
   colorTag         String           @default("#64748b")
   createdAt        DateTime         @default(now())
 
-  // Credentials интеграции Shopify. Само приложение (client_id/client_secret)
-  // общее на все магазины — эти поля хранят только то, что специфично для
-  // КОНКРЕТНОГО магазина (получено после установки через OAuth).
+  // LEGACY (старый общий OAuth-app): специфичные для магазина поля, полученные при установке.
+  // Для нового режима CUSTOM_APP не используются — там всё в зашифрованных полях ниже.
   shopifyShopDomain  String? @unique // "example.myshopify.com"
-  shopifyAccessToken String? // shpat_... — выдан этому магазину при установке
+  shopifyAccessToken String? // shpat_... — LEGACY plain-text (общий OAuth); CUSTOM_APP использует accessTokenEncrypted
   timezone           String? // IANA-таймзона магазина (из Shopify shop.json) — для «сегодня» в списке закупки
+
+  // ── CUSTOM APP (Dev Dashboard app + client_credentials, отдельное приложение на магазин) ──
+  // Все секреты — ТОЛЬКО в зашифрованном виде (AES-256-GCM, см. lib/crypto/secretBox).
+  authMode              ShopifyAuthMode?  // CUSTOM_APP для новых подключений; null = LEGACY
+  normalizedShopDomain  String?           // канонический "*.myshopify.com" — идентификатор магазина
+  clientIdEncrypted     String?
+  clientSecretEncrypted String?
+  clientSecretMask      String?           // "********abcd" — для UI без расшифровки
+  // Окно ротации Client Secret: старый secret валиден для входящих webhook до previousSecretValidUntil.
+  previousClientSecretEncrypted String?
+  previousSecretValidUntil      DateTime?
+  accessTokenEncrypted  String?
+  accessTokenMask       String?           // маска токена для UI без расшифровки
+  accessTokenExpiresAt  DateTime?         // client_credentials: now + 86399s
+  apiVersion            String?           // напр. "2026-07"
+  grantedScopes         String[]          @default([]) // фактические scopes из Shopify (не из формы)
+  lastConnectionCheckAt DateTime?
+  lastSyncAt            DateTime?
+  shopifyConnStatus     ShopifyConnStatus? // CONNECTING|CONNECTED|DEGRADED|REAUTH_REQUIRED|DISCONNECTED
+  connectionError       String?            // безопасный текст (без секретов)
 
   floristPriorities SiteFloristPriority[]
   products          Product[]
   orders            Order[]
   syncs             SiteSync[]
+  webhooks          ShopifyWebhook[]
+
+  // Запрет двух активных Site одного платформенного домена (двойное подключение).
+  @@unique([platform, normalizedShopDomain])
 }
 
 // Прогресс фоновой синхронизации по сайту и типу (товары/заказы). Одна актуальная
@@ -248,6 +286,7 @@ model Product {
   remoteDeleted Boolean       @default(false) // пропал из внешнего API
   deletedAt     DateTime?
   lastSyncedAt  DateTime?
+  lastSeenSyncRunId String?   // id последнего sync-прогона, где товар встретился (для безопасной пометки remoteDeleted только после DONE)
   createdAt     DateTime      @default(now())
   updatedAt     DateTime      @updatedAt
 
@@ -280,6 +319,7 @@ model ProductVariant {
   position       Int?
   adminUrl       String? // ссылка на вариант в Admin, если доступна
   lastSyncedAt   DateTime?
+  lastSeenSyncRunId String? // см. Product.lastSeenSyncRunId
   remoteDeleted  Boolean   @default(false)
   deletedAt      DateTime?
   createdAt      DateTime  @default(now())
@@ -377,6 +417,7 @@ model Order {
   externalId   String?
   platform     Platform
   lastSyncedAt DateTime?
+  externalUpdatedAt DateTime? // Shopify updated_at — защита от применения устаревших webhook/sync (out-of-order)
   syncError    String?
 
   // true — заказ подтянут разовым backfill-скриптом истории Shopify (не через
@@ -455,6 +496,23 @@ model Message {
   createdAt DateTime         @default(now())
 
   @@index([orderId])
+}
+
+// Зарегистрированные Shopify webhook-подписки по Site — чтобы не создавать дубли и
+// хранить внешние ID/статус. Одна запись на (siteId, topic).
+model ShopifyWebhook {
+  id               String   @id @default(cuid())
+  siteId           String
+  site             Site     @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  topic            String // напр. "ORDERS_CREATE"
+  shopifyWebhookId String? // GID подписки в Shopify
+  status           String   @default("ACTIVE") // ACTIVE | FAILED | DELETED
+  lastError        String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@unique([siteId, topic])
+  @@index([siteId])
 }
 
 // ─────────────────────────────  OUTBOX / ФОНОВЫЕ СОБЫТИЯ  ─────────────────────────────
