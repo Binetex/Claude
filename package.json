@@ -19,7 +19,8 @@
     "db:seed": "tsx prisma/seed.ts",
     "db:studio": "prisma studio",
     "create-owner": "tsx scripts/create-owner.ts",
-    "backfill-shopify-orders": "NODE_OPTIONS=--conditions=react-server tsx scripts/backfill-shopify-orders.ts"
+    "backfill-shopify-orders": "NODE_OPTIONS=--conditions=react-server tsx scripts/backfill-shopify-orders.ts",
+    "worker": "NODE_OPTIONS=--conditions=react-server tsx scripts/outbox-worker.ts"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.8.0",
