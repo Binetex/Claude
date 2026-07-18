@@ -456,3 +456,56 @@ model Message {
 
   @@index([orderId])
 }
+
+// ─────────────────────────────  OUTBOX / ФОНОВЫЕ СОБЫТИЯ  ─────────────────────────────
+//
+// Персистентный transactional outbox: доменные события сохраняются ДО обработки, чтобы
+// не терялись при рестарте процесса (в отличие от in-process шины). Отдельный worker
+// (scripts/outbox-worker.ts) поллит эту таблицу с lock/lease, ретраями и dead-letter.
+// Модели ADDITIVE — существующие таблицы не затрагиваются. См. docs/OUTBOX_AND_WORKER.md.
+
+enum OutboxStatus {
+  PENDING // ждёт обработки
+  PROCESSING // взято worker'ом (lease), в работе
+  PROCESSED // успешно обработано
+  FAILED // временный сбой, будет повтор (attempts < maxAttempts)
+  DEAD_LETTER // исчерпаны попытки — требует ручного вмешательства
+}
+
+model OutboxEvent {
+  id             String       @id @default(cuid())
+  eventType      String // напр. "order.delivery.completed"
+  aggregateType  String // напр. "order"
+  aggregateId    String // напр. Order.id
+  payload        Json // тонкий payload события (без PII сверх необходимого)
+  idempotencyKey String       @unique // дедуп публикации: одно событие = одна запись
+  status         OutboxStatus @default(PENDING)
+  attempts       Int          @default(0)
+  maxAttempts    Int          @default(8)
+  availableAt    DateTime     @default(now()) // не брать раньше этого времени (backoff)
+  lockedAt       DateTime? // когда взято в обработку (для восстановления зависших)
+  lockedBy       String? // идентификатор worker'а, держащего lease
+  processedAt    DateTime?
+  lastError      String? // последняя БЕЗОПАСНАЯ ошибка (без PII/секретов)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  // Поллинг worker'а: выбираем доступные PENDING/FAILED по availableAt.
+  @@index([status, availableAt])
+  // Восстановление зависших PROCESSING по lockedAt.
+  @@index([status, lockedAt])
+  @@index([aggregateType, aggregateId])
+}
+
+// Универсальный guard идемпотентности провайдер-операций: гарантирует, что конкретное
+// побочное действие (отправка SMS/Telegram, Shopify/Woo fulfillment, создание Burq-доставки)
+// выполняется РОВНО один раз, даже при повторной доставке события. Проверяется до действия.
+model ProcessedOperation {
+  id           String   @id @default(cuid())
+  operationKey String   @unique // напр. "order.delivery.completed:<orderId>:sms"
+  kind         String // напр. "sms.send", "telegram.send", "shopify.fulfillment"
+  externalId   String? // id результата у провайдера (напр. message id), если есть
+  createdAt    DateTime @default(now())
+
+  @@index([kind])
+}
