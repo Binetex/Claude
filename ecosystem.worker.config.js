@@ -1,6 +1,6 @@
 // ПРИМЕР PM2-конфигурации для отдельного процесса outbox-worker (floremart-worker).
 // НЕ применяется автоматически и НЕ заменяет рабочий ecosystem.config.js.
-// Владелец решает, как включить: отдельным файлом (`pm2 start ecosystem.worker.example.js`)
+// Владелец решает, как включить: отдельным файлом (`pm2 start ecosystem.worker.config.js`)
 // или добавив блок `apps[]` в основной ecosystem.config.js (см. предложенный diff в
 // docs/OUTBOX_AND_WORKER.md). PM2 в этой сессии НЕ запускается.
 //

@@ -103,9 +103,9 @@ DATABASE_URL=<local> npm run worker
 ```
 
 ## PM2 (пример, НЕ применён)
-Готовый пример — `ecosystem.worker.example.js` (процесс `floremart-worker`). Запуск отдельно:
+Готовый пример — `ecosystem.worker.config.js` (процесс `floremart-worker`). Запуск отдельно:
 ```bash
-pm2 start ecosystem.worker.example.js
+pm2 start ecosystem.worker.config.js
 ```
 Либо добавить блок в рабочий `ecosystem.config.js` (предложенный diff, применяет владелец):
 ```diff
