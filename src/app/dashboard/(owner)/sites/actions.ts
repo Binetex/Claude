@@ -11,6 +11,7 @@ import { checkConnection } from "@/integrations/shopify/customApp/connection";
 import { isCredentialCryptoConfigured } from "@/lib/crypto/secretBox";
 import { prisma } from "@/lib/db";
 import { isValidTimeZone } from "@/lib/tz";
+import { rescheduleSiteFutureOrders } from "@/integrations/delivery/burq/scheduleService";
 
 type FormState = { error?: string; ok?: boolean; message?: string } | null;
 
@@ -23,6 +24,12 @@ export async function ownerSetSiteTimezone(siteId: string, timezone: string): Pr
   await requireRole("OWNER");
   if (!isValidTimeZone(timezone)) return { error: "Неверная таймзона (нужен IANA-идентификатор, напр. America/Los_Angeles)." };
   await prisma.site.update({ where: { id: siteId }, data: { timezone } });
+  // Смена зоны меняет расчёт availableAt (04:00 локального дня) → пере-планировать будущие заказы.
+  try {
+    await rescheduleSiteFutureOrders(prisma, siteId);
+  } catch (err) {
+    console.error(`[burq] reschedule site future orders failed (${siteId}):`, err instanceof Error ? err.message : String(err));
+  }
   revalidatePath("/dashboard/sites");
   revalidatePath("/dashboard");
   return { ok: true, message: `Часовой пояс: ${timezone}` };

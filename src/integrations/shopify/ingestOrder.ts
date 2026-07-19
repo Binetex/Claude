@@ -6,6 +6,16 @@ import { assignInitial } from "@/modules/assignments/service";
 import { createProductImageCache, resolveLineItemImages, type ProductImageCache } from "./productImages";
 import { resolveShopifyAccessToken } from "./customApp/credentials";
 import { normalizePhone } from "@/lib/phone";
+import { scheduleDeliveryForNewOrder } from "@/integrations/delivery/burq/scheduleService";
+
+/** Планирование доставки, безопасное для импорта: ошибка логируется, но не роняет приём заказа. */
+async function scheduleDeliverySafe(orderId: string): Promise<void> {
+  try {
+    await scheduleDeliveryForNewOrder(prisma, orderId);
+  } catch (err) {
+    console.error(`[burq] не удалось запланировать доставку для заказа ${orderId}:`, err instanceof Error ? err.message : String(err));
+  }
+}
 
 type Site = { id: string; shortName: string; shopifyShopDomain: string | null; shopifyAccessToken: string | null };
 
@@ -208,6 +218,8 @@ export async function ingestShopifyOrder(
     if (order.orderStatus === "CONFIRMED") {
       await assignInitial(order.id);
     }
+    // Единый вызов планировщика доставки после сохранения заказа (best-effort — не ломаем приём).
+    await scheduleDeliverySafe(order.id);
   } catch (err) {
     if (!isUniqueConstraintViolation(err)) throw err;
     const existing = await prisma.order.findFirst({ where: { siteId: site.id, externalId } });

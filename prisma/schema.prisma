@@ -103,6 +103,48 @@ enum DeliveryStatus {
   FAILED
 }
 
+// ── BURQ доставка ──
+enum DeliveryProvider {
+  BURQ
+}
+
+// Нормализованный статус попытки доставки (не привязан к строкам Burq).
+enum DeliveryProviderStatus {
+  DRAFT_PENDING // задача поставлена, черновик ещё не создан
+  DRAFT_CREATED // Burq order создан (request), ждёт ручного checkout/dispatch флористом
+  SCHEDULED
+  COURIER_ASSIGNED
+  COURIER_EN_ROUTE_TO_PICKUP
+  AT_PICKUP
+  PICKED_UP
+  IN_TRANSIT
+  DELIVERED
+  PROBLEM // attempting reroute / disputed — зависшее проблемное состояние (terminal-like для автоматики)
+  CANCEL_REQUESTED
+  CANCELLED
+  FAILED
+  RETURNING
+  RETURNED
+  UNKNOWN
+}
+
+// Статус планирования черновика (DeliveryIntent).
+enum DeliveryIntentStatus {
+  SCHEDULED // задача запланирована (PENDING в outbox)
+  WAITING_FOR_FLORIST // доставка сегодня, но флорист не назначен / pickup не готов
+  DRAFT_CREATED // черновик успешно создан
+  SKIPPED // задача пропущена (не eligible), без ошибки
+  FAILED // создание завершилось ошибкой
+}
+
+// Источник изменения статуса доставки (для истории/аудита).
+enum DeliveryEventSource {
+  BURQ_WEBHOOK
+  MANUAL_ADMIN
+  POLLING
+  SYSTEM
+}
+
 enum SyncStatus {
   LOCAL // создан внутри системы / тестовый
   SYNCED
@@ -186,8 +228,10 @@ model Florist {
 
   sitePriorities SiteFloristPriority[]
   productPrices  FloristProductPrice[]
-  currentOrders  Order[]               @relation("CurrentFlorist")
+  currentOrders  Order[]                @relation("CurrentFlorist")
   assignments    OrderAssignment[]
+  pickupLocation FloristPickupLocation?
+  deliveries     Delivery[]             @relation("DeliveryFlorist")
 }
 
 // ─────────────────────────────  САЙТЫ  ─────────────────────────────
@@ -237,6 +281,10 @@ model Site {
   // (Shopify-поля выше НЕ переносятся и не рефакторятся).
   wooConnection     WooCommerceConnection?
   wooWebhooks       WooCommerceWebhook[]
+
+  // ── Burq автосоздание черновиков доставки ──
+  burqDraftAutoCreateEnabled Boolean @default(false)
+  burqDraftCreationLocalTime String  @default("04:00") // локальное время (HH:mm) утреннего создания черновиков
 
   // Запрет двух активных Site одного платформенного домена (двойное подключение).
   @@unique([platform, normalizedShopDomain])
@@ -452,9 +500,11 @@ model Order {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  items       OrderItem[]
-  assignments OrderAssignment[]
-  messages    Message[]
+  items          OrderItem[]
+  assignments    OrderAssignment[]
+  messages       Message[]
+  deliveryIntent DeliveryIntent?
+  deliveries     Delivery[]
 
   // NULL допустим много раз (Postgres: NULL != NULL) — не мешает заказам без внешнего источника.
   // Источник истины для идемпотентности вебхуков (см. ingestShopifyOrder) — не полагаемся
@@ -611,6 +661,128 @@ model WooCommerceWebhook {
   @@index([siteId])
 }
 
+// ─────────────────────────────  ДОСТАВКА (BURQ)  ─────────────────────────────
+//
+// Черновики Burq создаются автоматически (отложенная outbox-задача), но курьер и платная
+// доставка оформляются флористом вручную в кабинете Burq (checkout_url). Секреты Burq — в env.
+
+// Точка забора флориста (pickup). 1:1 Florist в v1 (архитектурно расширяемо до нескольких).
+model FloristPickupLocation {
+  id                  String   @id @default(cuid())
+  floristId           String   @unique
+  florist             Florist  @relation(fields: [floristId], references: [id], onDelete: Cascade)
+  locationName        String
+  contactName         String
+  contactPhone        String // E.164
+  addressLine         String
+  apartmentOrSuite    String?
+  city                String
+  state               String // 2-буквенный US-код
+  zip                 String
+  courierInstructions String?
+  isActive            Boolean  @default(true)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+}
+
+// Планирование черновика: версия расписания для anti-stale отложенных задач. 1:1 Order.
+model DeliveryIntent {
+  id                   String               @id @default(cuid())
+  orderId              String               @unique
+  order                Order                @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  scheduleVersion      Int                  @default(0) // ++ при каждом перепланировании
+  scheduledAvailableAt DateTime? // когда задача должна выполниться (UTC)
+  intentStatus         DeliveryIntentStatus @default(SCHEDULED)
+  lastSkipReason       String? // FLORIST_NOT_ASSIGNED | PICKUP_NOT_CONFIGURED | PICKUP_INACTIVE | PICKUP_INVALID | ...
+  createdAt            DateTime             @default(now())
+  updatedAt            DateTime             @updatedAt
+}
+
+// Одна попытка доставки (attempt). Несколько исторических на Order; актуальна ровно одна
+// (partial unique index isCurrentAttempt=true — добавлен в migration.sql, Prisma-схемой не выражается).
+model Delivery {
+  id                String           @id @default(cuid())
+  orderId           String
+  order             Order            @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  provider          DeliveryProvider @default(BURQ)
+  floristId         String? // флорист, чей pickup использован
+  florist           Florist?         @relation("DeliveryFlorist", fields: [floristId], references: [id])
+  pickupLocationId  String? // снимок id использованной точки забора
+  expectedFloristId String? // ожидаемый флорист на момент старта POST (защита от гонки)
+  attemptNumber     Int              @default(1)
+  isCurrentAttempt  Boolean          @default(true)
+
+  externalDeliveryId String? // Burq order id
+  externalOrderRef   String? // наш external_order_ref, переданный в Burq
+  checkoutUrl        String? // ссылка кабинета Burq (чувствительная — доступ флориста)
+  isDraft            Boolean @default(true)
+
+  status            DeliveryProviderStatus @default(DRAFT_PENDING)
+  rawProviderStatus String?
+  providerEventAt   DateTime? // время последнего применённого provider-события (anti-rollback)
+
+  idempotencyKey      String? // x-idempotency-key внешнего POST
+  quoteAmount         Decimal?  @db.Decimal(10, 2)
+  currency            String?
+  // Фактическая стоимость доставки Uber из Burq (Path A: после dispatch, из latest_delivery).
+  finalCost           Decimal?  @db.Decimal(10, 2) // total_amount_due (или fee) в долларах
+  finalCostUpdatedAt  DateTime?
+  quoteId             String? // latest_delivery.quote_id
+  providerName        String? // latest_delivery.provider (напр. "uber")
+  providerExternalId  String? // latest_delivery.provider_id (стабильный id провайдера)
+  costSource          String? // "BURQ_FINAL" (Path A) | (в будущем "UBER_QUOTE")
+  trackingUrl         String?
+  courierName         String?
+  courierPhone        String?
+  estimatedPickupAt   DateTime?
+  estimatedDeliveryAt DateTime?
+  pickedUpAt          DateTime?
+  deliveredAt         DateTime?
+  cancelledAt         DateTime?
+  cancellationReason  String? // FLORIST_REASSIGNED | MANUAL_ADMIN | ...
+  failureCode         String?
+  failureMessageSafe  String?
+  proofOfDeliveryUrl  String?
+
+  // Переназначение/суперседанс попыток (историю не переписываем).
+  supersedesDeliveryId   String?
+  supersededByDeliveryId String?
+
+  resolutionSource DeliveryEventSource?
+  resolvedByUserId String?
+
+  lastWebhookAt     DateTime?
+  lastStatusCheckAt DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  statusEvents DeliveryStatusEvent[]
+
+  @@index([orderId])
+  @@index([externalDeliveryId])
+}
+
+// История статусов доставки (без полного payload и PII).
+model DeliveryStatusEvent {
+  id               String                  @id @default(cuid())
+  deliveryId       String
+  delivery         Delivery                @relation(fields: [deliveryId], references: [id], onDelete: Cascade)
+  providerEventId  String? // id события Burq (для дедупа)
+  rawStatus        String?
+  normalizedStatus DeliveryProviderStatus
+  source           DeliveryEventSource
+  userId           String? // сотрудник (для MANUAL_ADMIN)
+  previousStatus   DeliveryProviderStatus?
+  newStatus        DeliveryProviderStatus?
+  safeReason       String?
+  occurredAt       DateTime? // provider event time
+  receivedAt       DateTime                @default(now())
+  createdAt        DateTime                @default(now())
+
+  @@unique([deliveryId, providerEventId]) // дедуп webhook-события по (delivery, providerEventId)
+  @@index([deliveryId])
+}
+
 // ─────────────────────────────  OUTBOX / ФОНОВЫЕ СОБЫТИЯ  ─────────────────────────────
 //
 // Персистентный transactional outbox: доменные события сохраняются ДО обработки, чтобы
@@ -662,4 +834,53 @@ model ProcessedOperation {
   createdAt    DateTime @default(now())
 
   @@index([kind])
+}
+
+// ─────────────────────────────  BURQ SETTINGS  ─────────────────────────────
+//
+// Глобальные настройки интеграции Burq (единственная строка, id="singleton").
+// Секреты (API Key, Webhook Secret) хранятся ТОЛЬКО в зашифрованном виде (AES-256-GCM,
+// см. lib/crypto/secretBox); в UI отдаётся лишь маска. Открытый текст нигде не логируется.
+//
+// enabled — интеграция настроена/включена (приём webhook, connection check).
+// draftCreationEnabled — ОТДЕЛЬНЫЙ гейт авто-создания доставок; ВЫКЛ до подтверждения sandbox.
+enum BurqEnvironment {
+  SANDBOX
+  PRODUCTION
+}
+
+model BurqSettings {
+  id                     String          @id @default("singleton")
+  environment            BurqEnvironment @default(SANDBOX)
+  apiKeyEncrypted        String?
+  apiKeyMask             String? // "********abcd" — для UI без расшифровки
+  webhookSecretEncrypted String?
+  webhookSecretMask      String?
+  apiBaseUrl             String? // advanced override; по умолчанию официальный URL
+  enabled                Boolean         @default(false)
+  draftCreationEnabled   Boolean         @default(false) // гейт авто-создания draft (OFF до sandbox)
+  lastConnectionCheckAt  DateTime?
+  connectionStatus       String? // "ok" | "unauthorized" | "error" | "saved_not_checked"
+  connectionErrorSafe    String? // безопасное сообщение, без секретов
+  // Глобальные order-level dimensions для Burq (обязательны в Create Order V2). Настраиваемые.
+  packageLength          Float?
+  packageWidth           Float?
+  packageHeight          Float?
+  packageWeight          Float?
+  dimensionUnit          String          @default("in") // "in" | "cm"
+  weightUnit             String          @default("lb") // "lb" | "kg" | "g"
+  createdAt              DateTime        @default(now())
+  updatedAt              DateTime        @updatedAt
+}
+
+// Аудит действий с настройками Burq. БЕЗ секретов — только кто/что/когда/окружение.
+model BurqSettingsAudit {
+  id          String          @id @default(cuid())
+  userId      String
+  action      String // "save_credentials" | "toggle_enabled" | "change_environment" | "connection_check" | "toggle_draft_creation"
+  environment BurqEnvironment
+  detailSafe  String? // безопасная деталь без секретов (напр. "enabled=true")
+  createdAt   DateTime        @default(now())
+
+  @@index([createdAt])
 }

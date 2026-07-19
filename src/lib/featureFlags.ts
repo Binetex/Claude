@@ -26,3 +26,15 @@ export const featureFlags = {
   email: readFlag("EMAIL_ENABLED"),
   telegram: readFlag("TELEGRAM_ENABLED"),
 } as const;
+
+/**
+ * ГЛАВНЫЙ аварийный выключатель ВСЕЙ Burq runtime-логики (scheduler, ingest/assignment/pickup/tz
+ * hooks, recovery, worker handlers, webhook processing, любые вызовы Burq API, создание Burq
+ * OutboxEvent). При false — все эти пути делают полный no-op. Читается динамически (env), чтобы
+ * менять без пересборки и тестировать. НЕ управляет UI настроек Burq и сохранением/проверкой
+ * credentials — они работают независимо. Per-site Site.burqDraftAutoCreateEnabled НЕ может обойти
+ * этот глобальный gate (проверяется раньше per-site логики).
+ */
+export function isBurqRuntimeEnabled(): boolean {
+  return process.env.BURQ_RUNTIME_ENABLED === "true";
+}

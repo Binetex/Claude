@@ -23,6 +23,11 @@ import { buildShopifyWebhookHandler } from "@/integrations/shopify/customApp/web
 import { shopifyWebhookHandlerDeps } from "@/integrations/shopify/customApp/webhookHandlerDeps";
 import { buildWooWebhookHandler } from "@/integrations/woocommerce/webhookHandler";
 import { buildWooSyncHandler } from "@/integrations/woocommerce/syncDispatch";
+import { buildBurqDraftCreateHandler } from "@/integrations/delivery/burq/outboxHandler";
+import { BURQ_DRAFT_CREATE_EVENT } from "@/integrations/delivery/burq/schedule";
+import { buildBurqWebhookHandler, BURQ_WEBHOOK_EVENT } from "@/integrations/delivery/burq/webhookHandler";
+import { reconcileBurqSchedules } from "@/integrations/delivery/burq/recovery";
+import { isBurqRuntimeEnabled } from "@/lib/featureFlags";
 import { MessagingService } from "@/messaging/service";
 import { createMockProviders } from "@/messaging/providers/mock";
 
@@ -58,6 +63,11 @@ async function main() {
     // WooCommerce: приём заказов/товаров из webhook и фоновая синхронизация (per-Site credentials).
     "woo.webhook.received": buildWooWebhookHandler(),
     "woo.sync.requested": buildWooSyncHandler(),
+    // Burq: отложенное автосоздание черновика доставки (draft-first). Реальные вызовы Burq
+    // включаются только при BURQ_ENABLED + креды; иначе mock-клиент (sandbox-gate).
+    [BURQ_DRAFT_CREATE_EVENT]: buildBurqDraftCreateHandler(prisma, (event, extra) => log(event, extra)),
+    // Burq: приём статус-событий доставки из webhook (anti-rollback, publish completed на DELIVERED).
+    [BURQ_WEBHOOK_EVENT]: buildBurqWebhookHandler(prisma),
   };
 
   const worker = new OutboxWorker({
@@ -82,10 +92,27 @@ async function main() {
   process.on("SIGTERM", () => shutdown("SIGTERM"));
   process.on("SIGINT", () => shutdown("SIGINT"));
 
+  // Реконсиляция Burq-расписаний — редкая самостраховка (потерянный enqueue). НЕ основной
+  // механизм и НЕ вызывает Burq API: только пере-ставит потерянные задачи в outbox.
+  // Master gate: при выключенном BURQ_RUNTIME_ENABLED интервал НЕ запускается вовсе.
+  const reconcileMs = Number(process.env.BURQ_RECONCILE_MS ?? 3_600_000); // 1ч по умолчанию
+  const reconcileTimer = isBurqRuntimeEnabled()
+    ? setInterval(() => {
+        if (shuttingDown) return;
+        reconcileBurqSchedules(prisma)
+          .then((r) => log("burq.reconcile.tick", r))
+          .catch((err) => log("burq.reconcile.error", { error: err instanceof Error ? err.message : String(err) }));
+      }, reconcileMs)
+      : null;
+  reconcileTimer?.unref?.();
+  if (reconcileTimer) log("burq.reconcile.enabled", { intervalMs: reconcileMs });
+  else log("burq.reconcile.disabled", { reason: "BURQ_RUNTIME_ENABLED=false" });
+
   log("worker.started", { workerId: worker.id });
   try {
     await worker.start(); // блокирует до stop()
   } finally {
+    if (reconcileTimer) clearInterval(reconcileTimer);
     await prisma.$disconnect();
     log("worker.stopped", { workerId: worker.id });
   }

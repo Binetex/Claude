@@ -4,6 +4,7 @@ import { Prisma } from "@/generated/prisma/client";
 import { applyAutoPriceSnapshot, recomputeEstimatedProfit } from "@/modules/pricing/service";
 import { notifyFloristAssigned } from "@/integrations/notifications/telegram";
 import { TERMINAL_ORDER_STATUSES } from "@/lib/statuses";
+import { onOrderDeliveryChangeSafe } from "@/integrations/delivery/burq/scheduleService";
 
 /** Активные флористы сайта в порядке приоритета (position ↑). */
 export async function getSitePriorityFloristIds(siteId: string): Promise<string[]> {
@@ -179,6 +180,8 @@ async function assignTo(orderId: string, floristId: string): Promise<void> {
     });
     await recomputeEstimatedProfit(tx, orderId);
   });
+  // Флорист назначен → (пере)планировать доставку под pickup этого флориста.
+  await onOrderDeliveryChangeSafe(prisma, orderId);
 }
 
 /** Флорист принимает заказ. */
@@ -239,6 +242,8 @@ export async function declineOrder(orderId: string, floristId: string): Promise<
       });
       await recomputeEstimatedProfit(tx, orderId);
     });
+    // Флориста больше нет → пере-оценить (существующий uninitiated draft будет отменён/переждёт).
+    await onOrderDeliveryChangeSafe(prisma, orderId);
     return;
   }
 
@@ -294,6 +299,8 @@ export async function reassignManual(
   });
 
   await notifyFloristAssigned(floristId, orderId);
+  // Переназначение флориста → DELETE неинициированного draft + новая attempt под нового флориста.
+  await onOrderDeliveryChangeSafe(prisma, orderId);
 }
 
 /** Владелец задаёт ручную цену флориста для заказа (приоритетнее авто). */

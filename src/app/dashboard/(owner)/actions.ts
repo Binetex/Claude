@@ -29,6 +29,7 @@ import { startOrderSyncInBackground } from "@/modules/orders/sync";
 import { getAppUrl } from "@/lib/appUrl";
 import { TERMINAL_ORDER_STATUSES } from "@/lib/statuses";
 import { normalizePhone } from "@/lib/phone";
+import { onOrderDeliveryChangeSafe } from "@/integrations/delivery/burq/scheduleService";
 
 async function ownerOnly() {
   await requireRole("OWNER");
@@ -68,6 +69,8 @@ export async function ownerUpdateDelivery(
       ...(data.deliveryWindow ? { deliveryWindow: data.deliveryWindow } : {}),
     },
   });
+  // Дата/окно доставки влияют на availableAt и dropoff_at → пере-планировать/пере-создать draft.
+  await onOrderDeliveryChangeSafe(prisma, orderId);
   revalidatePath(`/dashboard/orders/${orderId}`);
 }
 
@@ -89,6 +92,8 @@ export async function ownerUpdateContacts(
     data: { ...data, ...(data.recipientPhone !== undefined ? { recipientPhone: normalizePhone(data.recipientPhone) } : {}) },
   });
   await syncOrderToShopify(orderId);
+  // Адрес/телефон получателя = dropoff → пере-создать неинициированный draft со свежими данными.
+  await onOrderDeliveryChangeSafe(prisma, orderId);
   revalidatePath(`/dashboard/orders/${orderId}`);
 }
 

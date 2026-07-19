@@ -41,6 +41,42 @@ export function utcDayRangeForLocalToday(tz: string | null | undefined, now: Dat
   return { gte, lt };
 }
 
+/** Смещение таймзоны `tz` относительно UTC в минутах в момент `at` (LA летом = −420). */
+function tzOffsetMinutes(tz: string, at: Date): number {
+  const dtf = new Intl.DateTimeFormat("en-US", {
+    timeZone: tz,
+    hour12: false,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+  const map: Record<string, string> = {};
+  for (const p of dtf.formatToParts(at)) map[p.type] = p.value;
+  const asUTC = Date.UTC(+map.year, +map.month - 1, +map.day, +map.hour === 24 ? 0 : +map.hour, +map.minute, +map.second);
+  return (asUTC - at.getTime()) / 60000;
+}
+
+/**
+ * UTC-момент для локальных ДАТЫ (`YYYY-MM-DD`) и ВРЕМЕНИ (`HH:mm`) в таймзоне `tz`.
+ * Учитывает DST (двойная сверка смещения на границе перевода). Пример: 04:00 в
+ * America/Los_Angeles на 2026-07-18 (PDT, UTC−7) → 2026-07-18T11:00:00Z.
+ */
+export function zonedLocalTimeToUtc(dateStr: string, timeHHmm: string, tz: string | null | undefined): Date {
+  const zone = tz || DEFAULT_STORE_TZ;
+  const [h, m] = timeHHmm.split(":").map((x) => parseInt(x, 10));
+  const hh = String(Number.isFinite(h) ? h : 0).padStart(2, "0");
+  const mm = String(Number.isFinite(m) ? m : 0).padStart(2, "0");
+  const guess = new Date(`${dateStr}T${hh}:${mm}:00Z`); // локальное «настенное» время как если бы это был UTC
+  const off1 = tzOffsetMinutes(zone, guess);
+  let utc = new Date(guess.getTime() - off1 * 60000);
+  const off2 = tzOffsetMinutes(zone, utc);
+  if (off2 !== off1) utc = new Date(guess.getTime() - off2 * 60000);
+  return utc;
+}
+
 /**
  * Классифицирует `deliveryDate` (UTC-полночь локального дня) относительно СЕГОДНЯ в таймзоне `tz`.
  * Чистый строительный блок для БУДУЩЕГО per-site расчёта метрик «Сегодня/Завтра»: когда магазины

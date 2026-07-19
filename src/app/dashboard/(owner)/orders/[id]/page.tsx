@@ -15,6 +15,7 @@ import { UpdateCompositionButton } from "../UpdateCompositionButton";
 import { OwnerOrderControls } from "./OwnerOrderControls";
 import { ContactEditDialog } from "./ContactEditDialog";
 import { CardNoteCard } from "./CardNoteCard";
+import { BurqDeliveryPanel } from "./BurqDeliveryPanel";
 
 export const dynamic = "force-dynamic";
 
@@ -25,6 +26,55 @@ export default async function OwnerOrderPage({ params }: { params: Promise<{ id:
 
   const florists = await prisma.florist.findMany({ include: { user: true }, orderBy: { createdAt: "asc" } });
   const showAssignment = !(TERMINAL_ORDER_STATUSES as string[]).includes(order.orderStatus);
+
+  // Текущая попытка доставки Burq + интент + окружение Burq (для панели доставки). Обёрнуто в
+  // try/catch: даже если таблицы/БД временно недоступны, карточка заказа не должна падать (500).
+  let currentDelivery = null;
+  let deliveryIntent = null;
+  let burqEnvironment: "SANDBOX" | "PRODUCTION" = "SANDBOX";
+  let deliveryAttempts: import("./BurqDeliveryPanel").DeliveryAttempt[] = [];
+  try {
+    const [d, i, s, all] = await Promise.all([
+      prisma.delivery.findFirst({
+        where: { orderId: id, isCurrentAttempt: true },
+        select: {
+          id: true, status: true, attemptNumber: true, externalDeliveryId: true,
+          finalCost: true, currency: true, providerName: true, finalCostUpdatedAt: true,
+        },
+      }),
+      prisma.deliveryIntent.findUnique({
+        where: { orderId: id },
+        select: { intentStatus: true, lastSkipReason: true, scheduledAvailableAt: true },
+      }),
+      prisma.burqSettings.findUnique({ where: { id: "singleton" }, select: { environment: true } }),
+      prisma.delivery.findMany({
+        where: { orderId: id },
+        orderBy: { attemptNumber: "asc" },
+        select: {
+          attemptNumber: true, status: true, createdAt: true, cancelledAt: true, deliveredAt: true,
+          finalCost: true, currency: true, externalDeliveryId: true, cancellationReason: true,
+          florist: { select: { user: { select: { name: true } } } },
+        },
+      }),
+    ]);
+    currentDelivery = d;
+    deliveryIntent = i;
+    burqEnvironment = (s?.environment as "SANDBOX" | "PRODUCTION") ?? "SANDBOX";
+    deliveryAttempts = all.map((a) => ({
+      attemptNumber: a.attemptNumber,
+      status: a.status,
+      createdAt: a.createdAt.toISOString(),
+      cancelledAt: a.cancelledAt ? a.cancelledAt.toISOString() : null,
+      deliveredAt: a.deliveredAt ? a.deliveredAt.toISOString() : null,
+      finalCost: a.finalCost != null ? Number(a.finalCost) : null,
+      currency: a.currency,
+      externalDeliveryId: a.externalDeliveryId,
+      floristName: a.florist?.user.name ?? null,
+      cancellationReason: a.cancellationReason,
+    }));
+  } catch {
+    // Burq-таблицы недоступны — панель доставки просто не покажет данные.
+  }
 
   return (
     <div className="space-y-4">
@@ -216,6 +266,38 @@ export default async function OwnerOrderPage({ params }: { params: Promise<{ id:
               }}
               florists={florists.map((f) => ({ id: f.id, name: f.user.name }))}
             />
+            <div className="mt-4">
+              <BurqDeliveryPanel
+                orderId={order.id}
+                recipientName={order.recipientName}
+                environment={burqEnvironment}
+                orderStatus={order.orderStatus}
+                attempts={deliveryAttempts}
+                delivery={
+                  currentDelivery
+                    ? {
+                        id: currentDelivery.id,
+                        status: currentDelivery.status,
+                        attemptNumber: currentDelivery.attemptNumber,
+                        externalDeliveryId: currentDelivery.externalDeliveryId,
+                        finalCost: currentDelivery.finalCost != null ? Number(currentDelivery.finalCost) : null,
+                        currency: currentDelivery.currency,
+                        providerName: currentDelivery.providerName,
+                        finalCostUpdatedAt: currentDelivery.finalCostUpdatedAt ? currentDelivery.finalCostUpdatedAt.toISOString() : null,
+                      }
+                    : null
+                }
+                intent={
+                  deliveryIntent
+                    ? {
+                        intentStatus: deliveryIntent.intentStatus,
+                        lastSkipReason: deliveryIntent.lastSkipReason,
+                        scheduledAvailableAt: deliveryIntent.scheduledAvailableAt ? deliveryIntent.scheduledAvailableAt.toISOString() : null,
+                      }
+                    : null
+                }
+              />
+            </div>
           </div>
         </div>
       </div>

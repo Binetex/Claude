@@ -8,6 +8,7 @@ const nav: NavItem[] = [
   { href: "/dashboard/sites", label: "Сайты" },
   { href: "/dashboard/products", label: "Товары" },
   { href: "/dashboard/florists", label: "Флористы" },
+  { href: "/dashboard/burq", label: "Доставка (Burq)" },
   { href: "/dashboard/users", label: "Пользователи" },
 ];
 

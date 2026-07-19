@@ -17,6 +17,7 @@ import { parseWooOrder, type WooOrder } from "./orderAdapter";
 import { classifyWooPayment, type WooPaymentConfig, type WooOrderForPayment } from "./payment";
 import { deriveWooOrderState, reconcileOrderState, type OrderState } from "./orderState";
 import { resolveMappedOrderFields, type OrderMetaMapping } from "./orderMeta";
+import { scheduleDeliveryForNewOrder } from "@/integrations/delivery/burq/scheduleService";
 
 export type WooIngestConfig = {
   payment: WooPaymentConfig;
@@ -217,6 +218,12 @@ export async function ingestWooOrder(
       }
     }
     throw err;
+  }
+  // Единый вызов планировщика доставки после сохранения заказа (best-effort — не ломаем импорт).
+  try {
+    await scheduleDeliveryForNewOrder(prisma, created.id);
+  } catch (e) {
+    console.error(`[burq] не удалось запланировать доставку для заказа ${created.id}:`, e instanceof Error ? e.message : String(e));
   }
   return { status: "created", orderId: created.id, classification: payment.classification };
 }

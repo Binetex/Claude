@@ -2,6 +2,7 @@ import { prisma } from "@/lib/db";
 import { Card, CardHeader, CardTitle, CardBody } from "@/components/ui/Card";
 import { FinanceVisibilityToggle } from "./FinanceVisibilityToggle";
 import { SitePriorityEditor } from "./SitePriorityEditor";
+import { PickupLocationEditor } from "./PickupLocationEditor";
 import { TERMINAL_ORDER_STATUSES } from "@/lib/statuses";
 
 export const dynamic = "force-dynamic";
@@ -23,7 +24,7 @@ export default async function FloristsPage() {
   });
 
   const florists = await prisma.florist.findMany({
-    include: { user: true, _count: { select: { currentOrders: true } } },
+    include: { user: true, pickupLocation: true, _count: { select: { currentOrders: true } } },
     orderBy: { createdAt: "asc" },
   });
 
@@ -41,6 +42,25 @@ export default async function FloristsPage() {
             <div className="mt-1 text-sm text-slate-500">{f.user.email} · {f.user.phone}</div>
             <div className="mt-2 text-sm text-slate-600">Активных заказов: {f._count.currentOrders}</div>
             <FinanceVisibilityToggle floristId={f.id} current={f.financeVisibility} />
+            <PickupLocationEditor
+              floristId={f.id}
+              value={
+                f.pickupLocation
+                  ? {
+                      locationName: f.pickupLocation.locationName,
+                      contactName: f.pickupLocation.contactName,
+                      contactPhone: f.pickupLocation.contactPhone,
+                      addressLine: f.pickupLocation.addressLine,
+                      apartmentOrSuite: f.pickupLocation.apartmentOrSuite,
+                      city: f.pickupLocation.city,
+                      state: f.pickupLocation.state,
+                      zip: f.pickupLocation.zip,
+                      courierInstructions: f.pickupLocation.courierInstructions,
+                      isActive: f.pickupLocation.isActive,
+                    }
+                  : null
+              }
+            />
           </Card>
         ))}
       </div>
