@@ -2,6 +2,7 @@ import { listForOwner, type OrderFilters } from "@/modules/orders/queries";
 import { prisma } from "@/lib/db";
 import { OrderFiltersBar } from "./OrderFiltersBar";
 import { OrdersTable } from "./OrdersTable";
+import { indicatorsForOrders } from "@/integrations/quo/communicationsService";
 import { BulkFillCompositions } from "./BulkFillCompositions";
 import { PurchaseListBlock } from "@/components/PurchaseListBlock";
 import { PageHeader } from "@/components/ui/misc";
@@ -38,6 +39,10 @@ export default async function OwnerOrdersPage({
     prisma.florist.findMany({ include: { user: true }, orderBy: { createdAt: "asc" } }),
   ]);
 
+  // Индикаторы коммуникаций (непрочитанные/пропущенные/последний контакт/preview). Best-effort:
+  // недоступность QUO-таблиц не ломает список заказов.
+  const commIndicators = await indicatorsForOrders(prisma, orders.map((o) => o.id)).catch(() => ({}));
+
   return (
     <div className="space-y-4">
       <PageHeader
@@ -57,7 +62,7 @@ export default async function OwnerOrdersPage({
         current={filters}
       />
 
-      <OrdersTable orders={orders} groupByDay={filters.preset === "all"} />
+      <OrdersTable orders={orders} groupByDay={filters.preset === "all"} commIndicators={commIndicators} />
     </div>
   );
 }

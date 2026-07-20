@@ -7,6 +7,8 @@ import { createProductImageCache, resolveLineItemImages, type ProductImageCache 
 import { resolveShopifyAccessToken } from "./customApp/credentials";
 import { normalizePhone } from "@/lib/phone";
 import { scheduleDeliveryForNewOrder } from "@/integrations/delivery/burq/scheduleService";
+import { extractShopifyOrderNumber, extractSenderAddress } from "./orderFields";
+import { fetchShopifyDeliveryInstructions } from "./deliveryInstructions";
 
 /** Планирование доставки, безопасное для импорта: ошибка логируется, но не роняет приём заказа. */
 async function scheduleDeliverySafe(orderId: string): Promise<void> {
@@ -28,7 +30,10 @@ type ShopifyAddress = {
   address1?: string;
   address2?: string;
   city?: string;
+  province_code?: string;
+  province?: string;
   zip?: string;
+  country_code?: string;
 } | null;
 
 type ShopifyLineItem = {
@@ -148,15 +153,23 @@ function extractAddressAndCardMessage(payload: ShopifyOrder) {
  * неизменное значение бессмысленно.
  */
 async function applyUpdateFromShopify(
+  site: Site,
   existing: { id: string; paymentStatus: string; orderStatus: string },
   payload: ShopifyOrder,
   paymentStatus: PaymentStatus
 ): Promise<void> {
   const wasUnpaid = existing.paymentStatus !== "PAID";
   const { recipientName, recipientPhone, addressLine, apartment, city, zip, cardMessage } = extractAddressAndCardMessage(payload);
+  const externalId = String(payload.id);
+  // Номер (из name), адрес отправителя (billing) и инструкции доставки подтягиваем заново — как и
+  // адрес получателя, это неручные поля из Shopify; при resync их НЕ обнуляем (billing пустой → null,
+  // но Shopify его почти всегда присылает). deliveryInstructions best-effort (см. createNewOrder).
+  const senderAddress = extractSenderAddress(payload.billing_address);
+  const deliveryInstructions = await fetchShopifyDeliveryInstructions(site.id, externalId);
   await prisma.order.update({
     where: { id: existing.id },
     data: {
+      orderNumber: `${site.shortName}-${extractShopifyOrderNumber(payload.name, payload.order_number, externalId)}`,
       paymentStatus,
       orderStatus: paymentStatus === "PAID" && existing.orderStatus === "AWAITING_PAYMENT" ? "CONFIRMED" : undefined,
       syncStatus: "SYNCED",
@@ -168,6 +181,8 @@ async function applyUpdateFromShopify(
       city,
       zip,
       cardMessage,
+      ...senderAddress,
+      ...(deliveryInstructions ? { deliveryInstructions } : {}),
     },
   });
   if (wasUnpaid && paymentStatus === "PAID") {
@@ -224,7 +239,7 @@ export async function ingestShopifyOrder(
     if (!isUniqueConstraintViolation(err)) throw err;
     const existing = await prisma.order.findFirst({ where: { siteId: site.id, externalId } });
     if (!existing) throw err; // конфликт по другой причине (например, orderNumber) — пробрасываем дальше
-    await applyUpdateFromShopify(existing, payload, paymentStatus);
+    await applyUpdateFromShopify(site, existing, payload, paymentStatus);
   }
 }
 
@@ -241,9 +256,11 @@ function buildOrderData(
   paymentStatus: PaymentStatus,
   catalog: CatalogMatch,
   live: { images: Map<string, string> },
+  deliveryInstructions: string,
   extra?: { isBackfilled?: boolean }
 ) {
   const { recipientName, recipientPhone, addressLine, apartment, city, zip, cardMessage } = extractAddressAndCardMessage(payload);
+  const senderAddress = extractSenderAddress(payload.billing_address);
   const customerNote = ""; // у Shopify-заказов открытка всегда в payload.note — отдельного поля под заметку клиента нет
   const deliveryDateRaw = findNoteAttribute(payload, /delivery.*date/i);
   const deliveryWindow = findNoteAttribute(payload, /delivery.*(time|window)/i) ?? "";
@@ -285,7 +302,7 @@ function buildOrderData(
   const discount = money(payload.total_discounts);
   const deliveryCustomerCost = money(payload.total_shipping_price_set?.shop_money?.amount);
 
-  const orderNumber = `${site.shortName}-${payload.order_number ?? externalId}`;
+  const orderNumber = `${site.shortName}-${extractShopifyOrderNumber(payload.name, payload.order_number, externalId)}`;
   const { orderStatus, deliveryStatus } = deriveOrderState(payload, paymentStatus);
 
   return {
@@ -301,6 +318,8 @@ function buildOrderData(
     senderName: fullName(payload.billing_address) || [payload.customer?.first_name, payload.customer?.last_name].filter(Boolean).join(" ") || "—",
     senderPhone: normalizePhone(payload.billing_address?.phone || payload.customer?.phone),
     senderEmail: payload.email ?? payload.contact_email ?? null,
+    ...senderAddress,
+    deliveryInstructions,
     recipientName,
     recipientPhone,
     recipientEmail: null,
@@ -440,7 +459,10 @@ async function createNewOrder(
 ) {
   const catalog = await matchCatalog(site.id, payload);
   const live = await fetchLiveImages(site, payload, imageCache);
-  const data = buildOrderData(site, externalId, payload, paymentStatus, catalog, live, extra);
+  // Инструкции доставки (native Local Delivery) — отдельный GraphQL-запрос (в REST их нет).
+  // Best-effort: при отсутствии scope/ошибке вернётся "" и приём заказа не ломается.
+  const deliveryInstructions = await fetchShopifyDeliveryInstructions(site.id, externalId);
+  const data = buildOrderData(site, externalId, payload, paymentStatus, catalog, live, deliveryInstructions, extra);
   return prisma.order.create({ data });
 }
 

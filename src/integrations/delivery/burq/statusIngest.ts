@@ -44,7 +44,8 @@ export type StatusUpdateInput = {
 };
 
 export type StatusUpdateResult =
-  | { outcome: "applied"; status: DeliveryProviderStatus; delivered: boolean }
+  // POD НЕ здесь: URL получаем отдельным GET (refetchPodForDelivery), чтобы НЕ класть их в outbox.
+  | { outcome: "applied"; status: DeliveryProviderStatus; delivered: boolean; deliveryId: string }
   | { outcome: "duplicate" }
   | { outcome: "skipped"; reason: string }
   | { outcome: "delivery_not_found" };
@@ -168,7 +169,9 @@ export async function applyDeliveryStatusUpdate(
   }
 
   // Публикуем completed ТОЛЬКО на DELIVERED (идемпотентно на стороне outbox, ключ по deliveryId).
+  // POD (URL фото) намеренно НЕ трогаем здесь — их получает отдельный GET (refetchPodForDelivery),
+  // чтобы URL никогда не попадали в outbox-payload webhook-события.
   if (delivered) await publishCompleted({ orderId: delivery.orderId, deliveryId: delivery.id });
 
-  return { outcome: "applied", status: normalized, delivered };
+  return { outcome: "applied", status: normalized, delivered, deliveryId: delivery.id };
 }

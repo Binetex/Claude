@@ -9,6 +9,7 @@ import "server-only";
  */
 import { randomUUID } from "node:crypto";
 import type { BurqCreateOrderRequest, BurqOrder, BurqRawOrderResponse } from "./types";
+import { normalizePodUrls, normalizeSignatureUrl } from "./podCapture";
 
 export interface BurqClient {
   readonly mode: "real" | "mock";
@@ -45,6 +46,8 @@ export function normalizeBurqOrder(raw: BurqRawOrderResponse): BurqOrder {
     provider: typeof ld?.provider === "string" ? ld.provider : (ld?.provider?.name ?? null),
     providerId: ld?.provider && typeof ld.provider === "object" ? (ld.provider.id ?? null) : null,
     quoteId: ld?.quote_id ?? null,
+    proofOfDeliveryUrls: normalizePodUrls(ld?.proof_of_delivery_image_urls),
+    signatureImageUrl: normalizeSignatureUrl(ld?.signature_image_url),
   };
 }
 
@@ -81,6 +84,8 @@ export function createMockBurqClient(): BurqClient {
         provider: null,
         providerId: null,
         quoteId: null,
+        proofOfDeliveryUrls: [],
+        signatureImageUrl: null,
       };
       mockStore.set(id, order);
       mockIdempotency.set(idempotencyKey, id);

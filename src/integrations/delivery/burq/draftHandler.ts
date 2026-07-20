@@ -20,6 +20,7 @@ export type DraftContext = {
     orderStatus: string;
     scheduleVersion: number; // текущая версия расписания (из DeliveryIntent)
     siteAutoCreateEnabled: boolean;
+    deliveryDate: Date | null; // для guard'а прошедшей даты (авто-путь)
     dropoff: DraftOrderInput;
   };
   floristId: string | null;
@@ -87,6 +88,7 @@ export async function handleBurqDraftCreate(deps: DraftHandlerDeps, payload: Bur
     floristId: ctx.floristId,
     pickup: ctx.pickup,
     hasCurrentDraft: ctx.hasCurrentDraft,
+    deliveryDate: ctx.order.deliveryDate, // авто-путь: прошедшую дату не создаём
   });
 
   if (decision.action === "SKIP") {

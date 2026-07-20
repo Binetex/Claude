@@ -51,6 +51,7 @@ describe("Burq Create Order V2 — планируемый request JSON", () => {
       weight: 3,
       dimension_unit: "in",
       weight_unit: "lb",
+      preferred_provider_settings: { require_dropoff_photo: true },
       pickup: {
         address: "200 Market St, Los Angeles, CA 90013",
         unit: "Suite 5",
@@ -105,8 +106,19 @@ describe("Burq Order V2 — ответ (normalizeBurqOrder): статус в lat
       provider: null,
       providerId: null,
       quoteId: null,
+      proofOfDeliveryUrls: [],
+      signatureImageUrl: null,
     });
     expect(mapBurqStatus(o.status)).toBe("DRAFT_CREATED");
+  });
+
+  it("нормализует POD: proof_of_delivery_image_urls[] → массив, signature_image_url → строка", () => {
+    const o = normalizeBurqOrder({
+      id: "ord_pod",
+      latest_delivery: { status: "delivered", proof_of_delivery_image_urls: ["https://pod/1.jpg", "https://pod/2.jpg"], signature_image_url: "https://pod/sig.png" },
+    });
+    expect(o.proofOfDeliveryUrls).toEqual(["https://pod/1.jpg", "https://pod/2.jpg"]);
+    expect(o.signatureImageUrl).toBe("https://pod/sig.png");
   });
 
   it("courier.phone_number_for_customer → courierPhone; latest_delivery.status", () => {

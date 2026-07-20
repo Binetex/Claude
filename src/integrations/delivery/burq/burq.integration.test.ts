@@ -7,7 +7,10 @@ import { applyDeliveryStatusUpdate } from "./statusIngest";
 import { handleFloristReassignment } from "./reassignmentService";
 import { resolveDeliveryManually } from "./manualResolution";
 import { createRetryDeliveryAttempt } from "./retryService";
-import { createMockBurqClient, __resetMockBurqStore, __setMockBurqStatus } from "./client";
+import { linkBurqOrder } from "./linkService";
+import { refetchPodForDelivery, BURQ_POD_REFETCH_EVENT } from "./podService";
+import { buildBurqWebhookHandler } from "./webhookHandler";
+import { createMockBurqClient, __resetMockBurqStore, __setMockBurqStatus, __setMockBurqCost } from "./client";
 
 /**
  * Интеграционные тесты Burq на реальной БД (DATABASE_URL из .env). Требуют применённой
@@ -23,7 +26,9 @@ const userAEmail = `burq-a-${suffix}@test.local`;
 const userBEmail = `burq-b-${suffix}@test.local`;
 const createdOrderIds: string[] = [];
 
-async function makeOrder(floristId: string | null, deliveryDate = new Date("2026-07-20T00:00:00.000Z")): Promise<string> {
+// Дата доставки по умолчанию — в будущем (относительно «сейчас»), чтобы guard прошедшей даты
+// (eligibility.delivery_date_past) не блокировал автосоздание черновика вне зависимости от даты прогона.
+async function makeOrder(floristId: string | null, deliveryDate = new Date(Date.now() + 3 * 24 * 3600 * 1000)): Promise<string> {
   const order = await prisma.order.create({
     data: {
       orderNumber: `#BQ-${suffix}-${Math.random().toString(36).slice(2, 8)}`,
@@ -183,6 +188,92 @@ describe("Manual resolution", () => {
     expect(after!.paymentStatus).toBe(before!.paymentStatus);
     const completed = await prisma.outboxEvent.findUnique({ where: { idempotencyKey: `order.delivery.completed:${delivery!.id}` } });
     expect(completed).toBeNull();
+  });
+});
+
+describe("Proof of Delivery (Path A)", () => {
+  async function drafted() {
+    __resetMockBurqStore();
+    const orderId = await makeOrder(floristAId);
+    const port = createPrismaDraftPort(prisma);
+    await handleBurqDraftCreate({ client: createMockBurqClient(), port }, { orderId, scheduleVersion: 0 });
+    const d = await prisma.delivery.findFirst({ where: { orderId, isCurrentAttempt: true }, select: { id: true, externalDeliveryId: true } });
+    return { orderId, deliveryId: d!.id, ext: d!.externalDeliveryId! };
+  }
+
+  it("delivered с фото → URL сохраняются на конкретную Delivery", async () => {
+    const { deliveryId, ext } = await drafted();
+    __setMockBurqCost(ext, { proofOfDeliveryUrls: ["https://pod/a.jpg", "https://pod/b.jpg"], signatureImageUrl: "https://pod/sig.png" });
+    const r = await refetchPodForDelivery(prisma, deliveryId);
+    expect(r).toEqual({ outcome: "updated", count: 2 });
+    const del = await prisma.delivery.findUnique({ where: { id: deliveryId } });
+    expect(del!.proofOfDeliveryUrls).toEqual(["https://pod/a.jpg", "https://pod/b.jpg"]);
+    expect(del!.signatureImageUrl).toBe("https://pod/sig.png");
+    expect(del!.proofOfDeliveryFetchedAt).toBeTruthy();
+  });
+
+  it("пустой массив не ломает обработку; delivered без фото → no_photo (не ошибка), delivered сохраняется", async () => {
+    const { orderId, deliveryId, ext } = await drafted();
+    await applyDeliveryStatusUpdate(prisma, vi.fn(), { deliveryId, rawStatus: "delivered", providerEventId: "d1", occurredAt: new Date(), source: "BURQ_WEBHOOK" });
+    __setMockBurqCost(ext, { proofOfDeliveryUrls: [] });
+    const r = await refetchPodForDelivery(prisma, deliveryId);
+    expect(r.outcome).toBe("no_photo");
+    expect((await prisma.delivery.findUnique({ where: { id: deliveryId } }))!.proofOfDeliveryUrls).toBeNull();
+    expect((await prisma.order.findUnique({ where: { id: orderId } }))!.orderStatus).toBe("DELIVERED"); // delivered не отменён
+  });
+
+  it("повторный refetch с теми же URL не дублирует", async () => {
+    const { deliveryId, ext } = await drafted();
+    __setMockBurqCost(ext, { proofOfDeliveryUrls: ["https://pod/a.jpg", "https://pod/a.jpg"] });
+    await refetchPodForDelivery(prisma, deliveryId);
+    await refetchPodForDelivery(prisma, deliveryId);
+    expect((await prisma.delivery.findUnique({ where: { id: deliveryId } }))!.proofOfDeliveryUrls).toEqual(["https://pod/a.jpg"]);
+  });
+
+  it("разные attempts хранят разные фото", async () => {
+    const { orderId, deliveryId: d1, ext: e1 } = await drafted();
+    __setMockBurqCost(e1, { proofOfDeliveryUrls: ["https://pod/attempt1.jpg"] });
+    await refetchPodForDelivery(prisma, d1);
+    // cancel + новая попытка
+    await applyDeliveryStatusUpdate(prisma, vi.fn(), { deliveryId: d1, rawStatus: "provider_canceled", providerEventId: "c1", occurredAt: new Date(), source: "BURQ_WEBHOOK" });
+    const retry = await createRetryDeliveryAttempt(prisma, orderId);
+    expect(retry.outcome).toBe("created");
+    const d2 = await prisma.delivery.findFirst({ where: { orderId, isCurrentAttempt: true }, select: { id: true, externalDeliveryId: true } });
+    __setMockBurqCost(d2!.externalDeliveryId!, { proofOfDeliveryUrls: ["https://pod/attempt2.jpg"] });
+    await refetchPodForDelivery(prisma, d2!.id);
+    expect((await prisma.delivery.findUnique({ where: { id: d1 } }))!.proofOfDeliveryUrls).toEqual(["https://pod/attempt1.jpg"]);
+    expect((await prisma.delivery.findUnique({ where: { id: d2!.id } }))!.proofOfDeliveryUrls).toEqual(["https://pod/attempt2.jpg"]);
+  });
+
+  it("ручной refetch не меняет OrderStatus/PaymentStatus", async () => {
+    const { orderId, deliveryId, ext } = await drafted();
+    const before = await prisma.order.findUnique({ where: { id: orderId } });
+    __setMockBurqCost(ext, { proofOfDeliveryUrls: ["https://pod/x.jpg"] });
+    await refetchPodForDelivery(prisma, deliveryId);
+    const after = await prisma.order.findUnique({ where: { id: orderId } });
+    expect(after!.orderStatus).toBe(before!.orderStatus);
+    expect(after!.paymentStatus).toBe(before!.paymentStatus);
+  });
+
+  it("POD URL не попадают в outbox; отложенный refetch ограничен одной задачей на delivery", async () => {
+    process.env.BURQ_RUNTIME_ENABLED = "true";
+    try {
+      const { orderId, deliveryId, ext } = await drafted();
+      __setMockBurqCost(ext, { proofOfDeliveryUrls: [] }); // delivered без фото → нужен отложенный refetch
+      const ref = `${orderId}:a1`;
+      const handler = buildBurqWebhookHandler(prisma);
+      const rec = (payload: unknown) => ({ id: "w", payload, eventType: "x", aggregateType: "delivery", aggregateId: "d" }) as never;
+      const ev = { deliveryExternalId: ext, externalOrderRef: ref, rawStatus: "delivered", providerEventId: null, occurredAt: new Date() };
+      await handler(rec(ev));
+      await handler(rec(ev)); // повтор → не должно создать вторую задачу
+      const tasks = await prisma.outboxEvent.count({ where: { eventType: BURQ_POD_REFETCH_EVENT, aggregateId: deliveryId } });
+      expect(tasks).toBe(1); // одна задача (idempotencyKey по delivery)
+      // ни в одном outbox-payload нет POD URL
+      const all = await prisma.outboxEvent.findMany({ where: { OR: [{ aggregateId: deliveryId }, { aggregateId: ext }, { aggregateId: orderId }] } });
+      for (const e of all) expect(JSON.stringify(e.payload)).not.toContain("pod/");
+    } finally {
+      delete process.env.BURQ_RUNTIME_ENABLED;
+    }
   });
 });
 
@@ -417,5 +508,100 @@ describe("Uber cost capture (Path A)", () => {
     expect(dump).not.toContain("Recipient"); // имя получателя
     expect(dump).not.toContain("1 A St"); // адрес
     expect(dump).not.toContain("+13105550198"); // телефон
+  });
+});
+
+describe("Manual link existing Burq order", () => {
+  /** Засеять в mock-хранилище «существующий» доставленный Burq order с ценой/POD/провайдером. */
+  async function seedDeliveredBurqOrder(ref: string, patch: Record<string, unknown> = {}): Promise<string> {
+    const seed = createMockBurqClient();
+    const o = await seed.createDraft({ external_order_ref: ref } as never, `seed:${ref}:${Math.random()}`);
+    __setMockBurqStatus(o.id, "delivered");
+    __setMockBurqCost(o.id, { totalAmountDueCents: 1449, currency: "USD", provider: "Uber", providerId: "dsp_19g67ldj7ek3j", proofOfDeliveryUrls: ["https://pod/linked.jpg"], ...patch });
+    return o.id;
+  }
+
+  it("валидный ID: создаёт current attempt и подтягивает статус/стоимость/POD через существующую логику", async () => {
+    __resetMockBurqStore();
+    const orderId = await makeOrder(floristAId);
+    const burqId = await seedDeliveredBurqOrder("ext-ref-link-1");
+
+    const res = await linkBurqOrder(prisma, vi.fn(), { orderId, burqOrderId: burqId });
+    expect(res.outcome).toBe("linked");
+
+    const cur = await prisma.delivery.findFirst({ where: { orderId, isCurrentAttempt: true } });
+    expect(cur!.externalDeliveryId).toBe(burqId);
+    expect(cur!.externalOrderRef).toBe("ext-ref-link-1"); // ref скопирован из Burq order (для webhook-матча)
+    expect(cur!.status).toBe("DELIVERED"); // подтянут статус
+    expect(Number(cur!.finalCost)).toBe(14.49); // подтянута стоимость Uber (1449 центов)
+    expect(cur!.providerName).toBe("Uber");
+    expect(cur!.proofOfDeliveryUrls).toEqual(["https://pod/linked.jpg"]); // подтянут POD
+    // OrderStatus меняется только стандартным mapper.
+    expect((await prisma.order.findUnique({ where: { id: orderId } }))!.orderStatus).toBe("DELIVERED");
+    expect(Number((await prisma.order.findUnique({ where: { id: orderId } }))!.deliveryActualCost)).toBe(14.49);
+  });
+
+  it("несуществующий Burq ID → burq_not_found (ничего не создаётся)", async () => {
+    __resetMockBurqStore();
+    const orderId = await makeOrder(floristAId);
+    const res = await linkBurqOrder(prisma, vi.fn(), { orderId, burqOrderId: "o_doesnotexist999" });
+    expect(res.outcome).toBe("burq_not_found");
+    expect(await prisma.delivery.count({ where: { orderId } })).toBe(0);
+  });
+
+  it("Burq ID уже привязан к другому заказу → already_linked_other (отказ)", async () => {
+    __resetMockBurqStore();
+    const orderA = await makeOrder(floristAId);
+    const orderB = await makeOrder(floristAId);
+    const burqId = await seedDeliveredBurqOrder("ext-ref-link-2");
+
+    const r1 = await linkBurqOrder(prisma, vi.fn(), { orderId: orderA, burqOrderId: burqId });
+    expect(r1.outcome).toBe("linked");
+    const r2 = await linkBurqOrder(prisma, vi.fn(), { orderId: orderB, burqOrderId: burqId });
+    expect(r2).toEqual({ outcome: "already_linked_other", orderId: orderA });
+    expect(await prisma.delivery.count({ where: { orderId: orderB } })).toBe(0); // у B ничего не создано
+  });
+
+  it("отменённая текущая попытка → замена: старая historical, новая current с новым Burq order", async () => {
+    __resetMockBurqStore();
+    const orderId = await makeOrder(floristAId);
+    const port = createPrismaDraftPort(prisma);
+    await handleBurqDraftCreate({ client: createMockBurqClient(), port }, { orderId, scheduleVersion: 0 });
+    const old = await prisma.delivery.findFirst({ where: { orderId, isCurrentAttempt: true } });
+    await applyDeliveryStatusUpdate(prisma, vi.fn(), { deliveryId: old!.id, providerEventId: "cx", occurredAt: new Date(), source: "BURQ_WEBHOOK", rawStatus: "provider_canceled" });
+
+    const burqId = await seedDeliveredBurqOrder("ext-ref-link-3");
+    const res = await linkBurqOrder(prisma, vi.fn(), { orderId, burqOrderId: burqId });
+    expect(res.outcome).toBe("linked");
+    if (res.outcome === "linked") expect(res.attemptNumber).toBe(2);
+
+    const all = await prisma.delivery.findMany({ where: { orderId }, orderBy: { attemptNumber: "asc" } });
+    expect(all).toHaveLength(2);
+    expect(all[0].id).toBe(old!.id);
+    expect(all[0].isCurrentAttempt).toBe(false); // старая → historical
+    expect(all[0].status).toBe("CANCELLED"); // статус старой не трогаем
+    expect(all[1].isCurrentAttempt).toBe(true);
+    expect(all[1].externalDeliveryId).toBe(burqId);
+    expect(all[1].supersedesDeliveryId).toBe(old!.id);
+    expect(all[1].status).toBe("DELIVERED");
+  });
+
+  it("активная (не терминальная) текущая доставка → needs_confirmation, без подтверждения не заменяется", async () => {
+    __resetMockBurqStore();
+    const orderId = await makeOrder(floristAId);
+    const port = createPrismaDraftPort(prisma);
+    await handleBurqDraftCreate({ client: createMockBurqClient(), port }, { orderId, scheduleVersion: 0 });
+    const cur = await prisma.delivery.findFirst({ where: { orderId, isCurrentAttempt: true } });
+    await applyDeliveryStatusUpdate(prisma, vi.fn(), { deliveryId: cur!.id, providerEventId: "iv", occurredAt: new Date(), source: "BURQ_WEBHOOK", rawStatus: "driver_assigned" });
+
+    const burqId = await seedDeliveredBurqOrder("ext-ref-link-4");
+    const noConfirm = await linkBurqOrder(prisma, vi.fn(), { orderId, burqOrderId: burqId });
+    expect(noConfirm.outcome).toBe("needs_confirmation");
+    expect(await prisma.delivery.count({ where: { orderId } })).toBe(1); // ничего не создано
+
+    const confirmed = await linkBurqOrder(prisma, vi.fn(), { orderId, burqOrderId: burqId, replaceActive: true });
+    expect(confirmed.outcome).toBe("linked");
+    expect(await prisma.delivery.count({ where: { orderId, isCurrentAttempt: true } })).toBe(1);
+    expect((await prisma.delivery.findFirst({ where: { orderId, isCurrentAttempt: true } }))!.externalDeliveryId).toBe(burqId);
   });
 });

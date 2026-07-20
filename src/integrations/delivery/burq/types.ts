@@ -50,6 +50,8 @@ export type BurqCreateOrderRequest = {
   weight: number;
   dimension_unit: string;
   weight_unit: string;
+  // preferred (не required, чтобы не ограничивать доступность Uber): просим фото при dropoff.
+  preferred_provider_settings?: { require_dropoff_photo?: boolean };
 };
 
 /** Сырой ответ Burq (нужные поля). Статус и стоимость — в latest_delivery. Суммы — в ЦЕНТАХ. */
@@ -70,6 +72,8 @@ export type BurqRawOrderResponse = {
     provider?: string | { id?: string | null; name?: string | null } | null;
     provider_id?: string | null; // покоштучный id доставки (del_...), НЕ стабильный провайдер
     quote_id?: string | null;
+    proof_of_delivery_image_urls?: string[] | null; // массив URL фото (пустой, если нет)
+    signature_image_url?: string | null;
   } | null;
 };
 
@@ -91,6 +95,8 @@ export type BurqOrder = {
   provider: string | null;
   providerId: string | null;
   quoteId: string | null;
+  proofOfDeliveryUrls: string[];
+  signatureImageUrl: string | null;
 };
 
 /**
@@ -114,4 +120,5 @@ export type BurqWebhookEvent = {
   feeCents?: number | null;
   currency?: string | null;
   quoteId?: string | null;
+  // POD URL НЕ храним в webhook-событии (оно идёт в outbox) — их получает отдельный GET.
 };

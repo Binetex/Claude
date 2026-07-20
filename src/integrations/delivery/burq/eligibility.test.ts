@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { decideDraftEligibility, type EligibilityInput } from "./eligibility";
+import { decideDraftEligibility, isPastDeliveryDate, type EligibilityInput } from "./eligibility";
 
 const PICKUP = {
   locationName: "Main",
@@ -70,5 +70,33 @@ describe("decideDraftEligibility", () => {
     expect(
       decideDraftEligibility({ ...base, siteAutoCreateEnabled: false, floristId: null })
     ).toEqual({ action: "SKIP", reason: "site_disabled" });
+  });
+
+  describe("guard прошедшей даты доставки (авто-путь)", () => {
+    const now = new Date("2026-07-20T13:00:00Z");
+    it("прошедшая дата доставки → SKIP delivery_date_past", () => {
+      expect(decideDraftEligibility({ ...base, deliveryDate: new Date("2026-07-18T00:00:00Z"), now })).toEqual({
+        action: "SKIP",
+        reason: "delivery_date_past",
+      });
+    });
+    it("сегодняшняя дата → создаём (не прошедшая)", () => {
+      expect(decideDraftEligibility({ ...base, deliveryDate: new Date("2026-07-20T00:00:00Z"), now })).toEqual({ action: "CREATE_DRAFT" });
+    });
+    it("будущая дата → создаём", () => {
+      expect(decideDraftEligibility({ ...base, deliveryDate: new Date("2026-07-25T00:00:00Z"), now })).toEqual({ action: "CREATE_DRAFT" });
+    });
+    it("дата не передана (ручной ретрай) → guard не применяется", () => {
+      expect(decideDraftEligibility({ ...base, deliveryDate: null, now })).toEqual({ action: "CREATE_DRAFT" });
+      expect(decideDraftEligibility(base)).toEqual({ action: "CREATE_DRAFT" });
+    });
+    it("терминальный статус важнее прошедшей даты", () => {
+      expect(decideDraftEligibility({ ...base, orderStatus: "CANCELLED", deliveryDate: new Date("2026-07-18T00:00:00Z"), now })).toEqual({ action: "SKIP", reason: "order_terminal" });
+    });
+    it("isPastDeliveryDate — сравнение по дню (UTC)", () => {
+      expect(isPastDeliveryDate(new Date("2026-07-19T23:00:00Z"), now)).toBe(true);
+      expect(isPastDeliveryDate(new Date("2026-07-20T00:00:00Z"), now)).toBe(false);
+      expect(isPastDeliveryDate(new Date("2026-07-20T23:59:00Z"), now)).toBe(false);
+    });
   });
 });

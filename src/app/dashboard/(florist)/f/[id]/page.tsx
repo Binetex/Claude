@@ -2,6 +2,9 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireFlorist } from "@/lib/rbac";
 import { getForFlorist } from "@/modules/orders/queries";
+import { prisma } from "@/lib/db";
+import { loadOrderCommunicationsCard } from "@/integrations/quo/communicationsService";
+import { OrderCommunications } from "@/app/dashboard/(owner)/orders/[id]/OrderCommunications";
 import { Card, CardBody } from "@/components/ui/Card";
 import { OrderStatusBadge } from "@/components/StatusBadge";
 import { CopyButton } from "@/components/CopyButton";
@@ -18,6 +21,8 @@ export default async function FloristOrderPage({ params }: { params: Promise<{ i
   const user = await requireFlorist();
   const order = await getForFlorist(id, user.floristId);
   if (!order) notFound();
+
+  const comm = await loadOrderCommunicationsCard(prisma, id).catch(() => ({ communications: [], storeHasQuoNumber: false, storeTimeZone: undefined }));
 
   const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
     `${order.addressLine}, ${order.city} ${order.zip}`
@@ -126,6 +131,16 @@ export default async function FloristOrderPage({ params }: { params: Promise<{ i
           </div>
         </CardBody>
       </Card>
+
+      {/* Общение (SMS/звонки) — единый блок QUO, доступен флористу. */}
+      <OrderCommunications
+        orderId={order.id}
+        customerPhone={order.senderPhone}
+        recipientPhone={order.recipientPhone}
+        storeHasQuoNumber={comm.storeHasQuoNumber}
+        communications={comm.communications}
+        storeTimeZone={comm.storeTimeZone}
+      />
 
       {/* Основные кнопки процесса */}
       <div className="sticky bottom-0 rounded-xl border border-slate-200 bg-white p-4 shadow-lg">

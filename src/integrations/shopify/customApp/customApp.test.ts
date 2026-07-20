@@ -31,30 +31,37 @@ describe("domain — строгая валидация *.myshopify.com", () => {
 });
 
 describe("scopes — обязательные и diff", () => {
-  it("required = read_products, read_orders, write_orders", () => {
-    expect([...REQUIRED_SHOPIFY_SCOPES]).toEqual(["read_products", "read_orders", "write_orders"]);
-    expect(requiredScopesText()).toBe("read_products,read_orders,write_orders");
+  it("required = products/orders/write + fulfillment (для delivery instructions)", () => {
+    expect([...REQUIRED_SHOPIFY_SCOPES]).toEqual([
+      "read_products",
+      "read_orders",
+      "write_orders",
+      "read_merchant_managed_fulfillment_orders",
+      "read_assigned_fulfillment_orders",
+    ]);
+    expect(requiredScopesText()).toBe("read_products,read_orders,write_orders,read_merchant_managed_fulfillment_orders,read_assigned_fulfillment_orders");
   });
   it("hasAll когда все выданы", () => {
-    expect(diffScopes(["read_products", "read_orders", "write_orders", "read_content"]).hasAll).toBe(true);
+    expect(diffScopes(["read_products", "read_orders", "write_orders", "read_merchant_managed_fulfillment_orders", "read_assigned_fulfillment_orders", "read_content"]).hasAll).toBe(true);
   });
   it("missing когда часть отсутствует", () => {
     const d = diffScopes(["read_products"]);
     expect(d.hasAll).toBe(false);
-    expect(d.missing).toEqual(["read_orders", "write_orders"]);
+    expect(d.missing).toEqual(["read_orders", "write_orders", "read_merchant_managed_fulfillment_orders", "read_assigned_fulfillment_orders"]);
   });
 });
 
 describe("connectionLogic — вывод статуса", () => {
   const shop = { name: "Demo Flowers", myshopifyDomain: "demo.myshopify.com" };
+  const ALL_SCOPES = ["read_products", "read_orders", "write_orders", "read_merchant_managed_fulfillment_orders", "read_assigned_fulfillment_orders"];
   it("совпадение домена + все scopes → CONNECTED", () => {
-    const r = deriveConnectionResult({ enteredDomain: "demo.myshopify.com", shop, grantedScopes: ["read_products", "read_orders", "write_orders"] });
+    const r = deriveConnectionResult({ enteredDomain: "demo.myshopify.com", shop, grantedScopes: ALL_SCOPES });
     expect(r.status).toBe("CONNECTED");
     expect(r.ok).toBe(true);
     expect(r.canSyncProducts && r.canSyncOrders).toBe(true);
   });
-  it("совпадение домена + часть scopes → DEGRADED", () => {
-    const r = deriveConnectionResult({ enteredDomain: "demo.myshopify.com", shop, grantedScopes: ["read_orders", "write_orders"] });
+  it("совпадение домена + часть scopes → DEGRADED (но синк работает)", () => {
+    const r = deriveConnectionResult({ enteredDomain: "demo.myshopify.com", shop, grantedScopes: ["read_orders", "write_orders", "read_merchant_managed_fulfillment_orders", "read_assigned_fulfillment_orders"] });
     expect(r.status).toBe("DEGRADED");
     expect(r.missingScopes).toEqual(["read_products"]);
     expect(r.canSyncProducts).toBe(false);

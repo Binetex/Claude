@@ -13,6 +13,7 @@ function makeCtx(): DraftContext {
     order: {
       id: "o1",
       orderStatus: "AWAITING_COURIER",
+      deliveryDate: null,
       scheduleVersion: 0,
       siteAutoCreateEnabled: true,
       dropoff: { recipientName: "R", recipientPhone: "+13105550198", addressLine: "1 A St", city: "SM", recipientState: "CA", zip: "90401" },

@@ -69,6 +69,13 @@ describe("buildBurqDraftRequest — контракт Create Order V2", () => {
     expect(req.dropoff).not.toHaveProperty("address_details");
   });
 
+  it("запрашивает фото при dropoff: preferred_provider_settings.require_dropoff_photo=true (без signature)", () => {
+    const req = buildBurqDraftRequest("o:a1", order, pickup);
+    expect(req.preferred_provider_settings).toEqual({ require_dropoff_photo: true });
+    expect(req).not.toHaveProperty("required_provider_settings");
+    expect(JSON.stringify(req)).not.toContain("signature");
+  });
+
   it("order-level dimensions обязательны (дефолт при отсутствии настройки)", () => {
     const req = buildBurqDraftRequest("o:a1", order, pickup);
     expect({ l: req.length, w: req.width, h: req.height, wt: req.weight, du: req.dimension_unit, wu: req.weight_unit }).toEqual({

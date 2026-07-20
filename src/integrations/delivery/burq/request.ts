@@ -89,6 +89,8 @@ export function buildBurqDraftRequest(
     items,
     external_order_ref: externalOrderRef,
     order_value: BURQ_ORDER_VALUE_CENTS, // всегда 50000 (=$500 в центах), не из заказа Floremart
+    // Просим фото при dropoff (proof of delivery). preferred — НЕ ограничивает доступность Uber.
+    preferred_provider_settings: { require_dropoff_photo: true },
     // order-level dimensions — обязательны.
     length: dimensions.length,
     width: dimensions.width,

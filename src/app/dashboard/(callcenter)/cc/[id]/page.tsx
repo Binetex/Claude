@@ -2,11 +2,14 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { format } from "date-fns";
 import { getForCallCenter } from "@/modules/orders/queries";
+import { prisma } from "@/lib/db";
+import { loadOrderCommunicationsCard } from "@/integrations/quo/communicationsService";
+import { OrderCommunications } from "@/app/dashboard/(owner)/orders/[id]/OrderCommunications";
 import { Card, CardHeader, CardTitle, CardBody } from "@/components/ui/Card";
 import { OrderStatusBadge, DeliveryStatusBadge } from "@/components/StatusBadge";
 import { CopyButton } from "@/components/CopyButton";
 import { ZoomableImage } from "@/components/ImageLightbox";
-import { fmtDate, fmtDateTime, formatOrderNumber } from "@/lib/format";
+import { fmtDate, formatOrderNumber } from "@/lib/format";
 import { OrderItemComposition } from "@/components/OrderItemComposition";
 import { CallCenterControls } from "./CallCenterControls";
 
@@ -16,6 +19,8 @@ export default async function CallCenterOrderPage({ params }: { params: Promise<
   const { id } = await params;
   const order = await getForCallCenter(id);
   if (!order) notFound();
+
+  const comm = await loadOrderCommunicationsCard(prisma, id).catch(() => ({ communications: [], storeHasQuoNumber: false, storeTimeZone: undefined }));
 
   return (
     <div className="space-y-4">
@@ -93,28 +98,15 @@ export default async function CallCenterOrderPage({ params }: { params: Promise<
             </CardBody>
           </Card>
 
-          {/* Сообщения */}
-          <Card>
-            <CardHeader><CardTitle>История сообщений</CardTitle></CardHeader>
-            <CardBody className="p-0">
-              {order.messages.length === 0 ? (
-                <div className="px-4 py-4 text-sm text-slate-400">Сообщений нет</div>
-              ) : (
-                <ul className="divide-y divide-slate-100">
-                  {order.messages.map((m) => (
-                    <li key={m.id} className="px-4 py-2 text-sm">
-                      <div className="flex items-center gap-2 text-xs text-slate-400">
-                        <span className="rounded bg-slate-100 px-1.5 py-0.5">{m.channel}</span>
-                        <span>{m.direction === "OUTBOUND" ? "→ клиенту" : "← от клиента"}</span>
-                        <span>{fmtDateTime(m.createdAt)}</span>
-                      </div>
-                      <div className="mt-0.5 text-slate-700">{m.body}</div>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </CardBody>
-          </Card>
+          {/* Общение (SMS/звонки) — единый блок QUO, доступен любому сотруднику. */}
+          <OrderCommunications
+            orderId={order.id}
+            customerPhone={order.senderPhone}
+            recipientPhone={order.recipientPhone}
+            storeHasQuoNumber={comm.storeHasQuoNumber}
+            communications={comm.communications}
+            storeTimeZone={comm.storeTimeZone}
+          />
         </div>
 
         <div className="lg:col-span-1">

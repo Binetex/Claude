@@ -36,6 +36,7 @@ function baseFields(o: OrderWithRelations) {
     zip: o.zip,
     cardMessage: o.cardMessage,
     customerNote: o.customerNote,
+    deliveryInstructions: o.deliveryInstructions,
     paymentStatus: o.paymentStatus,
     orderStatus: o.orderStatus,
     assignmentStatus: o.assignmentStatus,
@@ -56,6 +57,14 @@ export function serializeForOwner(o: OrderWithRelations) {
     senderName: o.senderName,
     senderPhone: o.senderPhone,
     senderEmail: o.senderEmail,
+    senderAddress: {
+      addressLine: o.senderAddressLine,
+      apartment: o.senderApartment,
+      city: o.senderCity,
+      province: o.senderProvince,
+      zip: o.senderZip,
+      country: o.senderCountry,
+    },
     syncStatus: o.syncStatus,
     priceMode: o.priceMode,
     items: o.items.map((i) => ({

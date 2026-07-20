@@ -76,6 +76,8 @@ type BurqDeliveryData = {
   updated_at?: string;
   created_at?: string;
   courier?: { name?: string | null; phone_number_for_customer?: string | null; phone_number?: string | null } | null;
+  proof_of_delivery_image_urls?: string[] | null;
+  signature_image_url?: string | null;
 };
 
 /** Имя провайдера из provider (строка или { name }). */
@@ -117,5 +119,6 @@ export function parseBurqWebhook(payload: unknown): BurqWebhookEvent | null {
     feeCents: num(data.fee),
     currency: data.currency ?? null,
     quoteId: data.quote_id ?? null,
+    // POD URL сюда НЕ кладём (событие идёт в outbox) — их подтягивает refetchPodForDelivery через GET.
   };
 }

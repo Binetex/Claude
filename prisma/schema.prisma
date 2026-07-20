@@ -179,6 +179,69 @@ enum MessageParty {
   RECIPIENT
 }
 
+// ── QUO (ex-OpenPhone) единая история коммуникаций по заказу ──
+enum CommunicationType {
+  SMS
+  CALL
+  VOICEMAIL
+}
+
+enum CommunicationDirection {
+  INBOUND
+  OUTBOUND
+}
+
+enum CommunicationPartyRole {
+  CUSTOMER // телефон покупателя (Order.senderPhone / billing)
+  RECIPIENT // телефон получателя доставки (Order.recipientPhone)
+  UNKNOWN // не удалось сопоставить роль
+}
+
+enum CommunicationStatus {
+  PENDING // исходящее создано, ещё не подтверждено провайдером
+  SENT
+  DELIVERED
+  RECEIVED // входящее сообщение
+  COMPLETED // завершённый звонок
+  MISSED // пропущенный/без ответа звонок
+  FAILED
+}
+
+enum BackfillMode {
+  DRY_RUN
+  LIVE
+}
+
+enum BackfillStatus {
+  RUNNING
+  DONE
+  FAILED
+}
+
+/**
+ * История запусков backfill QUO: период, фильтры, режим, статус, счётчики/разбивка, инициатор,
+ * время, безопасная ошибка. `activeLock` (@unique) держит один активный LIVE-запуск (защита от гонки/
+ * двойного запуска): "ACTIVE" пока идёт LIVE, null после завершения.
+ */
+model QuoBackfillRun {
+  id                String         @id @default(cuid())
+  mode              BackfillMode
+  status            BackfillStatus @default(RUNNING)
+  fromAt            DateTime
+  toAt              DateTime
+  siteId            String?
+  quoPhoneNumberId  String?
+  counters          Json? // {found,created,updated,skipped,unlinked,errors}
+  breakdown         Json? // {byType:{...}, bySite:{...}}
+  initiatedByUserId String?
+  startedAt         DateTime       @default(now())
+  finishedAt        DateTime?
+  safeError         String?
+  activeLock        String?        @unique // "ACTIVE" пока идёт LIVE-запуск; null иначе
+
+  @@index([startedAt])
+}
+
 // Статус товара — источник истины Shopify (active/draft/archived).
 enum ProductStatus {
   ACTIVE
@@ -285,6 +348,10 @@ model Site {
   // ── Burq автосоздание черновиков доставки ──
   burqDraftAutoCreateEnabled Boolean @default(false)
   burqDraftCreationLocalTime String  @default("04:00") // локальное время (HH:mm) утреннего создания черновиков
+
+  // ── QUO (ex-OpenPhone): номер магазина для исходящих SMS ──
+  quoPhoneNumberId String? // QUO phone number id (PN…) — используется как `from` при отправке
+  quoPhoneNumber   String? // E.164 номер магазина (для отображения и storePhone)
 
   // Запрет двух активных Site одного платформенного домена (двойное подключение).
   @@unique([platform, normalizedShopDomain])
@@ -426,10 +493,22 @@ model Order {
   deliveryDate      DateTime
   deliveryWindow    String // напр. "14:00 – 18:00"
 
-  // Отправитель
-  senderName  String
-  senderPhone String
-  senderEmail String?
+  // Отправитель (billing). Адрес — из Shopify billing_address (двусторонним НЕ является: показываем
+  // как есть; при повторной синхронизации не обнуляем). Отдельно от адреса получателя (shipping).
+  senderName        String
+  senderPhone       String
+  senderEmail       String?
+  senderAddressLine String?
+  senderApartment   String?
+  senderCity        String?
+  senderProvince    String? // province_code (напр. "OR")
+  senderZip         String?
+  senderCountry     String? // country_code (напр. "US")
+
+  // Инструкции доставки — native Shopify Local Delivery (Additional details → Delivery instructions).
+  // Источник: GraphQL Order.fulfillmentOrders → deliveryMethod.additionalInformation.instructions.
+  // НЕ путать с cardMessage (текст открытки) и customerNote (ручная заметка владельца/колл-центра).
+  deliveryInstructions String @default("")
 
   // Получатель
   recipientName  String
@@ -503,6 +582,7 @@ model Order {
   items          OrderItem[]
   assignments    OrderAssignment[]
   messages       Message[]
+  communications OrderCommunication[]
   deliveryIntent DeliveryIntent?
   deliveries     Delivery[]
 
@@ -570,6 +650,60 @@ model Message {
   createdAt DateTime         @default(now())
 
   @@index([orderId])
+}
+
+/**
+ * Единая история коммуникаций по заказу (QUO/OpenPhone): SMS, звонки, voicemail. Привязка к
+ * заказу — на уровне КОНКРЕТНОГО события по нормализованному телефону + дате (orderId nullable:
+ * непривязанные события живут в разделе «Нераспознанные коммуникации»). Идемпотентность — по
+ * (provider, providerEventId). Секреты/сырой webhook целиком НЕ храним (только нужные метаданные).
+ */
+model OrderCommunication {
+  id      String @id @default(cuid())
+  orderId String?
+  order   Order? @relation(fields: [orderId], references: [id], onDelete: SetNull)
+
+  provider               String  @default("QUO")
+  providerEventId        String? // QUO webhook event id (EV…) — ключ идемпотентности
+  providerResourceId     String? // message/call id (AC…) — для дозагрузки записи/транскрипта
+  providerConversationId String? // conversation id (CN…)
+  providerUserId         String? // QUO user (US…), кто звонил/ответил/отправил
+  providerPhoneNumberId  String? // QUO phone number id магазина (PN…)
+
+  type      CommunicationType
+  direction CommunicationDirection
+  partyRole CommunicationPartyRole @default(UNKNOWN)
+  status    CommunicationStatus
+
+  storePhone              String? // номер магазина, через который прошла коммуникация (E.164)
+  externalPhone           String // отображаемый номер собеседника
+  externalPhoneNormalized String // E.164 для сопоставления
+
+  messageText     String? // текст SMS
+  durationSeconds Int? // длительность звонка
+  recordingUrl    String? // ссылка на запись (QUO)
+  transcript      String? // транскрипт звонка (Business/Scale)
+  summary         String? // краткое содержание звонка (Business/Scale)
+  attachmentsJson Json? // MMS/вложения [{url,type}]
+  rawMetadata     Json? // компактные доп. поля события (без секретов/сырого payload целиком)
+
+  occurredAt  DateTime // время события в QUO
+  deliveredAt DateTime? // подтверждение доставки исходящего
+  readAt      DateTime? // глобальное (командное) прочтение входящего/пропущенного
+  ignoredAt   DateTime? // «Игнорировать» для нераспознанных (исчезает из активного списка)
+
+  // Исходящие: устойчивый app-level ключ идемпотентности (двойной клик/повтор формы → без дублей).
+  sendKey      String? @unique
+  sentByUserId String? // кто из сотрудников админки отправил (User.id), для исходящих
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([provider, providerEventId])
+  @@index([orderId, occurredAt])
+  @@index([externalPhoneNormalized, occurredAt])
+  @@index([providerResourceId])
+  @@index([orderId, readAt])
 }
 
 // Зарегистрированные Shopify webhook-подписки по Site — чтобы не создавать дубли и
@@ -742,7 +876,11 @@ model Delivery {
   cancellationReason  String? // FLORIST_REASSIGNED | MANUAL_ADMIN | ...
   failureCode         String?
   failureMessageSafe  String?
-  proofOfDeliveryUrl  String?
+  proofOfDeliveryUrl  String? // @deprecated — не используется; оставлено для обратной совместимости
+  // Proof of Delivery (Path A, первая версия — храним Burq URL как есть, без копирования в наше хранилище).
+  proofOfDeliveryUrls      Json? // массив URL фото подтверждения доставки (proof_of_delivery_image_urls)
+  signatureImageUrl        String? // signature_image_url (если когда-либо запрошен)
+  proofOfDeliveryFetchedAt DateTime?
 
   // Переназначение/суперседанс попыток (историю не переписываем).
   supersedesDeliveryId   String?

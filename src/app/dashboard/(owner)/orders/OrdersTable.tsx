@@ -6,6 +6,24 @@ import { formatMoney } from "@/lib/money";
 import { fmtDate, formatOrderNumber } from "@/lib/format";
 import { orderStatusMeta } from "@/lib/statuses";
 import type { OwnerOrder } from "@/modules/orders/serialize";
+import type { OrderIndicator } from "@/integrations/quo/communicationsView";
+
+/** Компактные индикаторы коммуникаций в списке (непрочитанные/пропущенный/последний контакт/preview). */
+function CommIndicators({ ind }: { ind?: OrderIndicator }) {
+  if (!ind || (ind.unreadInbound === 0 && !ind.hasMissedUnread && !ind.lastAt)) return null;
+  return (
+    <div className="mt-0.5 flex flex-col gap-0.5 text-[10px] leading-tight">
+      {(ind.unreadInbound > 0 || ind.hasMissedUnread) && (
+        <div className="flex flex-wrap items-center gap-1">
+          {ind.unreadInbound > 0 && <span className="rounded bg-sky-100 px-1 font-medium text-sky-700">{ind.unreadInbound} нов.</span>}
+          {ind.hasMissedUnread && <span className="rounded bg-amber-100 px-1 font-medium text-amber-700">✆ пропущенный</span>}
+        </div>
+      )}
+      {ind.lastAt && <span className="text-slate-400">контакт: {new Date(ind.lastAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>}
+      {ind.preview && <span className="max-w-[160px] truncate text-slate-500">“{ind.preview}”</span>}
+    </div>
+  );
+}
 
 /** Единственный статус заказа — компактный бейдж ~9px (ширина по тексту). */
 function StatusPill({ status, className = "" }: { status: OwnerOrder["orderStatus"]; className?: string }) {
@@ -50,7 +68,7 @@ function ItemsList({ o, imgSize = "h-6 w-6", nameClass = "text-[11px]" }: { o: O
 }
 
 /** Десктоп — заказ отдельной плашкой (карточкой), без колонки прибыли. */
-function DesktopCard({ o }: { o: OwnerOrder }) {
+function DesktopCard({ o, ind }: { o: OwnerOrder; ind?: OrderIndicator }) {
   return (
     <Card className="p-4 transition-shadow hover:shadow-sm">
       <div className="flex items-start gap-4 text-[12px]">
@@ -61,6 +79,7 @@ function DesktopCard({ o }: { o: OwnerOrder }) {
             {formatOrderNumber(o.orderNumber)}
           </Link>
           <span className="text-[10px] text-slate-400">{o.site.name}</span>
+          <CommIndicators ind={ind} />
         </div>
 
         {/* Товар — расширенная область названия, картинка 60×60, имя 13px */}
@@ -106,7 +125,7 @@ function DesktopCard({ o }: { o: OwnerOrder }) {
   );
 }
 
-function MobileCard({ o }: { o: OwnerOrder }) {
+function MobileCard({ o, ind }: { o: OwnerOrder; ind?: OrderIndicator }) {
   return (
     <Card className="p-2.5">
       <div className="flex flex-col gap-0.5">
@@ -118,6 +137,7 @@ function MobileCard({ o }: { o: OwnerOrder }) {
           <span className="text-[13px] font-semibold text-slate-700">{formatMoney(o.finance.customerTotal)}</span>
         </div>
         <span className="text-[10px] text-slate-400">{o.site.name}</span>
+        <CommIndicators ind={ind} />
       </div>
 
       <div className="mt-2">
@@ -146,7 +166,7 @@ function DaySeparator({ date }: { date: Date | string }) {
   return <div className="px-1 pt-2 text-[11px] font-semibold text-slate-500">{fmtDate(date)}</div>;
 }
 
-export function OrdersTable({ orders, groupByDay = false }: { orders: OwnerOrder[]; groupByDay?: boolean }) {
+export function OrdersTable({ orders, groupByDay = false, commIndicators = {} }: { orders: OwnerOrder[]; groupByDay?: boolean; commIndicators?: Record<string, OrderIndicator> }) {
   // Разбивка по дням (только визуально, для вкладки «Все»). Сортировка уже сделана в запросе.
   const desktopItems: React.ReactNode[] = [];
   const mobileItems: React.ReactNode[] = [];
@@ -160,8 +180,8 @@ export function OrdersTable({ orders, groupByDay = false }: { orders: OwnerOrder
         prevDay = day;
       }
     }
-    desktopItems.push(<DesktopCard key={o.id} o={o} />);
-    mobileItems.push(<MobileCard key={o.id} o={o} />);
+    desktopItems.push(<DesktopCard key={o.id} o={o} ind={commIndicators[o.id]} />);
+    mobileItems.push(<MobileCard key={o.id} o={o} ind={commIndicators[o.id]} />);
   }
 
   return (

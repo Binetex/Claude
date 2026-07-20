@@ -26,6 +26,8 @@ import { buildWooSyncHandler } from "@/integrations/woocommerce/syncDispatch";
 import { buildBurqDraftCreateHandler } from "@/integrations/delivery/burq/outboxHandler";
 import { BURQ_DRAFT_CREATE_EVENT } from "@/integrations/delivery/burq/schedule";
 import { buildBurqWebhookHandler, BURQ_WEBHOOK_EVENT } from "@/integrations/delivery/burq/webhookHandler";
+import { buildBurqPodRefetchHandler, BURQ_POD_REFETCH_EVENT } from "@/integrations/delivery/burq/podService";
+import { buildQuoWebhookHandler, QUO_WEBHOOK_EVENT } from "@/integrations/quo/webhookHandler";
 import { reconcileBurqSchedules } from "@/integrations/delivery/burq/recovery";
 import { isBurqRuntimeEnabled } from "@/lib/featureFlags";
 import { MessagingService } from "@/messaging/service";
@@ -68,6 +70,10 @@ async function main() {
     [BURQ_DRAFT_CREATE_EVENT]: buildBurqDraftCreateHandler(prisma, (event, extra) => log(event, extra)),
     // Burq: приём статус-событий доставки из webhook (anti-rollback, publish completed на DELIVERED).
     [BURQ_WEBHOOK_EVENT]: buildBurqWebhookHandler(prisma),
+    // Burq: отложенный ОДНОразовый refetch Proof of Delivery (delivered без фото).
+    [BURQ_POD_REFETCH_EVENT]: buildBurqPodRefetchHandler(prisma),
+    // QUO (ex-OpenPhone): обработка проверенного webhook-события → OrderCommunication + привязка.
+    [QUO_WEBHOOK_EVENT]: buildQuoWebhookHandler(prisma),
   };
 
   const worker = new OutboxWorker({

@@ -18,6 +18,7 @@ export function createPrismaDraftPort(prisma: PrismaClient): DraftCreatePort {
         select: {
           id: true,
           orderStatus: true,
+          deliveryDate: true,
           currentFloristId: true,
           recipientName: true,
           recipientPhone: true,
@@ -42,6 +43,7 @@ export function createPrismaDraftPort(prisma: PrismaClient): DraftCreatePort {
         order: {
           id: order.id,
           orderStatus: order.orderStatus,
+          deliveryDate: order.deliveryDate ?? null,
           scheduleVersion: order.deliveryIntent?.scheduleVersion ?? 0,
           siteAutoCreateEnabled: order.site?.burqDraftAutoCreateEnabled ?? false,
           dropoff: {

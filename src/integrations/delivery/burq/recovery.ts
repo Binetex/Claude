@@ -59,6 +59,7 @@ export async function reconcileBurqSchedules(prisma: PrismaClient, now: Date = n
       floristId: ctx.floristId,
       pickup: ctx.pickup,
       hasCurrentDraft: ctx.hasCurrentDraft,
+      deliveryDate: ctx.order.deliveryDate, // recovery тоже не воскрешает прошедшие даты
     });
     if (decision.action !== "CREATE_DRAFT") continue;
 
