@@ -39,6 +39,9 @@ function baseFields(o: OrderWithRelations) {
     deliveryInstructions: o.deliveryInstructions,
     paymentStatus: o.paymentStatus,
     orderStatus: o.orderStatus,
+    // UI-флаг: оплата не прошла (WooCommerce `failed`). Без отдельного enum/миграции —
+    // из уже сохранённых полей. Показываем «Ошибка оплаты» вместо «Ожидает оплаты».
+    paymentFailed: o.externalStatus === "failed" || o.paymentClassification === "PAYMENT_FAILED",
     assignmentStatus: o.assignmentStatus,
     deliveryStatus: o.deliveryStatus,
     readyAt: o.readyAt,

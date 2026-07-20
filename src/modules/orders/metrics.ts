@@ -84,6 +84,7 @@ export async function getOwnerDashboard() {
       deliveryDate: o.deliveryDate,
       recipientName: o.recipientName,
       orderStatus: o.orderStatus,
+      paymentFailed: o.externalStatus === "failed" || o.paymentClassification === "PAYMENT_FAILED",
       assignmentStatus: o.assignmentStatus,
       florist: o.currentFlorist?.user.name ?? null,
     })),
@@ -96,6 +97,7 @@ export async function getOwnerDashboard() {
       deliveryWindow: o.deliveryWindow,
       recipientName: o.recipientName,
       orderStatus: o.orderStatus,
+      paymentFailed: o.externalStatus === "failed" || o.paymentClassification === "PAYMENT_FAILED",
       florist: o.currentFlorist?.user.name ?? null,
     })),
   };

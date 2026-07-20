@@ -1,6 +1,6 @@
 import { Badge } from "@/components/ui/Badge";
 import {
-  orderStatusMeta,
+  resolveOrderStatusMeta,
   paymentStatusMeta,
   assignmentStatusMeta,
   deliveryStatusMeta,
@@ -12,8 +12,8 @@ import type {
   DeliveryStatus,
 } from "@/generated/prisma/enums";
 
-export function OrderStatusBadge({ status }: { status: OrderStatus }) {
-  const m = orderStatusMeta[status];
+export function OrderStatusBadge({ status, paymentFailed }: { status: OrderStatus; paymentFailed?: boolean }) {
+  const m = resolveOrderStatusMeta(status, { paymentFailed });
   return <Badge className={m.className}>{m.label}</Badge>;
 }
 

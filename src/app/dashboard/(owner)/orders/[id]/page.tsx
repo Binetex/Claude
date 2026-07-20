@@ -128,7 +128,7 @@ export default async function OwnerOrderPage({ params }: { params: Promise<{ id:
         <h1 className="text-xl font-semibold text-slate-900">{formatOrderNumber(order.orderNumber)}</h1>
         <span className="text-sm text-slate-500">{order.site.name}</span>
         <div className="flex flex-wrap gap-1.5">
-          <OrderStatusBadge status={order.orderStatus} />
+          <OrderStatusBadge status={order.orderStatus} paymentFailed={order.paymentFailed} />
           <PaymentStatusBadge status={order.paymentStatus} />
           {showAssignment && <AssignmentStatusBadge status={order.assignmentStatus} />}
         </div>

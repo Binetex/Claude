@@ -30,7 +30,7 @@ export default async function CallCenterOrderPage({ params }: { params: Promise<
         <span className="h-3 w-3 rounded-full" style={{ background: order.site.colorTag }} />
         <h1 className="text-xl font-bold text-slate-800">{formatOrderNumber(order.orderNumber)}</h1>
         <span className="text-sm text-slate-500">{order.site.name}</span>
-        <OrderStatusBadge status={order.orderStatus} />
+        <OrderStatusBadge status={order.orderStatus} paymentFailed={order.paymentFailed} />
       </div>
 
       <div className="grid gap-4 lg:grid-cols-3">

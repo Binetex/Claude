@@ -76,7 +76,7 @@ export default async function CallCenterOrders({
                 </td>
                 <td className="px-3 py-2">{o.recipientName}<div className="text-xs text-slate-400">{o.recipientPhone}</div></td>
                 <td className="px-3 py-2 max-w-[160px] truncate text-slate-500">{o.addressLine}, {o.city}</td>
-                <td className="px-3 py-2"><OrderStatusBadge status={o.orderStatus} /></td>
+                <td className="px-3 py-2"><OrderStatusBadge status={o.orderStatus} paymentFailed={o.paymentFailed} /></td>
                 <td className="px-3 py-2 whitespace-nowrap">{o.currentFloristName ?? "—"}</td>
               </tr>
             ))}

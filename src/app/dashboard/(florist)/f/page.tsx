@@ -70,7 +70,7 @@ export default async function FloristHome({
                     <div className="text-base font-semibold text-slate-800">{o.items[0]?.name}{o.items.length > 1 && ` +${o.items.length - 1}`}</div>
                     <div className="text-sm text-slate-500">{formatOrderNumber(o.orderNumber)} · {o.site.name}</div>
                   </div>
-                  <OrderStatusBadge status={o.orderStatus} />
+                  <OrderStatusBadge status={o.orderStatus} paymentFailed={o.paymentFailed} />
                 </div>
                 <div className="grid grid-cols-2 gap-1 text-sm text-slate-600">
                   <div>📅 {fmtDate(o.deliveryDate)}</div>

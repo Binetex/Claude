@@ -4,7 +4,7 @@ import { EmptyState } from "@/components/ui/states";
 import { ZoomableImage } from "@/components/ImageLightbox";
 import { formatMoney } from "@/lib/money";
 import { fmtDate, formatOrderNumber } from "@/lib/format";
-import { orderStatusMeta } from "@/lib/statuses";
+import { resolveOrderStatusMeta } from "@/lib/statuses";
 import type { OwnerOrder } from "@/modules/orders/serialize";
 import type { OrderIndicator } from "@/integrations/quo/communicationsView";
 
@@ -26,8 +26,8 @@ function CommIndicators({ ind }: { ind?: OrderIndicator }) {
 }
 
 /** Единственный статус заказа — компактный бейдж ~9px (ширина по тексту). */
-function StatusPill({ status, className = "" }: { status: OwnerOrder["orderStatus"]; className?: string }) {
-  const m = orderStatusMeta[status];
+function StatusPill({ status, paymentFailed, className = "" }: { status: OwnerOrder["orderStatus"]; paymentFailed?: boolean; className?: string }) {
+  const m = resolveOrderStatusMeta(status, { paymentFailed });
   return (
     <span className={`inline-block w-fit rounded border px-1 py-px text-[9px] font-medium leading-none ${m.className} ${className}`}>
       {m.label}
@@ -74,7 +74,7 @@ function DesktopCard({ o, ind }: { o: OwnerOrder; ind?: OrderIndicator }) {
       <div className="flex items-start gap-4 text-[12px]">
         {/* Заказ */}
         <div className="flex w-28 shrink-0 flex-col items-start gap-1">
-          <StatusPill status={o.orderStatus} />
+          <StatusPill status={o.orderStatus} paymentFailed={o.paymentFailed} />
           <Link href={`/dashboard/orders/${o.id}`} className="font-semibold text-slate-800 hover:underline">
             {formatOrderNumber(o.orderNumber)}
           </Link>
@@ -129,7 +129,7 @@ function MobileCard({ o, ind }: { o: OwnerOrder; ind?: OrderIndicator }) {
   return (
     <Card className="p-2.5">
       <div className="flex flex-col gap-0.5">
-        <StatusPill status={o.orderStatus} className="self-start" />
+        <StatusPill status={o.orderStatus} paymentFailed={o.paymentFailed} className="self-start" />
         <div className="flex items-baseline justify-between gap-2">
           <Link href={`/dashboard/orders/${o.id}`} className="font-semibold text-slate-800">
             {formatOrderNumber(o.orderNumber)}

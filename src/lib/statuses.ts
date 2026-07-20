@@ -31,6 +31,21 @@ export const orderStatusMeta: Record<OrderStatus, Meta> = {
   CANCELLED: { label: "Отменён", className: TONE.neutral },
 };
 
+/**
+ * Метка статуса заказа с UI-различием «оплата не прошла» (WooCommerce `failed`) от обычного
+ * ожидания оплаты. Отдельного enum/миграции НЕ вводим: Woo `failed` уже маппится в
+ * AWAITING_PAYMENT (paymentStatus остаётся UNPAID, флорист/Burq/автовыполнение не запускаются),
+ * а здесь лишь показываем «Ошибка оплаты» вместо «Ожидает оплаты». Флаг берётся из уже
+ * сохранённых полей заказа (externalStatus="failed" / paymentClassification="PAYMENT_FAILED").
+ * Если Woo позже переведёт заказ в processing/completed — эти поля обновятся, и метка вернётся к норме.
+ */
+export function resolveOrderStatusMeta(status: OrderStatus, opts?: { paymentFailed?: boolean }): Meta {
+  if (status === "AWAITING_PAYMENT" && opts?.paymentFailed) {
+    return { label: "Ошибка оплаты", className: TONE.danger };
+  }
+  return orderStatusMeta[status];
+}
+
 export const paymentStatusMeta: Record<PaymentStatus, Meta> = {
   UNPAID: { label: "Не оплачен", className: "bg-amber-100 text-amber-800 border-amber-200" },
   PAID: { label: "Оплачен", className: "bg-emerald-100 text-emerald-800 border-emerald-200" },

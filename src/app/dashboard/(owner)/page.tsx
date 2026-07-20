@@ -118,7 +118,7 @@ export default async function DashboardPage() {
                     orderNumber={formatOrderNumber(o.orderNumber)}
                     primary={o.recipientName}
                     meta={`${fmtDate(o.deliveryDate)} · ${o.deliveryWindow} · ${o.florist ?? "без флориста"}`}
-                    badge={<OrderStatusBadge status={o.orderStatus} />}
+                    badge={<OrderStatusBadge status={o.orderStatus} paymentFailed={o.paymentFailed} />}
                   />
                 ))}
               </ul>

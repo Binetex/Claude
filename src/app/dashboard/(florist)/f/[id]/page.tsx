@@ -42,7 +42,7 @@ export default async function FloristOrderPage({ params }: { params: Promise<{ i
               <h1 className="text-lg font-bold text-slate-800">{formatOrderNumber(order.orderNumber)}</h1>
               <div className="text-sm text-slate-500">{order.site.name}</div>
             </div>
-            <OrderStatusBadge status={order.orderStatus} />
+            <OrderStatusBadge status={order.orderStatus} paymentFailed={order.paymentFailed} />
           </div>
 
           {/* Товары */}
