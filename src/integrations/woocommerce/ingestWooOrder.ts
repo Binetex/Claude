@@ -61,6 +61,21 @@ type FullWooOrder = WooOrder &
     discount_total?: string | number;
   };
 
+/**
+ * Адрес отправителя (billing) WooCommerce → поля senderAddress* заказа. Внешние данные
+ * (не локальные), поэтому переносим как есть и обновляем при ресинке — как в Shopify-ingest.
+ */
+function wooSenderAddressFields(billing: FullWooOrder["billing"]) {
+  return {
+    senderAddressLine: billing?.address_1?.trim() || null,
+    senderApartment: billing?.address_2?.trim() || null,
+    senderCity: billing?.city?.trim() || null,
+    senderProvince: billing?.state?.trim() || null,
+    senderZip: billing?.postcode?.trim() || null,
+    senderCountry: billing?.country?.trim() || null,
+  };
+}
+
 const dec = (n: number): Prisma.Decimal => new Prisma.Decimal(Number.isFinite(n) ? n : 0);
 const money = (v: unknown): number => {
   const n = typeof v === "string" ? parseFloat(v) : typeof v === "number" ? v : 0;
@@ -130,6 +145,8 @@ export async function ingestWooOrder(
     deletedAt: null,
     lastSyncedAt: new Date(),
     syncStatus: "SYNCED" as const,
+    // Адрес отправителя (billing) — внешние данные, подтягиваем и при ресинке (как в Shopify).
+    ...wooSenderAddressFields(wooOrder.billing),
   });
   const applyUpdate = async (id: string, cur: OrderState): Promise<OrderState> => {
     const reconciled = reconcileOrderState(cur, incomingState, wooOrder.status ?? "pending");
@@ -179,6 +196,7 @@ export async function ingestWooOrder(
       senderName: mapped.senderName ?? normalized.sender.name,
       senderPhone: normalized.sender.phone ?? "",
       senderEmail: normalized.sender.email,
+      ...wooSenderAddressFields(wooOrder.billing),
       recipientName,
       recipientPhone,
       recipientEmail: normalized.recipient.email,

@@ -259,6 +259,32 @@ describe("read-only анализ ничего не пишет в БД", () => {
   });
 });
 
+describe("адрес отправителя из billing (WooCommerce)", () => {
+  const site = () => ({ id: siteId, shortName: SHORT });
+  const withBilling = (over: Record<string, unknown> = {}) => ({
+    id: 7000, number: "7000", status: "processing",
+    date_created_gmt: "2026-08-03T10:00:00", date_modified_gmt: "2026-08-03T10:00:00",
+    billing: { first_name: "Slava", last_name: "V", phone: "+1310", email: "s@x.com", address_1: "742 Evergreen Terrace", address_2: "Apt 5", city: "Springfield", state: "CA", postcode: "90210", country: "US" },
+    shipping: { first_name: "Ann", last_name: "R", phone: "+2", address_1: "1 St", city: "Town", postcode: "1000" },
+    line_items: [{ id: 1, name: "Woo Rose", product_id: 100, variation_id: 201, quantity: 1, price: "100" }],
+    total: "100",
+    ...over,
+  });
+  afterAll(async () => { await prisma.order.deleteMany({ where: { siteId, externalId: "7000" } }); });
+
+  it("создание: billing-адрес переносится в senderAddress*", async () => {
+    await ingestWooOrder(site(), withBilling() as never, ingestConfig);
+    const o = await prisma.order.findFirst({ where: { siteId, externalId: "7000" }, select: { senderAddressLine: true, senderApartment: true, senderCity: true, senderProvince: true, senderZip: true, senderCountry: true } });
+    expect(o).toMatchObject({ senderAddressLine: "742 Evergreen Terrace", senderApartment: "Apt 5", senderCity: "Springfield", senderProvince: "CA", senderZip: "90210", senderCountry: "US" });
+  });
+
+  it("ресинк: изменённый billing-адрес обновляется, удалённые поля обнуляются", async () => {
+    await ingestWooOrder(site(), withBilling({ date_modified_gmt: "2026-08-03T12:00:00", billing: { first_name: "Slava", last_name: "V", phone: "+1310", address_1: "10 New Rd", city: "Newtown", state: "NY", postcode: "10001", country: "US" } }) as never, ingestConfig);
+    const o = await prisma.order.findFirst({ where: { siteId, externalId: "7000" }, select: { senderAddressLine: true, senderCity: true, senderProvince: true, senderApartment: true } });
+    expect(o).toMatchObject({ senderAddressLine: "10 New Rd", senderCity: "Newtown", senderProvince: "NY", senderApartment: null });
+  });
+});
+
 describe("авто-назначение флориста (WooCommerce — как в Shopify)", () => {
   let floristId = "";
   const email = `wf-${RUN}@x.com`;

@@ -25,6 +25,7 @@ type WooAddress = {
   address_1?: string;
   address_2?: string;
   city?: string;
+  state?: string; // код штата/провинции (напр. "CA")
   postcode?: string;
   country?: string;
 };

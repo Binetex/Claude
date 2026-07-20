@@ -4,7 +4,7 @@ import { format } from "date-fns";
 import { getForOwner } from "@/modules/orders/queries";
 import { prisma } from "@/lib/db";
 import { Card, CardHeader, CardTitle, CardBody } from "@/components/ui/Card";
-import { OrderStatusBadge, PaymentStatusBadge, AssignmentStatusBadge, DeliveryStatusBadge } from "@/components/StatusBadge";
+import { OrderStatusBadge, PaymentStatusBadge, AssignmentStatusBadge } from "@/components/StatusBadge";
 import { ZoomableImage } from "@/components/ImageLightbox";
 import { Separator } from "@/components/ui/misc";
 import { formatMoney } from "@/lib/money";
@@ -82,7 +82,9 @@ export default async function OwnerOrderPage({ params }: { params: Promise<{ id:
           id: true, status: true, rawProviderStatus: true, attemptNumber: true, externalDeliveryId: true,
           finalCost: true, currency: true, providerName: true, finalCostUpdatedAt: true,
           courierName: true, courierPhone: true, trackingUrl: true,
-          proofOfDeliveryUrls: true, signatureImageUrl: true,
+          proofOfDeliveryUrls: true, signatureImageUrl: true, deliveredAt: true,
+          // История статусов — чтобы показать «Курьер вызван» (первый активный статус курьера) и «Доставка завершена».
+          statusEvents: { select: { normalizedStatus: true, occurredAt: true, receivedAt: true }, orderBy: { receivedAt: "asc" } },
         },
       }),
       prisma.deliveryIntent.findUnique({
@@ -118,6 +120,14 @@ export default async function OwnerOrderPage({ params }: { params: Promise<{ id:
   } catch {
     // Burq-таблицы недоступны — панель доставки просто не покажет данные.
   }
+
+  // «Курьер вызван» = первый статус, где курьер уже задействован; «Доставка завершена» = deliveredAt / статус DELIVERED.
+  const COURIER_ACTIVE = new Set(["COURIER_ASSIGNED", "COURIER_EN_ROUTE_TO_PICKUP", "AT_PICKUP", "PICKED_UP", "IN_TRANSIT"]);
+  const evts = currentDelivery?.statusEvents ?? [];
+  const startedEvt = evts.find((e) => COURIER_ACTIVE.has(e.normalizedStatus));
+  const deliveredEvt = evts.find((e) => e.normalizedStatus === "DELIVERED");
+  const courierCalledAt: Date | null = startedEvt ? (startedEvt.occurredAt ?? startedEvt.receivedAt) : null;
+  const deliveryCompletedAt: Date | null = deliveredEvt ? (deliveredEvt.occurredAt ?? deliveredEvt.receivedAt) : (currentDelivery?.deliveredAt ?? null);
 
   return (
     <div className="space-y-4">
@@ -254,9 +264,9 @@ export default async function OwnerOrderPage({ params }: { params: Promise<{ id:
                 </div>
               )}
               <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
-                <Info label="Статус" value={<DeliveryStatusBadge status={order.deliveryStatus} />} />
+                <Info label="Курьер вызван" value={fmtLocalDateTime(courierCalledAt, storeTimeZone)} />
+                <Info label="Доставка завершена" value={fmtLocalDateTime(deliveryCompletedAt, storeTimeZone)} />
                 <Info label="Tracking" value={order.trackingUrl ? <a href={order.trackingUrl} className="text-sky-600 underline" target="_blank" rel="noreferrer">Открыть</a> : "—"} />
-                <Info label="Готовность" value={order.readyAt ? fmtDateTime(order.readyAt) : "—"} />
                 {order.bouquetPhotoUrl && (
                   <div><div className="mb-1 text-xs text-slate-400">Фото букета</div><ZoomableImage src={order.bouquetPhotoUrl} alt="" className="h-24 w-24 rounded-lg object-cover" /></div>
                 )}
@@ -354,6 +364,16 @@ export default async function OwnerOrderPage({ params }: { params: Promise<{ id:
       </div>
     </div>
   );
+}
+
+/** Дата/время в местном (для магазина) часовом поясе. "—" если нет значения. */
+function fmtLocalDateTime(d: Date | string | null | undefined, timeZone?: string): string {
+  if (!d) return "—";
+  try {
+    return new Intl.DateTimeFormat("ru-RU", { dateStyle: "short", timeStyle: "short", ...(timeZone ? { timeZone } : {}) }).format(new Date(d));
+  } catch {
+    return new Date(d).toLocaleString("ru-RU");
+  }
 }
 
 function Info({ label, value }: { label: string; value: React.ReactNode }) {
