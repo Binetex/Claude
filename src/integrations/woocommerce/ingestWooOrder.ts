@@ -147,6 +147,8 @@ export async function ingestWooOrder(
     syncStatus: "SYNCED" as const,
     // Адрес отправителя (billing) — внешние данные, подтягиваем и при ресинке (как в Shopify).
     ...wooSenderAddressFields(wooOrder.billing),
+    // Чаевые (Fees) — внешние данные, обновляем при ресинке (исправляет старые заказы с tip=0).
+    tip: dec(normalized.money.tip),
   });
   const applyUpdate = async (id: string, cur: OrderState): Promise<OrderState> => {
     const reconciled = reconcileOrderState(cur, incomingState, wooOrder.status ?? "pending");
@@ -210,6 +212,7 @@ export async function ingestWooOrder(
       originalCustomerNote: mapped.deliveryInstructions ?? "",
       itemsTotal: dec(normalized.money.itemsTotal),
       tax: dec(normalized.money.tax),
+      tip: dec(normalized.money.tip), // WooCommerce Fees = чаевые
       discount: dec(normalized.money.discount),
       deliveryCustomerCost: dec(normalized.money.deliveryCost),
       customerTotal: dec(normalized.money.total),

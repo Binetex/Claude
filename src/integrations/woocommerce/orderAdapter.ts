@@ -49,6 +49,8 @@ export type WooOrder = {
   billing?: WooAddress;
   shipping?: WooAddress;
   line_items?: WooLineItem[];
+  // Строки «Fees» WooCommerce. На сайтах Floremart Fees = чаевые (tip). Сумма total всех fee_lines → tip.
+  fee_lines?: { name?: string; total?: string | number; total_tax?: string | number }[];
   total?: string | number;
   total_tax?: string | number;
   shipping_total?: string | number;
@@ -102,6 +104,8 @@ export function parseWooOrder(order: WooOrder): NormalizedOrder {
   const deliveryCost = num(order.shipping_total);
   const discount = num(order.discount_total);
   const itemsTotal = items.reduce((s, i) => s + i.unitPrice * i.quantity, 0);
+  // Fees WooCommerce = чаевые: суммируем total всех fee_lines (уже входит в order.total).
+  const tip = (order.fee_lines ?? []).reduce((s, f) => s + num(f.total), 0);
 
   return {
     platform: "WOOCOMMERCE",
@@ -131,7 +135,7 @@ export function parseWooOrder(order: WooOrder): NormalizedOrder {
     cardMessage: order.customer_note ?? "",
     customerNote: "",
     items,
-    money: { itemsTotal, tax, tip: 0, discount, deliveryCost, total },
+    money: { itemsTotal, tax, tip, discount, deliveryCost, total },
     status,
     raw: order,
   };

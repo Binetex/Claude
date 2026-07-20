@@ -53,6 +53,15 @@ describe("WooCommerce OrderAdapter — нормализация заказа", (
     expect(o.money.total).toBe(110.5);
     expect(o.money.itemsTotal).toBeCloseTo(110.5); // 49*2 + 12.5
   });
+
+  it("tip = сумма fee_lines (WooCommerce Fees = чаевые)", () => {
+    const o = parseWooOrder({ ...sampleWoo, fee_lines: [{ name: "Tip", total: "7.00" }, { name: "Gratuity", total: "3.50" }] });
+    expect(o.money.tip).toBeCloseTo(10.5);
+  });
+
+  it("нет fee_lines → tip = 0", () => {
+    expect(parseWooOrder(sampleWoo).money.tip).toBe(0);
+  });
 });
 
 describe("mapWooStatus — маппинг статусов Woo → внутренние", () => {
