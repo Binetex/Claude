@@ -1,6 +1,7 @@
 "use client";
-import { useActionState, useState } from "react";
+import { useActionState } from "react";
 import { Button } from "@/components/ui/button";
+import { ZoomableImage } from "@/components/ImageLightbox";
 import { resolveDeliveryAction, createNewDeliveryAttemptAction, refetchPodAction } from "./deliveryActions";
 import { BurqLinkForm } from "./BurqLinkForm";
 
@@ -20,16 +21,9 @@ export type DeliveryPanelData = {
   signatureImageUrl: string | null;
 } | null;
 
-/** POD-миниатюра с обработкой битой ссылки (не ломает карточку). */
+/** POD-миниатюра: по клику открывается крупно в лайтбоксе (без перехода по ссылке и без скачивания). */
 function PodImage({ url }: { url: string }) {
-  const [broken, setBroken] = useState(false);
-  if (broken) return <span className="inline-flex h-16 items-center rounded border border-slate-200 bg-slate-50 px-2 text-[10px] text-slate-400">Фото больше недоступно в Burq</span>;
-  return (
-    <a href={url} target="_blank" rel="noopener noreferrer" title="Открыть фото">
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src={url} alt="Proof of delivery" onError={() => setBroken(true)} className="h-16 w-16 rounded border border-slate-200 object-cover hover:opacity-90" />
-    </a>
-  );
+  return <ZoomableImage src={url} alt="Proof of delivery" className="h-16 w-16 rounded border border-slate-200 object-cover" />;
 }
 
 export type DeliveryAttempt = {
@@ -208,12 +202,9 @@ export function BurqDeliveryPanel({
                 </form>
               </div>
               {delivery.proofOfDeliveryUrls.length > 0 ? (
-                <>
-                  <div className="flex flex-wrap gap-2">
-                    {delivery.proofOfDeliveryUrls.map((u, i) => <PodImage key={i} url={u} />)}
-                  </div>
-                  <a href={delivery.proofOfDeliveryUrls[0]} target="_blank" rel="noopener noreferrer" className="mt-1 inline-block text-xs text-sky-600 underline">Открыть фото</a>
-                </>
+                <div className="flex flex-wrap gap-2">
+                  {delivery.proofOfDeliveryUrls.map((u, i) => <PodImage key={i} url={u} />)}
+                </div>
               ) : isDelivered ? (
                 <div className="text-xs text-amber-700">Burq не вернул фотографию подтверждения доставки.</div>
               ) : (
