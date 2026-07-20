@@ -259,6 +259,55 @@ describe("read-only анализ ничего не пишет в БД", () => {
   });
 });
 
+describe("авто-назначение флориста (WooCommerce — как в Shopify)", () => {
+  let floristId = "";
+  const email = `wf-${RUN}@x.com`;
+  const wooOrder2 = (over: Record<string, unknown> = {}) => ({
+    id: 6100, number: "6100", status: "processing",
+    date_created_gmt: "2026-08-02T10:00:00", date_modified_gmt: "2026-08-02T10:00:00",
+    billing: { first_name: "J", last_name: "B", phone: "+1", email: "j@x.com" },
+    shipping: { first_name: "A", last_name: "R", phone: "+2", address_1: "1 St", city: "T", postcode: "1000" },
+    line_items: [{ id: 1, name: "Woo Rose", product_id: 100, variation_id: 201, quantity: 1, price: "100" }],
+    total: "100", total_tax: "0", shipping_total: "0", discount_total: "0",
+    ...over,
+  });
+
+  beforeAll(async () => {
+    const user = await prisma.user.create({ data: { name: "Woo Florist", email, role: "FLORIST", passwordHash: "x" } });
+    const florist = await prisma.florist.create({ data: { userId: user.id, active: true, financeVisibility: "FULL" } });
+    floristId = florist.id;
+    await prisma.siteFloristPriority.create({ data: { siteId, floristId, position: 0 } });
+  });
+  afterAll(async () => {
+    await prisma.orderAssignment.deleteMany({ where: { floristId } });
+    await prisma.order.deleteMany({ where: { siteId, externalId: { in: ["6100", "6200"] } } });
+    await prisma.siteFloristPriority.deleteMany({ where: { siteId } });
+    await prisma.florist.deleteMany({ where: { id: floristId } });
+    await prisma.user.deleteMany({ where: { email } });
+  });
+
+  const site = () => ({ id: siteId, shortName: SHORT });
+
+  it("новый processing (оплачен) заказ → автоматически назначается основному флористу", async () => {
+    const r = await ingestWooOrder(site(), wooOrder2() as never, ingestConfig);
+    expect(r.status).toBe("created");
+    const saved = await prisma.order.findFirst({ where: { siteId, externalId: "6100" }, select: { assignmentStatus: true, currentFloristId: true, orderStatus: true } });
+    expect(saved).toMatchObject({ assignmentStatus: "ASSIGNED", currentFloristId: floristId, orderStatus: "ASSIGNED" });
+  });
+
+  it("новый pending (не оплачен) заказ → НЕ назначается (остаётся UNASSIGNED)", async () => {
+    await ingestWooOrder(site(), wooOrder2({ id: 6200, number: "6200", status: "pending", date_modified_gmt: "2026-08-02T11:00:00" }) as never, ingestConfig);
+    const saved = await prisma.order.findFirst({ where: { siteId, externalId: "6200" }, select: { assignmentStatus: true, currentFloristId: true, orderStatus: true } });
+    expect(saved).toMatchObject({ assignmentStatus: "UNASSIGNED", currentFloristId: null, orderStatus: "AWAITING_PAYMENT" });
+  });
+
+  it("переход pending → processing существующего заказа → назначается флористу", async () => {
+    await ingestWooOrder(site(), wooOrder2({ id: 6200, number: "6200", status: "processing", date_modified_gmt: "2026-08-02T12:00:00" }) as never, ingestConfig);
+    const saved = await prisma.order.findFirst({ where: { siteId, externalId: "6200" }, select: { assignmentStatus: true, currentFloristId: true } });
+    expect(saved).toMatchObject({ assignmentStatus: "ASSIGNED", currentFloristId: floristId });
+  });
+});
+
 describe("disconnect (сценарий 22)", () => {
   it("отключение сохраняет товары и заказы, чистит credentials", async () => {
     const productsBefore = await prisma.product.count({ where: { siteId } });

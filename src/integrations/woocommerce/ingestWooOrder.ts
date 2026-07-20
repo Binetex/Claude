@@ -18,6 +18,23 @@ import { classifyWooPayment, type WooPaymentConfig, type WooOrderForPayment } fr
 import { deriveWooOrderState, reconcileOrderState, type OrderState } from "./orderState";
 import { resolveMappedOrderFields, type OrderMetaMapping } from "./orderMeta";
 import { scheduleDeliveryForNewOrder } from "@/integrations/delivery/burq/scheduleService";
+import { assignInitial } from "@/modules/assignments/service";
+
+/**
+ * Авто-назначение основного флориста при переходе заказа в CONFIRMED (оплачен / в работу) —
+ * зеркалит поведение Shopify-ingest. Идемпотентно (assignInitial не переназначает уже назначенный
+ * заказ) и срабатывает только на ПЕРЕХОДЕ в CONFIRMED, а не на каждом обновлении. Best-effort:
+ * сбой назначения не ломает приём заказа.
+ */
+async function autoAssignWooIfConfirmed(orderId: string, prev: OrderState | null, next: OrderState): Promise<void> {
+  const becameConfirmed = next.orderStatus === "CONFIRMED" && (!prev || prev.orderStatus !== "CONFIRMED");
+  if (!becameConfirmed) return;
+  try {
+    await assignInitial(orderId);
+  } catch (e) {
+    console.error(`[assign] авто-назначение WooCommerce заказа ${orderId} не удалось:`, e instanceof Error ? e.message : String(e));
+  }
+}
 
 export type WooIngestConfig = {
   payment: WooPaymentConfig;
@@ -114,14 +131,17 @@ export async function ingestWooOrder(
     lastSyncedAt: new Date(),
     syncStatus: "SYNCED" as const,
   });
-  const applyUpdate = async (id: string, cur: OrderState) => {
+  const applyUpdate = async (id: string, cur: OrderState): Promise<OrderState> => {
     const reconciled = reconcileOrderState(cur, incomingState, wooOrder.status ?? "pending");
     await prisma.order.update({ where: { id }, data: externalUpdateData(reconciled) });
+    return reconciled;
   };
 
   // ── UPDATE существующего.
   if (existing) {
-    await applyUpdate(existing.id, { orderStatus: existing.orderStatus, paymentStatus: existing.paymentStatus });
+    const prev: OrderState = { orderStatus: existing.orderStatus, paymentStatus: existing.paymentStatus };
+    const reconciled = await applyUpdate(existing.id, prev);
+    await autoAssignWooIfConfirmed(existing.id, prev, reconciled);
     return { status: "updated", orderId: existing.id, classification: payment.classification };
   }
 
@@ -213,12 +233,16 @@ export async function ingestWooOrder(
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
       const race = await prisma.order.findFirst({ where: { siteId: site.id, externalId }, select: { id: true, orderStatus: true, paymentStatus: true } });
       if (race) {
-        await applyUpdate(race.id, { orderStatus: race.orderStatus, paymentStatus: race.paymentStatus });
+        const prev: OrderState = { orderStatus: race.orderStatus, paymentStatus: race.paymentStatus };
+        const reconciled = await applyUpdate(race.id, prev);
+        await autoAssignWooIfConfirmed(race.id, prev, reconciled);
         return { status: "updated", orderId: race.id, classification: payment.classification };
       }
     }
     throw err;
   }
+  // Авто-назначение основного флориста для нового оплаченного заказа (как в Shopify-ingest).
+  await autoAssignWooIfConfirmed(created.id, null, incomingState);
   // Единый вызов планировщика доставки после сохранения заказа (best-effort — не ломаем импорт).
   try {
     await scheduleDeliveryForNewOrder(prisma, created.id);
