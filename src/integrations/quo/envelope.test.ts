@@ -106,6 +106,21 @@ describe("parseQuoWebhook — реальные объекты звонков QUO
     expect(e).toMatchObject({ kind: "call", direction: "OUTBOUND", externalPhone: STORE, phoneNumberId: "PNUqzT3K0J" });
   });
 
+  it("исходящий отвеченный без from/to, participants=[store,customer] → external=customer, OUTBOUND (НЕ self-call)", () => {
+    // Регрессия #20282: participants[0] = номер магазина; собеседник — второй участник.
+    const e = parseQuoWebhook(env("call.completed", {
+      id: "AC5aade9", direction: "outgoing", status: "completed",
+      participants: [STORE, CUST], duration: 33, answeredAt: "2026-07-20T17:57:43.003Z",
+      completedAt: "2026-07-20T17:58:10Z", createdAt: "2026-07-20T17:57:37Z", phoneNumberId: "PNUqzT3K0J",
+    }));
+    expect(e).toMatchObject({ kind: "call", type: "CALL", direction: "OUTBOUND", status: "COMPLETED", externalPhone: CUST, storePhone: STORE, durationSeconds: 33 });
+  });
+
+  it("входящий отвеченный без from/to, participants=[customer,store] → external=customer (не ломается)", () => {
+    const e = parseQuoWebhook(env("call.completed", { id: "ACin2", direction: "incoming", status: "completed", participants: [CUST, STORE], duration: 20, answeredAt: "2026-07-20T18:00:00Z" }));
+    expect(e).toMatchObject({ direction: "INBOUND", externalPhone: CUST, storePhone: STORE, status: "COMPLETED" });
+  });
+
   it("отвеченный без длительности (робот принял мгновенно): answeredAt задан → НЕ missed", () => {
     const e = parseQuoWebhook(env("call.completed", {
       id: "ACrobot", direction: "incoming", status: "completed",

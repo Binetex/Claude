@@ -127,14 +127,17 @@ export function parseQuoWebhook(input: unknown): NormalizedQuoEvent | null {
   if (eventType === "call.completed" || eventType === "call.ringing") {
     const c = obj as QuoCallObject;
     const isRinging = eventType === "call.ringing";
-    const to = c.to ?? null;
-    let external = null as string | null;
-    let store = null as string | null;
-    if (c.from || to) {
-      ({ externalPhone: external, storePhone: store } = partiesFor(c.direction, c.from ?? null, to));
-    } else if (Array.isArray(c.participants) && c.participants.length) {
-      external = c.participants[0] ?? null; // fallback: без from/to берём первого участника
-      store = c.participants[1] ?? null;
+    // Собеседника определяем ЧЕРЕЗ direction. Если from/to нет — берём participants как [from, to]
+    // (participants[0]=from, [1]=to) и отдаём в partiesFor. Это важно для outgoing: там первый
+    // участник — номер магазина, а собеседник — второй (иначе исходящий звонок ошибочно принимался
+    // за self-call на собственный номер и отбрасывался).
+    const parts = Array.isArray(c.participants) ? c.participants : [];
+    const from = c.from ?? parts[0] ?? null;
+    const to = c.to ?? parts[1] ?? null;
+    let external: string | null = null;
+    let store: string | null = null;
+    if (from || to) {
+      ({ externalPhone: external, storePhone: store } = partiesFor(c.direction, from, to));
     }
 
     // call.ringing без собеседника — ранний бесполезный сигнал, пропускаем.

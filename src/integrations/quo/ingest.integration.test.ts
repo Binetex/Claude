@@ -160,6 +160,19 @@ describe("ingestQuoEvent — привязка и идемпотентность"
     expect(comm).toMatchObject({ type: "CALL", status: "MISSED", direction: "INBOUND", orderId: null, externalPhone: "", readAt: null });
   });
 
+  it("исходящий отвеченный звонок participants=[store,customer] → НЕ self-call, создаётся OUTBOUND и привязывается (регрессия #20282)", async () => {
+    const cust = uniquePhone();
+    // клиент — получатель заказа (как в #20282, звонок на recipient).
+    const orderId = await makeOrder({ senderPhone: uniquePhone(), recipientPhone: cust, deliveryDate: today() });
+    const eid = `EV_out_${suffix}`;
+    const res = await ingestQuoEvent(prisma, ev("call.completed", {
+      id: `AC_out_${suffix}`, direction: "outgoing", status: "completed", participants: [STORE, cust], duration: 33, answeredAt: "2026-07-20T17:57:43Z", phoneNumberId: PN_ID,
+    }, eid));
+    expect(res).toMatchObject({ outcome: "created", orderId });
+    const comm = await prisma.orderCommunication.findUnique({ where: { provider_providerEventId: { provider: "QUO", providerEventId: eid } } });
+    expect(comm).toMatchObject({ orderId, type: "CALL", direction: "OUTBOUND", status: "COMPLETED", partyRole: "RECIPIENT", durationSeconds: 33 });
+  });
+
   it("реальный отвеченный входящий (from/to отсутствуют, есть participants) → привязка к заказу", async () => {
     const cust = uniquePhone();
     const eid = `EV_ans_${suffix}`;
