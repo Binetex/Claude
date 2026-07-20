@@ -134,10 +134,12 @@ export async function recomputeEstimatedProfit(
 ) {
   const order = await tx.order.findUnique({ where: { id: orderId } });
   if (!order) return;
-  // Прибыль ≈ сумма товаров (без налога/чаевых) − цена флориста − фактическая доставка.
+  // Прибыль ≈ сумма товаров (без налога) − цена флориста − фактическая доставка + чаевые.
+  // Чаевые целиком идут владельцу (налог — сквозной, в прибыль не входит).
   const profit = order.itemsTotal
     .sub(order.floristTotal)
-    .sub(order.deliveryActualCost);
+    .sub(order.deliveryActualCost)
+    .add(order.tip);
   await tx.order.update({
     where: { id: orderId },
     data: { estimatedProfit: profit },

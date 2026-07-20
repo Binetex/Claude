@@ -436,7 +436,7 @@ describe("Uber cost capture (Path A)", () => {
     expect(del!.providerExternalId).toBe("prov_uber_1");
     const ord = await prisma.order.findUnique({ where: { id: orderId } });
     expect(Number(ord!.deliveryActualCost)).toBe(15.5);
-    expect(Number(ord!.estimatedProfit)).toBe(Number(ord!.itemsTotal) - Number(ord!.floristTotal) - 15.5);
+    expect(Number(ord!.estimatedProfit)).toBe(Number(ord!.itemsTotal) - Number(ord!.floristTotal) - 15.5 + Number(ord!.tip));
     expect(ord!.orderStatus).toBe("AWAITING_COURIER"); // из маппинга driver_assigned
     expect(ord!.paymentStatus).toBe(before!.paymentStatus); // Payment не меняется
   });
