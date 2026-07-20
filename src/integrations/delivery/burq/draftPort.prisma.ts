@@ -8,6 +8,7 @@ import "server-only";
 import type { PrismaClient } from "@/generated/prisma/client";
 import { mapBurqStatus } from "./statusMap";
 import { getBurqDimensions } from "./settings";
+import { combineDropoffNotes } from "./dropoffNotes";
 import type { DraftContext, DraftCreatePort, PersistDraftInput } from "./draftHandler";
 
 export function createPrismaDraftPort(prisma: PrismaClient): DraftCreatePort {
@@ -27,7 +28,7 @@ export function createPrismaDraftPort(prisma: PrismaClient): DraftCreatePort {
           city: true,
           zip: true,
           customerNote: true,
-          site: { select: { burqDraftAutoCreateEnabled: true } },
+          site: { select: { burqDraftAutoCreateEnabled: true, burqDefaultDropoffInstructions: true } },
           deliveryIntent: { select: { scheduleVersion: true } },
           currentFlorist: { select: { id: true, pickupLocation: true } },
           deliveries: { select: { attemptNumber: true, isCurrentAttempt: true, externalDeliveryId: true } },
@@ -56,7 +57,8 @@ export function createPrismaDraftPort(prisma: PrismaClient): DraftCreatePort {
             // dropoff может требовать штат; см. отчёт о недостающих полях).
             recipientState: null,
             zip: order.zip,
-            dropoffInstructions: order.customerNote?.trim() ? order.customerNote : null,
+            // Стандартный dropoff-текст магазина + инструкция заказа (дедуп, пустое → null).
+            dropoffInstructions: combineDropoffNotes(order.site?.burqDefaultDropoffInstructions, order.customerNote),
           },
         },
         floristId: order.currentFloristId,

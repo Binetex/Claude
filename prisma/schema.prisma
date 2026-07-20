@@ -348,6 +348,9 @@ model Site {
   // ── Burq автосоздание черновиков доставки ──
   burqDraftAutoCreateEnabled Boolean @default(false)
   burqDraftCreationLocalTime String  @default("04:00") // локальное время (HH:mm) утреннего создания черновиков
+  // Единый текст dropoff-инструкций магазина, автоматически добавляемый во все новые Burq draft.
+  // Пусто/NULL → стандартная инструкция выключена (отдельный boolean не нужен).
+  burqDefaultDropoffInstructions String?
 
   // ── QUO (ex-OpenPhone): номер магазина для исходящих SMS ──
   quoPhoneNumberId String? // QUO phone number id (PN…) — используется как `from` при отправке

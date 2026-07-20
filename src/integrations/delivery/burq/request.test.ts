@@ -104,4 +104,13 @@ describe("buildBurqDraftRequest — контракт Create Order V2", () => {
     expect(req.items).toEqual([{ name: "Roses", quantity: 2, unit_price: 5000 }]);
     expect(req.order_value).toBe(50000);
   });
+
+  it("объединённый dropoff-текст → dropoff.notes; pickup.notes = courierInstructions и НЕ зависит от dropoff", () => {
+    const a = buildBurqDraftRequest("o:a1", { ...order, dropoffInstructions: "AAA" }, pickup);
+    const b = buildBurqDraftRequest("o:a1", { ...order, dropoffInstructions: "SITE default\nGate 4521" }, pickup);
+    expect(a.dropoff.notes).toBe("AAA");
+    expect(b.dropoff.notes).toBe("SITE default\nGate 4521"); // объединённый текст проходит как есть
+    expect(a.pickup.notes).toBe("Ring bell");
+    expect(b.pickup.notes).toBe("Ring bell"); // pickup не меняется при разных dropoff-инструкциях
+  });
 });

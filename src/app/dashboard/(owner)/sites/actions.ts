@@ -35,6 +35,19 @@ export async function ownerSetSiteTimezone(siteId: string, timezone: string): Pr
   return { ok: true, message: `Часовой пояс: ${timezone}` };
 }
 
+/**
+ * Стандартный dropoff-текст магазина для Burq draft (Site.burqDefaultDropoffInstructions).
+ * Пустая строка → NULL (стандартная инструкция выключена). НЕ трогает уже созданные draft —
+ * применяется только к новым (draftPort читает поле при создании каждого черновика).
+ */
+export async function ownerSetSiteBurqDropoff(siteId: string, text: string): Promise<FormState> {
+  await requireRole("OWNER");
+  const trimmed = text.trim();
+  await prisma.site.update({ where: { id: siteId }, data: { burqDefaultDropoffInstructions: trimmed || null } });
+  revalidatePath("/dashboard/sites");
+  return { ok: true, message: trimmed ? "Сохранено" : "Стандартная dropoff-инструкция выключена" };
+}
+
 function guardCrypto(): string | null {
   return isCredentialCryptoConfigured()
     ? null

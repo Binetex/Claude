@@ -8,6 +8,7 @@ import { SiteSyncControls } from "./SiteSyncControls";
 import { WooSiteControls } from "./WooSiteControls";
 import { WooSettings } from "./WooSettings";
 import { SiteTimezoneSetting } from "./SiteTimezoneSetting";
+import { SiteBurqDropoffSetting } from "./SiteBurqDropoffSetting";
 import { diffScopes } from "@/integrations/shopify/customApp/scopes";
 import type { SyncStatusSnapshot } from "@/app/dashboard/(owner)/actions";
 
@@ -27,7 +28,7 @@ export default async function SitesPage() {
   const sites = await prisma.site.findMany({
     select: {
       id: true, name: true, shortName: true, platform: true, colorTag: true,
-      connectionStatus: true, shopifyShopDomain: true, timezone: true,
+      connectionStatus: true, shopifyShopDomain: true, timezone: true, burqDefaultDropoffInstructions: true,
       authMode: true, shopifyConnStatus: true, lastConnectionCheckAt: true, lastSyncAt: true,
       grantedScopes: true, connectionError: true,
       floristPriorities: {
@@ -167,6 +168,8 @@ export default async function SitesPage() {
               )}
 
               <SiteTimezoneSetting siteId={s.id} current={s.timezone} />
+
+              <SiteBurqDropoffSetting siteId={s.id} current={s.burqDefaultDropoffInstructions} />
 
               <div>
                 <div className="mb-1 text-xs text-slate-400">Приоритет флористов</div>
