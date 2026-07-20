@@ -184,4 +184,32 @@ describe("ingestQuoEvent — привязка и идемпотентность"
     const comm = await prisma.orderCommunication.findUnique({ where: { provider_providerEventId: { provider: "QUO", providerEventId: eid } } });
     expect(comm).toMatchObject({ orderId, type: "CALL", direction: "INBOUND", status: "COMPLETED", partyRole: "CUSTOMER", durationSeconds: 18 });
   });
+
+  it("call.recording.completed без URL → один GET (fetchRecording) догружает и прикрепляет запись", async () => {
+    const cust = uniquePhone();
+    const rid = `AC_recgap_${suffix}`;
+    await makeOrder({ senderPhone: cust, recipientPhone: uniquePhone(), deliveryDate: today() });
+    await ingestQuoEvent(prisma, ev("call.completed", { id: rid, from: cust, to: STORE, direction: "incoming", status: "completed", duration: 30 }, `EV_recgapC_${suffix}`));
+    const recEvent = ev("call.recording.completed", { callId: rid, status: "completed" }, `EV_recgapR_${suffix}`);
+    expect(recEvent.recordingUrl).toBeNull(); // webhook без URL
+    let asked: string | null = null;
+    const res = await ingestQuoEvent(prisma, recEvent, {
+      fetchRecording: async (callId) => { asked = callId; return { url: "https://rec/fetched.mp3", duration: 24 }; },
+    });
+    expect(res.outcome).toBe("enriched");
+    expect(asked).toBe(rid); // ровно один GET по callId
+    const comm = await prisma.orderCommunication.findFirst({ where: { provider: "QUO", providerResourceId: rid } });
+    expect(comm).toMatchObject({ recordingUrl: "https://rec/fetched.mp3", durationSeconds: 24 });
+  });
+
+  it("call.recording.completed без URL и без fetchRecording → не падает (запись без URL)", async () => {
+    const cust = uniquePhone();
+    const rid = `AC_recgap2_${suffix}`;
+    await makeOrder({ senderPhone: cust, recipientPhone: uniquePhone(), deliveryDate: today() });
+    await ingestQuoEvent(prisma, ev("call.completed", { id: rid, from: cust, to: STORE, direction: "incoming", status: "completed", duration: 30 }, `EV_recgap2C_${suffix}`));
+    const res = await ingestQuoEvent(prisma, ev("call.recording.completed", { callId: rid, status: "completed" }, `EV_recgap2R_${suffix}`));
+    expect(res.outcome).toBe("enriched");
+    const comm = await prisma.orderCommunication.findFirst({ where: { provider: "QUO", providerResourceId: rid } });
+    expect(comm?.recordingUrl ?? null).toBeNull();
+  });
 });

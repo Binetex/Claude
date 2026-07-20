@@ -24,6 +24,12 @@ export class QuoIngestRetryableError extends Error {
   }
 }
 
+/** Внешние зависимости ingest (инъекция для тестируемости). */
+export type QuoIngestDeps = {
+  /** Догрузка записи звонка, если webhook `call.recording.completed` пришёл без URL (один GET к QUO). */
+  fetchRecording?: (callId: string) => Promise<{ url: string | null; duration: number | null } | null>;
+};
+
 export type IngestResult =
   | { outcome: "created" | "updated" | "duplicate"; communicationId: string; orderId: string | null }
   | { outcome: "enriched"; matched: number }
@@ -61,14 +67,21 @@ async function isCallToOwnStoreNumber(prisma: PrismaClient, phoneNumberId: strin
   return !!own && own === ext;
 }
 
-export async function ingestQuoEvent(prisma: PrismaClient, event: NormalizedQuoEvent): Promise<IngestResult> {
+export async function ingestQuoEvent(prisma: PrismaClient, event: NormalizedQuoEvent, deps: QuoIngestDeps = {}): Promise<IngestResult> {
   // ── Обогащение звонка: запись/транскрипт/summary → апдейт существующей записи по call id ──
   if (event.kind === "recording" || event.kind === "transcript" || event.kind === "summary") {
     if (!event.resourceId) return { outcome: "skipped", reason: "enrichment_without_resource" };
     const data: Prisma.OrderCommunicationUpdateManyMutationInput = {};
     if (event.kind === "recording") {
-      data.recordingUrl = event.recordingUrl;
-      if (event.durationSeconds != null) data.durationSeconds = event.durationSeconds;
+      let url = event.recordingUrl;
+      let duration = event.durationSeconds;
+      // Webhook `call.recording.completed` часто НЕ содержит URL записи — делаем один GET к QUO.
+      if (!url && deps.fetchRecording) {
+        const fetched = await deps.fetchRecording(event.resourceId).catch(() => null);
+        if (fetched?.url) { url = fetched.url; if (fetched.duration != null) duration = fetched.duration; }
+      }
+      if (url) data.recordingUrl = url; // не затираем существующий URL пустым значением
+      if (duration != null) data.durationSeconds = duration;
     } else if (event.kind === "transcript") {
       data.transcript = event.transcript;
     } else {
