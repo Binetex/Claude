@@ -34,7 +34,23 @@ export type CommunicationCardItem = {
  * ПОМЕЧАЕТ входящие/пропущенные прочитанными при открытии. История — из локальной БД. Best-effort:
  * недоступность QUO-таблиц не должна ронять карточку (вызывающий оборачивает в try/catch).
  */
-export async function loadOrderCommunicationsCard(prisma: PrismaClient, orderId: string): Promise<{ communications: CommunicationCardItem[]; storeHasQuoNumber: boolean; storeTimeZone: string | undefined }> {
+/** Непрочитанные (входящие SMS / пропущенные звонки) по стороне заказа — считать ДО пометки прочитанным. */
+export async function countUnreadBySide(prisma: PrismaClient, orderId: string): Promise<{ customer: number; recipient: number }> {
+  const rows = await prisma.orderCommunication.groupBy({
+    by: ["partyRole"],
+    where: { orderId, readAt: null, OR: [{ type: "SMS", direction: "INBOUND" }, { type: { in: ["CALL", "VOICEMAIL"] }, status: "MISSED" }] },
+    _count: true,
+  });
+  const out = { customer: 0, recipient: 0 };
+  for (const r of rows) {
+    if (r.partyRole === "CUSTOMER") out.customer = r._count;
+    else if (r.partyRole === "RECIPIENT") out.recipient = r._count;
+  }
+  return out;
+}
+
+export async function loadOrderCommunicationsCard(prisma: PrismaClient, orderId: string): Promise<{ communications: CommunicationCardItem[]; storeHasQuoNumber: boolean; storeTimeZone: string | undefined; unread: { customer: number; recipient: number } }> {
+  const unread = await countUnreadBySide(prisma, orderId).catch(() => ({ customer: 0, recipient: 0 }));
   await markOrderCommunicationsRead(prisma, orderId).catch(() => 0);
   const [comms, site] = await Promise.all([
     prisma.orderCommunication.findMany({
@@ -57,6 +73,7 @@ export async function loadOrderCommunicationsCard(prisma: PrismaClient, orderId:
     })),
     storeHasQuoNumber: !!site?.quoPhoneNumberId,
     storeTimeZone: site?.timezone ?? undefined,
+    unread,
   };
 }
 

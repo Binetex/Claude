@@ -62,6 +62,33 @@ export function isLongText(text: string | null | undefined, threshold = COLLAPSE
   return !!text && text.length > threshold;
 }
 
+/**
+ * Вкладки блока общения по стороне заказа. Порядок: Получатель первым (слева), Заказчик справа.
+ * Если номер заказчика и получателя совпадает — одна вкладка «Клиент» (без дублей). `role` — по чему
+ * фильтровать историю (null = показать все, для совпадающего номера). `target` — куда слать SMS.
+ */
+export type CommTab = {
+  key: "RECIPIENT" | "CUSTOMER" | "SAME";
+  label: string;
+  phone: string;
+  target: "CUSTOMER" | "RECIPIENT";
+  role: "CUSTOMER" | "RECIPIENT" | null;
+};
+
+const last10 = (p: string | null | undefined): string => (p ?? "").replace(/\D/g, "").slice(-10);
+
+export function buildCommTabs(customerPhone: string, recipientPhone: string): CommTab[] {
+  const cust = last10(customerPhone);
+  const recip = last10(recipientPhone);
+  if (cust && cust === recip) {
+    return [{ key: "SAME", label: "Клиент", phone: recipientPhone || customerPhone, target: "RECIPIENT", role: null }];
+  }
+  return [
+    { key: "RECIPIENT", label: "Получатель", phone: recipientPhone, target: "RECIPIENT", role: "RECIPIENT" },
+    { key: "CUSTOMER", label: "Заказчик", phone: customerPhone, target: "CUSTOMER", role: "CUSTOMER" },
+  ];
+}
+
 export type Timelineable = { occurredAt: Date | string };
 /** Единый порядок ленты: новые сверху (desc). */
 export function sortTimelineDesc<T extends Timelineable>(items: T[]): T[] {

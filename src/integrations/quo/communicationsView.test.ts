@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isUnreadComm, computeIndicators, isLongText, sortTimelineDesc, type CommForIndicator } from "./communicationsView";
+import { isUnreadComm, computeIndicators, isLongText, sortTimelineDesc, buildCommTabs, type CommForIndicator } from "./communicationsView";
 
 describe("isUnreadComm — только входящие SMS и пропущенные звонки (§7)", () => {
   it("входящее SMS без readAt → unread", () => {
@@ -62,5 +62,26 @@ describe("isLongText / sortTimelineDesc", () => {
   it("лента — новые сверху (§16.1 порядок)", () => {
     const sorted = sortTimelineDesc([{ occurredAt: "2026-07-20T08:00:00Z" }, { occurredAt: "2026-07-20T10:00:00Z" }, { occurredAt: "2026-07-20T09:00:00Z" }]);
     expect(sorted.map((s) => s.occurredAt)).toEqual(["2026-07-20T10:00:00Z", "2026-07-20T09:00:00Z", "2026-07-20T08:00:00Z"]);
+  });
+});
+
+describe("buildCommTabs — вкладки по стороне заказа", () => {
+  it("разные номера → две вкладки: Получатель первым (слева), Заказчик справа", () => {
+    const tabs = buildCommTabs("+13105550001", "+13105550002");
+    expect(tabs.map((t) => t.label)).toEqual(["Получатель", "Заказчик"]);
+    expect(tabs.map((t) => t.role)).toEqual(["RECIPIENT", "CUSTOMER"]);
+    expect(tabs[0].target).toBe("RECIPIENT");
+    expect(tabs[0].phone).toBe("+13105550002"); // номер получателя
+  });
+
+  it("одинаковый номер (в разных форматах) → одна вкладка «Клиент», role=null (показать все)", () => {
+    const tabs = buildCommTabs("(310) 555-0001", "+13105550001");
+    expect(tabs).toHaveLength(1);
+    expect(tabs[0]).toMatchObject({ key: "SAME", label: "Клиент", role: null });
+  });
+
+  it("матчинг по последним 10 цифрам (игнор +1/форматирования)", () => {
+    expect(buildCommTabs("13105550001", "3105550001")).toHaveLength(1); // тот же номер
+    expect(buildCommTabs("3105550001", "3105550009")).toHaveLength(2); // разные
   });
 });

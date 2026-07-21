@@ -50,4 +50,23 @@ describe("CommunicationTimeline (render)", () => {
     expect(html).toContain("flex-wrap"); // шапка переносится
     expect(html).not.toMatch(/w-\[\d{3,}px\]/); // нет фиксированной ширины в сотни px
   });
+
+  it("исходящее → автор «🌸 Вы» (вместо «SMS»)", () => {
+    const html = renderToStaticMarkup(<CommunicationTimeline items={[item({ direction: "OUTBOUND", status: "DELIVERED", messageText: "hi" })]} inboundLabel="Получатель" />);
+    expect(html).toContain("Вы");
+    expect(html).not.toContain("→ SMS");
+  });
+
+  it("входящее → автор = метка активной вкладки (Получатель / Заказчик)", () => {
+    const recip = renderToStaticMarkup(<CommunicationTimeline items={[item({ direction: "INBOUND" })]} inboundLabel="Получатель" />);
+    expect(recip).toContain("Получатель");
+    const cust = renderToStaticMarkup(<CommunicationTimeline items={[item({ direction: "INBOUND" })]} inboundLabel="Заказчик" />);
+    expect(cust).toContain("Заказчик");
+  });
+
+  it("пропущенный входящий звонок: автор — сторона, статус «пропущен»", () => {
+    const html = renderToStaticMarkup(<CommunicationTimeline items={[item({ type: "CALL", direction: "INBOUND", status: "MISSED", messageText: null })]} inboundLabel="Заказчик" />);
+    expect(html).toContain("Заказчик");
+    expect(html).toContain("пропущен");
+  });
 });

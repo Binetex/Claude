@@ -23,7 +23,7 @@ export default async function FloristOrderPage({ params }: { params: Promise<{ i
   const order = await getForFlorist(id, user.floristId);
   if (!order) notFound();
 
-  const comm = await loadOrderCommunicationsCard(prisma, id).catch(() => ({ communications: [], storeHasQuoNumber: false, storeTimeZone: undefined }));
+  const comm = await loadOrderCommunicationsCard(prisma, id).catch(() => ({ communications: [], storeHasQuoNumber: false, storeTimeZone: undefined, unread: { customer: 0, recipient: 0 } }));
   const handoffTargets = await listActiveHandoffTargets(prisma, user.floristId).catch(() => []);
 
   const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
@@ -142,6 +142,7 @@ export default async function FloristOrderPage({ params }: { params: Promise<{ i
         storeHasQuoNumber={comm.storeHasQuoNumber}
         communications={comm.communications}
         storeTimeZone={comm.storeTimeZone}
+        unread={comm.unread}
       />
 
       {/* Основные кнопки процесса */}

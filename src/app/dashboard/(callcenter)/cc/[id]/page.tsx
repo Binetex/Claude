@@ -20,7 +20,7 @@ export default async function CallCenterOrderPage({ params }: { params: Promise<
   const order = await getForCallCenter(id);
   if (!order) notFound();
 
-  const comm = await loadOrderCommunicationsCard(prisma, id).catch(() => ({ communications: [], storeHasQuoNumber: false, storeTimeZone: undefined }));
+  const comm = await loadOrderCommunicationsCard(prisma, id).catch(() => ({ communications: [], storeHasQuoNumber: false, storeTimeZone: undefined, unread: { customer: 0, recipient: 0 } }));
 
   return (
     <div className="space-y-4">
@@ -106,6 +106,7 @@ export default async function CallCenterOrderPage({ params }: { params: Promise<
             storeHasQuoNumber={comm.storeHasQuoNumber}
             communications={comm.communications}
             storeTimeZone={comm.storeTimeZone}
+            unread={comm.unread}
           />
         </div>
 

@@ -18,7 +18,6 @@ export type TimelineItem = {
 };
 
 const STATUS_RU: Record<string, string> = { PENDING: "отправляется", SENT: "отправлено", DELIVERED: "доставлено", RECEIVED: "получено", COMPLETED: "звонок", MISSED: "пропущен", FAILED: "ошибка" };
-const ROLE_RU: Record<string, string> = { CUSTOMER: "покупатель", RECIPIENT: "получатель", UNKNOWN: "неизвестный" };
 const COLLAPSE = 300;
 
 function statusClass(s: string): string {
@@ -59,7 +58,7 @@ function CollapsibleText({ text, id, kind }: { text: string; id: string; kind: s
  * звонка — через безопасный <audio> + ссылку. Отсутствие записи/транскрипта — не ошибка.
  * Адаптивно: узкие блоки, break-words, без фиксированной ширины → корректно на 375px.
  */
-export function CommunicationTimeline({ items, storeTimeZone }: { items: TimelineItem[]; storeTimeZone?: string }) {
+export function CommunicationTimeline({ items, storeTimeZone, inboundLabel = "Клиент" }: { items: TimelineItem[]; storeTimeZone?: string; inboundLabel?: string }) {
   if (items.length === 0) return <div className="text-xs text-slate-400">Коммуникаций пока нет.</div>;
   return (
     <ul className="space-y-2">
@@ -67,8 +66,7 @@ export function CommunicationTimeline({ items, storeTimeZone }: { items: Timelin
         <li key={c.id} className="rounded border border-slate-100 bg-slate-50 p-2 text-xs">
           <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
             <span className="font-medium text-slate-700">
-              {c.direction === "OUTBOUND" ? "→" : "←"} {c.type === "SMS" ? "SMS" : c.type === "VOICEMAIL" ? "Voicemail" : "Звонок"}
-              <span className="ml-1 text-slate-400">· {ROLE_RU[c.partyRole]}</span>
+              {c.direction === "OUTBOUND" ? "🌸 Вы" : inboundLabel}
             </span>
             <span className={statusClass(c.status)}>{STATUS_RU[c.status] ?? c.status}</span>
           </div>

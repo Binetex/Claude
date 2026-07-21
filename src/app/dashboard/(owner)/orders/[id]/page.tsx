@@ -17,7 +17,7 @@ import { ContactEditDialog } from "./ContactEditDialog";
 import { CardNoteCard } from "./CardNoteCard";
 import { BurqDeliveryPanel } from "./BurqDeliveryPanel";
 import { OrderCommunications, type CommItem } from "./OrderCommunications";
-import { markOrderCommunicationsRead } from "@/integrations/quo/communicationsService";
+import { markOrderCommunicationsRead, countUnreadBySide } from "@/integrations/quo/communicationsService";
 
 export const dynamic = "force-dynamic";
 
@@ -34,7 +34,10 @@ export default async function OwnerOrderPage({ params }: { params: Promise<{ id:
   let communications: CommItem[] = [];
   let storeHasQuoNumber = false;
   let storeTimeZone: string | undefined;
+  let commUnread = { customer: 0, recipient: 0 };
   try {
+    // Непрочитанные по сторонам считаем ДО пометки прочитанным (иначе всегда 0).
+    commUnread = await countUnreadBySide(prisma, id).catch(() => commUnread);
     // Открытие карточки → помечаем входящие SMS и пропущенные звонки прочитанными (командно).
     await markOrderCommunicationsRead(prisma, id).catch(() => 0);
     const [comms, siteQuo] = await Promise.all([
@@ -320,6 +323,7 @@ export default async function OwnerOrderPage({ params }: { params: Promise<{ id:
             storeHasQuoNumber={storeHasQuoNumber}
             communications={communications}
             storeTimeZone={storeTimeZone}
+            unread={commUnread}
           />
 
           {/* Легаси-блок «История сообщений» (модель Message) удалён: он никогда не наполнялся и
