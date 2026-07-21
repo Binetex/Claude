@@ -10,6 +10,10 @@ import { WooSettings } from "./WooSettings";
 import { SiteTimezoneSetting } from "./SiteTimezoneSetting";
 import { SiteBurqDropoffSetting } from "./SiteBurqDropoffSetting";
 import { SiteQuoSetting } from "./SiteQuoSetting";
+import { SiteQuoWebhookSecurity } from "./SiteQuoWebhookSecurity";
+import { listQuoSigningSecretsMasked } from "@/integrations/quo/signingSecrets";
+import { getQuoSigningKeys } from "@/integrations/quo/config";
+import { isCredentialCryptoConfigured } from "@/lib/crypto/secretBox";
 import { diffScopes } from "@/integrations/shopify/customApp/scopes";
 import type { SyncStatusSnapshot } from "@/app/dashboard/(owner)/actions";
 
@@ -77,6 +81,10 @@ export default async function SitesPage() {
     return { products: pick("PRODUCTS"), orders: pick("ORDERS") };
   };
 
+  const quoSecrets = await listQuoSigningSecretsMasked(prisma).catch(() => []);
+  const quoEnvCount = getQuoSigningKeys().length;
+  const quoCrypto = isCredentialCryptoConfigured();
+
   return (
     <div className="space-y-4">
       <h1 className="text-lg font-semibold text-slate-900">Сайты</h1>
@@ -85,6 +93,12 @@ export default async function SitesPage() {
         <div className="mb-2 text-sm font-semibold text-slate-700">Подключить новый магазин</div>
         <SiteConnectPanel />
       </Card>
+
+      <SiteQuoWebhookSecurity
+        secrets={quoSecrets.map((s) => ({ id: s.id, maskedSuffix: s.maskedSuffix, createdAt: s.createdAt.toISOString() }))}
+        envCount={quoEnvCount}
+        cryptoConfigured={quoCrypto}
+      />
 
       <div className="grid gap-4 md:grid-cols-2">
         {sites.map((s) => (

@@ -1053,3 +1053,22 @@ model OrderAudit {
   @@index([orderId, createdAt])
   @@index([userId, createdAt])
 }
+
+/**
+ * Зашифрованные секреты интеграций (глобально, не per-Site). Одна строка = один секрет.
+ * Значение — только в зашифрованном виде (AES-256-GCM, lib/crypto/secretBox). В UI отдаётся
+ * ТОЛЬКО `maskedSuffix` (маска), полное значение из браузера недоступно. Сейчас используется для
+ * QUO webhook signing secrets (provider="QUO", kind="webhook_signing_secret"); модель обобщаемая.
+ */
+model IntegrationSecret {
+  id             String   @id @default(cuid())
+  provider       String // "QUO"
+  kind           String // "webhook_signing_secret"
+  encryptedValue String // AES-256-GCM payload (никогда не отдаётся в браузер)
+  maskedSuffix   String // "********abcd" — только для UI
+  active         Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([provider, kind, active])
+}
