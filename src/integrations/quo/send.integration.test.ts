@@ -46,7 +46,7 @@ async function makeOrder(siteId: string): Promise<string> {
 }
 
 beforeAll(async () => {
-  siteWithNumber = (await prisma.site.create({ data: { name: `S1 ${suffix}`, shortName: "S1", platform: "WOOCOMMERCE", quoPhoneNumberId: STORE_PN, quoPhoneNumber: STORE_NUM } })).id;
+  siteWithNumber = (await prisma.site.create({ data: { name: `S1 ${suffix}`, shortName: "S1", platform: "WOOCOMMERCE", quoPhoneNumberId: STORE_PN, quoPhoneNumber: STORE_NUM, quoEnabled: true } })).id;
   siteNoNumber = (await prisma.site.create({ data: { name: `S2 ${suffix}`, shortName: "S2", platform: "WOOCOMMERCE" } })).id;
 });
 afterAll(async () => {

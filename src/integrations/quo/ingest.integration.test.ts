@@ -49,7 +49,7 @@ function ev(type: string, object: Record<string, unknown>, id: string): Normaliz
 }
 
 beforeAll(async () => {
-  const site = await prisma.site.create({ data: { name: `QUO Site ${suffix}`, shortName: "QUO", platform: "WOOCOMMERCE", quoPhoneNumberId: PN_ID, quoPhoneNumber: STORE } });
+  const site = await prisma.site.create({ data: { name: `QUO Site ${suffix}`, shortName: "QUO", platform: "WOOCOMMERCE", quoPhoneNumberId: PN_ID, quoPhoneNumber: STORE, quoEnabled: true } });
   siteId = site.id;
 });
 afterAll(async () => {

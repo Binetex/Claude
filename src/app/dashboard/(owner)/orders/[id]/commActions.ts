@@ -14,6 +14,7 @@ const ERR_RU: Record<string, string> = {
   too_long: "Слишком длинное сообщение (макс. 1600 символов).",
   invalid_target_phone: "У этого адресата некорректный номер телефона.",
   store_no_quo_number: "У магазина не настроен номер QUO для отправки SMS.",
+  store_quo_disabled: "QUO отключён для этого магазина — включите его в настройках сайта.",
   quo_not_configured: "Интеграция QUO не настроена.",
   order_not_found: "Заказ не найден.",
   missing_idempotency_key: "Повторите отправку.",

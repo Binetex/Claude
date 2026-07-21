@@ -33,7 +33,7 @@ export async function sendOrderSms(prisma: PrismaClient, client: QuoClient | nul
 
   const order = await prisma.order.findUnique({
     where: { id: input.orderId },
-    select: { id: true, senderPhone: true, recipientPhone: true, site: { select: { quoPhoneNumberId: true, quoPhoneNumber: true } } },
+    select: { id: true, senderPhone: true, recipientPhone: true, site: { select: { quoPhoneNumberId: true, quoPhoneNumber: true, quoEnabled: true } } },
   });
   if (!order) return { ok: false, code: "order_not_found" };
 
@@ -42,6 +42,7 @@ export async function sendOrderSms(prisma: PrismaClient, client: QuoClient | nul
 
   const fromId = order.site?.quoPhoneNumberId ?? null;
   if (!fromId) return { ok: false, code: "store_no_quo_number" }; // не отправляем без номера магазина
+  if (!order.site?.quoEnabled) return { ok: false, code: "store_quo_disabled" }; // магазин отключён
   if (!client) return { ok: false, code: "quo_not_configured" };
 
   // Durable идемпотентность: PENDING-запись с уникальным sendKey. P2002 → уже отправляли.

@@ -37,14 +37,19 @@ export type IngestResult =
 
 const CANDIDATE_WINDOW_MS = 90 * 24 * 3600 * 1000;
 
-/** Находит заказы-кандидаты, где нормализованный телефон совпадает с покупателем/получателем. */
-export async function findCandidateOrdersByPhone(prisma: PrismaClient, e164: string): Promise<CommOrderCandidate[]> {
+/**
+ * Находит заказы-кандидаты, где нормализованный телефон совпадает с покупателем/получателем.
+ * `siteId` (если задан) ограничивает поиск ОДНИМ магазином — маршрутизация входящих QUO-событий
+ * строго по номеру: событие номера магазина не может попасть в заказ другого магазина.
+ */
+export async function findCandidateOrdersByPhone(prisma: PrismaClient, e164: string, siteId?: string): Promise<CommOrderCandidate[]> {
   const select = { id: true, senderPhone: true, recipientPhone: true, deliveryDate: true, orderStatus: true } as const;
+  const siteFilter = siteId ? { siteId } : {};
   // 1) Точное совпадение по строке (покрывает чисто сохранённые E.164).
-  const exact = await prisma.order.findMany({ where: { OR: [{ senderPhone: e164 }, { recipientPhone: e164 }] }, select, take: 50 });
+  const exact = await prisma.order.findMany({ where: { ...siteFilter, OR: [{ senderPhone: e164 }, { recipientPhone: e164 }] }, select, take: 50 });
   // 2) Недавние заказы (покрывают разночтения форматирования) — фильтруем строго по toE164 в коде.
   const since = new Date(Date.now() - CANDIDATE_WINDOW_MS);
-  const recent = await prisma.order.findMany({ where: { OR: [{ createdAt: { gte: since } }, { deliveryDate: { gte: since } }] }, select, take: 500 });
+  const recent = await prisma.order.findMany({ where: { ...siteFilter, OR: [{ createdAt: { gte: since } }, { deliveryDate: { gte: since } }] }, select, take: 500 });
   const byId = new Map<string, (typeof exact)[number]>();
   for (const o of exact) byId.set(o.id, o);
   for (const o of recent) if (toE164(o.senderPhone) === e164 || toE164(o.recipientPhone) === e164) byId.set(o.id, o);
@@ -65,6 +70,12 @@ async function isCallToOwnStoreNumber(prisma: PrismaClient, phoneNumberId: strin
   const site = await prisma.site.findFirst({ where: { quoPhoneNumberId: phoneNumberId }, select: { quoPhoneNumber: true } });
   const own = site?.quoPhoneNumber ? toE164(site.quoPhoneNumber) : null;
   return !!own && own === ext;
+}
+
+/** Магазин-владелец QUO-номера события — для маршрутизации входящих строго в свой Site. */
+async function resolveQuoSiteByPhoneNumberId(prisma: PrismaClient, phoneNumberId: string | null): Promise<{ id: string; quoEnabled: boolean } | null> {
+  if (!phoneNumberId) return null;
+  return prisma.site.findFirst({ where: { quoPhoneNumberId: phoneNumberId }, select: { id: true, quoEnabled: true } });
 }
 
 export async function ingestQuoEvent(prisma: PrismaClient, event: NormalizedQuoEvent, deps: QuoIngestDeps = {}): Promise<IngestResult> {
@@ -148,14 +159,25 @@ export async function ingestQuoEvent(prisma: PrismaClient, event: NormalizedQuoE
   let partyRole: "CUSTOMER" | "RECIPIENT" | "UNKNOWN" = "UNKNOWN";
   let matchReason = "no_phone";
   if (e164) {
-    const candidates = await findCandidateOrdersByPhone(prisma, e164);
-    const m = matchCommunicationToOrder(e164, new Date(event.occurredAt), candidates);
-    if (m.matched) {
-      orderId = m.orderId;
-      partyRole = m.partyRole;
-      matchReason = "matched";
+    if (event.phoneNumberId) {
+      // Маршрутизация строго по номеру: сначала магазин-владелец номера, кандидаты — только его заказы.
+      const site = await resolveQuoSiteByPhoneNumberId(prisma, event.phoneNumberId);
+      if (!site) {
+        matchReason = "unknown_site"; // номер не привязан ни к одному Site → не матчим (unlinked)
+      } else if (!site.quoEnabled) {
+        matchReason = "site_disabled"; // магазин выключен → событие не привязываем к его заказам
+      } else {
+        const candidates = await findCandidateOrdersByPhone(prisma, e164, site.id);
+        const m = matchCommunicationToOrder(e164, new Date(event.occurredAt), candidates);
+        if (m.matched) { orderId = m.orderId; partyRole = m.partyRole; matchReason = "matched"; }
+        else matchReason = m.reason; // no_candidate | ambiguous → остаётся непривязанным
+      }
     } else {
-      matchReason = m.reason; // no_candidate | ambiguous → остаётся непривязанным
+      // Событие без phoneNumberId (нетипично) — прежнее поведение без скоупа по магазину.
+      const candidates = await findCandidateOrdersByPhone(prisma, e164);
+      const m = matchCommunicationToOrder(e164, new Date(event.occurredAt), candidates);
+      if (m.matched) { orderId = m.orderId; partyRole = m.partyRole; matchReason = "matched"; }
+      else matchReason = m.reason;
     }
   }
 

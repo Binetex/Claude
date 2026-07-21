@@ -355,8 +355,11 @@ model Site {
   burqDefaultDropoffInstructions String?
 
   // ── QUO (ex-OpenPhone): номер магазина для исходящих SMS ──
-  quoPhoneNumberId String? // QUO phone number id (PN…) — используется как `from` при отправке
-  quoPhoneNumber   String? // E.164 номер магазина (для отображения и storePhone)
+  quoPhoneNumberId   String? // QUO phone number id (PN…) — используется как `from` при отправке
+  quoPhoneNumber     String? // E.164 номер магазина (для отображения и storePhone)
+  quoEnabled         Boolean   @default(false) // QUO включён для магазина (гейт исходящих/входящих)
+  quoLastCheckAt     DateTime? // время последней успешной проверки подключения к QUO
+  quoConnectionError String? // безопасный текст ошибки последней проверки (без секретов)
 
   // Запрет двух активных Site одного платформенного домена (двойное подключение).
   @@unique([platform, normalizedShopDomain])

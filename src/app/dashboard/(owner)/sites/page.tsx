@@ -9,6 +9,7 @@ import { WooSiteControls } from "./WooSiteControls";
 import { WooSettings } from "./WooSettings";
 import { SiteTimezoneSetting } from "./SiteTimezoneSetting";
 import { SiteBurqDropoffSetting } from "./SiteBurqDropoffSetting";
+import { SiteQuoSetting } from "./SiteQuoSetting";
 import { diffScopes } from "@/integrations/shopify/customApp/scopes";
 import type { SyncStatusSnapshot } from "@/app/dashboard/(owner)/actions";
 
@@ -29,6 +30,7 @@ export default async function SitesPage() {
     select: {
       id: true, name: true, shortName: true, platform: true, colorTag: true,
       connectionStatus: true, shopifyShopDomain: true, timezone: true, burqDefaultDropoffInstructions: true,
+      quoPhoneNumberId: true, quoPhoneNumber: true, quoEnabled: true, quoLastCheckAt: true, quoConnectionError: true,
       authMode: true, shopifyConnStatus: true, lastConnectionCheckAt: true, lastSyncAt: true,
       grantedScopes: true, connectionError: true,
       floristPriorities: {
@@ -170,6 +172,17 @@ export default async function SitesPage() {
               <SiteTimezoneSetting siteId={s.id} current={s.timezone} />
 
               <SiteBurqDropoffSetting siteId={s.id} current={s.burqDefaultDropoffInstructions} />
+
+              <SiteQuoSetting
+                siteId={s.id}
+                current={{
+                  quoPhoneNumberId: s.quoPhoneNumberId,
+                  quoPhoneNumber: s.quoPhoneNumber,
+                  quoEnabled: s.quoEnabled,
+                  quoLastCheckAt: s.quoLastCheckAt ? s.quoLastCheckAt.toISOString() : null,
+                  quoConnectionError: s.quoConnectionError,
+                }}
+              />
 
               <div>
                 <div className="mb-1 text-xs text-slate-400">Приоритет флористов</div>

@@ -47,7 +47,7 @@ export default async function OwnerOrderPage({ params }: { params: Promise<{ id:
         take: 200,
         select: { id: true, type: true, direction: true, status: true, partyRole: true, externalPhone: true, messageText: true, durationSeconds: true, recordingUrl: true, transcript: true, summary: true, occurredAt: true, sentByUserId: true },
       }),
-      prisma.site.findFirst({ where: { orders: { some: { id } } }, select: { quoPhoneNumberId: true, timezone: true } }),
+      prisma.site.findFirst({ where: { orders: { some: { id } } }, select: { quoPhoneNumberId: true, quoEnabled: true, timezone: true } }),
     ]);
     const senderIds = [...new Set(comms.map((c) => c.sentByUserId).filter((x): x is string => !!x))];
     const users = senderIds.length ? await prisma.user.findMany({ where: { id: { in: senderIds } }, select: { id: true, name: true } }) : [];
@@ -58,7 +58,7 @@ export default async function OwnerOrderPage({ params }: { params: Promise<{ id:
       recordingUrl: c.recordingUrl, transcript: c.transcript, summary: c.summary,
       occurredAt: c.occurredAt.toISOString(), sentByName: c.sentByUserId ? nameById.get(c.sentByUserId) ?? null : null,
     }));
-    storeHasQuoNumber = !!siteQuo?.quoPhoneNumberId;
+    storeHasQuoNumber = !!(siteQuo?.quoPhoneNumberId && siteQuo?.quoEnabled);
     storeTimeZone = siteQuo?.timezone ?? undefined;
   } catch {
     // QUO-таблицы недоступны — блок общения просто не покажет историю.

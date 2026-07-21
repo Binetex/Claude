@@ -59,7 +59,7 @@ export async function loadOrderCommunicationsCard(prisma: PrismaClient, orderId:
       take: 200,
       select: { id: true, type: true, direction: true, status: true, partyRole: true, externalPhone: true, messageText: true, durationSeconds: true, recordingUrl: true, transcript: true, summary: true, occurredAt: true, sentByUserId: true },
     }),
-    prisma.site.findFirst({ where: { orders: { some: { id: orderId } } }, select: { quoPhoneNumberId: true, timezone: true } }),
+    prisma.site.findFirst({ where: { orders: { some: { id: orderId } } }, select: { quoPhoneNumberId: true, quoEnabled: true, timezone: true } }),
   ]);
   const senderIds = [...new Set(comms.map((c) => c.sentByUserId).filter((x): x is string => !!x))];
   const users = senderIds.length ? await prisma.user.findMany({ where: { id: { in: senderIds } }, select: { id: true, name: true } }) : [];
@@ -71,7 +71,7 @@ export async function loadOrderCommunicationsCard(prisma: PrismaClient, orderId:
       recordingUrl: c.recordingUrl, transcript: c.transcript, summary: c.summary,
       occurredAt: c.occurredAt.toISOString(), sentByName: c.sentByUserId ? nameById.get(c.sentByUserId) ?? null : null,
     })),
-    storeHasQuoNumber: !!site?.quoPhoneNumberId,
+    storeHasQuoNumber: !!(site?.quoPhoneNumberId && site?.quoEnabled),
     storeTimeZone: site?.timezone ?? undefined,
     unread,
   };
