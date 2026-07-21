@@ -252,6 +252,34 @@ export async function declineOrder(orderId: string, floristId: string): Promise<
 }
 
 /**
+ * Флорист ПЕРЕДАЁТ свой назначенный заказ выбранному активному флористу (замена «Отказаться»):
+ * фиксирует свой отказ (DECLINED) и назначает выбранного (авто-цена + уведомление). Передать может
+ * только текущий назначенный флорист и только пока заказ в статусе ASSIGNED (до принятия). Цель —
+ * другой активный флорист (active florist + active user). История прежних назначений сохраняется.
+ */
+export async function handoffOrder(
+  orderId: string,
+  fromFloristId: string,
+  toFloristId: string
+): Promise<{ ok: boolean; reason?: string }> {
+  if (fromFloristId === toFloristId) return { ok: false, reason: "same_florist" };
+  const order = await prisma.order.findUnique({ where: { id: orderId }, select: { currentFloristId: true, assignmentStatus: true } });
+  if (!order) return { ok: false, reason: "order_not_found" };
+  if (order.currentFloristId !== fromFloristId) return { ok: false, reason: "not_current_florist" };
+  if (order.assignmentStatus !== "ASSIGNED") return { ok: false, reason: "not_assignable" };
+  const target = await prisma.florist.findFirst({ where: { id: toFloristId, active: true, user: { active: true } }, select: { id: true } });
+  if (!target) return { ok: false, reason: "target_unavailable" };
+
+  await prisma.orderAssignment.updateMany({
+    where: { orderId, floristId: fromFloristId, state: "ASSIGNED" },
+    data: { state: "DECLINED", respondedAt: new Date() },
+  });
+  await assignTo(orderId, toFloristId);
+  await notifyFloristAssigned(toFloristId, orderId);
+  return { ok: true };
+}
+
+/**
  * Ручное переназначение владельцем.
  * keepManualPrice=true и наличие ручной цены → сохраняем текущую сумму (MANUAL).
  * Иначе — авто-снимок цены нового флориста.

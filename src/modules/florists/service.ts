@@ -39,6 +39,16 @@ function normPhone(phone: string | null | undefined): string | null {
   return toE164(raw) ?? raw;
 }
 
+/** Активные флористы (florist.active && user.active), кроме указанного — цели для передачи заказа. */
+export async function listActiveHandoffTargets(prisma: PrismaClient, exceptFloristId: string): Promise<{ id: string; name: string }[]> {
+  const rows = await prisma.florist.findMany({
+    where: { active: true, user: { active: true }, id: { not: exceptFloristId } },
+    select: { id: true, user: { select: { name: true } } },
+    orderBy: { user: { name: "asc" } },
+  });
+  return rows.map((f) => ({ id: f.id, name: f.user.name }));
+}
+
 export type CreateFloristInput = { name: string; email: string; phone?: string | null; password: string; active?: boolean };
 export type UpdateFloristInput = { name?: string; email?: string; phone?: string | null; password?: string | null; active?: boolean };
 

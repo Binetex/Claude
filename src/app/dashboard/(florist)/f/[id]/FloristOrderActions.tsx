@@ -2,11 +2,11 @@
 import { useRef, useState, useTransition } from "react";
 import {
   floristAccept,
-  floristDecline,
   floristStartWork,
   floristMarkReady,
   floristSetReadyTime,
 } from "@/app/dashboard/(florist)/actions";
+import { FloristHandoff } from "../FloristHandoff";
 import type { OrderStatus, AssignmentStatus } from "@/generated/prisma/enums";
 
 const bigBtn = "w-full rounded-xl px-4 py-3.5 text-base font-semibold disabled:opacity-60";
@@ -50,10 +50,12 @@ export function FloristOrderActions({
   orderId,
   orderStatus,
   assignmentStatus,
+  florists,
 }: {
   orderId: string;
   orderStatus: OrderStatus;
   assignmentStatus: AssignmentStatus;
+  florists: { id: string; name: string }[];
 }) {
   const [pending, start] = useTransition();
   const [photo, setPhoto] = useState<string | null>(null);
@@ -79,9 +81,7 @@ export function FloristOrderActions({
         <button disabled={pending} onClick={() => start(() => floristAccept(orderId))} className={`${bigBtn} bg-emerald-600 text-white hover:bg-emerald-700`}>
           Принять
         </button>
-        <button disabled={pending} onClick={() => start(() => floristDecline(orderId))} className={`${bigBtn} border border-red-300 bg-white text-red-600 hover:bg-red-50`}>
-          Отказаться
-        </button>
+        <FloristHandoff orderId={orderId} florists={florists} btnClass={`${bigBtn} border border-red-300 bg-white text-red-600 hover:bg-red-50`} />
       </div>
     );
   }

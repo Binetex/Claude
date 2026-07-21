@@ -1,8 +1,9 @@
 "use client";
 import { useTransition } from "react";
-import { floristAccept, floristDecline } from "@/app/dashboard/(florist)/actions";
+import { floristAccept } from "@/app/dashboard/(florist)/actions";
+import { FloristHandoff } from "./FloristHandoff";
 
-export function FloristAcceptDecline({ orderId, size = "sm" }: { orderId: string; size?: "sm" | "lg" }) {
+export function FloristAcceptDecline({ orderId, florists, size = "sm" }: { orderId: string; florists: { id: string; name: string }[]; size?: "sm" | "lg" }) {
   const [pending, start] = useTransition();
   const cls = size === "lg" ? "py-3 text-base" : "py-2 text-sm";
   return (
@@ -14,13 +15,11 @@ export function FloristAcceptDecline({ orderId, size = "sm" }: { orderId: string
       >
         Принять
       </button>
-      <button
-        disabled={pending}
-        onClick={() => start(() => floristDecline(orderId))}
-        className={`rounded-lg border border-red-300 bg-white px-4 font-semibold text-red-600 hover:bg-red-50 disabled:opacity-60 ${cls}`}
-      >
-        Отказаться
-      </button>
+      <FloristHandoff
+        orderId={orderId}
+        florists={florists}
+        btnClass={`rounded-lg border border-red-300 bg-white px-4 font-semibold text-red-600 hover:bg-red-50 disabled:opacity-60 ${cls}`}
+      />
     </div>
   );
 }

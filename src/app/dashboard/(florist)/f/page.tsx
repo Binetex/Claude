@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { requireFlorist } from "@/lib/rbac";
+import { prisma } from "@/lib/db";
 import { listForFlorist, type OrderFilters } from "@/modules/orders/queries";
+import { listActiveHandoffTargets } from "@/modules/florists/service";
 import { Card } from "@/components/ui/Card";
 import { OrderStatusBadge } from "@/components/StatusBadge";
 import { ZoomableImage } from "@/components/ImageLightbox";
@@ -27,6 +29,7 @@ export default async function FloristHome({
   const sp = await searchParams;
   const preset = (sp.tab as OrderFilters["preset"]) || "today";
   const orders = await listForFlorist(user.floristId, { preset });
+  const handoffTargets = await listActiveHandoffTargets(prisma, user.floristId).catch(() => []);
 
   return (
     <div className="mx-auto max-w-2xl space-y-4">
@@ -82,7 +85,7 @@ export default async function FloristHome({
             </Link>
             {o.assignmentStatus === "ASSIGNED" && (
               <div className="px-4 pb-4">
-                <FloristAcceptDecline orderId={o.id} />
+                <FloristAcceptDecline orderId={o.id} florists={handoffTargets} />
               </div>
             )}
           </Card>

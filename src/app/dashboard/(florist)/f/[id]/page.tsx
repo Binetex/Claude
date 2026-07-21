@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { requireFlorist } from "@/lib/rbac";
 import { getForFlorist } from "@/modules/orders/queries";
 import { prisma } from "@/lib/db";
+import { listActiveHandoffTargets } from "@/modules/florists/service";
 import { loadOrderCommunicationsCard } from "@/integrations/quo/communicationsService";
 import { OrderCommunications } from "@/app/dashboard/(owner)/orders/[id]/OrderCommunications";
 import { Card, CardBody } from "@/components/ui/Card";
@@ -23,6 +24,7 @@ export default async function FloristOrderPage({ params }: { params: Promise<{ i
   if (!order) notFound();
 
   const comm = await loadOrderCommunicationsCard(prisma, id).catch(() => ({ communications: [], storeHasQuoNumber: false, storeTimeZone: undefined }));
+  const handoffTargets = await listActiveHandoffTargets(prisma, user.floristId).catch(() => []);
 
   const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
     `${order.addressLine}, ${order.city} ${order.zip}`
@@ -144,7 +146,7 @@ export default async function FloristOrderPage({ params }: { params: Promise<{ i
 
       {/* Основные кнопки процесса */}
       <div className="sticky bottom-0 rounded-xl border border-slate-200 bg-white p-4 shadow-lg">
-        <FloristOrderActions orderId={order.id} orderStatus={order.orderStatus} assignmentStatus={order.assignmentStatus} />
+        <FloristOrderActions orderId={order.id} orderStatus={order.orderStatus} assignmentStatus={order.assignmentStatus} florists={handoffTargets} />
       </div>
     </div>
   );

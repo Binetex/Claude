@@ -26,7 +26,7 @@ export async function floristUpdateCardMessage(
 }
 import {
   acceptOrder,
-  declineOrder,
+  handoffOrder,
   startWork,
   markReady,
   setReadyAt,
@@ -39,11 +39,14 @@ export async function floristAccept(orderId: string) {
   revalidatePath(`/dashboard/f/${orderId}`);
 }
 
-export async function floristDecline(orderId: string) {
+/** Флорист передаёт свой заказ выбранному активному флористу (заменяет простой «Отказаться»). */
+export async function floristHandoff(orderId: string, targetFloristId: string): Promise<{ ok: boolean; reason?: string }> {
   const user = await requireFlorist();
-  await declineOrder(orderId, user.floristId);
+  if (!targetFloristId) return { ok: false, reason: "no_target" };
+  const r = await handoffOrder(orderId, user.floristId, targetFloristId);
   revalidatePath("/dashboard/f");
   revalidatePath(`/dashboard/f/${orderId}`);
+  return r;
 }
 
 export async function floristStartWork(orderId: string) {

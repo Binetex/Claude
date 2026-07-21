@@ -6,6 +6,8 @@ import {
   declineOrder,
   reassignManual,
   setManualFloristPrice,
+  handoffOrder,
+  acceptOrder,
 } from "./service";
 
 /**
@@ -202,5 +204,50 @@ describe("ручная цена и переназначение", () => {
     expect(updated.currentFloristId).toBe(floristBId);
     expect(updated.priceMode).toBe("AUTO");
     expect(Number(updated.floristTotal)).toBe(30);
+  });
+});
+
+describe("handoffOrder (флорист передаёт выбранному)", () => {
+  it("передаёт заказ выбранному активному флористу: цель ASSIGNED (авто-цена), исходный DECLINED", async () => {
+    const order = await makeOrder();
+    await assignInitial(order.id); // -> floristA (position 0)
+    const r = await handoffOrder(order.id, floristAId, floristBId);
+    expect(r).toEqual({ ok: true });
+    const updated = await prisma.order.findUniqueOrThrow({ where: { id: order.id } });
+    expect(updated.currentFloristId).toBe(floristBId);
+    expect(updated.assignmentStatus).toBe("ASSIGNED");
+    expect(Number(updated.floristTotal)).toBe(30); // авто-цена B
+    expect(await prisma.orderAssignment.count({ where: { orderId: order.id, floristId: floristAId, state: "DECLINED" } })).toBe(1);
+    expect(await prisma.orderAssignment.count({ where: { orderId: order.id, floristId: floristBId, state: "ASSIGNED" } })).toBe(1);
+  });
+
+  it("нельзя передать не свой заказ", async () => {
+    const order = await makeOrder();
+    await assignInitial(order.id); // -> floristA
+    const r = await handoffOrder(order.id, floristBId, floristAId); // B пытается передать заказ A
+    expect(r).toEqual({ ok: false, reason: "not_current_florist" });
+    expect((await prisma.order.findUniqueOrThrow({ where: { id: order.id } })).currentFloristId).toBe(floristAId);
+  });
+
+  it("нельзя передать самому себе", async () => {
+    const order = await makeOrder();
+    await assignInitial(order.id);
+    expect(await handoffOrder(order.id, floristAId, floristAId)).toEqual({ ok: false, reason: "same_florist" });
+  });
+
+  it("нельзя передать неактивному флористу", async () => {
+    const order = await makeOrder();
+    await assignInitial(order.id); // -> floristA
+    await prisma.florist.update({ where: { id: floristBId }, data: { active: false } });
+    const r = await handoffOrder(order.id, floristAId, floristBId);
+    expect(r).toEqual({ ok: false, reason: "target_unavailable" });
+    await prisma.florist.update({ where: { id: floristBId }, data: { active: true } }); // восстановить
+  });
+
+  it("нельзя передать после принятия (только до accept)", async () => {
+    const order = await makeOrder();
+    await assignInitial(order.id); // -> floristA (ASSIGNED)
+    await acceptOrder(order.id, floristAId); // -> ACCEPTED
+    expect(await handoffOrder(order.id, floristAId, floristBId)).toEqual({ ok: false, reason: "not_assignable" });
   });
 });
