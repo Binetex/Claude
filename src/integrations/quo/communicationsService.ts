@@ -10,6 +10,51 @@ import "server-only";
  */
 import type { PrismaClient, Prisma } from "@/generated/prisma/client";
 import { findCandidateOrdersByPhone } from "./ingest";
+import { toE164 } from "@/lib/phone";
+
+export type OrderPhoneSide = "CUSTOMER" | "RECIPIENT";
+
+/**
+ * Непривязанные QUO-сообщения по телефону стороны заказа, СТРОГО в рамках QUO-номера этого магазина.
+ * Берём только: orderId=null, не ignored, provider=QUO, externalPhoneNormalized == телефон стороны,
+ * providerPhoneNumberId == quoPhoneNumberId сайта заказа. Уже привязанные (в т.ч. к другим заказам)
+ * и сообщения другого магазина НЕ трогаются. Ничего не пишет — только читает.
+ */
+export async function findUnlinkedCommunicationsForOrderPhone(
+  prisma: PrismaClient,
+  orderId: string,
+  side: OrderPhoneSide
+): Promise<{ ids: string[]; phoneE164: string | null; siteQuoPhoneNumberId: string | null }> {
+  const order = await prisma.order.findUnique({
+    where: { id: orderId },
+    select: { senderPhone: true, recipientPhone: true, site: { select: { quoPhoneNumberId: true } } },
+  });
+  if (!order) return { ids: [], phoneE164: null, siteQuoPhoneNumberId: null };
+
+  const phoneE164 = toE164(side === "CUSTOMER" ? order.senderPhone : order.recipientPhone);
+  const pn = order.site?.quoPhoneNumberId ?? null;
+  if (!phoneE164 || !pn) return { ids: [], phoneE164, siteQuoPhoneNumberId: pn };
+
+  const rows = await prisma.orderCommunication.findMany({
+    where: { orderId: null, ignoredAt: null, provider: "QUO", externalPhoneNormalized: phoneE164, providerPhoneNumberId: pn },
+    select: { id: true },
+  });
+  return { ids: rows.map((r) => r.id), phoneE164, siteQuoPhoneNumberId: pn };
+}
+
+/**
+ * Привязывает найденные непривязанные сообщения к заказу с ролью стороны. Идемпотентно
+ * (updateMany строго по orderId=null), чужие/уже привязанные и другой магазин не трогает.
+ */
+export async function attachUnlinkedCommunicationsToOrder(prisma: PrismaClient, orderId: string, side: OrderPhoneSide): Promise<{ attached: number }> {
+  const { ids } = await findUnlinkedCommunicationsForOrderPhone(prisma, orderId, side);
+  if (ids.length === 0) return { attached: 0 };
+  const r = await prisma.orderCommunication.updateMany({
+    where: { id: { in: ids }, orderId: null, ignoredAt: null },
+    data: { orderId, partyRole: side },
+  });
+  return { attached: r.count };
+}
 import { matchCommunicationToOrder } from "./matching";
 import { computeIndicators, type OrderIndicator } from "./communicationsView";
 

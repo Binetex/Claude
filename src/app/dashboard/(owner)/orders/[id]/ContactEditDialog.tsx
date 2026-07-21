@@ -1,11 +1,13 @@
 "use client";
-import { useState } from "react";
+import { useState, useTransition } from "react";
 import { Pencil } from "lucide-react";
+import { toast } from "sonner";
 import { Dialog, DialogTrigger, DialogContent, DialogHeader, DialogTitle, DialogClose } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useBlockSave, ConflictNotice } from "./orderEditShared";
+import { checkUnlinkedComms, attachUnlinkedComms } from "@/modules/orders/editActions";
 
 type FieldDef = { k: string; label: string; wide?: boolean };
 
@@ -42,7 +44,11 @@ export function ContactEditDialog({
 }) {
   const [open, setOpen] = useState(false);
   const [f, setF] = useState<Record<string, string>>(initial);
+  const [unlinked, setUnlinked] = useState<{ count: number } | null>(null);
+  const [busy, startBusy] = useTransition();
   const block = kind === "recipient" ? "contacts" : "sender";
+  const side = kind === "recipient" ? "RECIPIENT" : "CUSTOMER";
+  const phoneKey = kind === "recipient" ? "recipientPhone" : "senderPhone";
   const { pending, conflict, save, acceptCurrentVersion } = useBlockSave(orderId, block, updatedAt);
 
   const allFields = kind === "recipient" ? RECIPIENT_FIELDS : SENDER_FIELDS;
@@ -53,7 +59,29 @@ export function ContactEditDialog({
     // Отправляем только видимые поля блока.
     const data: Record<string, string> = {};
     for (const fl of fields) data[fl.k] = f[fl.k] ?? "";
-    save(data, { successMessage: `${title} обновлён`, onOk: () => setOpen(false) });
+    const phoneChanged = (f[phoneKey] ?? "") !== (initial[phoneKey] ?? "");
+    // onOk НЕ вызывается при OCC-конфликте (useBlockSave) → при конфликте ничего не ищем.
+    save(data, {
+      successMessage: `${title} обновлён`,
+      onOk: () => {
+        if (!phoneChanged) { setOpen(false); return; }
+        // Телефон изменился — ищем непривязанную переписку по новому номеру (без QUO API).
+        startBusy(async () => {
+          const r = await checkUnlinkedComms(orderId, side);
+          if (r.count > 0) setUnlinked({ count: r.count });
+          else setOpen(false);
+        });
+      },
+    });
+  }
+
+  function attach() {
+    startBusy(async () => {
+      const r = await attachUnlinkedComms(orderId, side);
+      toast.success(r.attached > 0 ? `Привязано сообщений: ${r.attached}` : "Нечего привязывать");
+      setUnlinked(null);
+      setOpen(false);
+    });
   }
 
   function refreshFromDb(current: Record<string, string>) {
@@ -88,14 +116,24 @@ export function ContactEditDialog({
             <ConflictNotice current={conflict.current} labels={fields} onRefresh={() => acceptCurrentVersion(refreshFromDb)} />
           </div>
         )}
-        <div className="mt-5 flex justify-end gap-2">
-          <DialogClose asChild>
-            <Button variant="ghost" size="sm">Отмена</Button>
-          </DialogClose>
-          <Button size="sm" disabled={pending} onClick={submit}>
-            {pending ? "Сохранение…" : "Сохранить"}
-          </Button>
-        </div>
+        {unlinked ? (
+          <div className="mt-4 space-y-2 rounded-lg border border-sky-200 bg-sky-50 p-3 text-sm">
+            <p className="text-sky-800">По новому номеру найдено непривязанных сообщений: <b>{unlinked.count}</b>. Привязать их к этому заказу?</p>
+            <div className="flex justify-end gap-2">
+              <Button variant="ghost" size="sm" disabled={busy} onClick={() => { setUnlinked(null); setOpen(false); }}>Не сейчас</Button>
+              <Button size="sm" disabled={busy} onClick={attach}>{busy ? "Привязка…" : "Привязать"}</Button>
+            </div>
+          </div>
+        ) : (
+          <div className="mt-5 flex justify-end gap-2">
+            <DialogClose asChild>
+              <Button variant="ghost" size="sm">Отмена</Button>
+            </DialogClose>
+            <Button size="sm" disabled={pending || busy} onClick={submit}>
+              {pending || busy ? "Сохранение…" : "Сохранить"}
+            </Button>
+          </div>
+        )}
       </DialogContent>
     </Dialog>
   );
