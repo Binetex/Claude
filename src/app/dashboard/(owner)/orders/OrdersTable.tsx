@@ -10,8 +10,8 @@ import type { OrderIndicator } from "@/integrations/quo/communicationsView";
 
 /**
  * Структурный тип строки списка — совместим с OwnerOrder, CallCenterOrder и FloristOrder.
- * Финансы (finance) и имя флориста (currentFloristName) опциональны: у колл-центра/флориста
- * их нет, а на их страницах список рендерится с hideFinance (без цен и без колонки флориста).
+ * Финансы (finance) и имя флориста (currentFloristName) опциональны. hideFinance скрывает цены;
+ * hideFlorist отдельно скрывает колонку флориста. Колл-центр: hideFinance=true, но флориста ВИДИТ.
  */
 export type OrdersTableOrder = {
   id: string;
@@ -92,7 +92,7 @@ function ItemsList({ o, imgSize = "h-6 w-6", nameClass = "text-[11px]" }: { o: O
 }
 
 /** Десктоп — заказ отдельной плашкой (карточкой), без колонки прибыли. */
-function DesktopCard({ o, ind, hideFinance, hrefBase }: { o: OrdersTableOrder; ind?: OrderIndicator; hideFinance?: boolean; hrefBase: string }) {
+function DesktopCard({ o, ind, hideFinance, hideFlorist, hrefBase }: { o: OrdersTableOrder; ind?: OrderIndicator; hideFinance?: boolean; hideFlorist?: boolean; hrefBase: string }) {
   return (
     <Card className="p-4 pr-6 transition-shadow hover:shadow-sm">
       <div className="flex items-start gap-4 text-[12px]">
@@ -134,8 +134,8 @@ function DesktopCard({ o, ind, hideFinance, hrefBase }: { o: OrdersTableOrder; i
           )}
         </div>
 
-        {/* Флорист — только там, где показываем финансы (владелец). */}
-        {!hideFinance && (
+        {/* Флорист — владелец и колл-центр (просмотр). Скрыт только там, где hideFlorist. */}
+        {!hideFlorist && (
           <div className="w-20 shrink-0 truncate text-slate-700" title={o.currentFloristName ?? undefined}>{o.currentFloristName ?? "—"}</div>
         )}
 
@@ -153,7 +153,7 @@ function DesktopCard({ o, ind, hideFinance, hrefBase }: { o: OrdersTableOrder; i
   );
 }
 
-function MobileCard({ o, ind, hideFinance, hrefBase }: { o: OrdersTableOrder; ind?: OrderIndicator; hideFinance?: boolean; hrefBase: string }) {
+function MobileCard({ o, ind, hideFinance, hideFlorist, hrefBase }: { o: OrdersTableOrder; ind?: OrderIndicator; hideFinance?: boolean; hideFlorist?: boolean; hrefBase: string }) {
   return (
     <Card className="p-2.5">
       <div className="flex flex-col gap-0.5">
@@ -187,6 +187,9 @@ function MobileCard({ o, ind, hideFinance, hrefBase }: { o: OrdersTableOrder; in
             📍 {fullAddress(o)}
           </a>
         )}
+        {!hideFlorist && o.currentFloristName && (
+          <div className="text-slate-500">🌸 {o.currentFloristName}</div>
+        )}
       </div>
     </Card>
   );
@@ -201,12 +204,14 @@ export function OrdersTable({
   groupByDay = false,
   commIndicators = {},
   hideFinance = false,
+  hideFlorist = false,
   hrefBase = "/dashboard/orders",
 }: {
   orders: OrdersTableOrder[];
   groupByDay?: boolean;
   commIndicators?: Record<string, OrderIndicator>;
   hideFinance?: boolean;
+  hideFlorist?: boolean;
   hrefBase?: string;
 }) {
   // Разбивка по дням (только визуально, для вкладки «Все»). Сортировка уже сделана в запросе.
@@ -222,8 +227,8 @@ export function OrdersTable({
         prevDay = day;
       }
     }
-    desktopItems.push(<DesktopCard key={o.id} o={o} ind={commIndicators[o.id]} hideFinance={hideFinance} hrefBase={hrefBase} />);
-    mobileItems.push(<MobileCard key={o.id} o={o} ind={commIndicators[o.id]} hideFinance={hideFinance} hrefBase={hrefBase} />);
+    desktopItems.push(<DesktopCard key={o.id} o={o} ind={commIndicators[o.id]} hideFinance={hideFinance} hideFlorist={hideFlorist} hrefBase={hrefBase} />);
+    mobileItems.push(<MobileCard key={o.id} o={o} ind={commIndicators[o.id]} hideFinance={hideFinance} hideFlorist={hideFlorist} hrefBase={hrefBase} />);
   }
 
   return (

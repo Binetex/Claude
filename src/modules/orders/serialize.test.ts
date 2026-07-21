@@ -121,6 +121,10 @@ describe("serializeForCallCenter — без финансов", () => {
     expect(flat).not.toContain("estimatedProfit");
     expect(flat).not.toContain("deliveryActualCost");
   });
+  it("ВИДИТ имя назначенного флориста (только имя, без id/цен)", () => {
+    expect(o.currentFloristName).toBe("Florist One");
+    expect((o as Record<string, unknown>).currentFloristId).toBeUndefined();
+  });
 });
 
 describe("serializeForFlorist (MAKER_ONLY) — только своя цена", () => {
@@ -137,6 +141,10 @@ describe("serializeForFlorist (MAKER_ONLY) — только своя цена", 
     expect(flat).not.toContain("estimatedProfit");
     expect(flat).not.toContain("deliveryActualCost");
     expect(flat).not.toContain("sender@example.com");
+  });
+  it("НЕ получает имя/назначение флориста (в отличие от колл-центра)", () => {
+    expect((o as Record<string, unknown>).currentFloristName).toBeUndefined();
+    expect((o as Record<string, unknown>).currentFloristId).toBeUndefined();
   });
 });
 

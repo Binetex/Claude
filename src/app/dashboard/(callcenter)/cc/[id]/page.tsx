@@ -33,6 +33,8 @@ export default async function CallCenterOrderPage({ params }: { params: Promise<
         <h1 className="text-xl font-bold text-slate-800">{formatOrderNumber(order.orderNumber)}</h1>
         <span className="text-sm text-slate-500">{order.site.name}</span>
         <OrderStatusBadge status={order.orderStatus} paymentFailed={order.paymentFailed} />
+        {/* Назначенный флорист — только просмотр (переназначение доступно владельцу). */}
+        <span className="text-sm text-slate-500">🌸 Флорист: <span className="font-medium text-slate-700">{order.currentFloristName ?? "—"}</span></span>
       </div>
 
       <div className="grid gap-4 lg:grid-cols-3">
