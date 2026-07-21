@@ -49,8 +49,8 @@ export async function listActiveHandoffTargets(prisma: PrismaClient, exceptFlori
   return rows.map((f) => ({ id: f.id, name: f.user.name }));
 }
 
-export type CreateFloristInput = { name: string; email: string; phone?: string | null; password: string; active?: boolean };
-export type UpdateFloristInput = { name?: string; email?: string; phone?: string | null; password?: string | null; active?: boolean };
+export type CreateFloristInput = { name: string; email: string; phone?: string | null; password: string; active?: boolean; avatarUrl?: string | null };
+export type UpdateFloristInput = { name?: string; email?: string; phone?: string | null; password?: string | null; active?: boolean; avatarUrl?: string | null };
 
 /** Создаёт User(role=FLORIST) + Florist в одной транзакции. financeVisibility по умолчанию MAKER_ONLY (меняется отдельным тумблером). */
 export async function createFlorist(prisma: PrismaClient, input: CreateFloristInput): Promise<{ floristId: string; userId: string }> {
@@ -66,7 +66,7 @@ export async function createFlorist(prisma: PrismaClient, input: CreateFloristIn
   const passwordHash = await hashPassword(input.password);
   return prisma.$transaction(async (tx) => {
     const user = await tx.user.create({ data: { name, email, phone, role: "FLORIST", passwordHash, active } });
-    const florist = await tx.florist.create({ data: { userId: user.id, active, financeVisibility: "MAKER_ONLY" } });
+    const florist = await tx.florist.create({ data: { userId: user.id, active, financeVisibility: "MAKER_ONLY", avatarUrl: input.avatarUrl ?? null } });
     return { floristId: florist.id, userId: user.id };
   });
 }
@@ -91,8 +91,12 @@ export async function updateFlorist(prisma: PrismaClient, floristId: string, inp
   if (input.password) { checkPassword(input.password); userData.passwordHash = await hashPassword(input.password); }
   if (input.active !== undefined) userData.active = input.active;
 
+  const floristData: Prisma.FloristUpdateInput = {};
+  if (input.active !== undefined) floristData.active = input.active;
+  if (input.avatarUrl !== undefined) floristData.avatarUrl = input.avatarUrl;
+
   await prisma.$transaction(async (tx) => {
     if (Object.keys(userData).length > 0) await tx.user.update({ where: { id: florist.userId }, data: userData });
-    if (input.active !== undefined) await tx.florist.update({ where: { id: floristId }, data: { active: input.active } });
+    if (Object.keys(floristData).length > 0) await tx.florist.update({ where: { id: floristId }, data: floristData });
   });
 }

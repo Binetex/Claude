@@ -60,6 +60,7 @@ export function serializeForOwner(o: OrderWithRelations) {
   return {
     ...baseFields(o),
     currentFloristName: o.currentFlorist?.user.name ?? null,
+    currentFloristAvatarUrl: o.currentFlorist?.avatarUrl ?? null,
     currentFloristId: o.currentFloristId,
     senderName: o.senderName,
     senderPhone: o.senderPhone,
@@ -113,9 +114,10 @@ export type OwnerOrder = ReturnType<typeof serializeForOwner>;
 export function serializeForCallCenter(o: OrderWithRelations) {
   return {
     ...baseFields(o),
-    // Колл-центр ВИДИТ, какому флористу назначен заказ (только имя, для справки).
+    // Колл-центр ВИДИТ, какому флористу назначен заказ (имя + аватарка, для справки).
     // Переназначение и цены флориста остаются недоступны (нет currentFloristId/finance).
     currentFloristName: o.currentFlorist?.user.name ?? null,
+    currentFloristAvatarUrl: o.currentFlorist?.avatarUrl ?? null,
     senderName: o.senderName,
     senderPhone: o.senderPhone,
     senderEmail: o.senderEmail,

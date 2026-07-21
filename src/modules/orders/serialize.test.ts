@@ -50,7 +50,7 @@ function makeOrder(financeVisibility: "MAKER_ONLY" | "FULL" = "MAKER_ONLY"): Ord
     deliveryPhotoUrl: null,
     trackingUrl: null,
     currentFloristId: "f1",
-    currentFlorist: { financeVisibility, user: { name: "Florist One" } },
+    currentFlorist: { financeVisibility, avatarUrl: "/uploads/f1.jpg", user: { name: "Florist One" } },
     // Финансы владельца
     itemsTotal: D(100),
     tax: D(8),
@@ -121,8 +121,9 @@ describe("serializeForCallCenter — без финансов", () => {
     expect(flat).not.toContain("estimatedProfit");
     expect(flat).not.toContain("deliveryActualCost");
   });
-  it("ВИДИТ имя назначенного флориста (только имя, без id/цен)", () => {
+  it("ВИДИТ имя и аватарку назначенного флориста (без id/цен)", () => {
     expect(o.currentFloristName).toBe("Florist One");
+    expect(o.currentFloristAvatarUrl).toBe("/uploads/f1.jpg");
     expect((o as Record<string, unknown>).currentFloristId).toBeUndefined();
   });
 });

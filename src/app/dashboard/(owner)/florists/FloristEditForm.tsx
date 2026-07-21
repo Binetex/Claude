@@ -2,11 +2,12 @@
 import { useActionState, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { ownerUpdateFlorist, ownerSetFloristActive } from "./floristActions";
+import { AvatarUpload } from "./AvatarUpload";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 
-type FloristForEdit = { id: string; name: string; email: string; phone: string | null; active: boolean };
+type FloristForEdit = { id: string; name: string; email: string; phone: string | null; active: boolean; avatarUrl: string | null };
 
 /** Редактирование флориста (без создания нового пользователя) + быстрый тумблер Active/Inactive. */
 export function FloristEditForm({ florist }: { florist: FloristForEdit }) {
@@ -45,6 +46,7 @@ export function FloristEditForm({ florist }: { florist: FloristForEdit }) {
             <div className="space-y-1"><Label htmlFor={`ef-email-${florist.id}`}>Email / Login</Label><Input id={`ef-email-${florist.id}`} name="email" type="email" defaultValue={florist.email} required /></div>
             <div className="space-y-1"><Label htmlFor={`ef-phone-${florist.id}`}>Phone</Label><Input id={`ef-phone-${florist.id}`} name="phone" defaultValue={florist.phone ?? ""} /></div>
             <div className="space-y-1"><Label htmlFor={`ef-pw-${florist.id}`}>New password (пусто = без изменений)</Label><Input id={`ef-pw-${florist.id}`} name="password" type="text" autoComplete="new-password" /></div>
+            <AvatarUpload name="avatarDataUrl" currentUrl={florist.avatarUrl} label="Аватарка (пусто = без изменений)" />
           </div>
           <label className="flex items-center gap-2 text-sm text-slate-700">
             <input type="checkbox" name="active" defaultChecked={florist.active} className="h-4 w-4" /> Active

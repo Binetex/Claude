@@ -1,6 +1,7 @@
 "use client";
 import { useActionState, useState } from "react";
 import { ownerCreateFlorist } from "./floristActions";
+import { AvatarUpload } from "./AvatarUpload";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
@@ -33,6 +34,7 @@ export function AddFloristForm() {
           <Label htmlFor="af-password">Password</Label>
           <Input id="af-password" name="password" type="text" required minLength={8} autoComplete="new-password" />
         </div>
+        <AvatarUpload name="avatarDataUrl" />
         <label className="flex items-center gap-2 self-end text-sm text-slate-700">
           <input type="checkbox" name="active" defaultChecked className="h-4 w-4" /> Active
         </label>

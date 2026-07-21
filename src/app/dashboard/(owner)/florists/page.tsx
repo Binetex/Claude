@@ -5,6 +5,7 @@ import { SitePriorityEditor } from "./SitePriorityEditor";
 import { PickupLocationEditor } from "./PickupLocationEditor";
 import { AddFloristForm } from "./AddFloristForm";
 import { FloristEditForm } from "./FloristEditForm";
+import { FloristAvatar } from "@/components/FloristAvatar";
 import { TERMINAL_ORDER_STATUSES } from "@/lib/statuses";
 
 export const dynamic = "force-dynamic";
@@ -40,7 +41,10 @@ export default async function FloristsPage() {
         {florists.map((f) => (
           <Card key={f.id} className="p-4">
             <div className="flex items-center justify-between">
-              <div className="font-medium text-slate-800">{f.user.name}</div>
+              <div className="flex items-center gap-2">
+                <FloristAvatar name={f.user.name} avatarUrl={f.avatarUrl} size={26} />
+                <div className="font-medium text-slate-800">{f.user.name}</div>
+              </div>
               <span className={`text-xs ${f.active ? "text-emerald-600" : "text-slate-400"}`}>{f.active ? "активен" : "отключён"}</span>
             </div>
             <div className="mt-1 text-sm text-slate-500">{f.user.email} · {f.user.phone}</div>
@@ -65,7 +69,7 @@ export default async function FloristsPage() {
                   : null
               }
             />
-            <FloristEditForm florist={{ id: f.id, name: f.user.name, email: f.user.email, phone: f.user.phone, active: f.active }} />
+            <FloristEditForm florist={{ id: f.id, name: f.user.name, email: f.user.email, phone: f.user.phone, active: f.active, avatarUrl: f.avatarUrl }} />
           </Card>
         ))}
       </div>

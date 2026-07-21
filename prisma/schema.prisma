@@ -288,6 +288,7 @@ model Florist {
   user              User                     @relation(fields: [userId], references: [id], onDelete: Cascade)
   active            Boolean                  @default(true)
   financeVisibility FloristFinanceVisibility @default(MAKER_ONLY)
+  avatarUrl         String? // ссылка на маленькую аватарку (public/uploads); загружает владелец
   createdAt         DateTime                 @default(now())
 
   sitePriorities SiteFloristPriority[]

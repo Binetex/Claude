@@ -11,8 +11,8 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const requireOrderEditor = vi.fn();
 const findUnique = vi.fn();
 const updateOrderBlock = vi.fn();
-const syncOrderToShopify = vi.fn(async (..._a: unknown[]) => {});
-const onOrderDeliveryChangeSafe = vi.fn(async (..._a: unknown[]) => {});
+const syncOrderToShopify = vi.fn<(id: string) => Promise<void>>();
+const onOrderDeliveryChangeSafe = vi.fn<(p: unknown, id: string) => Promise<void>>();
 
 vi.mock("@/lib/rbac", () => ({ requireOrderEditor: () => requireOrderEditor() }));
 vi.mock("@/lib/db", () => ({ prisma: { order: { findUnique: (a: unknown) => findUnique(a) } } }));

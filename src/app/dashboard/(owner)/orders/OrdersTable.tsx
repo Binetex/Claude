@@ -7,6 +7,7 @@ import { fmtDate, formatOrderNumber } from "@/lib/format";
 import { resolveOrderStatusMeta } from "@/lib/statuses";
 import type { OrderStatus } from "@/generated/prisma/enums";
 import type { OrderIndicator } from "@/integrations/quo/communicationsView";
+import { FloristAvatar } from "@/components/FloristAvatar";
 
 /**
  * Структурный тип строки списка — совместим с OwnerOrder, CallCenterOrder и FloristOrder.
@@ -30,6 +31,7 @@ export type OrdersTableOrder = {
   items: { id: string; name: string; variantName: string | null; image: string | null; quantity: number }[];
   finance?: { customerTotal: number; floristTotal: number } | null;
   currentFloristName?: string | null;
+  currentFloristAvatarUrl?: string | null;
 };
 
 /** Компактные индикаторы коммуникаций в списке (непрочитанные/пропущенный/последний контакт/preview). */
@@ -136,7 +138,10 @@ function DesktopCard({ o, ind, hideFinance, hideFlorist, hrefBase }: { o: Orders
 
         {/* Флорист — владелец и колл-центр (просмотр). Скрыт только там, где hideFlorist. */}
         {!hideFlorist && (
-          <div className="w-20 shrink-0 truncate text-slate-700" title={o.currentFloristName ?? undefined}>{o.currentFloristName ?? "—"}</div>
+          <div className="flex w-24 shrink-0 items-center gap-1.5 text-slate-700" title={o.currentFloristName ?? undefined}>
+            {o.currentFloristName && <FloristAvatar name={o.currentFloristName} avatarUrl={o.currentFloristAvatarUrl} size={26} />}
+            <span className="truncate">{o.currentFloristName ?? "—"}</span>
+          </div>
         )}
 
         {/* Суммы (без прибыли) — скрыты для колл-центра/флориста. */}
@@ -188,7 +193,10 @@ function MobileCard({ o, ind, hideFinance, hideFlorist, hrefBase }: { o: OrdersT
           </a>
         )}
         {!hideFlorist && o.currentFloristName && (
-          <div className="text-slate-500">🌸 {o.currentFloristName}</div>
+          <div className="flex items-center gap-1.5 text-slate-500">
+            <FloristAvatar name={o.currentFloristName} avatarUrl={o.currentFloristAvatarUrl} size={20} />
+            <span>{o.currentFloristName}</span>
+          </div>
         )}
       </div>
     </Card>

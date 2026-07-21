@@ -14,6 +14,7 @@ import { OrderStatusBadge } from "@/components/StatusBadge";
 import { ZoomableImage } from "@/components/ImageLightbox";
 import { formatOrderNumber } from "@/lib/format";
 import { OrderItemComposition } from "@/components/OrderItemComposition";
+import { FloristAvatar } from "@/components/FloristAvatar";
 
 export const dynamic = "force-dynamic";
 
@@ -34,7 +35,10 @@ export default async function CallCenterOrderPage({ params }: { params: Promise<
         <span className="text-sm text-slate-500">{order.site.name}</span>
         <OrderStatusBadge status={order.orderStatus} paymentFailed={order.paymentFailed} />
         {/* Назначенный флорист — только просмотр (переназначение доступно владельцу). */}
-        <span className="text-sm text-slate-500">🌸 Флорист: <span className="font-medium text-slate-700">{order.currentFloristName ?? "—"}</span></span>
+        <span className="inline-flex items-center gap-1.5 text-sm text-slate-500">
+          Флорист: <FloristAvatar name={order.currentFloristName} avatarUrl={order.currentFloristAvatarUrl} size={26} />
+          <span className="font-medium text-slate-700">{order.currentFloristName ?? "—"}</span>
+        </span>
       </div>
 
       <div className="grid gap-4 lg:grid-cols-3">

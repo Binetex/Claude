@@ -2,6 +2,7 @@
 import { revalidatePath } from "next/cache";
 import { requireRole } from "@/lib/rbac";
 import { prisma } from "@/lib/db";
+import { imageStorage } from "@/lib/storage";
 import { createFlorist, updateFlorist, FloristValidationError } from "@/modules/florists/service";
 
 type FormState = { error?: string; success?: true } | null;
@@ -10,16 +11,29 @@ function checkbox(v: FormDataEntryValue | null): boolean {
   return v === "on" || v === "true" || v === "1";
 }
 
+/**
+ * Клиент присылает уже ужатую квадратную аватарку как data URL (см. AvatarUpload).
+ * Сохраняем файл в хранилище (public/uploads) и возвращаем ССЫЛКУ. Пусто/не data URL → undefined
+ * (аватарка не меняется). Сам файл в БД не кладём.
+ */
+async function resolveAvatar(formData: FormData): Promise<string | undefined> {
+  const raw = String(formData.get("avatarDataUrl") ?? "").trim();
+  if (!raw.startsWith("data:image/")) return undefined;
+  return imageStorage.saveImage(raw);
+}
+
 /** Создание нового флориста (User+Florist). Пароль задаёт владелец. */
 export async function ownerCreateFlorist(_prev: FormState, formData: FormData): Promise<FormState> {
   await requireRole("OWNER");
   try {
+    const avatarUrl = await resolveAvatar(formData);
     await createFlorist(prisma, {
       name: String(formData.get("name") ?? ""),
       email: String(formData.get("email") ?? ""),
       phone: String(formData.get("phone") ?? ""),
       password: String(formData.get("password") ?? ""),
       active: checkbox(formData.get("active")),
+      ...(avatarUrl ? { avatarUrl } : {}),
     });
   } catch (e) {
     if (e instanceof FloristValidationError) return { error: e.message };
@@ -36,12 +50,14 @@ export async function ownerUpdateFlorist(_prev: FormState, formData: FormData): 
   if (!floristId) return { error: "Не указан флорист." };
   const password = String(formData.get("password") ?? "");
   try {
+    const avatarUrl = await resolveAvatar(formData);
     await updateFlorist(prisma, floristId, {
       name: String(formData.get("name") ?? ""),
       email: String(formData.get("email") ?? ""),
       phone: String(formData.get("phone") ?? ""),
       ...(password ? { password } : {}),
       active: checkbox(formData.get("active")),
+      ...(avatarUrl ? { avatarUrl } : {}),
     });
   } catch (e) {
     if (e instanceof FloristValidationError) return { error: e.message };
