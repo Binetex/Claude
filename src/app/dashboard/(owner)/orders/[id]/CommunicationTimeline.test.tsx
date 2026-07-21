@@ -6,7 +6,7 @@ function item(over: Partial<TimelineItem>): TimelineItem {
   return {
     id: "c1", type: "SMS", direction: "INBOUND", status: "RECEIVED", partyRole: "CUSTOMER",
     externalPhone: "+13105551234", messageText: "hi", durationSeconds: null, recordingUrl: null,
-    transcript: null, summary: null, occurredAt: "2026-07-20T10:00:00Z", sentByName: null, ...over,
+    transcript: null, summary: null, attachments: [], occurredAt: "2026-07-20T10:00:00Z", sentByName: null, ...over,
   };
 }
 
@@ -68,5 +68,43 @@ describe("CommunicationTimeline (render)", () => {
     const html = renderToStaticMarkup(<CommunicationTimeline items={[item({ type: "CALL", direction: "INBOUND", status: "MISSED", messageText: null })]} inboundLabel="Заказчик" />);
     expect(html).toContain("Заказчик");
     expect(html).toContain("пропущен");
+  });
+
+  it("MMS с фото: миниатюра (img) + ссылка «Открыть»", () => {
+    const html = renderToStaticMarkup(<CommunicationTimeline items={[item({ messageText: null, attachments: [{ url: "https://cdn.example/p1.jpg", type: "image/jpeg" }] })]} />);
+    expect(html).toContain("<img");
+    expect(html).toContain("https://cdn.example/p1.jpg");
+    expect(html).toContain("Открыть");
+    expect(html).not.toContain("(без текста)"); // не выглядит пустым
+  });
+
+  it("несколько вложений — показываются все", () => {
+    const html = renderToStaticMarkup(<CommunicationTimeline items={[item({ messageText: "две картинки", attachments: [{ url: "https://cdn.example/a.png", type: "image/png" }, { url: "https://cdn.example/b.png", type: "image/png" }] })]} />);
+    expect(html).toContain("https://cdn.example/a.png");
+    expect(html).toContain("https://cdn.example/b.png");
+    expect(html).toContain("две картинки"); // текст SMS не потерян
+  });
+
+  it("MMS без текста и без вложений → «(без текста)», не пустая строка", () => {
+    const html = renderToStaticMarkup(<CommunicationTimeline items={[item({ messageText: null, attachments: [] })]} />);
+    expect(html).toContain("(без текста)");
+  });
+
+  it("не-image вложение → безопасная ссылка с именем/типом (без <img>)", () => {
+    const html = renderToStaticMarkup(<CommunicationTimeline items={[item({ messageText: null, attachments: [{ url: "https://cdn.example/doc.pdf", type: "application/pdf" }] })]} />);
+    expect(html).toContain("https://cdn.example/doc.pdf");
+    expect(html).toContain("application/pdf");
+    expect(html).not.toContain("<img");
+  });
+
+  it("вложение с «битым»/необычным url не роняет ленту", () => {
+    expect(() => renderToStaticMarkup(<CommunicationTimeline items={[item({ messageText: null, attachments: [{ url: "not a real url", type: null }] })]} />)).not.toThrow();
+  });
+
+  it("обычный SMS без вложений не изменился", () => {
+    const html = renderToStaticMarkup(<CommunicationTimeline items={[item({ messageText: "просто текст" })]} />);
+    expect(html).toContain("просто текст");
+    expect(html).not.toContain("<img");
+    expect(html).not.toContain("(без текста)");
   });
 });

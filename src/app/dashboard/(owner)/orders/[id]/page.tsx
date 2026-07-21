@@ -17,7 +17,7 @@ import { ContactEditDialog } from "./ContactEditDialog";
 import { CardNoteCard } from "./CardNoteCard";
 import { BurqDeliveryPanel } from "./BurqDeliveryPanel";
 import { OrderCommunications, type CommItem } from "./OrderCommunications";
-import { markOrderCommunicationsRead, countUnreadBySide } from "@/integrations/quo/communicationsService";
+import { markOrderCommunicationsRead, countUnreadBySide, parseAttachments } from "@/integrations/quo/communicationsService";
 
 export const dynamic = "force-dynamic";
 
@@ -45,7 +45,7 @@ export default async function OwnerOrderPage({ params }: { params: Promise<{ id:
         where: { orderId: id },
         orderBy: { occurredAt: "desc" },
         take: 200,
-        select: { id: true, type: true, direction: true, status: true, partyRole: true, externalPhone: true, messageText: true, durationSeconds: true, recordingUrl: true, transcript: true, summary: true, occurredAt: true, sentByUserId: true },
+        select: { id: true, type: true, direction: true, status: true, partyRole: true, externalPhone: true, messageText: true, durationSeconds: true, recordingUrl: true, transcript: true, summary: true, attachmentsJson: true, occurredAt: true, sentByUserId: true },
       }),
       prisma.site.findFirst({ where: { orders: { some: { id } } }, select: { quoPhoneNumberId: true, quoEnabled: true, timezone: true } }),
     ]);
@@ -56,6 +56,7 @@ export default async function OwnerOrderPage({ params }: { params: Promise<{ id:
       id: c.id, type: c.type, direction: c.direction, status: c.status, partyRole: c.partyRole,
       externalPhone: c.externalPhone, messageText: c.messageText, durationSeconds: c.durationSeconds,
       recordingUrl: c.recordingUrl, transcript: c.transcript, summary: c.summary,
+      attachments: parseAttachments(c.attachmentsJson),
       occurredAt: c.occurredAt.toISOString(), sentByName: c.sentByUserId ? nameById.get(c.sentByUserId) ?? null : null,
     }));
     storeHasQuoNumber = !!(siteQuo?.quoPhoneNumberId && siteQuo?.quoEnabled);

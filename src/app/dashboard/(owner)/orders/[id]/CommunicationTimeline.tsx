@@ -1,5 +1,6 @@
 "use client";
 import { useState } from "react";
+import { ZoomableImage } from "@/components/ImageLightbox";
 
 export type TimelineItem = {
   id: string;
@@ -13,9 +14,38 @@ export type TimelineItem = {
   recordingUrl: string | null;
   transcript: string | null;
   summary: string | null;
+  attachments: { url: string; type: string | null }[];
   occurredAt: string; // ISO
   sentByName?: string | null;
 };
+
+function isImageAttachment(url: string, type: string | null): boolean {
+  if (type && type.toLowerCase().startsWith("image/")) return true;
+  return /\.(jpe?g|png|gif|webp|heic|heif|bmp)(\?|#|$)/i.test(url);
+}
+function attachmentName(url: string): string {
+  try { return decodeURIComponent(new URL(url).pathname.split("/").filter(Boolean).pop() || "вложение"); } catch { return "вложение"; }
+}
+
+/**
+ * Одно MMS-вложение. Изображение → миниатюра через ZoomableImage (клик = lightbox) + ссылка «Открыть»
+ * (страхует, если URL протух/битый — сама лента при этом не ломается). Не-картинка → безопасная ссылка.
+ */
+function AttachmentView({ url, type }: { url: string; type: string | null }) {
+  if (isImageAttachment(url, type)) {
+    return (
+      <span className="inline-flex flex-col items-start gap-0.5">
+        <ZoomableImage src={url} alt="Вложение" className="h-28 w-28 rounded border border-slate-200 object-cover" />
+        <a href={url} target="_blank" rel="noopener noreferrer" className="text-[10px] text-sky-600 underline">Открыть</a>
+      </span>
+    );
+  }
+  return (
+    <a href={url} target="_blank" rel="noopener noreferrer" className="text-[11px] text-sky-600 underline">
+      📎 {type ? `${attachmentName(url)} · ${type}` : attachmentName(url)}
+    </a>
+  );
+}
 
 const STATUS_RU: Record<string, string> = { PENDING: "отправляется", SENT: "отправлено", DELIVERED: "доставлено", RECEIVED: "получено", COMPLETED: "звонок", MISSED: "пропущен", FAILED: "ошибка" };
 const COLLAPSE = 300;
@@ -71,7 +101,19 @@ export function CommunicationTimeline({ items, storeTimeZone, inboundLabel = "К
             <span className={statusClass(c.status)}>{STATUS_RU[c.status] ?? c.status}</span>
           </div>
 
-          {c.type === "SMS" && c.messageText && <CollapsibleText text={c.messageText} id={c.id} kind="sms" />}
+          {c.type === "SMS" && (
+            c.messageText
+              ? <CollapsibleText text={c.messageText} id={c.id} kind="sms" />
+              : c.attachments.length === 0
+                ? <div className="mt-0.5 text-xs text-slate-400 italic">(без текста)</div>
+                : null
+          )}
+
+          {c.attachments.length > 0 && (
+            <div className="mt-1 flex flex-wrap gap-2">
+              {c.attachments.map((a, i) => <AttachmentView key={i} url={a.url} type={a.type} />)}
+            </div>
+          )}
 
           {c.type !== "SMS" && (
             <div className="mt-0.5 space-y-1">

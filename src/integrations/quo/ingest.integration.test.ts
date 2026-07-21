@@ -213,3 +213,34 @@ describe("ingestQuoEvent — привязка и идемпотентность"
     expect(comm?.recordingUrl ?? null).toBeNull();
   });
 });
+
+describe("ingestQuoEvent — MMS media → attachmentsJson (regression)", () => {
+  it("входящее MMS с фото сохраняет вложение", async () => {
+    const cust = uniquePhone();
+    await makeOrder({ senderPhone: cust, recipientPhone: uniquePhone(), deliveryDate: today() });
+    const media = [{ url: "https://cdn.quo/mms/in.jpg", type: "image/jpeg" }];
+    const res = await ingestQuoEvent(prisma, ev("message.received", { id: `AC_mmsin_${suffix}`, from: cust, to: [STORE], direction: "incoming", body: "", media }, `EV_mmsin_${suffix}`));
+    expect(res.outcome).toBe("created");
+    const comm = await prisma.orderCommunication.findUnique({ where: { provider_providerEventId: { provider: "QUO", providerEventId: `EV_mmsin_${suffix}` } }, select: { attachmentsJson: true } });
+    expect(comm?.attachmentsJson).toEqual(media);
+  });
+
+  it("исходящее MMS с несколькими фото сохраняет все вложения", async () => {
+    const cust = uniquePhone();
+    await makeOrder({ senderPhone: cust, recipientPhone: uniquePhone(), deliveryDate: today() });
+    const media = [{ url: "https://cdn.quo/mms/out1.jpg", type: "image/jpeg" }, { url: "https://cdn.quo/mms/out2.png", type: "image/png" }];
+    const res = await ingestQuoEvent(prisma, ev("message.delivered", { id: `AC_mmsout_${suffix}`, from: STORE, to: [cust], direction: "outgoing", body: "", media }, `EV_mmsout_${suffix}`));
+    expect(res.outcome).toBe("created");
+    const comm = await prisma.orderCommunication.findUnique({ where: { provider_providerEventId: { provider: "QUO", providerEventId: `EV_mmsout_${suffix}` } }, select: { attachmentsJson: true } });
+    expect(comm?.attachmentsJson).toEqual(media);
+  });
+
+  it("обычный SMS без media → attachmentsJson пустой (null)", async () => {
+    const cust = uniquePhone();
+    await makeOrder({ senderPhone: cust, recipientPhone: uniquePhone(), deliveryDate: today() });
+    const res = await ingestQuoEvent(prisma, ev("message.received", { id: `AC_txt_${suffix}`, from: cust, to: [STORE], direction: "incoming", body: "just text" }, `EV_txt_${suffix}`));
+    expect(res.outcome).toBe("created");
+    const comm = await prisma.orderCommunication.findUnique({ where: { provider_providerEventId: { provider: "QUO", providerEventId: `EV_txt_${suffix}` } }, select: { attachmentsJson: true } });
+    expect(comm?.attachmentsJson ?? null).toBeNull();
+  });
+});

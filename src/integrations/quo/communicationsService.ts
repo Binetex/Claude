@@ -58,6 +58,8 @@ export async function attachUnlinkedCommunicationsToOrder(prisma: PrismaClient, 
 import { matchCommunicationToOrder } from "./matching";
 import { computeIndicators, type OrderIndicator } from "./communicationsView";
 
+export type CommAttachment = { url: string; type: string | null };
+
 export type CommunicationCardItem = {
   id: string;
   type: "SMS" | "CALL" | "VOICEMAIL";
@@ -70,9 +72,26 @@ export type CommunicationCardItem = {
   recordingUrl: string | null;
   transcript: string | null;
   summary: string | null;
+  attachments: CommAttachment[];
   occurredAt: string;
   sentByName: string | null;
 };
+
+/** Нормализует OrderCommunication.attachmentsJson (MMS media [{url,type}]) в безопасный массив. */
+export function parseAttachments(json: Prisma.JsonValue | null | undefined): CommAttachment[] {
+  if (!Array.isArray(json)) return [];
+  const out: CommAttachment[] = [];
+  for (const x of json) {
+    if (x && typeof x === "object" && "url" in x) {
+      const url = (x as { url?: unknown }).url;
+      if (typeof url === "string" && url) {
+        const t = (x as { type?: unknown }).type;
+        out.push({ url, type: typeof t === "string" ? t : null });
+      }
+    }
+  }
+  return out;
+}
 
 /**
  * Данные блока «Общение» для карточки заказа (owner/call-center/florist — единый вид, любой роль).
@@ -102,7 +121,7 @@ export async function loadOrderCommunicationsCard(prisma: PrismaClient, orderId:
       where: { orderId },
       orderBy: { occurredAt: "desc" },
       take: 200,
-      select: { id: true, type: true, direction: true, status: true, partyRole: true, externalPhone: true, messageText: true, durationSeconds: true, recordingUrl: true, transcript: true, summary: true, occurredAt: true, sentByUserId: true },
+      select: { id: true, type: true, direction: true, status: true, partyRole: true, externalPhone: true, messageText: true, durationSeconds: true, recordingUrl: true, transcript: true, summary: true, attachmentsJson: true, occurredAt: true, sentByUserId: true },
     }),
     prisma.site.findFirst({ where: { orders: { some: { id: orderId } } }, select: { quoPhoneNumberId: true, quoEnabled: true, timezone: true } }),
   ]);
@@ -114,6 +133,7 @@ export async function loadOrderCommunicationsCard(prisma: PrismaClient, orderId:
       id: c.id, type: c.type, direction: c.direction, status: c.status, partyRole: c.partyRole,
       externalPhone: c.externalPhone, messageText: c.messageText, durationSeconds: c.durationSeconds,
       recordingUrl: c.recordingUrl, transcript: c.transcript, summary: c.summary,
+      attachments: parseAttachments(c.attachmentsJson),
       occurredAt: c.occurredAt.toISOString(), sentByName: c.sentByUserId ? nameById.get(c.sentByUserId) ?? null : null,
     })),
     storeHasQuoNumber: !!(site?.quoPhoneNumberId && site?.quoEnabled),
