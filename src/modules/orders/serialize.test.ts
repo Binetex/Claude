@@ -24,6 +24,7 @@ function makeOrder(financeVisibility: "MAKER_ONLY" | "FULL" = "MAKER_ONLY"): Ord
     site: { name: "Demo Site", shortName: "DEMO", colorTag: "#64748b", platform: "SHOPIFY" },
     source: "Shopify",
     externalCreatedAt: new Date("2026-07-17T10:00:00Z"),
+    updatedAt: new Date("2026-07-17T12:00:00Z"),
     deliveryDate: new Date("2026-07-18T00:00:00Z"),
     deliveryWindow: "12:00 – 16:00",
     senderName: "Sender A",

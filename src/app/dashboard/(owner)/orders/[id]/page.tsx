@@ -158,7 +158,7 @@ export default async function OwnerOrderPage({ params }: { params: Promise<{ id:
         {/* Левая колонка — данные */}
         <div className="space-y-4 lg:col-span-2">
           {/* Открытка и заметка — важное, наверху */}
-          <CardNoteCard orderId={order.id} cardMessage={order.cardMessage} customerNote={order.customerNote} />
+          <CardNoteCard orderId={order.id} updatedAt={order.updatedAt} cardMessage={order.cardMessage} customerNote={order.customerNote} />
 
           {/* Товары */}
           <Card>
@@ -191,6 +191,7 @@ export default async function OwnerOrderPage({ params }: { params: Promise<{ id:
                 <ContactEditDialog
                   kind="sender"
                   orderId={order.id}
+                  updatedAt={order.updatedAt}
                   initial={{ senderName: order.senderName, senderPhone: order.senderPhone, senderEmail: order.senderEmail ?? "" }}
                 />
               </CardHeader>
@@ -213,6 +214,7 @@ export default async function OwnerOrderPage({ params }: { params: Promise<{ id:
                 <ContactEditDialog
                   kind="recipient"
                   orderId={order.id}
+                  updatedAt={order.updatedAt}
                   initial={{
                     recipientName: order.recipientName,
                     recipientPhone: order.recipientPhone,
@@ -353,6 +355,7 @@ export default async function OwnerOrderPage({ params }: { params: Promise<{ id:
           <div className="sticky top-16">
             <OwnerOrderControls
               orderId={order.id}
+              updatedAt={order.updatedAt}
               order={{
                 orderStatus: order.orderStatus,
                 deliveryDate: format(new Date(order.deliveryDate), "yyyy-MM-dd"),

@@ -1,40 +1,46 @@
 "use client";
-import { useState, useTransition } from "react";
-import { toast } from "sonner";
-import { ownerUpdateCardAndNote } from "@/app/dashboard/(owner)/actions";
+import { useState } from "react";
 import { CopyButton } from "@/components/CopyButton";
 import { Card, CardHeader, CardTitle, CardBody } from "@/components/ui/Card";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
+import { useBlockSave, ConflictNotice } from "./orderEditShared";
 
-/** Открытка + заметка клиента — важный блок, вынесен наверх. Меняется только вручную. */
+/** Открытка + заметка клиента — важный блок, вынесен наверх. Меняется только вручную (OCC). */
 export function CardNoteCard({
   orderId,
+  updatedAt,
   cardMessage,
   customerNote,
 }: {
   orderId: string;
+  updatedAt: string;
   cardMessage: string;
   customerNote: string;
 }) {
   const [card, setCard] = useState(cardMessage);
   const [note, setNote] = useState(customerNote);
   const [showNote, setShowNote] = useState(customerNote.trim() !== "");
-  const [pending, start] = useTransition();
+  const { pending, conflict, save, acceptCurrentVersion } = useBlockSave(orderId, "cardNote", updatedAt);
   const dirty = card !== cardMessage || note !== customerNote;
 
-  function save() {
-    start(async () => {
-      await ownerUpdateCardAndNote(orderId, { cardMessage: card, customerNote: note });
-      toast.success("Открытка и заметка сохранены");
-    });
+  function submit() {
+    save({ cardMessage: card, customerNote: note }, { successMessage: "Открытка и заметка сохранены" });
+  }
+
+  function refreshFromDb(current: Record<string, string>) {
+    if ("cardMessage" in current) setCard(current.cardMessage);
+    if ("customerNote" in current) {
+      setNote(current.customerNote);
+      if (current.customerNote.trim() !== "") setShowNote(true);
+    }
   }
 
   return (
     <Card>
       <CardHeader className="flex items-center justify-between">
         <CardTitle>Открытка и заметка клиента</CardTitle>
-        <Button size="sm" disabled={pending || !dirty} onClick={save}>
+        <Button size="sm" disabled={pending || !dirty} onClick={submit}>
           {pending ? "Сохранение…" : "Сохранить"}
         </Button>
       </CardHeader>
@@ -61,6 +67,13 @@ export function CardNoteCard({
           >
             + Добавить заметку клиента
           </button>
+        )}
+        {conflict && (
+          <ConflictNotice
+            current={conflict.current}
+            labels={[{ k: "cardMessage", label: "Открытка" }, { k: "customerNote", label: "Заметка" }]}
+            onRefresh={() => acceptCurrentVersion(refreshFromDb)}
+          />
         )}
       </CardBody>
     </Card>

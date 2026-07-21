@@ -5,8 +5,32 @@ import { ZoomableImage } from "@/components/ImageLightbox";
 import { formatMoney } from "@/lib/money";
 import { fmtDate, formatOrderNumber } from "@/lib/format";
 import { resolveOrderStatusMeta } from "@/lib/statuses";
-import type { OwnerOrder } from "@/modules/orders/serialize";
+import type { OrderStatus } from "@/generated/prisma/enums";
 import type { OrderIndicator } from "@/integrations/quo/communicationsView";
+
+/**
+ * Структурный тип строки списка — совместим с OwnerOrder, CallCenterOrder и FloristOrder.
+ * Финансы (finance) и имя флориста (currentFloristName) опциональны: у колл-центра/флориста
+ * их нет, а на их страницах список рендерится с hideFinance (без цен и без колонки флориста).
+ */
+export type OrdersTableOrder = {
+  id: string;
+  orderNumber: string;
+  site: { name: string };
+  orderStatus: OrderStatus;
+  paymentFailed?: boolean;
+  deliveryDate: Date | string;
+  deliveryWindow: string;
+  recipientName: string;
+  recipientPhone: string | null;
+  addressLine: string;
+  apartment: string | null;
+  city: string;
+  zip: string;
+  items: { id: string; name: string; variantName: string | null; image: string | null; quantity: number }[];
+  finance?: { customerTotal: number; floristTotal: number } | null;
+  currentFloristName?: string | null;
+};
 
 /** Компактные индикаторы коммуникаций в списке (непрочитанные/пропущенный/последний контакт/preview). */
 function CommIndicators({ ind }: { ind?: OrderIndicator }) {
@@ -26,7 +50,7 @@ function CommIndicators({ ind }: { ind?: OrderIndicator }) {
 }
 
 /** Единственный статус заказа — компактный бейдж ~9px (ширина по тексту). */
-function StatusPill({ status, paymentFailed, className = "" }: { status: OwnerOrder["orderStatus"]; paymentFailed?: boolean; className?: string }) {
+function StatusPill({ status, paymentFailed, className = "" }: { status: OrderStatus; paymentFailed?: boolean; className?: string }) {
   const m = resolveOrderStatusMeta(status, { paymentFailed });
   return (
     <span className={`inline-block w-fit rounded border px-1 py-px text-[9px] font-medium leading-none ${m.className} ${className}`}>
@@ -35,18 +59,18 @@ function StatusPill({ status, paymentFailed, className = "" }: { status: OwnerOr
   );
 }
 
-function fullAddress(o: OwnerOrder): string {
+function fullAddress(o: OrdersTableOrder): string {
   return [o.addressLine, o.apartment, o.city, o.zip].filter(Boolean).join(", ");
 }
 
-function mapsUrl(o: OwnerOrder): string {
+function mapsUrl(o: OrdersTableOrder): string {
   return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(fullAddress(o))}`;
 }
 
 const dayKey = (d: Date | string) => new Date(d).toISOString().slice(0, 10);
 
 /** Все позиции заказа — показываем сразу, без раскрытия. */
-function ItemsList({ o, imgSize = "h-6 w-6", nameClass = "text-[11px]" }: { o: OwnerOrder; imgSize?: string; nameClass?: string }) {
+function ItemsList({ o, imgSize = "h-6 w-6", nameClass = "text-[11px]" }: { o: OrdersTableOrder; imgSize?: string; nameClass?: string }) {
   return (
     <div className="flex flex-col gap-0.5">
       {o.items.map((it) => (
@@ -68,14 +92,14 @@ function ItemsList({ o, imgSize = "h-6 w-6", nameClass = "text-[11px]" }: { o: O
 }
 
 /** Десктоп — заказ отдельной плашкой (карточкой), без колонки прибыли. */
-function DesktopCard({ o, ind }: { o: OwnerOrder; ind?: OrderIndicator }) {
+function DesktopCard({ o, ind, hideFinance, hrefBase }: { o: OrdersTableOrder; ind?: OrderIndicator; hideFinance?: boolean; hrefBase: string }) {
   return (
     <Card className="p-4 pr-6 transition-shadow hover:shadow-sm">
       <div className="flex items-start gap-4 text-[12px]">
         {/* Заказ */}
         <div className="flex w-28 shrink-0 flex-col items-start gap-1">
           <StatusPill status={o.orderStatus} paymentFailed={o.paymentFailed} />
-          <Link href={`/dashboard/orders/${o.id}`} className="font-semibold text-slate-800 hover:underline">
+          <Link href={`${hrefBase}/${o.id}`} className="font-semibold text-slate-800 hover:underline">
             {formatOrderNumber(o.orderNumber)}
           </Link>
           <span className="text-[10px] text-slate-400">{o.site.name}</span>
@@ -110,31 +134,37 @@ function DesktopCard({ o, ind }: { o: OwnerOrder; ind?: OrderIndicator }) {
           )}
         </div>
 
-        {/* Флорист */}
-        <div className="w-20 shrink-0 truncate text-slate-700" title={o.currentFloristName ?? undefined}>{o.currentFloristName ?? "—"}</div>
+        {/* Флорист — только там, где показываем финансы (владелец). */}
+        {!hideFinance && (
+          <div className="w-20 shrink-0 truncate text-slate-700" title={o.currentFloristName ?? undefined}>{o.currentFloristName ?? "—"}</div>
+        )}
 
-        {/* Суммы (без прибыли) */}
-        <div className="w-24 shrink-0 text-right leading-tight">
-          <div className="font-medium text-slate-800">{formatMoney(o.finance.customerTotal)}</div>
-          <div className="text-[10px] text-slate-400">сумма</div>
-          <div className="mt-1 text-slate-600">{formatMoney(o.finance.floristTotal)}</div>
-          <div className="text-[10px] text-slate-400">флористу</div>
-        </div>
+        {/* Суммы (без прибыли) — скрыты для колл-центра/флориста. */}
+        {!hideFinance && o.finance && (
+          <div className="w-24 shrink-0 text-right leading-tight">
+            <div className="font-medium text-slate-800">{formatMoney(o.finance.customerTotal)}</div>
+            <div className="text-[10px] text-slate-400">сумма</div>
+            <div className="mt-1 text-slate-600">{formatMoney(o.finance.floristTotal)}</div>
+            <div className="text-[10px] text-slate-400">флористу</div>
+          </div>
+        )}
       </div>
     </Card>
   );
 }
 
-function MobileCard({ o, ind }: { o: OwnerOrder; ind?: OrderIndicator }) {
+function MobileCard({ o, ind, hideFinance, hrefBase }: { o: OrdersTableOrder; ind?: OrderIndicator; hideFinance?: boolean; hrefBase: string }) {
   return (
     <Card className="p-2.5">
       <div className="flex flex-col gap-0.5">
         <StatusPill status={o.orderStatus} paymentFailed={o.paymentFailed} className="self-start" />
         <div className="flex items-baseline justify-between gap-2">
-          <Link href={`/dashboard/orders/${o.id}`} className="font-semibold text-slate-800">
+          <Link href={`${hrefBase}/${o.id}`} className="font-semibold text-slate-800">
             {formatOrderNumber(o.orderNumber)}
           </Link>
-          <span className="text-[13px] font-semibold text-slate-700">{formatMoney(o.finance.customerTotal)}</span>
+          {!hideFinance && o.finance && (
+            <span className="text-[13px] font-semibold text-slate-700">{formatMoney(o.finance.customerTotal)}</span>
+          )}
         </div>
         <span className="text-[10px] text-slate-400">{o.site.name}</span>
         <CommIndicators ind={ind} />
@@ -166,7 +196,19 @@ function DaySeparator({ date }: { date: Date | string }) {
   return <div className="px-1 pt-2 text-[11px] font-semibold text-slate-500">{fmtDate(date)}</div>;
 }
 
-export function OrdersTable({ orders, groupByDay = false, commIndicators = {} }: { orders: OwnerOrder[]; groupByDay?: boolean; commIndicators?: Record<string, OrderIndicator> }) {
+export function OrdersTable({
+  orders,
+  groupByDay = false,
+  commIndicators = {},
+  hideFinance = false,
+  hrefBase = "/dashboard/orders",
+}: {
+  orders: OrdersTableOrder[];
+  groupByDay?: boolean;
+  commIndicators?: Record<string, OrderIndicator>;
+  hideFinance?: boolean;
+  hrefBase?: string;
+}) {
   // Разбивка по дням (только визуально, для вкладки «Все»). Сортировка уже сделана в запросе.
   const desktopItems: React.ReactNode[] = [];
   const mobileItems: React.ReactNode[] = [];
@@ -180,8 +222,8 @@ export function OrdersTable({ orders, groupByDay = false, commIndicators = {} }:
         prevDay = day;
       }
     }
-    desktopItems.push(<DesktopCard key={o.id} o={o} ind={commIndicators[o.id]} />);
-    mobileItems.push(<MobileCard key={o.id} o={o} ind={commIndicators[o.id]} />);
+    desktopItems.push(<DesktopCard key={o.id} o={o} ind={commIndicators[o.id]} hideFinance={hideFinance} hrefBase={hrefBase} />);
+    mobileItems.push(<MobileCard key={o.id} o={o} ind={commIndicators[o.id]} hideFinance={hideFinance} hrefBase={hrefBase} />);
   }
 
   return (

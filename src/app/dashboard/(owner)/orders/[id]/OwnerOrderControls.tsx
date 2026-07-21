@@ -1,26 +1,23 @@
 "use client";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
-import {
-  ownerSetOrderStatus,
-  ownerUpdateDelivery,
-  ownerSetManualPrice,
-  ownerReassign,
-} from "@/app/dashboard/(owner)/actions";
-import { manualOrderStatuses, orderStatusMeta } from "@/lib/statuses";
+import { ownerSetManualPrice, ownerReassign } from "@/app/dashboard/(owner)/actions";
 import { Card, CardHeader, CardTitle, CardBody } from "@/components/ui/Card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
 import type { OrderStatus } from "@/generated/prisma/enums";
+import { OrderStatusDateControls } from "./OrderStatusDateControls";
 
 export function OwnerOrderControls({
   orderId,
+  updatedAt,
   order,
   florists,
 }: {
   orderId: string;
+  updatedAt: string;
   order: {
     orderStatus: OrderStatus;
     deliveryDate: string;
@@ -33,16 +30,16 @@ export function OwnerOrderControls({
 }) {
   return (
     <div className="space-y-4">
-      <Card>
-        <CardHeader><CardTitle>Статус заказа</CardTitle></CardHeader>
-        <CardBody><StatusForm orderId={orderId} current={order.orderStatus} /></CardBody>
-      </Card>
+      {/* Статус + дата/время — общий блок (owner/call-center/florist), редактирование через OCC. */}
+      <OrderStatusDateControls
+        orderId={orderId}
+        updatedAt={updatedAt}
+        orderStatus={order.orderStatus}
+        deliveryDate={order.deliveryDate}
+        deliveryWindow={order.deliveryWindow}
+      />
 
-      <Card>
-        <CardHeader><CardTitle>Дата и время доставки</CardTitle></CardHeader>
-        <CardBody><DeliveryForm orderId={orderId} date={order.deliveryDate} window={order.deliveryWindow} /></CardBody>
-      </Card>
-
+      {/* Флорист и цена — ТОЛЬКО владелец. */}
       <Card>
         <CardHeader><CardTitle>Флорист и цена</CardTitle></CardHeader>
         <CardBody className="space-y-4">
@@ -50,51 +47,6 @@ export function OwnerOrderControls({
           <PriceForm orderId={orderId} current={order.floristTotal} priceMode={order.priceMode} />
         </CardBody>
       </Card>
-    </div>
-  );
-}
-
-function StatusForm({ orderId, current }: { orderId: string; current: OrderStatus }) {
-  const [status, setStatus] = useState<OrderStatus>(current);
-  const [pending, start] = useTransition();
-  return (
-    <div className="flex gap-2">
-      <Select value={status} onChange={(e) => setStatus(e.target.value as OrderStatus)}>
-        {manualOrderStatuses.map((s) => (
-          <option key={s} value={s}>{orderStatusMeta[s].label}</option>
-        ))}
-      </Select>
-      <Button
-        disabled={pending || status === current}
-        onClick={() => start(async () => { await ownerSetOrderStatus(orderId, status); toast.success("Статус обновлён"); })}
-      >
-        ОК
-      </Button>
-    </div>
-  );
-}
-
-function DeliveryForm({ orderId, date, window }: { orderId: string; date: string; window: string }) {
-  const [d, setD] = useState(date);
-  const [w, setW] = useState(window);
-  const [pending, start] = useTransition();
-  return (
-    <div className="space-y-2.5">
-      <div>
-        <Label>Дата</Label>
-        <Input type="date" value={d} onChange={(e) => setD(e.target.value)} className="mt-1" />
-      </div>
-      <div>
-        <Label>Интервал</Label>
-        <Input value={w} onChange={(e) => setW(e.target.value)} className="mt-1" placeholder="12:00 – 16:00" />
-      </div>
-      <Button
-        className="w-full"
-        disabled={pending}
-        onClick={() => start(async () => { await ownerUpdateDelivery(orderId, { deliveryDate: d, deliveryWindow: w }); toast.success("Доставка обновлена"); })}
-      >
-        Сохранить
-      </Button>
     </div>
   );
 }

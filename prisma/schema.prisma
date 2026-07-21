@@ -275,7 +275,8 @@ model User {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  florist Florist?
+  florist     Florist?
+  orderAudits OrderAudit[]
 
   @@index([role])
 }
@@ -588,6 +589,7 @@ model Order {
   communications OrderCommunication[]
   deliveryIntent DeliveryIntent?
   deliveries     Delivery[]
+  audits         OrderAudit[]
 
   // NULL допустим много раз (Postgres: NULL != NULL) — не мешает заказам без внешнего источника.
   // Источник истины для идемпотентности вебхуков (см. ingestShopifyOrder) — не полагаемся
@@ -1024,4 +1026,26 @@ model BurqSettingsAudit {
   createdAt   DateTime        @default(now())
 
   @@index([createdAt])
+}
+
+/**
+ * Аудит ручного редактирования полей заказа сотрудниками (owner/call-center/florist).
+ * Пишется в ТОЙ ЖЕ транзакции, что и обновление заказа (см. updateOrderBlock). `changed`
+ * содержит ТОЛЬКО before/after изменившихся полей блока — без паролей, токенов, секретов
+ * и полного payload. Отдельного UI просмотра пока нет (только запись).
+ */
+model OrderAudit {
+  id        String   @id @default(cuid())
+  orderId   String
+  userId    String
+  role      Role
+  block     String // contacts | sender | status | delivery | cardNote
+  changed   Json // { field: { from, to } } — только изменённые поля
+  createdAt DateTime @default(now())
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@index([orderId, createdAt])
+  @@index([userId, createdAt])
 }

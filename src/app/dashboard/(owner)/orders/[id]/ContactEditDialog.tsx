@@ -1,12 +1,11 @@
 "use client";
-import { useState, useTransition } from "react";
+import { useState } from "react";
 import { Pencil } from "lucide-react";
-import { toast } from "sonner";
 import { Dialog, DialogTrigger, DialogContent, DialogHeader, DialogTitle, DialogClose } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { ownerUpdateContacts, ownerUpdateSender } from "@/app/dashboard/(owner)/actions";
+import { useBlockSave, ConflictNotice } from "./orderEditShared";
 
 type FieldDef = { k: string; label: string; wide?: boolean };
 
@@ -25,28 +24,43 @@ const SENDER_FIELDS: FieldDef[] = [
   { k: "senderEmail", label: "Email" },
 ];
 
-/** Иконка-редактирование на карточке «Отправитель»/«Получатель» → модалка с полями. */
+/**
+ * Иконка-редактирование на карточке «Отправитель»/«Получатель» → модалка с полями.
+ * Единый путь сохранения (OCC): владелец/колл-центр/флорист. Показываются только те поля,
+ * что переданы в `initial` (например, флористу отправитель отдаётся без email).
+ */
 export function ContactEditDialog({
   kind,
   orderId,
+  updatedAt,
   initial,
 }: {
   kind: "recipient" | "sender";
   orderId: string;
+  updatedAt: string;
   initial: Record<string, string>;
 }) {
   const [open, setOpen] = useState(false);
-  const [pending, start] = useTransition();
   const [f, setF] = useState<Record<string, string>>(initial);
-  const fields = kind === "recipient" ? RECIPIENT_FIELDS : SENDER_FIELDS;
+  const block = kind === "recipient" ? "contacts" : "sender";
+  const { pending, conflict, save, acceptCurrentVersion } = useBlockSave(orderId, block, updatedAt);
+
+  const allFields = kind === "recipient" ? RECIPIENT_FIELDS : SENDER_FIELDS;
+  const fields = allFields.filter((fl) => fl.k in initial);
   const title = kind === "recipient" ? "Получатель" : "Отправитель";
 
-  function save() {
-    start(async () => {
-      if (kind === "recipient") await ownerUpdateContacts(orderId, f);
-      else await ownerUpdateSender(orderId, f);
-      toast.success(`${title} обновлён`);
-      setOpen(false);
+  function submit() {
+    // Отправляем только видимые поля блока.
+    const data: Record<string, string> = {};
+    for (const fl of fields) data[fl.k] = f[fl.k] ?? "";
+    save(data, { successMessage: `${title} обновлён`, onOk: () => setOpen(false) });
+  }
+
+  function refreshFromDb(current: Record<string, string>) {
+    setF((prev) => {
+      const next = { ...prev };
+      for (const fl of fields) if (fl.k in current) next[fl.k] = current[fl.k];
+      return next;
     });
   }
 
@@ -69,11 +83,16 @@ export function ContactEditDialog({
             </div>
           ))}
         </div>
+        {conflict && (
+          <div className="mt-4">
+            <ConflictNotice current={conflict.current} labels={fields} onRefresh={() => acceptCurrentVersion(refreshFromDb)} />
+          </div>
+        )}
         <div className="mt-5 flex justify-end gap-2">
           <DialogClose asChild>
             <Button variant="ghost" size="sm">Отмена</Button>
           </DialogClose>
-          <Button size="sm" disabled={pending} onClick={save}>
+          <Button size="sm" disabled={pending} onClick={submit}>
             {pending ? "Сохранение…" : "Сохранить"}
           </Button>
         </div>

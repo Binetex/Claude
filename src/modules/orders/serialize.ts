@@ -48,8 +48,10 @@ function baseFields(o: OrderWithRelations) {
     bouquetPhotoUrl: o.bouquetPhotoUrl,
     deliveryPhotoUrl: o.deliveryPhotoUrl,
     trackingUrl: o.trackingUrl,
-    currentFloristName: o.currentFlorist?.user.name ?? null,
-    currentFloristId: o.currentFloristId,
+    // Версия записи для оптимистической блокировки (OCC) при редактировании блоков.
+    updatedAt: o.updatedAt.toISOString(),
+    // Назначение флориста (currentFlorist*) НЕ в базе: колл-центр и флорист его не видят.
+    // Оно добавляется только в serializeForOwner ниже.
   };
 }
 
@@ -57,6 +59,8 @@ function baseFields(o: OrderWithRelations) {
 export function serializeForOwner(o: OrderWithRelations) {
   return {
     ...baseFields(o),
+    currentFloristName: o.currentFlorist?.user.name ?? null,
+    currentFloristId: o.currentFloristId,
     senderName: o.senderName,
     senderPhone: o.senderPhone,
     senderEmail: o.senderEmail,

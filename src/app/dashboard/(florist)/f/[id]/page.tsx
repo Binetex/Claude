@@ -1,17 +1,21 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { format } from "date-fns";
 import { requireFlorist } from "@/lib/rbac";
 import { getForFlorist } from "@/modules/orders/queries";
 import { prisma } from "@/lib/db";
 import { listActiveHandoffTargets } from "@/modules/florists/service";
 import { loadOrderCommunicationsCard } from "@/integrations/quo/communicationsService";
 import { OrderCommunications } from "@/app/dashboard/(owner)/orders/[id]/OrderCommunications";
-import { Card, CardBody } from "@/components/ui/Card";
+import { ContactEditDialog } from "@/app/dashboard/(owner)/orders/[id]/ContactEditDialog";
+import { CardNoteCard } from "@/app/dashboard/(owner)/orders/[id]/CardNoteCard";
+import { OrderStatusDateControls } from "@/app/dashboard/(owner)/orders/[id]/OrderStatusDateControls";
+import { DeliveryStatusCard } from "@/app/dashboard/(owner)/orders/[id]/DeliveryStatusCard";
+import { Card, CardHeader, CardTitle, CardBody } from "@/components/ui/Card";
 import { OrderStatusBadge } from "@/components/StatusBadge";
-import { CopyButton } from "@/components/CopyButton";
 import { ZoomableImage } from "@/components/ImageLightbox";
 import { formatMoney } from "@/lib/money";
-import { fmtDate, fmtDateTime, formatOrderNumber } from "@/lib/format";
+import { formatOrderNumber } from "@/lib/format";
 import { OrderItemComposition } from "@/components/OrderItemComposition";
 import { FloristOrderActions } from "./FloristOrderActions";
 
@@ -62,20 +66,6 @@ export default async function FloristOrderPage({ params }: { params: Promise<{ i
             ))}
           </div>
 
-          {/* Ключевая информация */}
-          <div className="grid grid-cols-2 gap-2 text-sm">
-            <KV label="Дата доставки" value={fmtDate(order.deliveryDate)} />
-            <KV label="Интервал" value={order.deliveryWindow} />
-            <KV label="Получатель" value={order.recipientName} />
-            <KV label="Телефон получателя" value={order.recipientPhone} />
-            <div className="col-span-2">
-              <KV label="Адрес" value={`${order.addressLine}${order.apartment ? `, ${order.apartment}` : ""}, ${order.city} ${order.zip}`} />
-            </div>
-            <KV label="Заказчик" value={order.senderName} />
-            <KV label="Телефон заказчика" value={order.senderPhone} />
-            {order.readyAt && <KV label="Время готовности" value={fmtDateTime(order.readyAt)} />}
-          </div>
-
           {/* Цена флориста */}
           <div className="rounded-lg bg-slate-800 px-4 py-3 text-center">
             <div className="text-xs text-slate-300">Ваша цена изготовления</div>
@@ -97,31 +87,6 @@ export default async function FloristOrderPage({ params }: { params: Promise<{ i
             </div>
           )}
 
-          {/* Открытка */}
-          <div className="rounded-lg border border-slate-200 p-3">
-            <div className="mb-1 flex items-center justify-between">
-              <span className="text-xs font-medium text-slate-500">Текст открытки</span>
-              <CopyButton text={order.cardMessage} />
-            </div>
-            <p className="whitespace-pre-wrap text-sm text-slate-700">{order.cardMessage || "—"}</p>
-          </div>
-
-          {/* Заметка */}
-          {order.customerNote && (
-            <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
-              <div className="mb-1 text-xs font-medium text-amber-700">Customer note</div>
-              <p className="whitespace-pre-wrap text-sm text-amber-900">{order.customerNote}</p>
-            </div>
-          )}
-
-          {/* Фото готового букета */}
-          {order.bouquetPhotoUrl && (
-            <div>
-              <div className="mb-1 text-xs font-medium text-slate-500">Фото готового букета</div>
-              <ZoomableImage src={order.bouquetPhotoUrl} alt="" className="h-40 w-full rounded-lg object-cover" />
-            </div>
-          )}
-
           {/* Быстрые действия */}
           <div className="grid grid-cols-2 gap-2">
             <a href={mapsUrl} target="_blank" rel="noreferrer" className="rounded-lg border border-slate-300 py-2.5 text-center text-sm font-medium text-slate-700">
@@ -133,6 +98,82 @@ export default async function FloristOrderPage({ params }: { params: Promise<{ i
           </div>
         </CardBody>
       </Card>
+
+      {/* Получатель / Отправитель — редактируемо (OCC). Отправитель — без email. */}
+      <div className="grid gap-4 md:grid-cols-2">
+        <Card>
+          <CardHeader className="flex items-center justify-between">
+            <CardTitle>Получатель</CardTitle>
+            <ContactEditDialog
+              kind="recipient"
+              orderId={order.id}
+              updatedAt={order.updatedAt}
+              initial={{
+                recipientName: order.recipientName,
+                recipientPhone: order.recipientPhone,
+                recipientEmail: order.recipientEmail ?? "",
+                addressLine: order.addressLine,
+                apartment: order.apartment ?? "",
+                city: order.city,
+                zip: order.zip,
+              }}
+            />
+          </CardHeader>
+          <CardBody className="space-y-1 text-sm">
+            <div className="font-medium text-slate-800">{order.recipientName}</div>
+            <div className="text-slate-600">{order.recipientPhone || "—"}</div>
+            <div className="text-slate-600">{order.addressLine}{order.apartment ? `, ${order.apartment}` : ""}, {order.city} {order.zip}</div>
+          </CardBody>
+        </Card>
+        <Card>
+          <CardHeader className="flex items-center justify-between">
+            <CardTitle>Заказчик</CardTitle>
+            <ContactEditDialog
+              kind="sender"
+              orderId={order.id}
+              updatedAt={order.updatedAt}
+              initial={{ senderName: order.senderName, senderPhone: order.senderPhone }}
+            />
+          </CardHeader>
+          <CardBody className="space-y-1 text-sm">
+            <div className="font-medium text-slate-800">{order.senderName}</div>
+            <div className="text-slate-600">{order.senderPhone || "—"}</div>
+          </CardBody>
+        </Card>
+      </div>
+
+      {/* Открытка и заметка — редактируемо (OCC). */}
+      <CardNoteCard orderId={order.id} updatedAt={order.updatedAt} cardMessage={order.cardMessage} customerNote={order.customerNote} />
+
+      {/* Фото готового букета */}
+      {order.bouquetPhotoUrl && (
+        <Card>
+          <CardHeader><CardTitle>Фото готового букета</CardTitle></CardHeader>
+          <CardBody>
+            <ZoomableImage src={order.bouquetPhotoUrl} alt="" className="h-40 w-full rounded-lg object-cover" />
+          </CardBody>
+        </Card>
+      )}
+
+      {/* Статус заказа + дата/время доставки — редактируемо (OCC). */}
+      <OrderStatusDateControls
+        orderId={order.id}
+        updatedAt={order.updatedAt}
+        orderStatus={order.orderStatus}
+        deliveryDate={format(new Date(order.deliveryDate), "yyyy-MM-dd")}
+        deliveryWindow={order.deliveryWindow}
+      />
+
+      {/* Статус доставки — полный блок (инструкции + курьер + Burq). */}
+      <DeliveryStatusCard
+        orderId={order.id}
+        orderStatus={order.orderStatus}
+        deliveryInstructions={order.deliveryInstructions}
+        trackingUrl={order.trackingUrl}
+        bouquetPhotoUrl={order.bouquetPhotoUrl}
+        deliveryPhotoUrl={order.deliveryPhotoUrl}
+        storeTimeZone={comm.storeTimeZone}
+      />
 
       {/* Общение (SMS/звонки) — единый блок QUO, доступен флористу. */}
       <OrderCommunications

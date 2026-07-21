@@ -24,6 +24,17 @@ export async function requireFlorist(): Promise<CurrentUser & { floristId: strin
   return user as CurrentUser & { floristId: string };
 }
 
+/**
+ * Роли, которым разрешено РЕДАКТИРОВАТЬ данные заказа (нефинансовые блоки):
+ * владелец, колл-центр и флорист. Финансовые действия и назначение флориста
+ * остаются OWNER-only (см. (owner)/actions.ts) — этот guard их не покрывает.
+ * Флорист дополнительно ограничен своими заказами — проверка владения делается
+ * в самом действии (saveOrderBlock), т.к. rbac не знает orderId.
+ */
+export async function requireOrderEditor(): Promise<CurrentUser> {
+  return requireRole("OWNER", "CALL_CENTER", "FLORIST");
+}
+
 export function homePathFor(role: Role): string {
   switch (role) {
     case "OWNER":
