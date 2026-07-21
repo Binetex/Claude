@@ -3,6 +3,8 @@ import { Card, CardHeader, CardTitle, CardBody } from "@/components/ui/Card";
 import { FinanceVisibilityToggle } from "./FinanceVisibilityToggle";
 import { SitePriorityEditor } from "./SitePriorityEditor";
 import { PickupLocationEditor } from "./PickupLocationEditor";
+import { AddFloristForm } from "./AddFloristForm";
+import { FloristEditForm } from "./FloristEditForm";
 import { TERMINAL_ORDER_STATUSES } from "@/lib/statuses";
 
 export const dynamic = "force-dynamic";
@@ -31,6 +33,8 @@ export default async function FloristsPage() {
   return (
     <div className="space-y-6">
       <h1 className="text-lg font-semibold text-slate-900">Флористы и распределение</h1>
+
+      <AddFloristForm />
 
       <div className="grid gap-4 md:grid-cols-2">
         {florists.map((f) => (
@@ -61,6 +65,7 @@ export default async function FloristsPage() {
                   : null
               }
             />
+            <FloristEditForm florist={{ id: f.id, name: f.user.name, email: f.user.email, phone: f.user.phone, active: f.active }} />
           </Card>
         ))}
       </div>
