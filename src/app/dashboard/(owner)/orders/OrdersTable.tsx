@@ -78,7 +78,8 @@ function ItemsList({ o, imgSize = "h-6 w-6", nameClass = "text-[11px]" }: { o: O
       {o.items.map((it) => (
         <div key={it.id} className="flex items-center gap-1.5">
           {it.image ? (
-            <ZoomableImage src={it.image} alt={it.name} className={`${imgSize} shrink-0 rounded object-cover`} />
+            // relative z-10 — фото остаётся кликабельным (зум) поверх «растянутой» ссылки карточки.
+            <ZoomableImage src={it.image} alt={it.name} className={`${imgSize} relative z-10 shrink-0 rounded object-cover`} />
           ) : (
             <span className={`${imgSize} shrink-0 rounded bg-slate-100`} />
           )}
@@ -96,12 +97,14 @@ function ItemsList({ o, imgSize = "h-6 w-6", nameClass = "text-[11px]" }: { o: O
 /** Десктоп — заказ отдельной плашкой (карточкой), без колонки прибыли. */
 function DesktopCard({ o, ind, hideFinance, hideFlorist, hrefBase }: { o: OrdersTableOrder; ind?: OrderIndicator; hideFinance?: boolean; hideFlorist?: boolean; hrefBase: string }) {
   return (
-    <Card className="p-4 pr-6 transition-shadow hover:shadow-sm">
+    // relative + «растянутая» ссылка (after:inset-0) → вся карточка кликабельна и ведёт в заказ;
+    // симметричные отступы p-4 (16px слева и справа), чтобы правый блок не съезжал к краю.
+    <Card className="relative cursor-pointer p-4 transition-shadow hover:shadow-sm">
       <div className="flex items-start gap-4 text-[12px]">
         {/* Заказ */}
         <div className="flex w-28 shrink-0 flex-col items-start gap-1">
           <StatusPill status={o.orderStatus} paymentFailed={o.paymentFailed} />
-          <Link href={`${hrefBase}/${o.id}`} className="font-semibold text-slate-800 hover:underline">
+          <Link href={`${hrefBase}/${o.id}`} className="font-semibold text-slate-800 hover:underline after:absolute after:inset-0 after:content-['']">
             {formatOrderNumber(o.orderNumber)}
           </Link>
           <span className="text-[10px] text-slate-400">{o.site.name}</span>
@@ -109,7 +112,7 @@ function DesktopCard({ o, ind, hideFinance, hideFlorist, hrefBase }: { o: Orders
         </div>
 
         {/* Товар — расширенная область названия, картинка 60×60, имя 13px */}
-        <div className="min-w-[240px] flex-[2]">
+        <div className="min-w-0 flex-[2]">
           <ItemsList o={o} imgSize="h-[60px] w-[60px]" nameClass="text-[13px]" />
         </div>
 
@@ -126,9 +129,9 @@ function DesktopCard({ o, ind, hideFinance, hideFlorist, hrefBase }: { o: Orders
         </div>
 
         {/* Адрес */}
-        <div className="min-w-[180px] flex-1">
+        <div className="min-w-0 flex-1">
           {fullAddress(o) ? (
-            <a href={mapsUrl(o)} target="_blank" rel="noopener noreferrer" className="text-sky-600 hover:underline">
+            <a href={mapsUrl(o)} target="_blank" rel="noopener noreferrer" className="relative z-10 text-sky-600 hover:underline">
               {fullAddress(o)}
             </a>
           ) : (
@@ -160,11 +163,11 @@ function DesktopCard({ o, ind, hideFinance, hideFlorist, hrefBase }: { o: Orders
 
 function MobileCard({ o, ind, hideFinance, hideFlorist, hrefBase }: { o: OrdersTableOrder; ind?: OrderIndicator; hideFinance?: boolean; hideFlorist?: boolean; hrefBase: string }) {
   return (
-    <Card className="p-2.5">
+    <Card className="relative p-2.5">
       <div className="flex flex-col gap-0.5">
         <StatusPill status={o.orderStatus} paymentFailed={o.paymentFailed} className="self-start" />
         <div className="flex items-baseline justify-between gap-2">
-          <Link href={`${hrefBase}/${o.id}`} className="font-semibold text-slate-800">
+          <Link href={`${hrefBase}/${o.id}`} className="font-semibold text-slate-800 after:absolute after:inset-0 after:content-['']">
             {formatOrderNumber(o.orderNumber)}
           </Link>
           {!hideFinance && o.finance && (
@@ -188,7 +191,7 @@ function MobileCard({ o, ind, hideFinance, hideFlorist, hrefBase }: { o: OrdersT
           {o.recipientPhone && <span className="text-slate-500"> · {o.recipientPhone}</span>}
         </div>
         {fullAddress(o) && (
-          <a href={mapsUrl(o)} target="_blank" rel="noopener noreferrer" className="block text-sky-600 hover:underline">
+          <a href={mapsUrl(o)} target="_blank" rel="noopener noreferrer" className="relative z-10 block text-sky-600 hover:underline">
             📍 {fullAddress(o)}
           </a>
         )}
