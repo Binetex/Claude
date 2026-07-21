@@ -24,7 +24,9 @@ class LocalImageStorage implements ImageStorage {
     const dir = path.join(process.cwd(), "public", "uploads");
     await mkdir(dir, { recursive: true });
     await writeFile(path.join(dir, name), buffer);
-    return `/uploads/${name}`;
+    // Отдаём через route-handler (/api/media), а НЕ через /uploads: `next start` не раздаёт
+    // из public/ файлы, созданные после сборки. Файл на диске лежит в public/uploads.
+    return `/api/media/${name}`;
   }
 }
 

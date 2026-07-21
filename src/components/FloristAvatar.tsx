@@ -14,10 +14,13 @@ export function FloristAvatar({
   const dim = { width: `${size}px`, height: `${size}px` };
 
   if (avatarUrl) {
+    // Раньше ссылки сохранялись как /uploads/... (не отдаётся `next start`). Переводим на
+    // route-handler /api/media/..., чтобы уже загруженные аватарки тоже показывались.
+    const src = avatarUrl.startsWith("/uploads/") ? avatarUrl.replace("/uploads/", "/api/media/") : avatarUrl;
     return (
       // eslint-disable-next-line @next/next/no-img-element
       <img
-        src={avatarUrl}
+        src={src}
         alt={name ?? ""}
         style={dim}
         className="inline-block shrink-0 rounded-full border border-slate-200 object-cover align-middle"
