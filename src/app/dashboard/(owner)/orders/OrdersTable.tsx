@@ -70,7 +70,7 @@ function ItemsList({ o, imgSize = "h-6 w-6", nameClass = "text-[11px]" }: { o: O
 /** Десктоп — заказ отдельной плашкой (карточкой), без колонки прибыли. */
 function DesktopCard({ o, ind }: { o: OwnerOrder; ind?: OrderIndicator }) {
   return (
-    <Card className="p-4 transition-shadow hover:shadow-sm">
+    <Card className="p-4 pr-6 transition-shadow hover:shadow-sm">
       <div className="flex items-start gap-4 text-[12px]">
         {/* Заказ */}
         <div className="flex w-28 shrink-0 flex-col items-start gap-1">
@@ -111,7 +111,7 @@ function DesktopCard({ o, ind }: { o: OwnerOrder; ind?: OrderIndicator }) {
         </div>
 
         {/* Флорист */}
-        <div className="w-24 shrink-0 text-slate-700">{o.currentFloristName ?? "—"}</div>
+        <div className="w-20 shrink-0 truncate text-slate-700" title={o.currentFloristName ?? undefined}>{o.currentFloristName ?? "—"}</div>
 
         {/* Суммы (без прибыли) */}
         <div className="w-24 shrink-0 text-right leading-tight">
