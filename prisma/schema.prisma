@@ -257,6 +257,14 @@ enum SyncKind {
 
 // Аудитория внутреннего Telegram-уведомления. Один заказ может иметь ОТДЕЛЬНОЕ основное
 // сообщение у флористов и у владельца — они не затирают друг друга.
+// Назначение бота. Разные боты могут указывать на ОДИН чат — chatId живёт на боте,
+// а не на аудитории, поэтому это не создаёт конфликта.
+enum TelegramBotPurpose {
+  OWNER
+  FLORIST
+  CUSTOMER_SERVICE
+}
+
 enum TelegramAudience {
   FLORIST
   OWNER
@@ -303,6 +311,7 @@ model Florist {
   currentOrders  Order[]                @relation("CurrentFlorist")
   assignments    OrderAssignment[]
   pickupLocation FloristPickupLocation?
+  telegramBot    TelegramBot?
   deliveries     Delivery[]             @relation("DeliveryFlorist")
 }
 
@@ -1024,12 +1033,43 @@ model TelegramMessage {
   messageId String
   orderId   String?
   order     Order?           @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  // Каким ботом отправлено — без этого не понять, чьим токеном редактировать.
+  botId     String?
+  bot       TelegramBot?     @relation(fields: [botId], references: [id], onDelete: SetNull)
   eventType String
   lastText  String? // последний отправленный текст — не редактируем, если он не изменился
   createdAt DateTime         @default(now())
   updatedAt DateTime         @updatedAt
 
   @@index([orderId])
+}
+
+/**
+ * Бот Telegram. У каждого флориста СВОЙ бот и свой личный чат: бот не может редактировать
+ * сообщение, отправленное другим ботом, поэтому «одно сообщение на заказ» существует в
+ * пределах одного бота, а не всей системы.
+ *
+ * Токен — только зашифрованным (secretBox). Включение возможно лишь после успешной проверки:
+ * любое изменение токена или чата сбрасывает verifiedAt и enabled.
+ */
+model TelegramBot {
+  id             String             @id @default(cuid())
+  label          String
+  purpose        TelegramBotPurpose
+  tokenEncrypted String?
+  botUsername    String?
+  chatId         String?
+  floristId      String?            @unique // заполнено только у purpose = FLORIST
+  florist        Florist?           @relation(fields: [floristId], references: [id], onDelete: Cascade)
+  enabled        Boolean            @default(false)
+  verifiedAt     DateTime?
+  lastErrorSafe  String?
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+
+  messages TelegramMessage[]
+
+  @@index([purpose])
 }
 
 /**

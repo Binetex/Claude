@@ -4,20 +4,17 @@ import type { TelegramAudience } from "./config";
  * Центральный реестр типов внутренних Telegram-уведомлений. Новое уведомление добавляется
  * ЗАПИСЬЮ ЗДЕСЬ, а не копированием кода отправки: обработчик один на все типы.
  *
- * `dedupeKey` определяет, что считать «одним и тем же сообщением»:
- *  - основное сообщение флористам по заказу — одно на заказ, обновляется через editMessage
- *    (новое назначение и передача другому флористу правят его, а не плодят дубли);
- *  - основное сообщение владельцу о новом заказе — отдельное, флористским не затирается;
- *  - срочные уведомления владельцу (оплата/доставка) имеют СВОИ ключи и не затирают основное.
- */
-/**
- * ЗАРЕЗЕРВИРОВАНО на будущее, НЕ реализовано: "payment.pending_too_long" — Airwallex/Klarna
- * висит в ожидании дольше порога. Требует отложенной проверки по каждому заказу; постоянный
- * скан заказов сознательно не делаем.
+ * `dedupeKey` определяет, что считать «одним и тем же сообщением». Для флористов ключ включает
+ * floristId: у каждого свой бот и свой чат, поэтому «одно сообщение на заказ» существует в
+ * пределах одного флориста. При передаче заказа прежний получает пометку в СВОЁМ сообщении,
+ * новый — отдельное новое от своего бота.
+ *
+ * ЗАРЕЗЕРВИРОВАНО, НЕ реализовано: "payment.pending_too_long" — BNPL висит дольше порога.
+ * Требует отложенной проверки по каждому заказу; постоянный скан заказов делать не хотим.
  */
 export const TELEGRAM_EVENTS = [
   "order.assigned",
-  "order.reassigned",
+  "order.handed_over",
   "order.created",
   "payment.failed",
   "delivery.problem",
@@ -25,11 +22,14 @@ export const TELEGRAM_EVENTS = [
 
 export type TelegramEventType = (typeof TELEGRAM_EVENTS)[number];
 
+export type DedupeContext = { orderId: string; floristId?: string | null };
+
 export type TelegramEventDef = {
   type: TelegramEventType;
   audience: TelegramAudience;
-  /** Ключ основного сообщения: одинаковый ключ → редактируем существующее. */
-  dedupeKey: (orderId: string) => string;
+  /** Требует ли событие конкретного флориста (и, значит, его персонального бота). */
+  perFlorist: boolean;
+  dedupeKey: (ctx: DedupeContext) => string;
   description: string;
 };
 
@@ -37,32 +37,37 @@ const REGISTRY: Record<TelegramEventType, TelegramEventDef> = {
   "order.assigned": {
     type: "order.assigned",
     audience: "FLORIST",
-    dedupeKey: (orderId) => `order:${orderId}:florist`,
-    description: "Заказ назначен флористу (авто или вручную).",
+    perFlorist: true,
+    dedupeKey: ({ orderId, floristId }) => `order:${orderId}:florist:${floristId}`,
+    description: "Заказ назначен флористу — его личным ботом в его чат.",
   },
-  "order.reassigned": {
-    type: "order.reassigned",
+  "order.handed_over": {
+    type: "order.handed_over",
     audience: "FLORIST",
-    // ТОТ ЖЕ ключ, что у order.assigned: при передаче заказа правим существующее сообщение.
-    dedupeKey: (orderId) => `order:${orderId}:florist`,
-    description: "Заказ передан другому флористу — обновляет то же сообщение.",
+    perFlorist: true,
+    // ТОТ ЖЕ ключ, что у order.assigned для этого флориста: правим его собственное сообщение.
+    dedupeKey: ({ orderId, floristId }) => `order:${orderId}:florist:${floristId}`,
+    description: "Заказ забрали у флориста — его сообщение помечается «передан».",
   },
   "order.created": {
     type: "order.created",
     audience: "OWNER",
-    dedupeKey: (orderId) => `order:${orderId}:owner`,
+    perFlorist: false,
+    dedupeKey: ({ orderId }) => `order:${orderId}:owner`,
     description: "Новый заказ (включая неоплаченные) — владельцу для наблюдения за потоком.",
   },
   "payment.failed": {
     type: "payment.failed",
     audience: "OWNER",
-    dedupeKey: (orderId) => `order:${orderId}:owner.payment`,
+    perFlorist: false,
+    dedupeKey: ({ orderId }) => `order:${orderId}:owner.payment`,
     description: "Платёж отклонён (PAYMENT_FAILED).",
   },
   "delivery.problem": {
     type: "delivery.problem",
     audience: "OWNER",
-    dedupeKey: (orderId) => `order:${orderId}:owner.delivery`,
+    perFlorist: false,
+    dedupeKey: ({ orderId }) => `order:${orderId}:owner.delivery`,
     description: "Доставка перешла в FAILED / CANCELLED / PROBLEM.",
   },
 };

@@ -168,6 +168,11 @@ type AssignActivateOpts = { closePrevious?: "DECLINED" | "REASSIGNED"; manualTot
  * транзакции; при ошибке транзакции ничего частично активного не остаётся.
  */
 export async function assignAndActivateFlorist(orderId: string, floristId: string, opts: AssignActivateOpts = {}): Promise<void> {
+  // Прежнего флориста нужно знать ДО транзакции: после неё currentFloristId уже перезаписан,
+  // а именно ему уходит пометка «заказ передан» его собственным ботом.
+  const before = await prisma.order.findUnique({ where: { id: orderId }, select: { currentFloristId: true } });
+  const previousFloristId = opts.closePrevious ? before?.currentFloristId ?? null : null;
+
   await prisma.$transaction(async (tx) => {
     if (opts.closePrevious) {
       await tx.orderAssignment.updateMany({
@@ -190,8 +195,7 @@ export async function assignAndActivateFlorist(orderId: string, floristId: strin
     await recomputeEstimatedProfit(tx, orderId);
   });
   // Строго один раз после успешной транзакции: уведомление + (пере)планирование доставки под флориста.
-  // closePrevious означает, что заказ забрали у другого флориста (handoff/переназначение).
-  await notifyFloristAssigned(floristId, orderId, { reassigned: !!opts.closePrevious });
+  await notifyFloristAssigned(floristId, orderId, { previousFloristId });
   await onOrderDeliveryChangeSafe(prisma, orderId);
 }
 

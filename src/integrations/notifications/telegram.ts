@@ -3,24 +3,42 @@ import { prisma } from "@/lib/db";
 import { publishTelegramNotification } from "@/integrations/telegram/events";
 
 /**
- * Уведомление флористам о назначении заказа. Сигнатура сохранена ради вызывающего кода
- * (assignments/service.ts), но внутри теперь durable outbox вместо прежней in-memory заглушки
- * lib/jobs.enqueue, которая только писала в лог.
+ * Уведомления флористам о назначении заказа. Сигнатура сохранена ради вызывающего кода
+ * (assignments/service.ts), внутри — durable outbox.
  *
- * `reassigned` различает первичное назначение и передачу заказа: оба правят ОДНО и то же
- * основное сообщение по заказу (один dedupeKey), меняется лишь заголовок.
- *
- * Проверку featureFlags.telegram здесь НЕ делаем: событие должно попасть в outbox в любом
- * случае, а решение «отправлять или пропустить» принимает обработчик — иначе при выключенном
- * флаге события молча терялись бы, и после включения ничего бы не пришло.
+ * При передаче заказа отправляются ДВА уведомления, потому что бот не может редактировать
+ * чужое сообщение: прежний флорист получает пометку в СВОЁМ сообщении (его же ботом), новый —
+ * полноценное новое от своего бота. Иначе у прежнего флориста навсегда осталось бы сообщение,
+ * будто заказ всё ещё за ним.
  */
-export async function notifyFloristAssigned(floristId: string, orderId: string, opts: { reassigned?: boolean } = {}): Promise<void> {
-  const florist = await prisma.florist.findUnique({ where: { id: floristId }, select: { user: { select: { name: true } } } }).catch(() => null);
+export async function notifyFloristAssigned(
+  floristId: string,
+  orderId: string,
+  opts: { previousFloristId?: string | null } = {}
+): Promise<void> {
+  const names = await prisma.florist
+    .findMany({
+      where: { id: { in: [floristId, ...(opts.previousFloristId ? [opts.previousFloristId] : [])] } },
+      select: { id: true, user: { select: { name: true } } },
+    })
+    .catch(() => []);
+  const nameOf = (id: string | null | undefined) => (id ? names.find((n) => n.id === id)?.user.name ?? null : null);
+
   await publishTelegramNotification(prisma, {
-    type: opts.reassigned ? "order.reassigned" : "order.assigned",
+    type: "order.assigned",
     orderId,
-    // Один заказ + один флорист = один факт назначения; повторный вызов дубля не создаёт.
+    floristId,
     occurrenceKey: `${orderId}:${floristId}`,
-    context: { floristName: florist?.user.name ?? null },
+    context: { floristName: nameOf(floristId) },
   });
+
+  if (opts.previousFloristId && opts.previousFloristId !== floristId) {
+    await publishTelegramNotification(prisma, {
+      type: "order.handed_over",
+      orderId,
+      floristId: opts.previousFloristId,
+      occurrenceKey: `${orderId}:${opts.previousFloristId}:to:${floristId}`,
+      context: { toFloristName: nameOf(floristId) },
+    });
+  }
 }

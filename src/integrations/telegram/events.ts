@@ -9,6 +9,8 @@ export const TELEGRAM_NOTIFY_EVENT = "telegram.notify";
 export type TelegramNotifyPayload = {
   type: TelegramEventType;
   orderId: string;
+  /** Для событий флориста: чей персональный бот отправляет и в чей чат. */
+  floristId?: string | null;
   /** Доп. контекст под конкретный тип (имя флориста, статус доставки, причина) — без PII сверх нужного. */
   context?: Record<string, string | null>;
 };
@@ -31,7 +33,7 @@ export async function publishTelegramNotification(
       eventType: TELEGRAM_NOTIFY_EVENT,
       aggregateType: "order",
       aggregateId: p.orderId,
-      payload: { type: p.type, orderId: p.orderId, context: p.context ?? {} },
+      payload: { type: p.type, orderId: p.orderId, floristId: p.floristId ?? null, context: p.context ?? {} },
       idempotencyKey: `telegram:${p.type}:${p.occurrenceKey}`,
     });
   } catch (err) {

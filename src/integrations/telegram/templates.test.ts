@@ -3,7 +3,7 @@
  * и ссылки ведут в правильные разделы.
  */
 import { describe, it, expect } from "vitest";
-import { renderFloristMessage, renderOwnerCreated, buttonFor, floristOrderUrl, ownerOrderUrl, type OrderSnapshot } from "./templates";
+import { renderFloristMessage, renderFloristHandedOver, renderOwnerCreated, buttonFor, floristOrderUrl, ownerOrderUrl, type OrderSnapshot } from "./templates";
 
 const order: OrderSnapshot = {
   id: "o1",
@@ -36,10 +36,14 @@ describe("сообщение флористу", () => {
     }
   });
 
-  it("передача заказа меняет заголовок, а не тело", () => {
-    const re = renderFloristMessage(order, { reassigned: true });
-    expect(re).toContain("передан");
-    expect(re).toContain("Petal Poetry");
+  it("сообщение прежнему флористу: заказ больше не за ним, без лишних деталей", () => {
+    const handed = renderFloristHandedOver(order, "Пётр");
+    expect(handed).toContain("передан");
+    expect(handed).toContain("Пётр");
+    expect(handed).toContain("THEFLOW-20292");
+    expect(handed).toContain("больше не за вами");
+    // Состав здесь не нужен — заказ уже не его.
+    expect(handed).not.toContain("pink peony");
   });
 
   it("пустые поля не оставляют висящих подписей", () => {
@@ -59,7 +63,7 @@ describe("ссылки Open Order", () => {
     expect(floristOrderUrl("o1")).toMatch(/\/dashboard\/f\/o1$/);
     expect(ownerOrderUrl("o1")).toMatch(/\/dashboard\/orders\/o1$/);
     expect(buttonFor("order.assigned", "o1").url).toMatch(/\/dashboard\/f\/o1$/);
-    expect(buttonFor("order.reassigned", "o1").url).toMatch(/\/dashboard\/f\/o1$/);
+    expect(buttonFor("order.handed_over", "o1").url).toMatch(/\/dashboard\/f\/o1$/);
     expect(buttonFor("order.created", "o1").url).toMatch(/\/dashboard\/orders\/o1$/);
     expect(buttonFor("delivery.problem", "o1").url).toMatch(/\/dashboard\/orders\/o1$/);
   });

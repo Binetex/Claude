@@ -2,23 +2,36 @@ import "server-only";
 import type { PrismaClient } from "@/generated/prisma/client";
 import type { OutboxHandler } from "@/outbox/worker";
 import type { OutboxRecord } from "@/outbox/types";
-import { getTelegramConfig, isTelegramDeliberatelyDisabled, resolveChatId } from "./config";
 import { getTelegramEvent } from "./registry";
+import { resolveOwnerBot, resolveFloristBot, resolveBotById, type BotLookup, type ResolvedBot } from "./bots";
+import { isTelegramGloballyEnabled } from "./config";
 import { TelegramSender } from "./sender";
-import { buttonFor, renderFloristMessage, renderOwnerCreated, renderOwnerDeliveryProblem, renderOwnerPaymentProblem, type OrderSnapshot } from "./templates";
+import {
+  buttonFor,
+  renderFloristMessage,
+  renderFloristHandedOver,
+  renderOwnerCreated,
+  renderOwnerDeliveryProblem,
+  renderOwnerPaymentProblem,
+  type OrderSnapshot,
+} from "./templates";
 import type { TelegramNotifyPayload } from "./events";
 
 /**
  * Единый обработчик ВСЕХ внутренних Telegram-уведомлений: тип события → запись реестра →
- * текст → отправка или редактирование. Новый тип уведомления не требует нового обработчика.
+ * бот → текст → отправка или редактирование. Новый тип не требует нового обработчика.
+ *
+ * Ключевое отличие от общего бота: сообщение редактируется ТЕМ ЖЕ ботом, который его отправил
+ * (Telegram не позволяет иначе). Поэтому TelegramMessage хранит botId, и при редактировании
+ * берётся токен именно этого бота, а не текущий бот флориста.
  *
  * Гарантии:
- *  - не настроен токен/чат → событие пропускается с безопасной причиной, worker не падает;
- *  - существующее сообщение с тем же dedupeKey → editMessage вместо дубля;
+ *  - глобальный выключатель — штатный no-op;
+ *  - у флориста нет бота / бот выключен → тихий пропуск (решение владельца);
+ *  - настройка сломана (не расшифровывается токен) → throw, чтобы это стало видно;
+ *  - временная ошибка Telegram → throw, outbox повторит с backoff;
  *  - текст не изменился → в Telegram не ходим вовсе;
- *  - сообщение нельзя отредактировать (удалено) → отправляем новое и обновляем messageId;
- *  - временная ошибка Telegram → throw, чтобы outbox повторил с backoff;
- *  - постоянная ошибка → лог и выход без падения worker'а.
+ *  - сообщение удалено → отправляем новое и обновляем messageId.
  */
 export function buildTelegramNotifyHandler(prisma: PrismaClient): OutboxHandler {
   return async (record: OutboxRecord) => {
@@ -31,34 +44,47 @@ export function buildTelegramNotifyHandler(prisma: PrismaClient): OutboxHandler 
       return;
     }
 
-    const cfg = await getTelegramConfig(prisma);
-    const chat = resolveChatId(cfg, def.audience);
-    if ("skip" in chat) {
-      // Осознанно выключенная интеграция — штатный no-op (аварийный выключатель).
-      if (await isTelegramDeliberatelyDisabled(prisma)) {
-        console.info(`[telegram] ${p.type} пропущено: интеграция выключена`);
-        return;
-      }
-      // Включена, но НЕ настроена — уведомление молча терять нельзя. Бросаем: outbox
-      // повторит с backoff, а при исчерпании попыток событие станет видимым в dead-letter,
-      // а не исчезнет как «успешно обработанное».
-      throw new Error(`telegram_not_configured:${chat.skip}`);
+    if (!(await isTelegramGloballyEnabled(prisma))) {
+      console.info(`[telegram] ${p.type} пропущено: уведомления выключены`);
+      return;
+    }
+
+    if (def.perFlorist && !p.floristId) {
+      console.warn(`[telegram] ${p.type} без floristId — пропуск`);
+      return;
     }
 
     const order = await loadOrderSnapshot(prisma, p.orderId);
     if (!order) return; // заказ исчез — уведомлять не о чем
 
     const ctx = p.context ?? {};
+    const dedupeKey = def.dedupeKey({ orderId: order.id, floristId: p.floristId });
+    const existing = await prisma.telegramMessage.findUnique({ where: { dedupeKey } });
+
+    // Редактировать может только отправивший бот, поэтому для существующего сообщения
+    // берём именно его токен, а не текущего бота флориста (тот мог смениться).
+    const lookup: BotLookup = existing?.botId
+      ? await resolveBotById(prisma, existing.botId)
+      : def.perFlorist
+        ? await resolveFloristBot(prisma, p.floristId!)
+        : await resolveOwnerBot(prisma);
+
+    if ("skip" in lookup) {
+      if (lookup.skip === "bad_token_ciphertext") {
+        // Поломка настройки (сменился ключ шифрования) — терять молча нельзя.
+        throw new Error(`telegram_bot_unusable:${lookup.skip}`);
+      }
+      console.info(`[telegram] ${p.type} пропущено: ${lookup.skip}`);
+      return;
+    }
+
+    const bot: ResolvedBot = lookup.bot;
     const text = renderFor(p.type, order, ctx);
     const button = buttonFor(p.type, order.id);
-    const dedupeKey = def.dedupeKey(order.id);
-
-    const existing = await prisma.telegramMessage.findUnique({ where: { dedupeKey } });
-    const sender = new TelegramSender(cfg!.botToken);
+    const sender = new TelegramSender(bot.token);
 
     if (existing) {
-      // Текст не изменился — в Telegram не ходим (иначе получили бы 400 "not modified").
-      if (existing.lastText === text) return;
+      if (existing.lastText === text) return; // нечего менять
       const edited = await sender.editMessage(existing.chatId, existing.messageId, text, button);
       if (edited.ok) {
         await prisma.telegramMessage.update({ where: { dedupeKey }, data: { lastText: text, eventType: p.type } });
@@ -69,10 +95,10 @@ export function buildTelegramNotifyHandler(prisma: PrismaClient): OutboxHandler 
         console.error(`[telegram] edit ${p.type} order ${order.id} не удалось: ${edited.code}`);
         return;
       }
-      // Сообщение удалено/нередактируемо — отправляем новое вместо него.
+      // Сообщение удалено/нередактируемо — отправим новое вместо него.
     }
 
-    const sent = await sender.sendMessage(chat.chatId, text, button);
+    const sent = await sender.sendMessage(bot.chatId, text, button);
     if (!sent.ok) {
       if (sent.retryable) throw new Error(`telegram_send_transient:${sent.code}`);
       console.error(`[telegram] send ${p.type} order ${order.id} не удалось: ${sent.code}`);
@@ -84,13 +110,14 @@ export function buildTelegramNotifyHandler(prisma: PrismaClient): OutboxHandler 
       create: {
         dedupeKey,
         audience: def.audience,
-        chatId: chat.chatId,
+        chatId: bot.chatId,
         messageId: sent.messageId,
+        botId: bot.id,
         orderId: order.id,
         eventType: p.type,
         lastText: text,
       },
-      update: { chatId: chat.chatId, messageId: sent.messageId, lastText: text, eventType: p.type },
+      update: { chatId: bot.chatId, messageId: sent.messageId, botId: bot.id, lastText: text, eventType: p.type },
     });
   };
 }
@@ -99,8 +126,8 @@ function renderFor(type: TelegramNotifyPayload["type"], order: OrderSnapshot, ct
   switch (type) {
     case "order.assigned":
       return renderFloristMessage(order, { floristName: ctx.floristName ?? null });
-    case "order.reassigned":
-      return renderFloristMessage(order, { reassigned: true, floristName: ctx.floristName ?? null });
+    case "order.handed_over":
+      return renderFloristHandedOver(order, ctx.toFloristName ?? null);
     case "order.created":
       return renderOwnerCreated(order, ctx.paymentLabel ?? "—");
     case "payment.failed":

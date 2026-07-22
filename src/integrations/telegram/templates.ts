@@ -101,7 +101,21 @@ export function renderOwnerDeliveryProblem(o: OrderSnapshot, status: string, saf
   ).trimEnd();
 }
 
+/**
+ * Сообщение прежнему флористу: заказ у него забрали. Полный состав уже не нужен — важно, что
+ * заказ больше не его. Отправляется ЕГО ботом (чужое сообщение отредактировать нельзя).
+ */
+export function renderFloristHandedOver(o: OrderSnapshot, toName: string | null): string {
+  return (
+    `↪️ <b>Заказ передан${toName ? ` → ${esc(toName)}` : ""}</b>\n` +
+    `<b>${esc(o.orderNumber)}</b> · ${esc(o.siteName)}\n\n` +
+    line("Доставка", [fmtDate(o.deliveryDate), o.deliveryWindow].filter(Boolean).join(" ")) +
+    line("Получатель", o.recipientName) +
+    `\nЭтот заказ больше не за вами.`
+  ).trimEnd();
+}
+
 export function buttonFor(type: TelegramEventType, orderId: string): { text: string; url: string } {
-  const forFlorist = type === "order.assigned" || type === "order.reassigned";
+  const forFlorist = type === "order.assigned" || type === "order.handed_over";
   return { text: "Open Order", url: forFlorist ? floristOrderUrl(orderId) : ownerOrderUrl(orderId) };
 }
