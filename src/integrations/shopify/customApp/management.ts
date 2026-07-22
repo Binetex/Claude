@@ -12,6 +12,7 @@ import { Prisma } from "@/generated/prisma/client";
 import { encryptSecret, maskSecret } from "@/lib/crypto/secretBox";
 import { parseMyshopifyDomain } from "./domain";
 import { checkConnection } from "./connection";
+import { registerWebhooks } from "./webhookRegistration";
 import { DEFAULT_SHOPIFY_API_VERSION } from "./config";
 import type { ConnectionResult } from "./connectionLogic";
 
@@ -118,7 +119,27 @@ export async function connectCustomApp(input: ConnectInput, opts: { allowReconne
 
   // Первичная проверка: минтит токен, сверяет домен и scopes, ставит статус.
   const result = await checkConnection(siteId);
+  // Подписки на webhook — сразу после успешной проверки. Без них магазин молча не получает
+  // заказы (см. инцидент с Par 22.07.2026): подключение выглядит рабочим, а events не приходят.
+  await ensureWebhooksBestEffort(siteId, result);
   return { ok: true, siteId, reconnected, result };
+}
+
+/**
+ * Идемпотентно создаёт недостающие подписки на webhook. Best-effort: сбой регистрации НЕ
+ * ломает подключение (credentials уже сохранены, статус выставлен) — ошибка попадёт в лог и в
+ * ShopifyWebhook.status=FAILED, а починить можно кнопкой «Проверить подписки» на карточке.
+ * Пропускаем, если проверка подключения не прошла: без валидного токена вызов всё равно упадёт.
+ */
+export async function ensureWebhooksBestEffort(siteId: string, result: ConnectionResult): Promise<void> {
+  if (!result.ok) return;
+  try {
+    const res = await registerWebhooks(siteId);
+    if (res.created.length > 0) console.info(`[shopify] ${siteId}: созданы подписки — ${res.created.join(", ")}`);
+    if (res.failed.length > 0) console.warn(`[shopify] ${siteId}: не удалось создать подписки — ${res.failed.map((f) => f.topic).join(", ")}`);
+  } catch (err) {
+    console.warn(`[shopify] ${siteId}: регистрация подписок не выполнена:`, err instanceof Error ? err.message : err);
+  }
 }
 
 /** Обновление только credentials существующего Site (без создания нового). */
@@ -146,7 +167,11 @@ export async function updateCustomAppCredentials(
       connectionError: null,
     },
   });
-  return checkConnection(siteId);
+  const result = await checkConnection(siteId);
+  // Ротация credentials не меняет подписки в Shopify, но могла произойти после неудачного
+  // первичного подключения — сверяем набор и дозаписываем недостающее.
+  await ensureWebhooksBestEffort(siteId, result);
+  return result;
 }
 
 /**

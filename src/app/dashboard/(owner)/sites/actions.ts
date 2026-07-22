@@ -6,7 +6,9 @@ import {
   updateCustomAppCredentials,
   disconnectSite,
   findSiteByDomain,
+  ensureWebhooksBestEffort,
 } from "@/integrations/shopify/customApp/management";
+import { registerWebhooks, REQUIRED_WEBHOOK_TOPICS } from "@/integrations/shopify/customApp/webhookRegistration";
 import { checkConnection } from "@/integrations/shopify/customApp/connection";
 import { isCredentialCryptoConfigured } from "@/lib/crypto/secretBox";
 import { prisma } from "@/lib/db";
@@ -94,10 +96,36 @@ export async function ownerLookupExistingSite(domain: string) {
 export async function ownerCheckConnection(siteId: string): Promise<FormState> {
   await requireRole("OWNER");
   const result = await checkConnection(siteId);
+  // Заодно сверяем подписки: проверка подключения — то место, куда владелец идёт при
+  // подозрении на проблему, и она должна чинить молча отсутствующие webhook сама.
+  await ensureWebhooksBestEffort(siteId, result);
   revalidatePath("/dashboard/sites");
   return result.ok
     ? { ok: true, message: `Подключено: ${result.shopName ?? ""} (${result.myshopifyDomain ?? ""}).` }
     : { error: result.error ?? "Проверка не прошла." };
+}
+
+/**
+ * Сверяет подписки на webhook с реальным состоянием в Shopify и создаёт недостающие.
+ * Идемпотентно: если всё на месте — ничего не меняет. Без подписок магазин не получает заказы.
+ */
+export async function ownerRegisterWebhooks(siteId: string): Promise<FormState> {
+  await requireRole("OWNER");
+  try {
+    const res = await registerWebhooks(siteId);
+    revalidatePath("/dashboard/sites");
+    if (res.failed.length > 0) {
+      return { error: `Не удалось создать: ${res.failed.map((f) => f.topic).join(", ")}. Проверьте подключение и scopes.` };
+    }
+    return {
+      ok: true,
+      message: res.created.length > 0
+        ? `Создано подписок: ${res.created.length} (${res.created.join(", ")}). Всего активно ${REQUIRED_WEBHOOK_TOPICS.length}.`
+        : `Все ${REQUIRED_WEBHOOK_TOPICS.length} подписок уже на месте.`,
+    };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message.slice(0, 200) : "Не удалось обратиться к Shopify." };
+  }
 }
 
 /** Обновить credentials (ротация secret) и перепроверить. */

@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/db";
+import { REQUIRED_WEBHOOK_TOPICS } from "@/integrations/shopify/customApp/webhookRegistration";
 import { Card, CardHeader, CardBody } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { SiteConnectPanel } from "./SiteConnectPanel";
@@ -37,6 +38,7 @@ export default async function SitesPage() {
       quoPhoneNumberId: true, quoPhoneNumber: true, quoEnabled: true, quoLastCheckAt: true, quoConnectionError: true,
       authMode: true, shopifyConnStatus: true, lastConnectionCheckAt: true, lastSyncAt: true,
       grantedScopes: true, connectionError: true,
+      webhooks: { select: { topic: true, status: true } },
       floristPriorities: {
         orderBy: { position: "asc" },
         select: { id: true, position: true, florist: { select: { user: { select: { name: true } } } } },
@@ -177,6 +179,20 @@ export default async function SitesPage() {
                     return missing.length ? (
                       <div className="text-xs text-orange-700">Не хватает scopes: {missing.join(", ")}</div>
                     ) : null;
+                  })()}
+                  {(() => {
+                    // Без подписок магазин молча не получает заказы — показываем это явно.
+                    const active = s.webhooks.filter((w) => w.status === "ACTIVE").length;
+                    const hasOrders = s.webhooks.some((w) => w.topic === "ORDERS_CREATE" && w.status === "ACTIVE");
+                    if (active >= REQUIRED_WEBHOOK_TOPICS.length && hasOrders) {
+                      return <div className="text-xs text-emerald-700">Подписки на webhook: {active} активных ✓</div>;
+                    }
+                    return (
+                      <div className="text-xs text-orange-700">
+                        Подписки на webhook: {active} из {REQUIRED_WEBHOOK_TOPICS.length}
+                        {hasOrders ? "" : " — нет ORDERS_CREATE, новые заказы не придут"}. Нажмите «Проверить подписки».
+                      </div>
+                    );
                   })()}
                   {s.connectionError && <div className="text-xs text-red-600">{s.connectionError}</div>}
                   <SiteCardActions siteId={s.id} />

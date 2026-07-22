@@ -1,9 +1,9 @@
 "use client";
 import { useState, useTransition } from "react";
 import { Button } from "@/components/ui/button";
-import { ownerCheckConnection, ownerDisconnectSite } from "./actions";
+import { ownerCheckConnection, ownerDisconnectSite, ownerRegisterWebhooks } from "./actions";
 
-/** Действия карточки Custom App: Проверить подключение / Отключить. */
+/** Действия карточки Custom App: Проверить подключение / Проверить подписки / Отключить. */
 export function SiteCardActions({ siteId }: { siteId: string }) {
   const [pending, start] = useTransition();
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
@@ -25,6 +25,22 @@ export function SiteCardActions({ siteId }: { siteId: string }) {
           }
         >
           {pending ? "…" : "Проверить подключение"}
+        </Button>
+
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={pending}
+          title="Сверяет подписки на webhook с Shopify и создаёт недостающие. Без них заказы не приходят."
+          onClick={() =>
+            start(async () => {
+              const res = await ownerRegisterWebhooks(siteId);
+              setMsg(res?.ok ? { ok: true, text: res.message ?? "OK" } : { ok: false, text: res?.error ?? "Ошибка" });
+            })
+          }
+        >
+          {pending ? "…" : "Проверить подписки"}
         </Button>
 
         {confirmDisconnect ? (
