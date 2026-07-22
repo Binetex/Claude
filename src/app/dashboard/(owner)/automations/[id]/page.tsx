@@ -11,7 +11,10 @@ export const dynamic = "force-dynamic";
 
 export default async function EditAutomationPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const automation = await prisma.automation.findUnique({ where: { id } });
+  const automation = await prisma.automation.findUnique({
+    where: { id },
+    include: { sites: { select: { siteId: true }, orderBy: { createdAt: "asc" } } },
+  });
   if (!automation || automation.deletedAt) notFound();
 
   const [sites, recentOrders, jobs, execLogs] = await Promise.all([
@@ -36,7 +39,7 @@ export default async function EditAutomationPage({ params }: { params: Promise<{
 
   const initial: AutomationFormInitial = {
     id: automation.id,
-    siteId: automation.siteId,
+    siteIds: automation.sites.map((s) => s.siteId),
     name: automation.name,
     active: automation.active,
     channel: automation.channel,

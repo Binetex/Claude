@@ -15,7 +15,7 @@ export default async function AutomationsPage() {
   const [automations, statRows, lastRuns, sites, settings] = await Promise.all([
     prisma.automation.findMany({
       where: { deletedAt: null },
-      include: { site: { select: { name: true } } },
+      include: { sites: { select: { site: { select: { name: true } } }, orderBy: { createdAt: "asc" } } },
       orderBy: [{ createdAt: "desc" }],
     }),
     prisma.automationJob.groupBy({ by: ["automationId", "status"], _count: { _all: true } }),
@@ -65,7 +65,7 @@ export default async function AutomationsPage() {
             <thead className="border-b border-slate-200 bg-slate-50 text-left text-xs text-slate-500">
               <tr>
                 <th className="px-3 py-2">Название</th>
-                <th className="px-3 py-2">Магазин</th>
+                <th className="px-3 py-2">Магазины</th>
                 <th className="px-3 py-2">Канал</th>
                 <th className="px-3 py-2">Событие</th>
                 <th className="px-3 py-2">Аудитория</th>
@@ -92,7 +92,23 @@ export default async function AutomationsPage() {
                     <td className="px-3 py-2">
                       <Link href={`/dashboard/automations/${a.id}`} className="font-medium text-slate-800 hover:underline">{a.name}</Link>
                     </td>
-                    <td className="px-3 py-2 text-slate-600">{a.site.name}</td>
+                    <td className="px-3 py-2 text-slate-600">
+                      {/* Одна карточка на правило: сводка + раскрытие полного списка магазинов. */}
+                      {a.sites.length === 0 ? (
+                        <span className="text-amber-600">Магазины не выбраны</span>
+                      ) : (
+                        <details className="group">
+                          <summary className="cursor-pointer list-none whitespace-nowrap text-slate-700 hover:underline">
+                            {a.sites.length === sites.length ? `Все магазины (${sites.length})` : `Магазинов: ${a.sites.length}`}
+                            <span className="ml-1 text-slate-400 group-open:hidden">▾</span>
+                            <span className="ml-1 hidden text-slate-400 group-open:inline">▴</span>
+                          </summary>
+                          <ul className="mt-1 space-y-0.5 text-[11px] text-slate-500">
+                            {a.sites.map((s) => <li key={s.site.name}>{s.site.name}</li>)}
+                          </ul>
+                        </details>
+                      )}
+                    </td>
                     <td className="px-3 py-2 text-slate-600">{a.channel}</td>
                     <td className="px-3 py-2">
                       {trigger ? (

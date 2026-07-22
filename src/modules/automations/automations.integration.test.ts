@@ -84,10 +84,11 @@ async function makeOrder(siteId: string, overrides: Partial<Prisma.OrderCreateIn
   return order;
 }
 
-function makeAutomation(siteId: string, overrides: Partial<Prisma.AutomationUncheckedCreateInput> = {}) {
+function makeAutomation(siteIds: string | string[], overrides: Partial<Prisma.AutomationUncheckedCreateInput> = {}) {
+  const ids = Array.isArray(siteIds) ? siteIds : [siteIds];
   return prisma.automation.create({
     data: {
-      siteId,
+      sites: { create: ids.map((siteId) => ({ siteId })) },
       name: `auto ${suffix}`,
       active: true,
       triggerType: "ORDER_CREATED",
@@ -197,6 +198,24 @@ describe("SMS engine — trigger → job", () => {
     await fireTrigger(orderB, "ORDER_CREATED"); // событие Site B
     expect(await jobsFor(autoA.id, orderB.id)).toHaveLength(0);
   });
+
+  it("16a. Одно правило на несколько Site срабатывает от события каждого из них", async () => {
+    const siteA = await makeSite();
+    const siteB = await makeSite();
+    const siteC = await makeSite();
+    const auto = await makeAutomation([siteA.id, siteB.id]);
+
+    const orderA = await makeOrder(siteA.id);
+    const orderB = await makeOrder(siteB.id);
+    const orderC = await makeOrder(siteC.id); // Site вне правила
+    await fireTrigger(orderA, "ORDER_CREATED");
+    await fireTrigger(orderB, "ORDER_CREATED");
+    await fireTrigger(orderC, "ORDER_CREATED");
+
+    expect(await jobsFor(auto.id, orderA.id)).toHaveLength(1);
+    expect(await jobsFor(auto.id, orderB.id)).toHaveLength(1);
+    expect(await jobsFor(auto.id, orderC.id)).toHaveLength(0);
+  });
 });
 
 describe("SMS engine — send job", () => {
@@ -260,6 +279,18 @@ describe("SMS engine — send job", () => {
     const updated = await prisma.automationJob.findUniqueOrThrow({ where: { id: job.id } });
     expect(updated.status).toBe("SKIPPED");
     expect(updated.lastErrorSafe).toBe("order_cancelled_or_refunded");
+  });
+
+  it("6c. Магазин отвязан от правила к моменту отправки → SKIP automation_not_enabled_for_site", async () => {
+    sendOk = true;
+    const site = await makeSite();
+    const order = await makeOrder(site.id);
+    const { auto, job } = await triggerAndGetJob(site.id, order, {});
+    await prisma.automationSite.delete({ where: { automationId_siteId: { automationId: auto.id, siteId: site.id } } });
+    await sendHandler(rec({ jobId: job.id, orderId: order.id }));
+    const updated = await prisma.automationJob.findUniqueOrThrow({ where: { id: job.id } });
+    expect(updated.status).toBe("SKIPPED");
+    expect(updated.lastErrorSafe).toBe("automation_not_enabled_for_site");
   });
 
   it("8. Выключённый QUO у Site → SKIP site_quo_disabled", async () => {

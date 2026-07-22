@@ -363,7 +363,7 @@ model Site {
 
   // ── SMS-маркетинг ──
   reviewUrl   String? // ссылка на отзыв для {{review_url}}; пусто → review-правила не отправляются
-  automations Automation[]
+  automationSites AutomationSite[]
 
   // Запрет двух активных Site одного платформенного домена (двойное подключение).
   @@unique([platform, normalizedShopDomain])
@@ -1128,8 +1128,6 @@ enum AutomationChannel {
 
 model Automation {
   id             String            @id @default(cuid())
-  siteId         String
-  site           Site              @relation(fields: [siteId], references: [id], onDelete: Cascade)
   name           String
   active         Boolean           @default(false) // после deploy все правила выключены
   channel        AutomationChannel @default(SMS) // канал доставки (пока только SMS)
@@ -1143,10 +1141,26 @@ model Automation {
   updatedAt      DateTime          @updatedAt
   deletedAt      DateTime? // soft-delete при наличии истории
 
-  jobs AutomationJob[]
+  jobs  AutomationJob[]
+  // Магазины правила (many-to-many): одно правило — один шаблон на несколько Site.
+  sites AutomationSite[]
 
-  @@index([siteId, active])
-  @@index([triggerType])
+  @@index([triggerType, active])
+}
+
+// Связка «правило ↔ магазин». Единственный источник правды о магазинах автоматизации
+// (Automation.siteId удалён миграцией 20260722120000_automation_multi_site).
+model AutomationSite {
+  automationId String
+  siteId       String
+
+  automation Automation @relation(fields: [automationId], references: [id], onDelete: Cascade)
+  site       Site       @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@id([automationId, siteId])
+  @@index([siteId])
 }
 
 model AutomationJob {

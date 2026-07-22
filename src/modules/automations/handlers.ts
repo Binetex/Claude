@@ -46,8 +46,9 @@ export function buildAutomationTriggerHandler(prisma: PrismaClient): OutboxHandl
     // Global kill switch: новые job'ы не создаём вовсе.
     if (await isAutomationsGloballyDisabled(prisma)) return;
 
+    // Правило может быть привязано к нескольким Site — выбираем по связи AutomationSite.
     const automations = await prisma.automation.findMany({
-      where: { siteId: p.siteId, triggerType: p.triggerType, active: true, deletedAt: null },
+      where: { sites: { some: { siteId: p.siteId } }, triggerType: p.triggerType, active: true, deletedAt: null },
     });
     if (automations.length === 0) return;
 
@@ -152,6 +153,13 @@ export function buildAutomationSendHandler(prisma: PrismaClient, deps: Automatio
     // Повторные проверки на СВЕЖИХ данных.
     if (!automation.active) return skip("automation_disabled");
     if (automation.deletedAt) return skip("automation_deleted");
+
+    // Набор магазинов правила мог измениться, пока job ждал отправки: магазин заказа могли отвязать.
+    const stillLinked = await prisma.automationSite.findUnique({
+      where: { automationId_siteId: { automationId: automation.id, siteId: site.id } },
+      select: { siteId: true },
+    });
+    if (!stillLinked) return skip("automation_not_enabled_for_site");
 
     const cond = evaluateConditions(automation.conditionsJson as SmsConditions | null, {
       orderStatus: order.orderStatus,

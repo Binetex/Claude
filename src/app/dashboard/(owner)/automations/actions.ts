@@ -17,7 +17,8 @@ const DELAY_UNITS = new Set(["IMMEDIATE", "MINUTE", "HOUR", "DAY", "WEEK", "MONT
 const CHANNELS = new Set(["SMS"]); // расширяется вместе с AutomationChannel + ChannelSender
 
 export type AutomationInput = {
-  siteId: string;
+  /** Магазины правила (M:N). Один шаблон/триггер/условия — на все выбранные Site. */
+  siteIds: string[];
   name: string;
   active: boolean;
   channel: "SMS";
@@ -32,7 +33,7 @@ export type AutomationInput = {
 export type ActionResult = { ok?: true; id?: string; error?: string; warning?: string };
 
 function validate(input: AutomationInput): string | null {
-  if (!input.siteId) return "Выберите магазин.";
+  if (!Array.isArray(input.siteIds) || input.siteIds.length === 0) return "Выберите хотя бы один магазин.";
   if (!input.name?.trim()) return "Укажите название.";
   if (!CHANNELS.has(input.channel)) return "Неизвестный канал.";
   if (!isSupportedTrigger(input.triggerType)) return "Неизвестный триггер.";
@@ -44,12 +45,21 @@ function validate(input: AutomationInput): string | null {
   return null;
 }
 
-/** Мягкое предупреждение (не блокирует сохранение): review_url используется, но не задан у магазина. */
-async function reviewUrlWarning(siteId: string, template: string): Promise<string | undefined> {
+/** Дедуп + проверка существования выбранных магазинов. */
+async function resolveSiteIds(siteIds: string[]): Promise<{ ids: string[] } | { error: string }> {
+  const unique = [...new Set(siteIds.filter(Boolean))];
+  const found = await prisma.site.findMany({ where: { id: { in: unique } }, select: { id: true } });
+  if (found.length !== unique.length) return { error: "Один из выбранных магазинов не найден." };
+  return { ids: unique };
+}
+
+/** Мягкое предупреждение (не блокирует сохранение): review_url используется, но не задан у магазинов. */
+async function reviewUrlWarning(siteIds: string[], template: string): Promise<string | undefined> {
   if (!/\{\{\s*review_url\s*\}\}/.test(template)) return undefined;
-  const site = await prisma.site.findUnique({ where: { id: siteId }, select: { reviewUrl: true } });
-  if (!site?.reviewUrl) return "Шаблон использует {{review_url}}, но у магазина не задана ссылка на отзыв — такие сообщения не будут отправлены, пока вы её не заполните.";
-  return undefined;
+  const sites = await prisma.site.findMany({ where: { id: { in: siteIds } }, select: { name: true, reviewUrl: true } });
+  const missing = sites.filter((s) => !s.reviewUrl).map((s) => s.name);
+  if (missing.length === 0) return undefined;
+  return `Шаблон использует {{review_url}}, но ссылка на отзыв не задана у магазинов: ${missing.join(", ")} — такие сообщения не будут отправлены, пока вы её не заполните.`;
 }
 
 function normalizeConditions(c: SmsConditions): SmsConditions {
@@ -66,12 +76,12 @@ export async function createAutomation(input: AutomationInput): Promise<ActionRe
   await requireRole("OWNER");
   const err = validate(input);
   if (err) return { error: err };
-  const site = await prisma.site.findUnique({ where: { id: input.siteId }, select: { id: true } });
-  if (!site) return { error: "Магазин не найден." };
+  const resolved = await resolveSiteIds(input.siteIds);
+  if ("error" in resolved) return { error: resolved.error };
 
   const created = await prisma.automation.create({
     data: {
-      siteId: input.siteId,
+      sites: { create: resolved.ids.map((siteId) => ({ siteId })) },
       name: input.name.trim(),
       active: !!input.active,
       channel: input.channel,
@@ -85,20 +95,35 @@ export async function createAutomation(input: AutomationInput): Promise<ActionRe
     select: { id: true },
   });
   revalidatePath("/dashboard/automations");
-  return { ok: true, id: created.id, warning: await reviewUrlWarning(input.siteId, input.template) };
+  return { ok: true, id: created.id, warning: await reviewUrlWarning(resolved.ids, input.template) };
 }
 
 export async function updateAutomation(id: string, input: AutomationInput): Promise<ActionResult> {
   await requireRole("OWNER");
   const err = validate(input);
   if (err) return { error: err };
-  const existing = await prisma.automation.findUnique({ where: { id }, select: { id: true, deletedAt: true } });
+  const existing = await prisma.automation.findUnique({
+    where: { id },
+    select: { id: true, deletedAt: true, sites: { select: { siteId: true } } },
+  });
   if (!existing || existing.deletedAt) return { error: "Автоматизация не найдена." };
+  const resolved = await resolveSiteIds(input.siteIds);
+  if ("error" in resolved) return { error: resolved.error };
+
+  // Диффим набор магазинов: существующие связи не трогаем (сохраняем createdAt). Отвязка магазина
+  // не удаляет историю — job'ы остаются, они привязаны к automationId+orderId.
+  const current = new Set(existing.sites.map((s) => s.siteId));
+  const next = new Set(resolved.ids);
+  const toAdd = resolved.ids.filter((s) => !current.has(s));
+  const toRemove = [...current].filter((s) => !next.has(s));
 
   await prisma.automation.update({
     where: { id },
     data: {
-      // siteId менять не даём — история job'ов привязана к магазину.
+      sites: {
+        deleteMany: toRemove.length ? { siteId: { in: toRemove } } : undefined,
+        create: toAdd.map((siteId) => ({ siteId })),
+      },
       name: input.name.trim(),
       active: !!input.active,
       channel: input.channel,
@@ -112,7 +137,7 @@ export async function updateAutomation(id: string, input: AutomationInput): Prom
   });
   revalidatePath("/dashboard/automations");
   revalidatePath(`/dashboard/automations/${id}`);
-  return { ok: true, id, warning: await reviewUrlWarning(input.siteId, input.template) };
+  return { ok: true, id, warning: await reviewUrlWarning(resolved.ids, input.template) };
 }
 
 export async function toggleAutomation(id: string, active: boolean): Promise<ActionResult> {
@@ -126,11 +151,11 @@ export async function toggleAutomation(id: string, active: boolean): Promise<Act
 
 export async function duplicateAutomation(id: string): Promise<ActionResult> {
   await requireRole("OWNER");
-  const src = await prisma.automation.findUnique({ where: { id } });
+  const src = await prisma.automation.findUnique({ where: { id }, include: { sites: { select: { siteId: true } } } });
   if (!src || src.deletedAt) return { error: "Автоматизация не найдена." };
   const copy = await prisma.automation.create({
     data: {
-      siteId: src.siteId,
+      sites: { create: src.sites.map((s) => ({ siteId: s.siteId })) },
       name: `${src.name} (копия)`,
       active: false, // копия всегда выключена
       channel: src.channel,

@@ -4,17 +4,18 @@ import { useRouter } from "next/navigation";
 import { Card, CardBody } from "@/components/ui/Card";
 import { Button } from "@/components/ui/button";
 import { createAutomation, updateAutomation, previewAutomation, sendTestSms, type AutomationInput, type PreviewActionResult } from "./actions";
+import { SiteMultiSelect, type SiteOption } from "./SiteMultiSelect";
 
 type TriggerOpt = { type: string; label: string; description: string };
 type VarDef = { key: string; label: string; example: string };
-type SiteOpt = { id: string; name: string; quoEnabled: boolean };
+type SiteOpt = SiteOption;
 type OrderOpt = { id: string; orderNumber: string; siteId: string };
 
 type Conditions = { requirePaid?: boolean; excludeCancelledRefunded?: boolean; deliveryToday?: boolean; apartmentPresent?: boolean };
 
 export type AutomationFormInitial = {
   id: string;
-  siteId: string;
+  siteIds: string[];
   name: string;
   active: boolean;
   channel: "SMS";
@@ -52,7 +53,7 @@ export function AutomationForm({
   const [pending, start] = useTransition();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  const [siteId, setSiteId] = useState(initial?.siteId ?? sites[0]?.id ?? "");
+  const [siteIds, setSiteIds] = useState<string[]>(initial?.siteIds ?? []);
   const [name, setName] = useState(initial?.name ?? "");
   const [active, setActive] = useState(initial?.active ?? false);
   const channel = "SMS" as const; // пока единственный канал; выбор появится с EMAIL/PUSH/…
@@ -69,9 +70,25 @@ export function AutomationForm({
   const [testPhone, setTestPhone] = useState("");
   const [testMsg, setTestMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
-  const ordersForSite = useMemo(() => recentOrders.filter((o) => o.siteId === siteId), [recentOrders, siteId]);
+  // Preview и тестовая отправка всегда идут по ОДНОМУ магазину — выбирается отдельно из привязанных.
+  const [sandboxSiteId, setSandboxSiteId] = useState<string>(initial?.siteIds[0] ?? "");
+  const selectedSites = useMemo(() => sites.filter((s) => siteIds.includes(s.id)), [sites, siteIds]);
+
+  /** Магазин убрали из правила → сбрасываем выбор песочницы (и заказ/preview вместе с ним). */
+  function changeSiteIds(next: string[]) {
+    setSiteIds(next);
+    if (sandboxSiteId && !next.includes(sandboxSiteId)) resetSandbox("");
+  }
+
+  function resetSandbox(siteId: string) {
+    setSandboxSiteId(siteId);
+    setPreviewOrderId("");
+    setPreview(null);
+  }
+
+  const ordersForSite = useMemo(() => recentOrders.filter((o) => o.siteId === sandboxSiteId), [recentOrders, sandboxSiteId]);
   const selectedTrigger = triggers.find((t) => t.type === triggerType);
-  const siteObj = sites.find((s) => s.id === siteId);
+  const sandboxSite = sites.find((s) => s.id === sandboxSiteId);
 
   function insertVar(key: string) {
     const token = `{{${key}}}`;
@@ -86,7 +103,7 @@ export function AutomationForm({
 
   function buildInput(): AutomationInput {
     return {
-      siteId,
+      siteIds,
       name,
       active,
       channel,
@@ -121,7 +138,7 @@ export function AutomationForm({
   function runTest() {
     setTestMsg(null);
     start(async () => {
-      const r = await sendTestSms(siteId, testPhone, template);
+      const r = await sendTestSms(sandboxSiteId, testPhone, template);
       setTestMsg(r?.error ? { ok: false, text: r.error } : { ok: true, text: "Тестовое SMS отправлено" });
     });
   }
@@ -140,12 +157,11 @@ export function AutomationForm({
               <span className="text-xs text-slate-500">Название</span>
               <input value={name} onChange={(e) => setName(e.target.value)} className="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm" placeholder="Спасибо за заказ" />
             </label>
-            <label className="space-y-1">
-              <span className="text-xs text-slate-500">Магазин</span>
-              <select value={siteId} onChange={(e) => setSiteId(e.target.value)} disabled={!!initial} className="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm disabled:bg-slate-50">
-                {sites.map((s) => <option key={s.id} value={s.id}>{s.name}{s.quoEnabled ? "" : " (QUO выключен)"}</option>)}
-              </select>
-            </label>
+            <div className="space-y-1">
+              <span className="text-xs text-slate-500">Магазины</span>
+              <SiteMultiSelect sites={sites} selected={siteIds} onChange={changeSiteIds} />
+              <span className="block text-[11px] text-slate-400">Шаблон, триггер, аудитория, задержка и условия — общие для всех выбранных магазинов.</span>
+            </div>
           </div>
 
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
@@ -239,14 +255,26 @@ export function AutomationForm({
       <Card>
         <CardBody className="space-y-2">
           <h2 className="text-sm font-semibold text-slate-800">Preview на реальном заказе</h2>
+          <label className="block space-y-1">
+            <span className="text-xs text-slate-500">Магазин для preview / test send</span>
+            <select
+              value={sandboxSiteId}
+              onChange={(e) => resetSandbox(e.target.value)}
+              className="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm sm:w-72"
+            >
+              <option value="">Выберите магазин…</option>
+              {selectedSites.map((s) => <option key={s.id} value={s.id}>{s.name}{s.quoEnabled ? "" : " (QUO выключен)"}</option>)}
+            </select>
+          </label>
+          {selectedSites.length === 0 && <p className="text-[11px] text-slate-400">Сначала выберите магазины правила выше.</p>}
           <div className="flex flex-wrap items-center gap-2">
-            <select value={previewOrderId} onChange={(e) => setPreviewOrderId(e.target.value)} className="min-w-[220px] flex-1 rounded-md border border-slate-300 px-2 py-1.5 text-sm">
+            <select value={previewOrderId} onChange={(e) => setPreviewOrderId(e.target.value)} disabled={!sandboxSiteId} className="min-w-[220px] flex-1 rounded-md border border-slate-300 px-2 py-1.5 text-sm disabled:bg-slate-50">
               <option value="">Выберите заказ…</option>
               {ordersForSite.map((o) => <option key={o.id} value={o.id}>{o.orderNumber}</option>)}
             </select>
-            <Button size="sm" variant="outline" disabled={pending || !previewOrderId} onClick={runPreview}>Показать preview</Button>
+            <Button size="sm" variant="outline" disabled={pending || !sandboxSiteId || !previewOrderId} onClick={runPreview}>Показать preview</Button>
           </div>
-          {ordersForSite.length === 0 && <p className="text-[11px] text-slate-400">Нет недавних заказов для выбранного магазина.</p>}
+          {sandboxSiteId && ordersForSite.length === 0 && <p className="text-[11px] text-slate-400">Нет недавних заказов для выбранного магазина.</p>}
           {preview && !preview.ok && <p className="text-sm text-red-600">{preview.error}</p>}
           {preview && preview.ok && (
             <div className="space-y-2 rounded-md border border-slate-200 bg-slate-50 p-3">
@@ -264,11 +292,12 @@ export function AutomationForm({
       <Card>
         <CardBody className="space-y-2">
           <h2 className="text-sm font-semibold text-slate-800">Отправить тест</h2>
-          <p className="text-[11px] text-slate-500">Отправляется с номера магазина на введённый номер. Не создаёт задачу и не пишется в историю заказа.</p>
+          <p className="text-[11px] text-slate-500">Отправляется с номера магазина, выбранного выше в блоке preview. Не создаёт задачу и не пишется в историю заказа.</p>
           <div className="flex flex-wrap items-center gap-2">
             <input value={testPhone} onChange={(e) => setTestPhone(e.target.value)} placeholder="+1310…" className="rounded-md border border-slate-300 px-2 py-1.5 text-sm" />
-            <Button size="sm" variant="outline" disabled={pending || !testPhone.trim() || !siteObj?.quoEnabled} onClick={runTest}>Отправить тест</Button>
-            {!siteObj?.quoEnabled && <span className="text-[11px] text-amber-600">QUO выключен у магазина</span>}
+            <Button size="sm" variant="outline" disabled={pending || !sandboxSiteId || !testPhone.trim() || !sandboxSite?.quoEnabled} onClick={runTest}>Отправить тест</Button>
+            {!sandboxSiteId && <span className="text-[11px] text-slate-400">Выберите магазин для теста</span>}
+            {sandboxSiteId && !sandboxSite?.quoEnabled && <span className="text-[11px] text-amber-600">QUO выключен у магазина</span>}
             {testMsg && <span className={testMsg.ok ? "text-xs text-emerald-700" : "text-xs text-red-600"}>{testMsg.text}</span>}
           </div>
         </CardBody>
