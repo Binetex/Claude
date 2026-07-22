@@ -6,7 +6,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { useBlockSave, ConflictNotice } from "./orderEditShared";
 
-/** Открытка + заметка клиента — важный блок, вынесен наверх. Меняется только вручную (OCC). */
+/** Открытка + заметка заказчика — важный блок, вынесен наверх. Меняется только вручную (OCC). */
 export function CardNoteCard({
   orderId,
   updatedAt,
@@ -39,7 +39,7 @@ export function CardNoteCard({
   return (
     <Card>
       <CardHeader className="flex items-center justify-between">
-        <CardTitle>Открытка и заметка клиента</CardTitle>
+        <CardTitle>Открытка и заметка заказчика</CardTitle>
         <Button size="sm" disabled={pending || !dirty} onClick={submit}>
           {pending ? "Сохранение…" : "Сохранить"}
         </Button>
@@ -55,7 +55,7 @@ export function CardNoteCard({
         {showNote ? (
           <div>
             <div className="mb-1 flex items-center justify-between">
-              <span className="text-xs font-medium text-slate-500">Заметка клиента</span>
+              <span className="text-xs font-medium text-slate-500">Заметка заказчика</span>
               <CopyButton text={note} />
             </div>
             <Textarea value={note} onChange={(e) => setNote(e.target.value)} rows={2} placeholder="Внутренняя заметка…" />
@@ -65,7 +65,7 @@ export function CardNoteCard({
             onClick={() => setShowNote(true)}
             className="text-xs font-medium text-sky-600 hover:text-sky-800"
           >
-            + Добавить заметку клиента
+            + Добавить заметку заказчика
           </button>
         )}
         {conflict && (

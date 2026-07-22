@@ -78,9 +78,9 @@ export default async function FloristOrderPage({ params }: { params: Promise<{ i
               <div className="mb-2 text-xs font-medium text-slate-500">Полная раскладка заказа</div>
               <div className="grid grid-cols-2 gap-2 text-sm">
                 <KV label="Сумма товаров" value={formatMoney(order.finance.itemsTotal)} />
-                <KV label="Итог клиента" value={formatMoney(order.finance.customerTotal)} />
+                <KV label="Итог заказчика" value={formatMoney(order.finance.customerTotal)} />
                 <KV label="Налог" value={formatMoney(order.finance.tax)} />
-                <KV label="Доставка (клиент)" value={formatMoney(order.finance.deliveryCustomerCost)} />
+                <KV label="Доставка (заказчик)" value={formatMoney(order.finance.deliveryCustomerCost)} />
                 <KV label="Чаевые" value={formatMoney(order.finance.tip)} />
                 <KV label="Скидка" value={formatMoney(order.finance.discount)} />
               </div>

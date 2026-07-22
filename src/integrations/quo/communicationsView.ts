@@ -64,7 +64,7 @@ export function isLongText(text: string | null | undefined, threshold = COLLAPSE
 
 /**
  * Вкладки блока общения по стороне заказа. Порядок: Получатель первым (слева), Заказчик справа.
- * Если номер заказчика и получателя совпадает — одна вкладка «Клиент» (без дублей). `role` — по чему
+ * Если номер заказчика и получателя совпадает — одна вкладка «Заказчик» (без дублей). `role` — по чему
  * фильтровать историю (null = показать все, для совпадающего номера). `target` — куда слать SMS.
  */
 export type CommTab = {
@@ -81,7 +81,7 @@ export function buildCommTabs(customerPhone: string, recipientPhone: string): Co
   const cust = last10(customerPhone);
   const recip = last10(recipientPhone);
   if (cust && cust === recip) {
-    return [{ key: "SAME", label: "Клиент", phone: recipientPhone || customerPhone, target: "RECIPIENT", role: null }];
+    return [{ key: "SAME", label: "Заказчик", phone: customerPhone || recipientPhone, target: "CUSTOMER", role: null }];
   }
   return [
     { key: "RECIPIENT", label: "Получатель", phone: recipientPhone, target: "RECIPIENT", role: "RECIPIENT" },

@@ -74,10 +74,10 @@ describe("buildCommTabs — вкладки по стороне заказа", ()
     expect(tabs[0].phone).toBe("+13105550002"); // номер получателя
   });
 
-  it("одинаковый номер (в разных форматах) → одна вкладка «Клиент», role=null (показать все)", () => {
+  it("одинаковый номер (в разных форматах) → одна вкладка «Заказчик», role=null (показать все)", () => {
     const tabs = buildCommTabs("(310) 555-0001", "+13105550001");
     expect(tabs).toHaveLength(1);
-    expect(tabs[0]).toMatchObject({ key: "SAME", label: "Клиент", role: null });
+    expect(tabs[0]).toMatchObject({ key: "SAME", label: "Заказчик", role: null });
   });
 
   it("матчинг по последним 10 цифрам (игнор +1/форматирования)", () => {

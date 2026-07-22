@@ -175,7 +175,7 @@ export default async function OwnerOrderPage({ params }: { params: Promise<{ id:
                       <UpdateCompositionButton itemId={it.id} />
                     </div>
                     <div className="text-right text-sm whitespace-nowrap">
-                      <div className="text-slate-700">{formatMoney(it.externalPrice)} <span className="text-xs text-slate-400">клиенту</span></div>
+                      <div className="text-slate-700">{formatMoney(it.externalPrice)} <span className="text-xs text-slate-400">заказчику</span></div>
                       <div className="text-slate-500">{formatMoney(it.floristItemPrice)} <span className="text-xs text-slate-400">флористу</span></div>
                     </div>
                   </li>
@@ -243,7 +243,7 @@ export default async function OwnerOrderPage({ params }: { params: Promise<{ id:
             <CardHeader><CardTitle>Финансы</CardTitle></CardHeader>
             <CardBody>
               <div className="grid grid-cols-3 gap-3">
-                <BigFig label="Итого клиент" value={formatMoney(order.finance.customerTotal)} />
+                <BigFig label="Итого заказчик" value={formatMoney(order.finance.customerTotal)} />
                 <BigFig label="Флористу" value={formatMoney(order.finance.floristTotal)} />
                 <BigFig label="≈ Прибыль" value={formatMoney(order.finance.estimatedProfit)} tone="text-blue-600" />
               </div>
@@ -253,7 +253,7 @@ export default async function OwnerOrderPage({ params }: { params: Promise<{ id:
                 <FinRow label="Налог" value={formatMoney(order.finance.tax)} />
                 <FinRow label="Чаевые" value={formatMoney(order.finance.tip)} />
                 <FinRow label="Скидка" value={formatMoney(order.finance.discount)} />
-                <FinRow label="Доставка (клиент)" value={formatMoney(order.finance.deliveryCustomerCost)} />
+                <FinRow label="Доставка (заказчик)" value={formatMoney(order.finance.deliveryCustomerCost)} />
                 <FinRow label="Доставка (факт)" value={formatMoney(order.finance.deliveryActualCost)} />
               </div>
             </CardBody>
