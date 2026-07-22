@@ -6,6 +6,7 @@ import { prisma } from "@/lib/db";
 import { Card, CardHeader, CardTitle, CardBody } from "@/components/ui/Card";
 import { OrderStatusBadge, PaymentStatusBadge, AssignmentStatusBadge } from "@/components/StatusBadge";
 import { ZoomableImage } from "@/components/ImageLightbox";
+import { OrderItemImages } from "@/components/OrderItemImages";
 import { Separator } from "@/components/ui/misc";
 import { formatMoney } from "@/lib/money";
 import { fmtDate, fmtDateTime, formatOrderNumber } from "@/lib/format";
@@ -168,7 +169,7 @@ export default async function OwnerOrderPage({ params }: { params: Promise<{ id:
               <ul className="divide-y divide-slate-100">
                 {order.items.map((it) => (
                   <li key={it.id} className="flex items-center gap-3 px-4 py-3">
-                    {it.image && <ZoomableImage src={it.image} alt="" className="h-14 w-14 rounded-lg object-cover" />}
+                    <OrderItemImages image={it.image} variantImage={it.variantImage} size="h-14 w-14" />
                     <div className="min-w-0 flex-1">
                       <div className="text-sm font-medium text-slate-800">{it.name} × {it.quantity}</div>
                       <OrderItemComposition variantName={it.variantName} floristComposition={it.floristComposition} />

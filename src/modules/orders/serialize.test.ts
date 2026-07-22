@@ -66,7 +66,9 @@ function makeOrder(financeVisibility: "MAKER_ONLY" | "FULL" = "MAKER_ONLY"): Ord
         id: "it1",
         name: "Roses",
         variantName: "Medium",
-        image: null,
+        image: "https://cdn.example/variant.jpg",
+        parentImageUrl: "https://cdn.example/parent.jpg",
+        variantImageUrl: "https://cdn.example/variant.jpg",
         floristCompositionSnapshot: "12 roses",
         quantity: 1,
         options: "",
@@ -163,5 +165,41 @@ describe("serializeForFlorist (FULL) — расширенная раскладк
   });
   it("позиция всё ещё без цены клиента", () => {
     expect((o.items[0] as Record<string, unknown>).externalPrice).toBeUndefined();
+  });
+});
+
+// ─────────────── Изображения позиции: parent как основное, variant — дополнительно ───────────────
+describe("сериализация изображений позиции", () => {
+  it("все три роли получают основное фото = родительское (не фото вариации)", () => {
+    const o = makeOrder();
+    for (const items of [serializeForOwner(o).items, serializeForCallCenter(o).items, serializeForFlorist(o).items]) {
+      expect(items[0].image).toBe("https://cdn.example/parent.jpg");
+    }
+  });
+
+  it("все три роли получают доп. фото вариации отдельным полем", () => {
+    const o = makeOrder();
+    for (const items of [serializeForOwner(o).items, serializeForCallCenter(o).items, serializeForFlorist(o).items]) {
+      expect(items[0].variantImage).toBe("https://cdn.example/variant.jpg");
+    }
+  });
+
+  it("совпадающие parent/variant → доп. фото не отдаётся (нет дублей)", () => {
+    const o = makeOrder();
+    o.items[0].parentImageUrl = "https://cdn.example/same.jpg";
+    o.items[0].variantImageUrl = "https://cdn.example/same.jpg";
+    const items = serializeForOwner(o).items;
+    expect(items[0].image).toBe("https://cdn.example/same.jpg");
+    expect(items[0].variantImage).toBeNull();
+  });
+
+  it("старый заказ без parent/variant → legacy image как основное, доп. фото нет", () => {
+    const o = makeOrder();
+    o.items[0].parentImageUrl = null;
+    o.items[0].variantImageUrl = null;
+    o.items[0].image = "https://cdn.example/legacy.jpg";
+    const items = serializeForOwner(o).items;
+    expect(items[0].image).toBe("https://cdn.example/legacy.jpg");
+    expect(items[0].variantImage).toBeNull();
   });
 });

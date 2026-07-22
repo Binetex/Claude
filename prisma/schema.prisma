@@ -624,7 +624,12 @@ model OrderItem {
   name                       String // снимок названия товара
   variantName                String? // снимок названия варианта
   sku                        String? // снимок SKU
-  image                      String?
+  // Снимки изображений. `image` — LEGACY «эффективное» изображение (variant ?? product):
+  // сохранено для старых заказов, где разделить parent/variant задним числом невозможно.
+  // Новые импорты пишут все три: parentImageUrl/variantImageUrl раздельно + image как прежде.
+  image                      String? // legacy/effective snapshot — не удалять, читается как fallback
+  parentImageUrl             String? // фото родительского товара (Product.image)
+  variantImageUrl            String? // фото выбранной вариации (ProductVariant.image), если задано
   floristCompositionSnapshot String? // снимок состава варианта на момент заказа (не Shopify description)
   quantity                   Int     @default(1)
   options                    String  @default("") // выбранные параметры (текст)

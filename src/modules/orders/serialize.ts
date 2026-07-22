@@ -1,5 +1,6 @@
 import { Prisma } from "@/generated/prisma/client";
 import { toNumber } from "@/lib/money";
+import { getOrderItemImages } from "./images";
 
 // Полный набор связей для карточки заказа.
 export const orderInclude = {
@@ -79,7 +80,10 @@ export function serializeForOwner(o: OrderWithRelations) {
       id: i.id,
       name: i.name,
       variantName: i.variantName,
-      image: i.image,
+      // image — основное фото (parent ?? legacy); variantImage — доп. фото вариации,
+      // уже отфильтрованное от дублей. Общие списки читают только image.
+      image: getOrderItemImages(i).primary,
+      variantImage: getOrderItemImages(i).variant,
       floristComposition: i.floristCompositionSnapshot,
       quantity: i.quantity,
       options: i.options,
@@ -125,7 +129,10 @@ export function serializeForCallCenter(o: OrderWithRelations) {
       id: i.id,
       name: i.name,
       variantName: i.variantName,
-      image: i.image,
+      // image — основное фото (parent ?? legacy); variantImage — доп. фото вариации,
+      // уже отфильтрованное от дублей. Общие списки читают только image.
+      image: getOrderItemImages(i).primary,
+      variantImage: getOrderItemImages(i).variant,
       floristComposition: i.floristCompositionSnapshot,
       quantity: i.quantity,
       options: i.options,
@@ -155,7 +162,10 @@ export function serializeForFlorist(o: OrderWithRelations) {
       id: i.id,
       name: i.name,
       variantName: i.variantName,
-      image: i.image,
+      // image — основное фото (parent ?? legacy); variantImage — доп. фото вариации,
+      // уже отфильтрованное от дублей. Общие списки читают только image.
+      image: getOrderItemImages(i).primary,
+      variantImage: getOrderItemImages(i).variant,
       floristComposition: i.floristCompositionSnapshot,
       quantity: i.quantity,
       options: i.options,

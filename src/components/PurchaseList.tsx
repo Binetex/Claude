@@ -3,6 +3,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { ChevronRight, ChevronDown, Copy, Check, RefreshCw } from "lucide-react";
 import { Tooltip } from "@/components/ui/tooltip";
+import { ZoomableImage } from "@/components/ImageLightbox";
 import type { PurchaseItem } from "@/modules/purchase/list";
 
 const NOT_SET = "Состав варианта не указан";
@@ -72,13 +73,17 @@ export function PurchaseList({ items, text }: { items: PurchaseItem[]; text: str
       ) : (
         <ul className="mt-1.5 space-y-2 text-xs">
           {items.map((it, i) => (
-            <li key={i}>
-              <div className="font-medium text-slate-800">
-                {it.orderNumber} — {it.productName}
-                {it.variantName ? <span className="font-bold text-red-600"> — {it.variantName}</span> : null} × {it.quantity}
-              </div>
-              <div className="whitespace-pre-line text-slate-600">
-                {it.composition && it.composition.trim() ? it.composition : <span className="text-slate-400 italic">{NOT_SET}</span>}
+            <li key={i} className="flex items-start gap-2">
+              {/* Агрегированный список — только родительское фото, без фото вариации. */}
+              {it.image && <ZoomableImage src={it.image} alt="" className="h-10 w-10 shrink-0 rounded object-cover" />}
+              <div className="min-w-0 flex-1">
+                <div className="font-medium text-slate-800">
+                  {it.orderNumber} — {it.productName}
+                  {it.variantName ? <span className="font-bold text-red-600"> — {it.variantName}</span> : null} × {it.quantity}
+                </div>
+                <div className="whitespace-pre-line text-slate-600">
+                  {it.composition && it.composition.trim() ? it.composition : <span className="text-slate-400 italic">{NOT_SET}</span>}
+                </div>
               </div>
             </li>
           ))}

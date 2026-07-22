@@ -284,14 +284,21 @@ function buildOrderData(
       (li.product_id ? catalog.productByExt.get(String(li.product_id)) : undefined) ?? variant?.product;
     return { variant, product };
   };
-  const resolveImage = (li: ShopifyLineItem): string | null => {
-    const { variant, product } = resolveMatch(li);
-    if (variant?.image) return variant.image;
+  // Фото родительского товара: каталог → live-фолбэк по product_id.
+  const resolveParentImage = (li: ShopifyLineItem): string | null => {
+    const { product } = resolveMatch(li);
     if (product?.image) return product.image;
-    const liveVariant = li.variant_id != null ? live.images.get(String(li.variant_id)) : undefined;
-    const liveProduct = li.product_id != null ? live.images.get(String(li.product_id)) : undefined;
-    return liveVariant ?? liveProduct ?? null;
+    return (li.product_id != null ? live.images.get(String(li.product_id)) : undefined) ?? null;
   };
+  // Фото конкретной вариации: только собственное фото варианта (каталог → live по variant_id).
+  // Без фолбэка на товар — отсутствие фото у вариации значимо и означает «показывать родительское».
+  const resolveVariantImage = (li: ShopifyLineItem): string | null => {
+    const { variant } = resolveMatch(li);
+    if (variant?.image) return variant.image;
+    return (li.variant_id != null ? live.images.get(String(li.variant_id)) : undefined) ?? null;
+  };
+  /** LEGACY «эффективное» фото — прежнее поведение, чтобы старая колонка не меняла смысл. */
+  const resolveImage = (li: ShopifyLineItem): string | null => resolveVariantImage(li) ?? resolveParentImage(li);
   // Снимок состава букета берётся ТОЛЬКО из сопоставленного варианта (не Shopify description,
   // не defaultFloristComposition товара). Если состав не задан — null.
   const resolveComposition = (li: ShopifyLineItem): string | null => {
@@ -362,6 +369,8 @@ function buildOrderData(
           quantity: li.quantity,
           externalPrice: money(li.price),
           image: resolveImage(li),
+          parentImageUrl: resolveParentImage(li),
+          variantImageUrl: resolveVariantImage(li),
           floristCompositionSnapshot: resolveComposition(li),
         };
       }),

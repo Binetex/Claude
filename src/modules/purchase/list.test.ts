@@ -3,8 +3,8 @@ import { purchaseListToText, type PurchaseItem } from "@/modules/purchase/list";
 
 describe("purchaseListToText — формат списка закупки", () => {
   const items: PurchaseItem[] = [
-    { orderNumber: "O'HARA-1053", productName: "White Roses Bouquet", variantName: "Medium", quantity: 2, composition: "24 white roses\n5 eucalyptus stems\n1 vase" },
-    { orderNumber: "O'HARA-1054", productName: "Peony Dream", variantName: "Large", quantity: 1, composition: null },
+    { orderNumber: "O'HARA-1053", productName: "White Roses Bouquet", variantName: "Medium", quantity: 2, composition: "24 white roses\n5 eucalyptus stems\n1 vase", image: null },
+    { orderNumber: "O'HARA-1054", productName: "Peony Dream", variantName: "Large", quantity: 1, composition: null, image: null },
   ];
   const text = purchaseListToText(items);
 

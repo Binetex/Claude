@@ -160,6 +160,65 @@ describe("order ingest (сценарии 9,10 + out-of-order)", () => {
   });
 });
 
+describe("изображения позиции: parent + variant (WooCommerce)", () => {
+  const PARENT = "https://cdn.example/woo-parent.jpg";
+  const VARIANT = "https://cdn.example/woo-variant.jpg";
+
+  const imgOrder = (over: Record<string, unknown> = {}) => ({
+    id: 7100,
+    number: "7100",
+    status: "processing",
+    date_created_gmt: "2026-08-05T10:00:00",
+    date_modified_gmt: "2026-08-05T10:00:00",
+    billing: { first_name: "John", last_name: "Buyer", phone: "+1", email: "j@x.com" },
+    shipping: { first_name: "Ann", last_name: "Recip", phone: "+2", address_1: "1 St", city: "Town", postcode: "1000" },
+    line_items: [
+      { id: 1, name: "Woo Rose", product_id: 100, variation_id: 201, quantity: 1, price: "100", sku: "R" }, // вариация со своим фото
+      { id: 2, name: "Woo Rose", product_id: 100, variation_id: 202, quantity: 1, price: "180" },           // вариация без фото
+    ],
+    total: "280", total_tax: "0", shipping_total: "0", discount_total: "0",
+    ...over,
+  });
+
+  /** Каталог: у товара своё фото, у вариации 201 — своё, у 202 — нет. */
+  async function seedCatalog(parentImage: string | null, variant201Image: string | null) {
+    const p = product({ image: parentImage });
+    p.variants[0].image = variant201Image; // 201
+    p.variants[1].image = null;            // 202
+    await upsertWooProduct(siteId, p);
+  }
+
+  it("вариация со своим фото сохраняет обе ссылки; вариация без фото — только родительскую", async () => {
+    await seedCatalog(PARENT, VARIANT);
+    await ingestWooOrder({ id: siteId, shortName: SHORT }, imgOrder() as never, ingestConfig);
+
+    const order = await prisma.order.findFirstOrThrow({ where: { siteId, externalId: "7100" }, include: { items: true } });
+    const withVariantImage = order.items.find((i) => i.variantExternalId === "201");
+    const withoutVariantImage = order.items.find((i) => i.variantExternalId === "202");
+
+    expect(withVariantImage?.parentImageUrl).toBe(PARENT);
+    expect(withVariantImage?.variantImageUrl).toBe(VARIANT);
+    expect(withVariantImage?.image).toBe(VARIANT); // legacy «эффективное» фото не изменило смысл
+
+    expect(withoutVariantImage?.parentImageUrl).toBe(PARENT);
+    expect(withoutVariantImage?.variantImageUrl).toBeNull(); // fallback на родительское — при рендере
+    expect(withoutVariantImage?.image).toBe(PARENT);
+  });
+
+  it("снимок в OrderItem не меняется при последующем изменении товара в WooCommerce", async () => {
+    await seedCatalog(PARENT, VARIANT);
+    await ingestWooOrder({ id: siteId, shortName: SHORT }, imgOrder({ id: 7101, number: "7101" }) as never, ingestConfig);
+
+    // Товар и вариация получили НОВЫЕ фото в Woo.
+    await seedCatalog("https://cdn.example/woo-parent-NEW.jpg", "https://cdn.example/woo-variant-NEW.jpg");
+
+    const order = await prisma.order.findFirstOrThrow({ where: { siteId, externalId: "7101" }, include: { items: true } });
+    const item = order.items.find((i) => i.variantExternalId === "201");
+    expect(item?.parentImageUrl).toBe(PARENT);   // старый снимок
+    expect(item?.variantImageUrl).toBe(VARIANT); // старый снимок
+  });
+});
+
 describe("webhook intake (сценарии 18,19)", () => {
   const body = JSON.stringify({ id: 5000, status: "processing" });
   const sign = (b: string) => crypto.createHmac("sha256", "whsecret").update(b, "utf8").digest("base64");

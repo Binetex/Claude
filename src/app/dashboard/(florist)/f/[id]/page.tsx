@@ -14,6 +14,7 @@ import { DeliveryStatusCard } from "@/app/dashboard/(owner)/orders/[id]/Delivery
 import { Card, CardHeader, CardTitle, CardBody } from "@/components/ui/Card";
 import { OrderStatusBadge } from "@/components/StatusBadge";
 import { ZoomableImage } from "@/components/ImageLightbox";
+import { OrderItemImages } from "@/components/OrderItemImages";
 import { formatMoney } from "@/lib/money";
 import { formatOrderNumber } from "@/lib/format";
 import { OrderItemComposition } from "@/components/OrderItemComposition";
@@ -55,9 +56,7 @@ export default async function FloristOrderPage({ params }: { params: Promise<{ i
           <div className="space-y-2">
             {order.items.map((it) => (
               <div key={it.id} className="flex items-center gap-3 rounded-lg bg-slate-50 p-2">
-                {it.image && (
-                  <ZoomableImage src={it.image} alt="" className="h-12 w-12 rounded object-cover" />
-                )}
+                <OrderItemImages image={it.image} variantImage={it.variantImage} size="h-12 w-12" />
                 <div className="min-w-0 flex-1">
                   <div className="font-medium text-slate-800">{it.name} × {it.quantity}</div>
                   <OrderItemComposition variantName={it.variantName} floristComposition={it.floristComposition} />

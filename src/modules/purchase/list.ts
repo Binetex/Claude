@@ -2,6 +2,7 @@ import "server-only";
 import { prisma } from "@/lib/db";
 import { localDateStr, todayStrInTz } from "@/lib/tz";
 import { TERMINAL_ORDER_STATUSES } from "@/lib/statuses";
+import { getOrderItemImages } from "@/modules/orders/images";
 
 export type PurchaseItem = {
   orderNumber: string;
@@ -9,6 +10,7 @@ export type PurchaseItem = {
   variantName: string | null;
   quantity: number;
   composition: string | null; // snapshot состава (не live)
+  image: string | null; // основное (родительское) фото: parentImageUrl ?? legacy image
 };
 
 /**
@@ -31,7 +33,7 @@ export async function getTodayPurchaseList(opts: { floristId?: string } = {}): P
       orderNumber: true,
       deliveryDate: true,
       site: { select: { timezone: true } },
-      items: { select: { name: true, variantName: true, quantity: true, floristCompositionSnapshot: true } },
+      items: { select: { name: true, variantName: true, quantity: true, floristCompositionSnapshot: true, image: true, parentImageUrl: true, variantImageUrl: true } },
     },
     orderBy: { deliveryDate: "asc" },
   });
@@ -49,6 +51,8 @@ export async function getTodayPurchaseList(opts: { floristId?: string } = {}): P
         variantName: it.variantName,
         quantity: it.quantity,
         composition: it.floristCompositionSnapshot,
+        // Закупка — агрегированный список: только родительское фото, без фото вариации.
+        image: getOrderItemImages(it).primary,
       });
     }
   }

@@ -11,7 +11,7 @@ import { OrderStatusDateControls } from "@/app/dashboard/(owner)/orders/[id]/Ord
 import { DeliveryStatusCard } from "@/app/dashboard/(owner)/orders/[id]/DeliveryStatusCard";
 import { Card, CardHeader, CardTitle, CardBody } from "@/components/ui/Card";
 import { OrderStatusBadge } from "@/components/StatusBadge";
-import { ZoomableImage } from "@/components/ImageLightbox";
+import { OrderItemImages } from "@/components/OrderItemImages";
 import { formatOrderNumber } from "@/lib/format";
 import { OrderItemComposition } from "@/components/OrderItemComposition";
 import { FloristAvatar } from "@/components/FloristAvatar";
@@ -53,9 +53,7 @@ export default async function CallCenterOrderPage({ params }: { params: Promise<
               <ul className="divide-y divide-slate-100">
                 {order.items.map((it) => (
                   <li key={it.id} className="flex items-center gap-3 px-4 py-3">
-                    {it.image && (
-                      <ZoomableImage src={it.image} alt="" className="h-12 w-12 rounded-lg object-cover" />
-                    )}
+                    <OrderItemImages image={it.image} variantImage={it.variantImage} size="h-12 w-12" />
                     <div>
                       <div className="font-medium text-slate-800">{it.name} × {it.quantity}</div>
                       <OrderItemComposition variantName={it.variantName} floristComposition={it.floristComposition} />

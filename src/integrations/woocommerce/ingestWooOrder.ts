@@ -97,12 +97,16 @@ async function loadCatalogMatch(siteId: string) {
     select: { id: true, externalId: true, image: true, variants: { select: { id: true, externalId: true, image: true, floristComposition: true } } },
   });
   const productByExt = new Map<string, { id: string; image: string | null }>();
+  // Товар по нашему id — чтобы при ненайденном product_id взять РОДИТЕЛЬСКОЕ фото товара
+  // варианта, а не фото самого варианта.
+  const productById = new Map<string, { id: string; image: string | null }>();
   const variantByExt = new Map<string, { id: string; image: string | null; floristComposition: string | null; productId: string }>();
   for (const p of products) {
     productByExt.set(p.externalId, { id: p.id, image: p.image });
+    productById.set(p.id, { id: p.id, image: p.image });
     for (const v of p.variants) variantByExt.set(v.externalId, { id: v.id, image: v.image, floristComposition: v.floristComposition, productId: p.id });
   }
-  return { productByExt, variantByExt };
+  return { productByExt, productById, variantByExt };
 }
 
 /**
@@ -169,13 +173,14 @@ export async function ingestWooOrder(
   }
 
   // ── CREATE.
-  const { productByExt, variantByExt } = await loadCatalogMatch(site.id);
+  const { productByExt, productById, variantByExt } = await loadCatalogMatch(site.id);
   const resolveMatch = (li: WooLineItem) => {
     const variant = li.variation_id ? variantByExt.get(String(li.variation_id)) : undefined;
     // simple-товар: синтетический вариант имеет externalId = product_id.
     const variantFallback = !variant && li.product_id ? variantByExt.get(String(li.product_id)) : undefined;
     const v = variant ?? variantFallback;
-    const product = (li.product_id ? productByExt.get(String(li.product_id)) : undefined) ?? (v ? { id: v.productId, image: v.image } : undefined);
+    // Товар не нашёлся по product_id → берём родителя варианта (с ЕГО фото, не фото варианта).
+    const product = (li.product_id ? productByExt.get(String(li.product_id)) : undefined) ?? (v ? productById.get(v.productId) : undefined);
     return { v, product };
   };
 
@@ -244,7 +249,10 @@ export async function ingestWooOrder(
             options: variantName ?? "",
             quantity: li.quantity ?? 1,
             externalPrice: dec(money(li.price ?? li.total)),
+            // image — прежнее «эффективное» фото (legacy, совместимость); parent/variant — раздельно.
             image: v?.image ?? product?.image ?? null,
+            parentImageUrl: product?.image ?? null,
+            variantImageUrl: v?.image ?? null,
             floristCompositionSnapshot: v?.floristComposition ?? null,
           };
         }),
