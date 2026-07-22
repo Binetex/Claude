@@ -73,6 +73,7 @@ export type NormalizedProduct = {
   status: NormalizedProductStatus;
   productType: string | null;
   adminUrl: string | null; // ссылка на товар в Admin
+  onlineUrl: string | null; // публичная ссылка на товар в витрине магазина
   variants: NormalizedVariant[];
 };
 

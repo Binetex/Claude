@@ -29,6 +29,8 @@ export type ProductVM = {
   sitePriceLabel: string;
   floristPrice: number | null; // null = не задана → полная стоимость
   adminUrl: string | null;
+  onlineUrl: string | null;
+  platform: "SHOPIFY" | "WOOCOMMERCE";
   variantCount: number;
   showVariants: boolean; // прятать раскрытие для одиночного "Default Title"
   compFilled: number;
@@ -109,9 +111,9 @@ export function ProductRow({ p }: { p: ProductVM }) {
             <Link href={`/dashboard/products/${p.id}`} className="text-xs text-sky-600 hover:text-sky-800">
               Редактировать
             </Link>
-            {p.adminUrl && (
-              <a href={p.adminUrl} target="_blank" rel="noopener noreferrer" className="text-xs text-slate-500 hover:text-slate-800">
-                Открыть товар ↗
+            {(p.onlineUrl ?? (p.platform === "SHOPIFY" ? null : p.adminUrl)) && (
+              <a href={(p.onlineUrl ?? p.adminUrl)!} target="_blank" rel="noopener noreferrer" className="text-xs text-slate-500 hover:text-slate-800">
+                Открыть на сайте ↗
               </a>
             )}
           </div>
@@ -158,7 +160,7 @@ export function ProductRow({ p }: { p: ProductVM }) {
                     <td className="px-2 py-1">
                       {v.adminUrl && (
                         <a href={v.adminUrl} target="_blank" rel="noopener noreferrer" className="text-slate-500 hover:text-slate-800">
-                          Shopify ↗
+                          {p.platform === "SHOPIFY" ? "Shopify ↗" : "На сайте ↗"}
                         </a>
                       )}
                     </td>

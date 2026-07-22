@@ -30,6 +30,7 @@ export async function upsertWooProduct(siteId: string, np: NormalizedProduct): P
     status: np.status,
     productType: np.productType,
     adminUrl: np.adminUrl,
+    onlineUrl: np.onlineUrl,
     minPrice: min,
     maxPrice: max,
     remoteDeleted: false,

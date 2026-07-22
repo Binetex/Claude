@@ -62,7 +62,7 @@ export default async function ProductsPage({ searchParams }: { searchParams: Pro
       where,
       orderBy,
       include: {
-        site: { select: { name: true, shortName: true, colorTag: true } },
+        site: { select: { name: true, shortName: true, colorTag: true, platform: true } },
         variants: { where: { remoteDeleted: false }, orderBy: [{ position: "asc" }, { title: "asc" }] },
       },
     }),
@@ -96,6 +96,8 @@ export default async function ProductsPage({ searchParams }: { searchParams: Pro
       sitePriceLabel: priceLabel(p.minPrice, p.maxPrice),
       floristPrice: p.floristPrice != null ? toNumber(p.floristPrice) : null,
       adminUrl: p.adminUrl,
+      onlineUrl: p.onlineUrl,
+      platform: p.site.platform,
       variantCount: variants.length,
       showVariants,
       compFilled,

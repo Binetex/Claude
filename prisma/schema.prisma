@@ -420,7 +420,8 @@ model Product {
   externalId                String // Shopify product id
   status                    ProductStatus @default(ACTIVE) // источник истины — Shopify
   productType               String?
-  adminUrl                  String? // ссылка на товар в Shopify Admin (или Woo в будущем)
+  adminUrl                  String? // ссылка на товар в Shopify Admin (у Woo сюда пишется permalink витрины)
+  onlineUrl                 String? // публичная ссылка на товар в витрине магазина (Woo: permalink, Shopify: /products/{handle})
   floristPrice              Decimal?      @db.Decimal(10, 2) // базовая себестоимость; NULL = не задана → флорист получает полную стоимость заказа
   minPrice                  Decimal?      @db.Decimal(10, 2) // агрегат по активным вариантам
   maxPrice                  Decimal?      @db.Decimal(10, 2)

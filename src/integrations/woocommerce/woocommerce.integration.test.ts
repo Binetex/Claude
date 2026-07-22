@@ -46,6 +46,7 @@ function product(over: Partial<NormalizedProduct> = {}): NormalizedProduct {
     externalId: "100",
     name: "Woo Rose",
     image: null,
+    onlineUrl: null,
     status: "ACTIVE",
     productType: "variable",
     adminUrl: null,

@@ -19,13 +19,15 @@ export function VariantEditDialog({
   initialComposition,
   siblings,
   adminUrl,
+  onlineUrl,
 }: {
   variantId: string;
   title: string;
   initialPrice: number | null;
   initialComposition: string | null;
   siblings: Sibling[];
-  adminUrl: string | null;
+  adminUrl: string | null;  // ссылка в админку Shopify; для Woo — null
+  onlineUrl: string | null; // публичная ссылка на товар в витрине
 }) {
   const [open, setOpen] = useState(false);
   const [price, setPrice] = useState(initialPrice != null ? String(initialPrice) : "");
@@ -93,13 +95,18 @@ export function VariantEditDialog({
           </div>
         </div>
         <div className="mt-4 flex items-center justify-between">
-          {adminUrl ? (
-            <a href={adminUrl} target="_blank" rel="noopener noreferrer" className="text-xs text-slate-500 hover:text-slate-800">
-              Открыть в Shopify ↗
-            </a>
-          ) : (
-            <span />
-          )}
+          <div className="flex items-center gap-3">
+            {onlineUrl && (
+              <a href={onlineUrl} target="_blank" rel="noopener noreferrer" className="text-xs text-slate-500 hover:text-slate-800">
+                Открыть на сайте ↗
+              </a>
+            )}
+            {adminUrl && (
+              <a href={adminUrl} target="_blank" rel="noopener noreferrer" className="text-xs text-slate-500 hover:text-slate-800">
+                Открыть в Shopify ↗
+              </a>
+            )}
+          </div>
           <div className="flex gap-2">
             <DialogClose asChild>
               <Button variant="ghost" size="sm">Отмена</Button>

@@ -53,6 +53,7 @@ async function upsertProduct(
     status: np.status,
     productType: np.productType,
     adminUrl: np.adminUrl,
+    onlineUrl: np.onlineUrl,
     minPrice: min,
     maxPrice: max,
     lastSyncedAt: now,

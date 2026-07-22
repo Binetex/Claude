@@ -28,9 +28,10 @@ type ShopifyVariant = {
   inventory_management?: string | null;
   inventory_policy?: string | null;
 };
-type ShopifyProduct = {
+export type ShopifyProduct = {
   id: number | string;
   title?: string;
+  handle?: string | null; // slug витрины: /products/{handle}
   status?: string | null;
   product_type?: string | null;
   image?: { src?: string } | null;
@@ -115,7 +116,7 @@ function normalizeVariant(
   };
 }
 
-function normalizeProduct(shop: string, p: ShopifyProduct): NormalizedProduct {
+export function normalizeProduct(shop: string, p: ShopifyProduct): NormalizedProduct {
   const externalId = String(p.id);
   const status = toStatus(p.status);
   const productActive = status === "ACTIVE";
@@ -139,6 +140,9 @@ function normalizeProduct(shop: string, p: ShopifyProduct): NormalizedProduct {
     status,
     productType: p.product_type?.trim() || null,
     adminUrl: `https://${shop}/admin/products/${externalId}`,
+    // Витрина открывается только по handle — по числовому id Shopify страницу не отдаёт.
+    // Домен myshopify.com редиректит на основной домен магазина, если он настроен.
+    onlineUrl: p.handle ? `https://${shop}/products/${p.handle}` : null,
     variants,
   };
 }
@@ -166,7 +170,7 @@ export const shopifyCatalogAdapter: CatalogAdapter = {
       // fields ограничивает ответ — body_html (Shopify description) НЕ запрашиваем вовсе.
       const params = new URLSearchParams({
         limit: String(PAGE_SIZE),
-        fields: "id,title,status,product_type,image,images,variants",
+        fields: "id,title,handle,status,product_type,image,images,variants",
       });
       // При курсорной пагинации Shopify разрешает только limit, fields и page_info.
       if (pageInfo) params.set("page_info", pageInfo);

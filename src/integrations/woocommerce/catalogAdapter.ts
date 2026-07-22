@@ -155,6 +155,7 @@ export function normalizeWooProduct(p: WooProduct, variations: WooVariation[]): 
     status,
     productType: p.type?.trim() || null,
     adminUrl: p.permalink ?? null,
+    onlineUrl: p.permalink ?? null,
     variants,
   };
 }

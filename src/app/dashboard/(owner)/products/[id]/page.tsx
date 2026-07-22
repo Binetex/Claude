@@ -34,7 +34,7 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
   const product = await prisma.product.findUnique({
     where: { id },
     include: {
-      site: { select: { name: true, shortName: true, colorTag: true } },
+      site: { select: { name: true, shortName: true, colorTag: true, platform: true } },
       variants: { orderBy: [{ remoteDeleted: "asc" }, { position: "asc" }, { title: "asc" }] },
     },
   });
@@ -85,13 +85,28 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
               </Field>
               <Field label="Синхронизация">{product.lastSyncedAt ? fmtDateTime(product.lastSyncedAt) : "—"}</Field>
             </div>
-            {product.adminUrl && (
-              <div className="mt-4">
-                <Button asChild variant="outline" size="sm">
-                  <a href={product.adminUrl} target="_blank" rel="noopener noreferrer">Открыть в Shopify ↗</a>
-                </Button>
-              </div>
-            )}
+            {(() => {
+              // У Woo adminUrl исторически хранит permalink витрины, отдельной админ-ссылки нет.
+              // У Shopify adminUrl — админка, витрина живёт в onlineUrl (нужен handle товара).
+              const isShopify = product.site.platform === "SHOPIFY";
+              const online = product.onlineUrl ?? (isShopify ? null : product.adminUrl);
+              const admin = isShopify ? product.adminUrl : null;
+              if (!online && !admin) return null;
+              return (
+                <div className="mt-4 flex flex-wrap gap-2">
+                  {online && (
+                    <Button asChild variant="outline" size="sm">
+                      <a href={online} target="_blank" rel="noopener noreferrer">Открыть на сайте ↗</a>
+                    </Button>
+                  )}
+                  {admin && (
+                    <Button asChild variant="outline" size="sm">
+                      <a href={admin} target="_blank" rel="noopener noreferrer">Открыть в Shopify ↗</a>
+                    </Button>
+                  )}
+                </div>
+              );
+            })()}
           </div>
         </CardBody>
       </Card>
@@ -145,7 +160,8 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
                       title={variantOptions(v)}
                       initialPrice={v.floristPrice != null ? toNumber(v.floristPrice) : null}
                       initialComposition={v.floristComposition}
-                      adminUrl={v.adminUrl}
+                      adminUrl={product.site.platform === "SHOPIFY" ? v.adminUrl : null}
+                      onlineUrl={product.onlineUrl ?? (product.site.platform === "SHOPIFY" ? null : product.adminUrl)}
                       siblings={product.variants
                         .filter((x) => x.id !== v.id)
                         .map((x) => ({ id: x.id, label: variantOptions(x), composition: x.floristComposition }))}

@@ -65,6 +65,7 @@ type ShopifyProductWebhook = {
   id: number | string;
   title?: string;
   status?: string;
+  handle?: string | null;
   image?: { src?: string } | null;
   variants?: { id: number | string; title?: string; sku?: string | null; price?: string | null }[];
 };
@@ -79,10 +80,15 @@ function mapProductStatus(s: string | undefined): ProductStatus {
 async function upsertProduct(siteId: string, shopify: unknown): Promise<void> {
   const p = shopify as ShopifyProductWebhook;
   const externalId = String(p.id);
+  // handle меняется при переименовании товара — обновляем ссылку на витрину сразу,
+  // не дожидаясь следующей синхронизации каталога.
+  const site = p.handle ? await prisma.site.findUnique({ where: { id: siteId }, select: { shopifyShopDomain: true } }) : null;
   const common = {
     name: p.title ?? "—",
     status: mapProductStatus(p.status),
     image: p.image?.src ?? null,
+    // handle может смениться при переименовании товара — держим ссылку на витрину актуальной.
+    ...(site?.shopifyShopDomain ? { onlineUrl: `https://${site.shopifyShopDomain}/products/${p.handle}` } : {}),
     remoteDeleted: false,
     deletedAt: null,
     lastSyncedAt: new Date(),
