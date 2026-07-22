@@ -1,13 +1,12 @@
 "use client";
 import { useRef, useState, useTransition } from "react";
 import {
-  floristAccept,
   floristStartWork,
   floristMarkReady,
   floristSetReadyTime,
 } from "@/app/dashboard/(florist)/actions";
 import { FloristHandoff } from "../FloristHandoff";
-import type { OrderStatus, AssignmentStatus } from "@/generated/prisma/enums";
+import type { OrderStatus } from "@/generated/prisma/enums";
 
 const bigBtn = "w-full rounded-xl px-4 py-3.5 text-base font-semibold disabled:opacity-60";
 const MAX_DIMENSION = 1600;
@@ -49,12 +48,10 @@ function compressImage(file: File): Promise<string> {
 export function FloristOrderActions({
   orderId,
   orderStatus,
-  assignmentStatus,
   florists,
 }: {
   orderId: string;
   orderStatus: OrderStatus;
-  assignmentStatus: AssignmentStatus;
   florists: { id: string; name: string }[];
 }) {
   const [pending, start] = useTransition();
@@ -74,24 +71,15 @@ export function FloristOrderActions({
     }
   }
 
-  // Ожидает принятия
-  if (assignmentStatus === "ASSIGNED") {
+  // Назначен и авто-принят (FLORIST_ACCEPTED) или легаси ASSIGNED → начать работу либо передать другому.
+  if (orderStatus === "ASSIGNED" || orderStatus === "FLORIST_ACCEPTED") {
     return (
       <div className="grid grid-cols-2 gap-3">
-        <button disabled={pending} onClick={() => start(() => floristAccept(orderId))} className={`${bigBtn} bg-emerald-600 text-white hover:bg-emerald-700`}>
-          Принять
+        <button disabled={pending} onClick={() => start(() => floristStartWork(orderId))} className={`${bigBtn} bg-slate-800 text-white hover:bg-slate-900`}>
+          Начать работу
         </button>
         <FloristHandoff orderId={orderId} florists={florists} btnClass={`${bigBtn} border border-red-300 bg-white text-red-600 hover:bg-red-50`} />
       </div>
-    );
-  }
-
-  // Принят → начать работу
-  if (orderStatus === "FLORIST_ACCEPTED") {
-    return (
-      <button disabled={pending} onClick={() => start(() => floristStartWork(orderId))} className={`${bigBtn} bg-slate-800 text-white hover:bg-slate-900`}>
-        Начать работу
-      </button>
     );
   }
 

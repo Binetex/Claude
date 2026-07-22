@@ -188,7 +188,7 @@ export default async function FloristOrderPage({ params }: { params: Promise<{ i
 
       {/* Основные кнопки процесса */}
       <div className="sticky bottom-0 rounded-xl border border-slate-200 bg-white p-4 shadow-lg">
-        <FloristOrderActions orderId={order.id} orderStatus={order.orderStatus} assignmentStatus={order.assignmentStatus} florists={handoffTargets} />
+        <FloristOrderActions orderId={order.id} orderStatus={order.orderStatus} florists={handoffTargets} />
       </div>
     </div>
   );

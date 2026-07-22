@@ -151,55 +151,47 @@ export async function assignInitial(orderId: string): Promise<void> {
     return;
   }
 
-  await assignTo(orderId, nextFloristId);
-  await notifyFloristAssigned(nextFloristId, orderId);
+  await assignAndActivateFlorist(orderId, nextFloristId);
 }
 
-/** Назначает заказ конкретному флористу с авто-снимком цены (в транзакции). */
-async function assignTo(orderId: string, floristId: string): Promise<void> {
+type AssignActivateOpts = { closePrevious?: "DECLINED" | "REASSIGNED"; manualTotal?: Prisma.Decimal | null };
+
+/**
+ * ЕДИНЫЙ путь назначения флориста с АВТО-ПРИНЯТИЕМ (заменяет старый assign+accept flow).
+ * Используется assignInitial, handoffOrder, reassignManual и decline-reassign — чтобы не было
+ * второго параллельного пути. Атомарно в одной транзакции:
+ *   - (опц.) корректно закрыть прежнее активное назначение (DECLINED/REASSIGNED);
+ *   - создать новое назначение сразу ACCEPTED (respondedAt = now — время авто-принятия);
+ *   - Order.assignmentStatus = ACCEPTED, orderStatus = FLORIST_ACCEPTED, currentFloristId;
+ *   - снимок цены (авто под нового флориста, либо ручной), пересчёт прибыли.
+ * Side-effects (уведомление + перепланирование доставки) — РОВНО ОДИН РАЗ и только после успешной
+ * транзакции; при ошибке транзакции ничего частично активного не остаётся.
+ */
+export async function assignAndActivateFlorist(orderId: string, floristId: string, opts: AssignActivateOpts = {}): Promise<void> {
   await prisma.$transaction(async (tx) => {
-    const total = await applyAutoPriceSnapshot(tx, orderId, floristId);
+    if (opts.closePrevious) {
+      await tx.orderAssignment.updateMany({
+        where: { orderId, state: { in: ["ASSIGNED", "ACCEPTED"] } },
+        data: { state: opts.closePrevious, respondedAt: new Date() },
+      });
+    }
+    // Свежий снимок цены под НОВОГО флориста (старые расходы/финданные не копируются), либо ручная цена.
+    const useManual = opts.manualTotal != null;
+    const total = useManual ? opts.manualTotal! : await applyAutoPriceSnapshot(tx, orderId, floristId);
+    const priceMode = useManual ? "MANUAL" : "AUTO";
+    const now = new Date();
     await tx.order.update({
       where: { id: orderId },
-      data: {
-        currentFloristId: floristId,
-        assignmentStatus: "ASSIGNED",
-        orderStatus: "ASSIGNED",
-        priceMode: "AUTO",
-        floristTotal: total,
-      },
+      data: { currentFloristId: floristId, assignmentStatus: "ACCEPTED", orderStatus: "FLORIST_ACCEPTED", priceMode, floristTotal: total },
     });
     await tx.orderAssignment.create({
-      data: {
-        orderId,
-        floristId,
-        state: "ASSIGNED",
-        priceMode: "AUTO",
-        floristTotalSnapshot: total,
-      },
+      data: { orderId, floristId, state: "ACCEPTED", respondedAt: now, priceMode, floristTotalSnapshot: total },
     });
     await recomputeEstimatedProfit(tx, orderId);
   });
-  // Флорист назначен → (пере)планировать доставку под pickup этого флориста.
+  // Строго один раз после успешной транзакции: уведомление + (пере)планирование доставки под флориста.
+  await notifyFloristAssigned(floristId, orderId);
   await onOrderDeliveryChangeSafe(prisma, orderId);
-}
-
-/** Флорист принимает заказ. */
-export async function acceptOrder(orderId: string, floristId: string): Promise<void> {
-  const order = await prisma.order.findUnique({ where: { id: orderId } });
-  if (!order || order.currentFloristId !== floristId) return;
-  if (order.assignmentStatus !== "ASSIGNED") return;
-
-  await prisma.$transaction(async (tx) => {
-    await tx.order.update({
-      where: { id: orderId },
-      data: { assignmentStatus: "ACCEPTED", orderStatus: "FLORIST_ACCEPTED" },
-    });
-    await tx.orderAssignment.updateMany({
-      where: { orderId, floristId, state: "ASSIGNED" },
-      data: { state: "ACCEPTED", respondedAt: new Date() },
-    });
-  });
 }
 
 /**
@@ -209,11 +201,12 @@ export async function acceptOrder(orderId: string, floristId: string): Promise<v
 export async function declineOrder(orderId: string, floristId: string): Promise<void> {
   const order = await prisma.order.findUnique({ where: { id: orderId } });
   if (!order || order.currentFloristId !== floristId) return;
-  if (order.assignmentStatus !== "ASSIGNED") return;
+  // Авто-принятие: активное назначение теперь ACCEPTED (раньше ждало ASSIGNED) — разрешаем оба.
+  if (!["ASSIGNED", "ACCEPTED"].includes(order.assignmentStatus)) return;
 
-  // Фиксируем отказ текущего флориста.
+  // Фиксируем отказ текущего флориста (его назначение теперь ACCEPTED).
   await prisma.orderAssignment.updateMany({
-    where: { orderId, floristId, state: "ASSIGNED" },
+    where: { orderId, floristId, state: { in: ["ASSIGNED", "ACCEPTED"] } },
     data: { state: "DECLINED", respondedAt: new Date() },
   });
 
@@ -247,15 +240,14 @@ export async function declineOrder(orderId: string, floristId: string): Promise<
     return;
   }
 
-  await assignTo(orderId, nextFloristId);
-  await notifyFloristAssigned(nextFloristId, orderId);
+  await assignAndActivateFlorist(orderId, nextFloristId);
 }
 
 /**
  * Флорист ПЕРЕДАЁТ свой назначенный заказ выбранному активному флористу (замена «Отказаться»):
  * фиксирует свой отказ (DECLINED) и назначает выбранного (авто-цена + уведомление). Передать может
- * только текущий назначенный флорист и только пока заказ в статусе ASSIGNED (до принятия). Цель —
- * другой активный флорист (active florist + active user). История прежних назначений сохраняется.
+ * только текущий назначенный флорист и пока заказ активен (ASSIGNED/ACCEPTED). Цель — другой активный
+ * флорист (active florist + active user). История прежних назначений сохраняется.
  */
 export async function handoffOrder(
   orderId: string,
@@ -266,16 +258,13 @@ export async function handoffOrder(
   const order = await prisma.order.findUnique({ where: { id: orderId }, select: { currentFloristId: true, assignmentStatus: true } });
   if (!order) return { ok: false, reason: "order_not_found" };
   if (order.currentFloristId !== fromFloristId) return { ok: false, reason: "not_current_florist" };
-  if (order.assignmentStatus !== "ASSIGNED") return { ok: false, reason: "not_assignable" };
+  // Авто-принятие: передавать можно из активного состояния (ASSIGNED — легаси, ACCEPTED — новое).
+  if (!["ASSIGNED", "ACCEPTED"].includes(order.assignmentStatus)) return { ok: false, reason: "not_assignable" };
   const target = await prisma.florist.findFirst({ where: { id: toFloristId, active: true, user: { active: true } }, select: { id: true } });
   if (!target) return { ok: false, reason: "target_unavailable" };
 
-  await prisma.orderAssignment.updateMany({
-    where: { orderId, floristId: fromFloristId, state: "ASSIGNED" },
-    data: { state: "DECLINED", respondedAt: new Date() },
-  });
-  await assignTo(orderId, toFloristId);
-  await notifyFloristAssigned(toFloristId, orderId);
+  // Один путь: закрыть прежнее (DECLINED) + назначить+активировать нового — атомарно, без дублей.
+  await assignAndActivateFlorist(orderId, toFloristId, { closePrevious: "DECLINED" });
   return { ok: true };
 }
 
@@ -292,43 +281,11 @@ export async function reassignManual(
   const order = await prisma.order.findUnique({ where: { id: orderId } });
   if (!order) return;
 
-  const hadManual = order.priceMode === "MANUAL";
-  await prisma.$transaction(async (tx) => {
-    // Прежнее активное назначение помечаем как переназначенное.
-    await tx.orderAssignment.updateMany({
-      where: { orderId, state: { in: ["ASSIGNED", "ACCEPTED"] } },
-      data: { state: "REASSIGNED", respondedAt: new Date() },
-    });
-
-    let total: Prisma.Decimal;
-    let priceMode: "AUTO" | "MANUAL";
-    if (keepManualPrice && hadManual) {
-      total = order.floristTotal;
-      priceMode = "MANUAL";
-    } else {
-      total = await applyAutoPriceSnapshot(tx, orderId, floristId);
-      priceMode = "AUTO";
-    }
-
-    await tx.order.update({
-      where: { id: orderId },
-      data: {
-        currentFloristId: floristId,
-        assignmentStatus: "ASSIGNED",
-        orderStatus: "ASSIGNED",
-        priceMode,
-        floristTotal: total,
-      },
-    });
-    await tx.orderAssignment.create({
-      data: { orderId, floristId, state: "ASSIGNED", priceMode, floristTotalSnapshot: total },
-    });
-    await recomputeEstimatedProfit(tx, orderId);
-  });
-
-  await notifyFloristAssigned(floristId, orderId);
-  // Переназначение флориста → DELETE неинициированного draft + новая attempt под нового флориста.
-  await onOrderDeliveryChangeSafe(prisma, orderId);
+  // Сохранить ручную цену прежнего расчёта, если так указано; иначе — авто-снимок под нового флориста.
+  const manualTotal = keepManualPrice && order.priceMode === "MANUAL" ? order.floristTotal : null;
+  // Единый путь: закрыть прежнее (REASSIGNED) + назначить+активировать нового (сразу ACCEPTED). Внутри —
+  // notify + перепланирование доставки ровно один раз после успешной транзакции.
+  await assignAndActivateFlorist(orderId, floristId, { closePrevious: "REASSIGNED", manualTotal });
 }
 
 /** Владелец задаёт ручную цену флориста для заказа (приоритетнее авто). */

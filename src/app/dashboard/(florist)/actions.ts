@@ -25,19 +25,13 @@ export async function floristUpdateCardMessage(
   return { ok: true, message: "Текст открытки сохранён." };
 }
 import {
-  acceptOrder,
   handoffOrder,
   startWork,
   markReady,
   setReadyAt,
 } from "@/modules/assignments/service";
 
-export async function floristAccept(orderId: string) {
-  const user = await requireFlorist();
-  await acceptOrder(orderId, user.floristId);
-  revalidatePath("/dashboard/f");
-  revalidatePath(`/dashboard/f/${orderId}`);
-}
+// Заказ авто-принимается при назначении (см. assignAndActivateFlorist) — отдельного «Принять» больше нет.
 
 /** Флорист передаёт свой заказ выбранному активному флористу (заменяет простой «Отказаться»). */
 export async function floristHandoff(orderId: string, targetFloristId: string): Promise<{ ok: boolean; reason?: string }> {

@@ -7,7 +7,6 @@ import {
   reassignManual,
   setManualFloristPrice,
   handoffOrder,
-  acceptOrder,
 } from "./service";
 
 /**
@@ -15,6 +14,11 @@ import {
  * (DATABASE_URL из .env), создают собственные изолированные фикстуры
  * с уникальным суффиксом и полностью удаляют их после себя —
  * демо-данные (сид) не затрагиваются.
+ *
+ * Модель АВТО-ПРИНЯТИЯ: назначение флориста сразу активно (нет отдельного «Принять»).
+ * Новое назначение всегда: OrderAssignment.state=ACCEPTED (+ respondedAt=now),
+ * Order.assignmentStatus=ACCEPTED, Order.orderStatus=FLORIST_ACCEPTED. Инвариант —
+ * у заказа не более одного активного назначения (state ∈ {ASSIGNED, ACCEPTED}).
  */
 
 const suffix = `test-${Date.now()}`;
@@ -25,6 +29,13 @@ let userAId: string;
 let userBId: string;
 let productId: string;
 let orderId: string;
+
+/** Инвариант: у заказа максимум одно активное назначение. */
+async function activeAssignmentCount(oid: string): Promise<number> {
+  return prisma.orderAssignment.count({
+    where: { orderId: oid, state: { in: ["ASSIGNED", "ACCEPTED"] } },
+  });
+}
 
 async function makeOrder(overrides: Partial<Prisma.OrderCreateInput> = {}) {
   const order = await prisma.order.create({
@@ -117,8 +128,8 @@ afterAll(async () => {
   await prisma.$disconnect();
 });
 
-describe("assignInitial", () => {
-  it("назначает основному флористу сайта со снимком авто-цены", async () => {
+describe("assignInitial (авто-принятие)", () => {
+  it("назначает основному флористу и СРАЗУ принимает: ACCEPTED/FLORIST_ACCEPTED + respondedAt", async () => {
     const order = await makeOrder();
     orderId = order.id;
 
@@ -126,31 +137,46 @@ describe("assignInitial", () => {
 
     const updated = await prisma.order.findUniqueOrThrow({ where: { id: orderId } });
     expect(updated.currentFloristId).toBe(floristAId);
-    expect(updated.assignmentStatus).toBe("ASSIGNED");
-    expect(updated.orderStatus).toBe("ASSIGNED");
-    expect(Number(updated.floristTotal)).toBe(50);
+    expect(updated.assignmentStatus).toBe("ACCEPTED");
+    expect(updated.orderStatus).toBe("FLORIST_ACCEPTED");
+    expect(Number(updated.floristTotal)).toBe(50); // авто-цена A
+
+    // Назначение создано сразу активным (ACCEPTED) с проставленным временем авто-принятия.
+    const assignment = await prisma.orderAssignment.findFirstOrThrow({
+      where: { orderId, floristId: floristAId },
+    });
+    expect(assignment.state).toBe("ACCEPTED");
+    expect(assignment.respondedAt).not.toBeNull();
+    expect(await activeAssignmentCount(orderId)).toBe(1);
   });
 
-  it("идемпотентно — повторный вызов не переназначает уже назначенный заказ", async () => {
-    await assignInitial(orderId); // уже назначен флористу A
+  it("идемпотентно — повторный вызов не переназначает и НЕ создаёт дубль назначения", async () => {
+    await assignInitial(orderId); // уже принят флористом A
+    await assignInitial(orderId);
     const updated = await prisma.order.findUniqueOrThrow({ where: { id: orderId } });
     expect(updated.currentFloristId).toBe(floristAId);
+    // Ровно одно активное назначение — повторный ingest/вебхук не дублирует.
+    expect(await activeAssignmentCount(orderId)).toBe(1);
+    expect(await prisma.orderAssignment.count({ where: { orderId } })).toBe(1);
   });
 });
 
 describe("declineOrder", () => {
-  it("при отказе основного передаёт резервному с пересчётом цены", async () => {
+  it("при отказе основного передаёт резервному, сразу ACCEPTED, авто-цена пересчитана", async () => {
     await declineOrder(orderId, floristAId);
 
     const updated = await prisma.order.findUniqueOrThrow({ where: { id: orderId } });
     expect(updated.currentFloristId).toBe(floristBId);
-    expect(updated.assignmentStatus).toBe("ASSIGNED");
-    expect(Number(updated.floristTotal)).toBe(30);
+    expect(updated.assignmentStatus).toBe("ACCEPTED");
+    expect(updated.orderStatus).toBe("FLORIST_ACCEPTED");
+    expect(Number(updated.floristTotal)).toBe(30); // свежий снимок B, а не расходы A
 
     const declined = await prisma.orderAssignment.findFirst({
       where: { orderId, floristId: floristAId, state: "DECLINED" },
     });
     expect(declined).not.toBeNull();
+    // Прежнее закрыто, новое активно — по-прежнему ровно одно активное.
+    expect(await activeAssignmentCount(orderId)).toBe(1);
   });
 
   it("при отказе всех флористов заказ становится UNASSIGNED без зацикливания", async () => {
@@ -160,6 +186,7 @@ describe("declineOrder", () => {
     expect(updated.currentFloristId).toBeNull();
     expect(updated.assignmentStatus).toBe("UNASSIGNED");
     expect(Number(updated.floristTotal)).toBe(0);
+    expect(await activeAssignmentCount(orderId)).toBe(0);
   });
 
   it("повторный отказ идемпотентен — не ломается и не меняет состояние", async () => {
@@ -180,7 +207,7 @@ describe("ручная цена и переназначение", () => {
     expect(Number(updated.floristTotal)).toBe(999);
   });
 
-  it("переназначение с keepManualPrice=true сохраняет ручную цену", async () => {
+  it("переназначение с keepManualPrice=true сохраняет ручную цену, новый сразу ACCEPTED", async () => {
     const order = await makeOrder();
     await assignInitial(order.id); // -> floristA
     await setManualFloristPrice(order.id, 777);
@@ -189,11 +216,15 @@ describe("ручная цена и переназначение", () => {
 
     const updated = await prisma.order.findUniqueOrThrow({ where: { id: order.id } });
     expect(updated.currentFloristId).toBe(floristBId);
+    expect(updated.assignmentStatus).toBe("ACCEPTED");
     expect(updated.priceMode).toBe("MANUAL");
     expect(Number(updated.floristTotal)).toBe(777);
+    // Прежнее назначение закрыто как REASSIGNED, активно ровно одно.
+    expect(await prisma.orderAssignment.count({ where: { orderId: order.id, floristId: floristAId, state: "REASSIGNED" } })).toBe(1);
+    expect(await activeAssignmentCount(order.id)).toBe(1);
   });
 
-  it("переназначение с keepManualPrice=false берёт авто-цену нового флориста", async () => {
+  it("переназначение с keepManualPrice=false берёт свежую авто-цену нового флориста", async () => {
     const order = await makeOrder();
     await assignInitial(order.id); // -> floristA, авто 50
     await setManualFloristPrice(order.id, 777);
@@ -202,23 +233,38 @@ describe("ручная цена и переназначение", () => {
 
     const updated = await prisma.order.findUniqueOrThrow({ where: { id: order.id } });
     expect(updated.currentFloristId).toBe(floristBId);
+    expect(updated.assignmentStatus).toBe("ACCEPTED");
     expect(updated.priceMode).toBe("AUTO");
     expect(Number(updated.floristTotal)).toBe(30);
+    expect(await activeAssignmentCount(order.id)).toBe(1);
   });
 });
 
-describe("handoffOrder (флорист передаёт выбранному)", () => {
-  it("передаёт заказ выбранному активному флористу: цель ASSIGNED (авто-цена), исходный DECLINED", async () => {
+describe("handoffOrder (флорист передаёт выбранному, авто-принятие)", () => {
+  it("передаёт заказ выбранному: цель сразу ACCEPTED (свежая авто-цена), исходный DECLINED", async () => {
     const order = await makeOrder();
-    await assignInitial(order.id); // -> floristA (position 0)
+    await assignInitial(order.id); // -> floristA (авто-принят)
     const r = await handoffOrder(order.id, floristAId, floristBId);
     expect(r).toEqual({ ok: true });
     const updated = await prisma.order.findUniqueOrThrow({ where: { id: order.id } });
     expect(updated.currentFloristId).toBe(floristBId);
-    expect(updated.assignmentStatus).toBe("ASSIGNED");
-    expect(Number(updated.floristTotal)).toBe(30); // авто-цена B
+    expect(updated.assignmentStatus).toBe("ACCEPTED");
+    expect(updated.orderStatus).toBe("FLORIST_ACCEPTED");
+    expect(Number(updated.floristTotal)).toBe(30); // авто-цена B, расходы A не копируются
     expect(await prisma.orderAssignment.count({ where: { orderId: order.id, floristId: floristAId, state: "DECLINED" } })).toBe(1);
-    expect(await prisma.orderAssignment.count({ where: { orderId: order.id, floristId: floristBId, state: "ASSIGNED" } })).toBe(1);
+    expect(await prisma.orderAssignment.count({ where: { orderId: order.id, floristId: floristBId, state: "ACCEPTED" } })).toBe(1);
+    // Никаких двух активных назначений.
+    expect(await activeAssignmentCount(order.id)).toBe(1);
+  });
+
+  it("можно передать ПОСЛЕ авто-принятия (из состояния ACCEPTED)", async () => {
+    const order = await makeOrder();
+    await assignInitial(order.id); // -> floristA сразу ACCEPTED
+    expect((await prisma.order.findUniqueOrThrow({ where: { id: order.id } })).assignmentStatus).toBe("ACCEPTED");
+    const r = await handoffOrder(order.id, floristAId, floristBId);
+    expect(r).toEqual({ ok: true });
+    expect((await prisma.order.findUniqueOrThrow({ where: { id: order.id } })).currentFloristId).toBe(floristBId);
+    expect(await activeAssignmentCount(order.id)).toBe(1);
   });
 
   it("нельзя передать не свой заказ", async () => {
@@ -241,13 +287,9 @@ describe("handoffOrder (флорист передаёт выбранному)", 
     await prisma.florist.update({ where: { id: floristBId }, data: { active: false } });
     const r = await handoffOrder(order.id, floristAId, floristBId);
     expect(r).toEqual({ ok: false, reason: "target_unavailable" });
+    // Заказ не тронут, лишних назначений нет.
+    expect((await prisma.order.findUniqueOrThrow({ where: { id: order.id } })).currentFloristId).toBe(floristAId);
+    expect(await activeAssignmentCount(order.id)).toBe(1);
     await prisma.florist.update({ where: { id: floristBId }, data: { active: true } }); // восстановить
-  });
-
-  it("нельзя передать после принятия (только до accept)", async () => {
-    const order = await makeOrder();
-    await assignInitial(order.id); // -> floristA (ASSIGNED)
-    await acceptOrder(order.id, floristAId); // -> ACCEPTED
-    expect(await handoffOrder(order.id, floristAId, floristBId)).toEqual({ ok: false, reason: "not_assignable" });
   });
 });
