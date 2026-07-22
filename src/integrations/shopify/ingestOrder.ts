@@ -10,6 +10,7 @@ import { scheduleDeliveryForNewOrder } from "@/integrations/delivery/burq/schedu
 import { extractShopifyOrderNumber, extractSenderAddress } from "./orderFields";
 import { fetchShopifyDeliveryInstructions } from "./deliveryInstructions";
 import { publishOrderCreatedTrigger, scheduleDeliveryTodayTrigger, publishPaymentStateTrigger } from "@/modules/automations/lifecycle";
+import { publishTelegramNotification } from "@/integrations/telegram/events";
 
 /** Планирование доставки, безопасное для импорта: ошибка логируется, но не роняет приём заказа. */
 async function scheduleDeliverySafe(orderId: string): Promise<void> {
@@ -246,6 +247,11 @@ export async function ingestShopifyOrder(
     await publishOrderCreatedTrigger(prisma, { orderId: order.id, siteId: site.id });
     // «Доставка сегодня» — платформо-независимый триггер, планируется и для Shopify.
     await scheduleDeliveryTodayTrigger(prisma, order.id);
+    // Владельцу — о любом новом заказе. Только здесь: backfillShopifyOrder этот путь не проходит.
+    await publishTelegramNotification(prisma, {
+      type: "order.created", orderId: order.id, occurrenceKey: order.id,
+      context: { paymentLabel: paymentStatus },
+    });
   } catch (err) {
     if (!isUniqueConstraintViolation(err)) throw err;
     const existing = await prisma.order.findFirst({ where: { siteId: site.id, externalId } });

@@ -190,7 +190,8 @@ export async function assignAndActivateFlorist(orderId: string, floristId: strin
     await recomputeEstimatedProfit(tx, orderId);
   });
   // Строго один раз после успешной транзакции: уведомление + (пере)планирование доставки под флориста.
-  await notifyFloristAssigned(floristId, orderId);
+  // closePrevious означает, что заказ забрали у другого флориста (handoff/переназначение).
+  await notifyFloristAssigned(floristId, orderId, { reassigned: !!opts.closePrevious });
   await onOrderDeliveryChangeSafe(prisma, orderId);
 }
 

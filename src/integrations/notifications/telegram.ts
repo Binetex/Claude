@@ -1,15 +1,26 @@
 import "server-only";
-import { enqueue } from "@/lib/jobs";
-import { featureFlags } from "@/lib/featureFlags";
+import { prisma } from "@/lib/db";
+import { publishTelegramNotification } from "@/integrations/telegram/events";
 
 /**
- * Адаптер Telegram-уведомлений (стаб на этапе 1).
- * Реальная отправка появится позже за этим же интерфейсом, под флагом TELEGRAM_ENABLED.
+ * Уведомление флористам о назначении заказа. Сигнатура сохранена ради вызывающего кода
+ * (assignments/service.ts), но внутри теперь durable outbox вместо прежней in-memory заглушки
+ * lib/jobs.enqueue, которая только писала в лог.
+ *
+ * `reassigned` различает первичное назначение и передачу заказа: оба правят ОДНО и то же
+ * основное сообщение по заказу (один dedupeKey), меняется лишь заголовок.
+ *
+ * Проверку featureFlags.telegram здесь НЕ делаем: событие должно попасть в outbox в любом
+ * случае, а решение «отправлять или пропустить» принимает обработчик — иначе при выключенном
+ * флаге события молча терялись бы, и после включения ничего бы не пришло.
  */
-export async function notifyFloristAssigned(
-  floristId: string,
-  orderId: string
-): Promise<void> {
-  if (!featureFlags.telegram) return; // интеграция выключена — назначение всё равно проходит
-  await enqueue("notify.florist.assigned", { floristId, orderId });
+export async function notifyFloristAssigned(floristId: string, orderId: string, opts: { reassigned?: boolean } = {}): Promise<void> {
+  const florist = await prisma.florist.findUnique({ where: { id: floristId }, select: { user: { select: { name: true } } } }).catch(() => null);
+  await publishTelegramNotification(prisma, {
+    type: opts.reassigned ? "order.reassigned" : "order.assigned",
+    orderId,
+    // Один заказ + один флорист = один факт назначения; повторный вызов дубля не создаёт.
+    occurrenceKey: `${orderId}:${floristId}`,
+    context: { floristName: florist?.user.name ?? null },
+  });
 }

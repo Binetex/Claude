@@ -14,6 +14,7 @@ import type { DeliveryProviderStatus, DeliveryEventSource } from "@/generated/pr
 import { mapBurqStatus, orderStatusForDelivery, isDeliveredStatus } from "./statusMap";
 import { shouldApplyDeliveryUpdate } from "./reconcile";
 import { publishTrackingAvailableTrigger } from "@/modules/automations/lifecycle";
+import { publishTelegramNotification } from "@/integrations/telegram/events";
 import { decideCostUpdate } from "./costCapture";
 import { recomputeEstimatedProfit } from "@/modules/pricing/service";
 
@@ -54,6 +55,9 @@ export type StatusUpdateResult =
 /** Публикатор order.delivery.completed (обёртка над outbox publishEvent). Идемпотентность —
  *  по конкретной Delivery (`order.delivery.completed:{deliveryId}`). */
 export type PublishCompleted = (args: { orderId: string; deliveryId: string }) => Promise<void>;
+
+/** Статусы, о которых владелец должен узнать немедленно. */
+const PROBLEM_DELIVERY_STATUSES = new Set(["FAILED", "CANCELLED", "PROBLEM"]);
 
 export async function applyDeliveryStatusUpdate(
   prisma: PrismaClient,
@@ -102,6 +106,11 @@ export async function applyDeliveryStatusUpdate(
 
   if (!decision.apply) return { outcome: "skipped", reason: decision.reason };
 
+  // Уведомление владельцу — ТОЛЬКО на реальном переходе в проблемный статус. Повторный
+  // одинаковый webhook сюда не доходит (дедуп по providerEventId выше) либо отсекается
+  // сравнением со старым статусом, поэтому второго сообщения не будет.
+  const becameProblem = PROBLEM_DELIVERY_STATUSES.has(normalized) && delivery.status !== normalized;
+
   const delivered = isDeliveredStatus(normalized);
   const now = new Date();
   await prisma.delivery.update({
@@ -137,6 +146,18 @@ export async function applyDeliveryStatusUpdate(
   if (input.trackingUrl && !delivery.trackingUrl) {
     const ord = await prisma.order.findUnique({ where: { id: delivery.orderId }, select: { siteId: true } });
     if (ord) await publishTrackingAvailableTrigger(prisma, { orderId: delivery.orderId, siteId: ord.siteId, deliveryId: delivery.id });
+  }
+
+  // Владельцу — о проблеме доставки. Отдельное срочное сообщение: у него собственный dedupeKey,
+  // основное уведомление о новом заказе оно не затирает.
+  if (becameProblem) {
+    await publishTelegramNotification(prisma, {
+      type: "delivery.problem",
+      orderId: delivery.orderId,
+      // Один переход в проблемный статус на попытку доставки → одно уведомление.
+      occurrenceKey: `${delivery.id}:${normalized}`,
+      context: { status: normalized, safeReason: input.safeReason ?? input.rawStatus ?? null },
+    });
   }
 
   // Захват фактической стоимости доставки Uber (Path A). Best-effort: сбой стоимости НЕ ломает

@@ -255,6 +255,13 @@ enum SyncKind {
   ORDERS
 }
 
+// Аудитория внутреннего Telegram-уведомления. Один заказ может иметь ОТДЕЛЬНОЕ основное
+// сообщение у флористов и у владельца — они не затирают друг друга.
+enum TelegramAudience {
+  FLORIST
+  OWNER
+}
+
 enum SiteSyncStatus {
   RUNNING
   DONE
@@ -599,6 +606,7 @@ model Order {
   communications OrderCommunication[]
   deliveryIntent DeliveryIntent?
   deliveries     Delivery[]
+  telegramMessages TelegramMessage[]
   audits         OrderAudit[]
   automationJobs AutomationJob[]
 
@@ -995,6 +1003,33 @@ model ProcessedOperation {
   createdAt    DateTime @default(now())
 
   @@index([kind])
+}
+
+/**
+ * Отправленное внутреннее Telegram-уведомление. Хранит message_id, чтобы обновлять
+ * существующее сообщение (editMessage) вместо создания дубля.
+ *
+ * `dedupeKey` включает роль/аудиторию, поэтому у одного заказа независимо живут основное
+ * сообщение флористам ("order:{id}:florist") и владельцу ("order:{id}:owner"), а срочные
+ * уведомления владельцу получают собственные ключи и НЕ затирают основное.
+ *
+ * chatId/messageId — строки: id супергрупп у Telegram — большие отрицательные числа, и хранение
+ * строкой исключает потерю точности; над этими значениями арифметика не нужна.
+ */
+model TelegramMessage {
+  id        String           @id @default(cuid())
+  dedupeKey String           @unique
+  audience  TelegramAudience
+  chatId    String
+  messageId String
+  orderId   String?
+  order     Order?           @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  eventType String
+  lastText  String? // последний отправленный текст — не редактируем, если он не изменился
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+
+  @@index([orderId])
 }
 
 // ─────────────────────────────  BURQ SETTINGS  ─────────────────────────────

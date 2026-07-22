@@ -30,6 +30,8 @@ import { buildBurqPodRefetchHandler, BURQ_POD_REFETCH_EVENT } from "@/integratio
 import { buildQuoWebhookHandler, QUO_WEBHOOK_EVENT } from "@/integrations/quo/webhookHandler";
 import { buildAutomationTriggerHandler, buildAutomationSendHandler } from "@/modules/automations/handlers";
 import { AUTOMATION_TRIGGER_EVENT, AUTOMATION_SEND_EVENT } from "@/modules/automations/events";
+import { buildTelegramNotifyHandler } from "@/integrations/telegram/handler";
+import { TELEGRAM_NOTIFY_EVENT } from "@/integrations/telegram/events";
 import { createSmsChannelSender } from "@/modules/automations/channels/sms";
 import { getQuoConfig } from "@/integrations/quo/config";
 import { createQuoClient } from "@/integrations/quo/client";
@@ -80,6 +82,8 @@ async function main() {
     // QUO (ex-OpenPhone): обработка проверенного webhook-события → OrderCommunication + привязка.
     [QUO_WEBHOOK_EVENT]: buildQuoWebhookHandler(prisma),
     // Automation Engine: событие заказа → создать job'ы под активные правила Site (отложенно).
+    // Внутренние Telegram-уведомления сотрудникам: один обработчик на все типы событий.
+    [TELEGRAM_NOTIFY_EVENT]: buildTelegramNotifyHandler(prisma),
     [AUTOMATION_TRIGGER_EVENT]: buildAutomationTriggerHandler(prisma),
     // Automation Engine: отправка одного due job через ChannelSender (SMS — поверх QUO-номера Site).
     [AUTOMATION_SEND_EVENT]: buildAutomationSendHandler(prisma, {

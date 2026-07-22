@@ -21,6 +21,7 @@ import { scheduleDeliveryForNewOrder } from "@/integrations/delivery/burq/schedu
 import { assignInitial } from "@/modules/assignments/service";
 import { publishOrderCreatedTrigger, scheduleDeliveryTodayTrigger, publishPaymentStateTrigger } from "@/modules/automations/lifecycle";
 import { paymentTriggerFor } from "@/modules/automations/paymentTriggers";
+import { publishTelegramNotification } from "@/integrations/telegram/events";
 
 /**
  * Авто-назначение основного флориста при переходе заказа в CONFIRMED (оплачен / в работу) —
@@ -180,6 +181,13 @@ export async function ingestWooOrder(
       if (trigger && trigger !== prevTrigger) {
         await publishPaymentStateTrigger(prisma, { orderId: existing.id, siteId: site.id, triggerType: trigger });
       }
+      // Владельцу — только реальный отказ платежа (см. отчёт: обычный краткий pending не шлём).
+      if (payment.classification === "PAYMENT_FAILED" && existing.paymentClassification !== "PAYMENT_FAILED") {
+        await publishTelegramNotification(prisma, {
+          type: "payment.pending", orderId: existing.id, occurrenceKey: `${existing.id}:PAYMENT_FAILED`,
+          context: { safeReason: payment.warning ?? "платёж отклонён" },
+        });
+      }
       // Дата доставки могла измениться — планируем «доставку сегодня» на актуальный день.
       await scheduleDeliveryTodayTrigger(prisma, existing.id);
     }
@@ -297,6 +305,18 @@ export async function ingestWooOrder(
     console.error(`[burq] не удалось запланировать доставку для заказа ${created.id}:`, e instanceof Error ? e.message : String(e));
   }
   // Авто-SMS: ORDER_CREATED только для нового заказа из ЖИВОГО webhook (не bulk-sync/backfill).
+  // Владельцу — о ЛЮБОМ новом заказе, включая неоплаченный. Строго при первом создании строки
+  // Order: ветка create достижима только один раз, resync/повторный webhook идут в update.
+  await publishTelegramNotification(prisma, {
+    type: "order.created", orderId: created.id, occurrenceKey: created.id,
+    context: { paymentLabel: incomingState.paymentStatus },
+  });
+  if (payment.classification === "PAYMENT_FAILED") {
+    await publishTelegramNotification(prisma, {
+      type: "payment.pending", orderId: created.id, occurrenceKey: `${created.id}:PAYMENT_FAILED`,
+      context: { safeReason: payment.warning ?? "платёж отклонён" },
+    });
+  }
   if (opts.emitLifecycle) {
     await publishOrderCreatedTrigger(prisma, { orderId: created.id, siteId: site.id });
     await scheduleDeliveryTodayTrigger(prisma, created.id);
