@@ -9,6 +9,7 @@ import { normalizePhone } from "@/lib/phone";
 import { scheduleDeliveryForNewOrder } from "@/integrations/delivery/burq/scheduleService";
 import { extractShopifyOrderNumber, extractSenderAddress } from "./orderFields";
 import { fetchShopifyDeliveryInstructions } from "./deliveryInstructions";
+import { publishOrderCreatedTrigger } from "@/modules/sms/lifecycle";
 
 /** Планирование доставки, безопасное для импорта: ошибка логируется, но не роняет приём заказа. */
 async function scheduleDeliverySafe(orderId: string): Promise<void> {
@@ -235,6 +236,8 @@ export async function ingestShopifyOrder(
     }
     // Единый вызов планировщика доставки после сохранения заказа (best-effort — не ломаем приём).
     await scheduleDeliverySafe(order.id);
+    // Авто-SMS: триггер ORDER_CREATED только для НОВОГО заказа (не update/resync/backfill).
+    await publishOrderCreatedTrigger(prisma, { orderId: order.id, siteId: site.id });
   } catch (err) {
     if (!isUniqueConstraintViolation(err)) throw err;
     const existing = await prisma.order.findFirst({ where: { siteId: site.id, externalId } });

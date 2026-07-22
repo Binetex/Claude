@@ -348,8 +348,8 @@ model Site {
   wooWebhooks       WooCommerceWebhook[]
 
   // ── Burq автосоздание черновиков доставки ──
-  burqDraftAutoCreateEnabled Boolean @default(false)
-  burqDraftCreationLocalTime String  @default("04:00") // локальное время (HH:mm) утреннего создания черновиков
+  burqDraftAutoCreateEnabled     Boolean @default(false)
+  burqDraftCreationLocalTime     String  @default("04:00") // локальное время (HH:mm) утреннего создания черновиков
   // Единый текст dropoff-инструкций магазина, автоматически добавляемый во все новые Burq draft.
   // Пусто/NULL → стандартная инструкция выключена (отдельный boolean не нужен).
   burqDefaultDropoffInstructions String?
@@ -360,6 +360,10 @@ model Site {
   quoEnabled         Boolean   @default(false) // QUO включён для магазина (гейт исходящих/входящих)
   quoLastCheckAt     DateTime? // время последней успешной проверки подключения к QUO
   quoConnectionError String? // безопасный текст ошибки последней проверки (без секретов)
+
+  // ── SMS-маркетинг ──
+  reviewUrl      String? // ссылка на отзыв для {{review_url}}; пусто → review-правила не отправляются
+  smsAutomations SmsAutomation[]
 
   // Запрет двух активных Site одного платформенного домена (двойное подключение).
   @@unique([platform, normalizedShopDomain])
@@ -594,6 +598,7 @@ model Order {
   deliveryIntent DeliveryIntent?
   deliveries     Delivery[]
   audits         OrderAudit[]
+  smsJobs        SmsAutomationJob[]
 
   // NULL допустим много раз (Postgres: NULL != NULL) — не мешает заказам без внешнего источника.
   // Источник истины для идемпотентности вебхуков (см. ingestShopifyOrder) — не полагаемся
@@ -668,9 +673,9 @@ model Message {
  * (provider, providerEventId). Секреты/сырой webhook целиком НЕ храним (только нужные метаданные).
  */
 model OrderCommunication {
-  id      String @id @default(cuid())
+  id      String  @id @default(cuid())
   orderId String?
-  order   Order? @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  order   Order?  @relation(fields: [orderId], references: [id], onDelete: SetNull)
 
   provider               String  @default("QUO")
   providerEventId        String? // QUO webhook event id (EV…) — ключ идемпотентности
@@ -704,6 +709,8 @@ model OrderCommunication {
   // Исходящие: устойчивый app-level ключ идемпотентности (двойной клик/повтор формы → без дублей).
   sendKey      String? @unique
   sentByUserId String? // кто из сотрудников админки отправил (User.id), для исходящих
+
+  smsJobs SmsAutomationJob[] // авто-SMS job'ы, чьё сообщение записано в эту коммуникацию
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -864,28 +871,28 @@ model Delivery {
   rawProviderStatus String?
   providerEventAt   DateTime? // время последнего применённого provider-события (anti-rollback)
 
-  idempotencyKey      String? // x-idempotency-key внешнего POST
-  quoteAmount         Decimal?  @db.Decimal(10, 2)
-  currency            String?
+  idempotencyKey           String? // x-idempotency-key внешнего POST
+  quoteAmount              Decimal?  @db.Decimal(10, 2)
+  currency                 String?
   // Фактическая стоимость доставки Uber из Burq (Path A: после dispatch, из latest_delivery).
-  finalCost           Decimal?  @db.Decimal(10, 2) // total_amount_due (или fee) в долларах
-  finalCostUpdatedAt  DateTime?
-  quoteId             String? // latest_delivery.quote_id
-  providerName        String? // latest_delivery.provider (напр. "uber")
-  providerExternalId  String? // latest_delivery.provider_id (стабильный id провайдера)
-  costSource          String? // "BURQ_FINAL" (Path A) | (в будущем "UBER_QUOTE")
-  trackingUrl         String?
-  courierName         String?
-  courierPhone        String?
-  estimatedPickupAt   DateTime?
-  estimatedDeliveryAt DateTime?
-  pickedUpAt          DateTime?
-  deliveredAt         DateTime?
-  cancelledAt         DateTime?
-  cancellationReason  String? // FLORIST_REASSIGNED | MANUAL_ADMIN | ...
-  failureCode         String?
-  failureMessageSafe  String?
-  proofOfDeliveryUrl  String? // @deprecated — не используется; оставлено для обратной совместимости
+  finalCost                Decimal?  @db.Decimal(10, 2) // total_amount_due (или fee) в долларах
+  finalCostUpdatedAt       DateTime?
+  quoteId                  String? // latest_delivery.quote_id
+  providerName             String? // latest_delivery.provider (напр. "uber")
+  providerExternalId       String? // latest_delivery.provider_id (стабильный id провайдера)
+  costSource               String? // "BURQ_FINAL" (Path A) | (в будущем "UBER_QUOTE")
+  trackingUrl              String?
+  courierName              String?
+  courierPhone             String?
+  estimatedPickupAt        DateTime?
+  estimatedDeliveryAt      DateTime?
+  pickedUpAt               DateTime?
+  deliveredAt              DateTime?
+  cancelledAt              DateTime?
+  cancellationReason       String? // FLORIST_REASSIGNED | MANUAL_ADMIN | ...
+  failureCode              String?
+  failureMessageSafe       String?
+  proofOfDeliveryUrl       String? // @deprecated — не используется; оставлено для обратной совместимости
   // Proof of Delivery (Path A, первая версия — храним Burq URL как есть, без копирования в наше хранилище).
   proofOfDeliveryUrls      Json? // массив URL фото подтверждения доставки (proof_of_delivery_image_urls)
   signatureImageUrl        String? // signature_image_url (если когда-либо запрошен)
@@ -1071,4 +1078,99 @@ model IntegrationSecret {
   updatedAt      DateTime @updatedAt
 
   @@index([provider, kind, active])
+}
+
+// ─────────────────────────────  SMS-МАРКЕТИНГ  ─────────────────────────────
+//
+// Движок правил авто-SMS: SmsAutomation (правило) + SmsAutomationJob (задача + история).
+// Отложенное исполнение — через существующий durable outbox (availableAt), отдельной очереди НЕТ.
+// Реальная отправка — через sendOrderSms (номер Site, запись OrderCommunication). Всё ADDITIVE.
+// triggerType — String + централизованный app-registry (src/modules/sms/triggers.ts): новый
+// триггер добавляется без Prisma-миграции; неизвестное значение показывается как «Unsupported»
+// и не запускается. Все правила после deploy выключены (active=false), seed-правил нет.
+
+enum SmsAudience {
+  CUSTOMER
+  RECIPIENT
+  BOTH
+}
+
+// Адресат конкретного job'а — строго один из двух. BOTH разворачивается в per-recipient job'ы,
+// поэтому записать BOTH в job by design нельзя (отдельный enum, а не SmsAudience).
+enum SmsRecipientType {
+  CUSTOMER
+  RECIPIENT
+}
+
+enum SmsDelayUnit {
+  IMMEDIATE
+  MINUTE
+  HOUR
+  DAY
+  WEEK
+  MONTH
+}
+
+enum SmsJobStatus {
+  SCHEDULED
+  PROCESSING
+  SENT
+  SKIPPED
+  FAILED
+  CANCELLED
+}
+
+model SmsAutomation {
+  id             String       @id @default(cuid())
+  siteId         String
+  site           Site         @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  name           String
+  active         Boolean      @default(false) // после deploy все правила выключены
+  triggerType    String // валидируется app-registry; строкой — для расширяемости без миграции
+  audience       SmsAudience
+  delayAmount    Int          @default(0)
+  delayUnit      SmsDelayUnit @default(IMMEDIATE)
+  template       String
+  conditionsJson Json? // расширяемые условия (не отменён / оплачен / поле есть / есть телефон + на будущее)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  deletedAt      DateTime? // soft-delete при наличии истории
+
+  jobs SmsAutomationJob[]
+
+  @@index([siteId, active])
+  @@index([triggerType])
+}
+
+model SmsAutomationJob {
+  id           String        @id @default(cuid())
+  automationId String
+  // Restrict: правило с историей нельзя удалить физически (только soft-delete) — job'ы сохраняются.
+  automation   SmsAutomation @relation(fields: [automationId], references: [id], onDelete: Restrict)
+  orderId      String
+  order        Order         @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  recipientType   SmsRecipientType // только CUSTOMER | RECIPIENT
+  phoneNormalized String // E.164 адресата (для дедупа BOTH и истории)
+  scheduledAt     DateTime // когда worker должен отправить (delay применён)
+  status          SmsJobStatus     @default(SCHEDULED)
+
+  renderedTextSnapshot String? // фиксируется в момент фактической отправки (рендер по свежим данным)
+  idempotencyKey       String              @unique // automationId:orderId:recipientType:triggerOccurrence
+  communicationId      String? // ссылка на созданный OrderCommunication (если отправлено)
+  communication        OrderCommunication? @relation(fields: [communicationId], references: [id], onDelete: SetNull)
+
+  sentAt            DateTime?
+  skippedAt         DateTime?
+  failedAt          DateTime?
+  lastErrorSafe     String? // без PII/секретов
+  providerMessageId String? // id сообщения у QUO
+  attempts          Int       @default(0)
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  @@index([status, scheduledAt])
+  @@index([automationId, status])
+  @@index([orderId])
+  @@index([communicationId])
 }

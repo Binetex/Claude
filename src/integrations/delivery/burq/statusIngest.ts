@@ -13,6 +13,7 @@ import { Prisma, type PrismaClient } from "@/generated/prisma/client";
 import type { DeliveryProviderStatus, DeliveryEventSource } from "@/generated/prisma/enums";
 import { mapBurqStatus, orderStatusForDelivery, isDeliveredStatus } from "./statusMap";
 import { shouldApplyDeliveryUpdate } from "./reconcile";
+import { publishTrackingAvailableTrigger } from "@/modules/sms/lifecycle";
 import { decideCostUpdate } from "./costCapture";
 import { recomputeEstimatedProfit } from "@/modules/pricing/service";
 
@@ -129,6 +130,13 @@ export async function applyDeliveryStatusUpdate(
   if (input.trackingUrl) orderData.trackingUrl = input.trackingUrl;
   if (Object.keys(orderData).length > 0) {
     await prisma.order.update({ where: { id: delivery.orderId }, data: orderData });
+  }
+
+  // Авто-SMS: TRACKING_LINK_AVAILABLE — строго при ПЕРВОМ появлении трек-ссылки у этой доставки
+  // (раньше её не было). occurrenceKey = deliveryId → один триггер на попытку доставки.
+  if (input.trackingUrl && !delivery.trackingUrl) {
+    const ord = await prisma.order.findUnique({ where: { id: delivery.orderId }, select: { siteId: true } });
+    if (ord) await publishTrackingAvailableTrigger(prisma, { orderId: delivery.orderId, siteId: ord.siteId, deliveryId: delivery.id });
   }
 
   // Захват фактической стоимости доставки Uber (Path A). Best-effort: сбой стоимости НЕ ломает

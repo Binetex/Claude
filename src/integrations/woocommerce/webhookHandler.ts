@@ -19,7 +19,8 @@ async function handleOrderUpsert(siteId: string, woo: unknown): Promise<void> {
   const site = await prisma.site.findUnique({ where: { id: siteId }, select: { id: true, shortName: true } });
   if (!site) return;
   const config = await loadWooIngestConfig(siteId);
-  await ingestWooOrder(site, woo as never, config);
+  // Живой webhook → разрешаем trigger-события авто-SMS (ORDER_CREATED).
+  await ingestWooOrder(site, woo as never, config, { emitLifecycle: true });
 }
 
 async function handleProductUpsert(siteId: string, woo: unknown): Promise<void> {

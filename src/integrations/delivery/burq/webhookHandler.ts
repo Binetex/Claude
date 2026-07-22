@@ -12,6 +12,7 @@ import { publishEvent } from "@/outbox/publisher";
 import { isBurqRuntimeEnabled } from "@/lib/featureFlags";
 import { applyDeliveryStatusUpdate } from "./statusIngest";
 import { refetchPodForDelivery, BURQ_POD_REFETCH_EVENT, BURQ_POD_REFETCH_DELAY_MS } from "./podService";
+import { publishOrderDeliveredTrigger } from "@/modules/sms/lifecycle";
 import type { BurqWebhookEvent } from "./types";
 
 export const BURQ_WEBHOOK_EVENT = "burq.webhook.received";
@@ -25,6 +26,8 @@ export function makeCompletedPublisher(prisma: PrismaClient) {
   const repo = new PrismaOutboxRepository(prisma);
   return async ({ orderId, deliveryId }: { orderId: string; deliveryId: string }) => {
     await publishEvent(repo, "order.delivery.completed", { orderId }, { idempotencyKey: `order.delivery.completed:${deliveryId}` });
+    // Авто-SMS: ORDER_DELIVERED — ровно один раз на доставленную попытку (тот же дедуп по deliveryId).
+    await publishOrderDeliveredTrigger(prisma, { orderId, deliveryId });
   };
 }
 

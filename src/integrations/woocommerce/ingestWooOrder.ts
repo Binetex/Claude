@@ -19,6 +19,7 @@ import { deriveWooOrderState, reconcileOrderState, type OrderState } from "./ord
 import { resolveMappedOrderFields, type OrderMetaMapping } from "./orderMeta";
 import { scheduleDeliveryForNewOrder } from "@/integrations/delivery/burq/scheduleService";
 import { assignInitial } from "@/modules/assignments/service";
+import { publishOrderCreatedTrigger } from "@/modules/sms/lifecycle";
 
 /**
  * Авто-назначение основного флориста при переходе заказа в CONFIRMED (оплачен / в работу) —
@@ -111,7 +112,10 @@ async function loadCatalogMatch(siteId: string) {
 export async function ingestWooOrder(
   site: { id: string; shortName: string },
   wooOrder: FullWooOrder,
-  config: WooIngestConfig
+  config: WooIngestConfig,
+  // emitLifecycle: публиковать ли trigger-события авто-SMS (ORDER_CREATED). ТОЛЬКО для «живого»
+  // webhook; при bulk-sync/backfill истории — false (по умолчанию), чтобы не слать SMS по старым заказам.
+  opts: { emitLifecycle?: boolean } = {}
 ): Promise<{ status: "created" | "updated" | "skipped_stale"; orderId: string | null; classification: string }> {
   const externalId = String(wooOrder.id);
   const normalized = parseWooOrder(wooOrder);
@@ -270,6 +274,8 @@ export async function ingestWooOrder(
   } catch (e) {
     console.error(`[burq] не удалось запланировать доставку для заказа ${created.id}:`, e instanceof Error ? e.message : String(e));
   }
+  // Авто-SMS: ORDER_CREATED только для нового заказа из ЖИВОГО webhook (не bulk-sync/backfill).
+  if (opts.emitLifecycle) await publishOrderCreatedTrigger(prisma, { orderId: created.id, siteId: site.id });
   return { status: "created", orderId: created.id, classification: payment.classification };
 }
 
