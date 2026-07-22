@@ -34,8 +34,15 @@ export function buildTelegramNotifyHandler(prisma: PrismaClient): OutboxHandler 
     const cfg = getTelegramConfig();
     const chat = resolveChatId(cfg, def.audience);
     if ("skip" in chat) {
-      console.info(`[telegram] ${p.type} пропущено: ${chat.skip}`);
-      return;
+      // Осознанно выключенная интеграция — штатный no-op (аварийный выключатель).
+      if (chat.skip === "telegram_disabled") {
+        console.info(`[telegram] ${p.type} пропущено: интеграция выключена`);
+        return;
+      }
+      // Включена, но НЕ настроена — уведомление молча терять нельзя. Бросаем: outbox
+      // повторит с backoff, а при исчерпании попыток событие станет видимым в dead-letter,
+      // а не исчезнет как «успешно обработанное».
+      throw new Error(`telegram_not_configured:${chat.skip}`);
     }
 
     const order = await loadOrderSnapshot(prisma, p.orderId);

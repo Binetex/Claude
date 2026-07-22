@@ -189,13 +189,14 @@ describe("устойчивость", () => {
     expect(await tgMessages(order.id)).toHaveLength(0);
   });
 
-  it("нет chatId для аудитории → событие безопасно пропускается, сети нет", async () => {
+  it("включена, но чат не настроен → НЕ теряем молча: бросаем telegram_not_configured", async () => {
     const site = await makeSite();
     const order = await makeOrder(site.id);
     const saved = process.env.TELEGRAM_CHAT_ID_FLORISTS;
     process.env.TELEGRAM_CHAT_ID_FLORISTS = "";
     try {
-      await expect(handler(rec({ type: "order.assigned", orderId: order.id }))).resolves.toBeUndefined();
+      // outbox повторит событие, при исчерпании попыток оно станет видимым в dead-letter.
+      await expect(handler(rec({ type: "order.assigned", orderId: order.id }))).rejects.toThrow(/telegram_not_configured/);
       expect(fetchMock).not.toHaveBeenCalled();
       expect(await tgMessages(order.id)).toHaveLength(0);
     } finally {
@@ -203,7 +204,19 @@ describe("устойчивость", () => {
     }
   });
 
-  it("интеграция выключена → ничего не отправляется", async () => {
+  it("нет bot token → тоже telegram_not_configured, а не тихий пропуск", async () => {
+    const site = await makeSite();
+    const order = await makeOrder(site.id);
+    const saved = process.env.TELEGRAM_BOT_TOKEN;
+    process.env.TELEGRAM_BOT_TOKEN = "";
+    try {
+      await expect(handler(rec({ type: "order.created", orderId: order.id }))).rejects.toThrow(/telegram_not_configured/);
+    } finally {
+      process.env.TELEGRAM_BOT_TOKEN = saved;
+    }
+  });
+
+  it("интеграция ОСОЗНАННО выключена → штатный no-op, dead-letter не копим", async () => {
     const site = await makeSite();
     const order = await makeOrder(site.id);
     process.env.TELEGRAM_ENABLED = "false";
