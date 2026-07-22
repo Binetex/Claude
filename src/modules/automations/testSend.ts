@@ -15,9 +15,9 @@ export function buildTestMessage(template: string, site: TestSendSite): string {
   const ex = Object.fromEntries(SMS_VARIABLES.map((v) => [v.key, v.example]));
   const vars = buildOrderVariables({
     orderNumber: ex.order_number,
-    senderName: ex.customer_name,
+    senderName: ex.sender_name,
     recipientName: ex.recipient_name,
-    senderPhone: ex.customer_phone,
+    senderPhone: ex.sender_phone,
     recipientPhone: ex.recipient_phone,
     addressLine: "1 Main St",
     apartment: "4",

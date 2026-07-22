@@ -135,8 +135,8 @@ describe("терминология: только «Заказчик»/«Полу
   });
   it("подписи переменных заказчика — «заказчик», не «клиент»", () => {
     const byKey = Object.fromEntries(SMS_VARIABLES.map((v) => [v.key, v.label]));
-    expect(byKey["customer_name"]).toBe("Имя заказчика");
-    expect(byKey["customer_phone"]).toBe("Телефон заказчика");
+    expect(byKey["sender_name"]).toBe("Имя заказчика");
+    expect(byKey["sender_phone"]).toBe("Телефон заказчика");
     for (const v of SMS_VARIABLES) expect(v.label.toLowerCase()).not.toContain("клиент");
   });
 });

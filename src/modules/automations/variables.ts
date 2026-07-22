@@ -9,9 +9,9 @@ export type SmsVariableDef = { key: string; label: string; example: string };
 // Порядок = порядок показа в UI (кнопки вставки).
 export const SMS_VARIABLES: readonly SmsVariableDef[] = [
   { key: "order_number", label: "Номер заказа", example: "#1234" },
-  { key: "customer_name", label: "Имя заказчика", example: "Anna" },
+  { key: "sender_name", label: "Имя заказчика", example: "Anna" },
   { key: "recipient_name", label: "Имя получателя", example: "Maria" },
-  { key: "customer_phone", label: "Телефон заказчика", example: "+1..." },
+  { key: "sender_phone", label: "Телефон заказчика", example: "+1..." },
   { key: "recipient_phone", label: "Телефон получателя", example: "+1..." },
   { key: "delivery_address", label: "Адрес доставки", example: "1 Main St, Apt 4, Portland" },
   { key: "delivery_date", label: "Дата доставки", example: "2026-07-25" },
@@ -80,9 +80,9 @@ function joinAddress(line: string | null, apartment: string | null, city: string
 export function buildOrderVariables(src: OrderVariableSource): Record<string, string> {
   return {
     order_number: s(src.orderNumber),
-    customer_name: s(src.senderName),
+    sender_name: s(src.senderName),
     recipient_name: s(src.recipientName),
-    customer_phone: s(src.senderPhone),
+    sender_phone: s(src.senderPhone),
     recipient_phone: s(src.recipientPhone),
     delivery_address: joinAddress(src.addressLine, src.apartment, src.city),
     delivery_date: formatDate(src.deliveryDate, src.timezone),

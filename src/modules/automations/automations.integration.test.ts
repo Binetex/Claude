@@ -94,7 +94,7 @@ function makeAutomation(siteId: string, overrides: Partial<Prisma.AutomationUnch
       audience: "CUSTOMER",
       delayAmount: 0,
       delayUnit: "IMMEDIATE",
-      template: "Hi {{customer_name}}",
+      template: "Hi {{sender_name}}",
       ...overrides,
     },
   });
@@ -211,7 +211,7 @@ describe("SMS engine — send job", () => {
     sendOk = true;
     const site = await makeSite();
     const order = await makeOrder(site.id);
-    const { job } = await triggerAndGetJob(site.id, order, { template: "Hi {{customer_name}}" });
+    const { job } = await triggerAndGetJob(site.id, order, { template: "Hi {{sender_name}}" });
     await sendHandler(rec({ jobId: job.id, orderId: order.id }));
     const updated = await prisma.automationJob.findUniqueOrThrow({ where: { id: job.id } });
     expect(updated.status).toBe("SENT");
@@ -226,7 +226,7 @@ describe("SMS engine — send job", () => {
     sendOk = true;
     const site = await makeSite();
     const order = await makeOrder(site.id, { senderName: "Anna" });
-    const { job } = await triggerAndGetJob(site.id, order, { template: "Hi {{customer_name}} {{nonexistent}}" });
+    const { job } = await triggerAndGetJob(site.id, order, { template: "Hi {{sender_name}} {{nonexistent}}" });
     await sendHandler(rec({ jobId: job.id, orderId: order.id }));
     const updated = await prisma.automationJob.findUniqueOrThrow({ where: { id: job.id } });
     expect(updated.renderedTextSnapshot).toBe("Hi Anna");
@@ -308,11 +308,11 @@ describe("SMS engine — send job", () => {
     sendOk = true;
     const site = await makeSite();
     const order = await makeOrder(site.id, { senderName: "Anna" });
-    const { auto, job } = await triggerAndGetJob(site.id, order, { template: "Hi {{customer_name}}" });
+    const { auto, job } = await triggerAndGetJob(site.id, order, { template: "Hi {{sender_name}}" });
     await sendHandler(rec({ jobId: job.id, orderId: order.id }));
     const snapshot = (await prisma.automationJob.findUniqueOrThrow({ where: { id: job.id } })).renderedTextSnapshot;
     expect(snapshot).toBe("Hi Anna");
-    await prisma.automation.update({ where: { id: auto.id }, data: { template: "Totally different {{customer_name}}" } });
+    await prisma.automation.update({ where: { id: auto.id }, data: { template: "Totally different {{sender_name}}" } });
     const after = await prisma.automationJob.findUniqueOrThrow({ where: { id: job.id } });
     expect(after.renderedTextSnapshot).toBe("Hi Anna"); // снимок не меняется
   });
@@ -357,7 +357,7 @@ describe("Global kill switch + Execution Log", () => {
   it("20. Execution Log отражает этапы успешной отправки по порядку", async () => {
     sendOk = true;
     const site = await makeSite();
-    const auto = await makeAutomation(site.id, { template: "Hi {{customer_name}}" });
+    const auto = await makeAutomation(site.id, { template: "Hi {{sender_name}}" });
     const order = await makeOrder(site.id, { senderName: "Anna" });
     await fireTrigger(order, "ORDER_CREATED");
     const job = (await jobsFor(auto.id, order.id))[0];
