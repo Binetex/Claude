@@ -1,0 +1,1 @@
+ALTER TABLE "Site" DROP COLUMN "brand";
