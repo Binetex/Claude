@@ -144,12 +144,24 @@ describe("SMS engine — trigger → job", () => {
     expect(jobs[0].scheduledAt.getTime()).toBeGreaterThan(before + 29 * 60_000);
   });
 
-  it("4. BOTH с одинаковым номером → один job", async () => {
+  it("4. BOTH с одинаковым номером → один job-ЗАКАЗЧИК", async () => {
     const site = await makeSite();
     const auto = await makeAutomation(site.id, { audience: "BOTH" });
     const order = await makeOrder(site.id, { senderPhone: "+15551112222", recipientPhone: "+1 (555) 111-2222" });
     await fireTrigger(order, "ORDER_CREATED");
-    expect(await jobsFor(auto.id, order.id)).toHaveLength(1);
+    const jobs = await jobsFor(auto.id, order.id);
+    expect(jobs).toHaveLength(1);
+    expect(jobs[0].recipientType).toBe("CUSTOMER");
+  });
+
+  it("4b. RECIPIENT, но номер совпадает с заказчиком → один job-ЗАКАЗЧИК", async () => {
+    const site = await makeSite();
+    const auto = await makeAutomation(site.id, { audience: "RECIPIENT" });
+    const order = await makeOrder(site.id, { senderPhone: "+15551112222", recipientPhone: "+1 (555) 111-2222" });
+    await fireTrigger(order, "ORDER_CREATED");
+    const jobs = await jobsFor(auto.id, order.id);
+    expect(jobs).toHaveLength(1);
+    expect(jobs[0].recipientType).toBe("CUSTOMER"); // не RECIPIENT
   });
 
   it("5. Повторный trigger не создаёт дубль", async () => {

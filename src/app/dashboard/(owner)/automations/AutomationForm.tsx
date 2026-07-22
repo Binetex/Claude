@@ -168,7 +168,7 @@ export function AutomationForm({
               <select value={audience} onChange={(e) => setAudience(e.target.value as AutomationInput["audience"])} className="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm">
                 <option value="CUSTOMER">Заказчик</option>
                 <option value="RECIPIENT">Получатель</option>
-                <option value="BOTH">Оба (при совпадении номера — одно сообщение)</option>
+                <option value="BOTH">Оба (при совпадении номера — одно сообщение заказчику)</option>
               </select>
             </label>
           </div>

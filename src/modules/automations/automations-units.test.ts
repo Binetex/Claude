@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { renderTemplate, extractVariables } from "./template";
-import { buildOrderVariables } from "./variables";
+import { buildOrderVariables, SMS_VARIABLES } from "./variables";
+import { audienceLabel } from "./display";
 import { evaluateConditions } from "./conditions";
 import { computeScheduledAt } from "./delay";
 import { resolveRecipients } from "./audience";
@@ -98,19 +99,45 @@ describe("audience.resolveRecipients", () => {
     const r = resolveRecipients("CUSTOMER", { senderPhone: "+15551112222", recipientPhone: "+15553334444" });
     expect(r.recipients).toEqual([{ recipientType: "CUSTOMER", phoneNormalized: "+15551112222" }]);
   });
-  it("BOTH с разными номерами → два адресата", () => {
+  it("BOTH с разными номерами → заказчик и получатель раздельно", () => {
     const r = resolveRecipients("BOTH", { senderPhone: "+15551112222", recipientPhone: "+15553334444" });
-    expect(r.recipients).toHaveLength(2);
+    expect(r.recipients).toEqual([
+      { recipientType: "CUSTOMER", phoneNormalized: "+15551112222" },
+      { recipientType: "RECIPIENT", phoneNormalized: "+15553334444" },
+    ]);
   });
-  it("BOTH с одинаковым номером → один адресат (без дубля)", () => {
+  it("BOTH с одинаковым номером → один адресат-заказчик (без дубля)", () => {
     const r = resolveRecipients("BOTH", { senderPhone: "+1 (555) 111-2222", recipientPhone: "+15551112222" });
-    expect(r.recipients).toHaveLength(1);
-    expect(r.recipients[0].recipientType).toBe("CUSTOMER");
+    expect(r.recipients).toEqual([{ recipientType: "CUSTOMER", phoneNormalized: "+15551112222" }]);
+  });
+  it("RECIPIENT, но номер совпадает с заказчиком → один job-ЗАКАЗЧИК (не получатель)", () => {
+    const r = resolveRecipients("RECIPIENT", { senderPhone: "+15551112222", recipientPhone: "+1 (555) 111-2222" });
+    expect(r.recipients).toEqual([{ recipientType: "CUSTOMER", phoneNormalized: "+15551112222" }]);
+  });
+  it("RECIPIENT с отдельным номером → получатель", () => {
+    const r = resolveRecipients("RECIPIENT", { senderPhone: "+15551112222", recipientPhone: "+15553334444" });
+    expect(r.recipients).toEqual([{ recipientType: "RECIPIENT", phoneNormalized: "+15553334444" }]);
   });
   it("отсутствующий/битый номер пропускается с причиной", () => {
     const r = resolveRecipients("RECIPIENT", { senderPhone: null, recipientPhone: "" });
     expect(r.recipients).toHaveLength(0);
     expect(r.skipped[0]).toMatchObject({ recipientType: "RECIPIENT", reason: "invalid_or_missing_phone" });
+  });
+});
+
+describe("терминология: только «Заказчик»/«Получатель», без «Клиент»", () => {
+  it("audienceLabel даёт «Заказчик»/«Получатель» и не содержит «Клиент»", () => {
+    expect(audienceLabel("CUSTOMER")).toBe("Заказчик");
+    expect(audienceLabel("RECIPIENT")).toBe("Получатель");
+    for (const a of ["CUSTOMER", "RECIPIENT", "BOTH"]) {
+      expect(audienceLabel(a).toLowerCase()).not.toContain("клиент");
+    }
+  });
+  it("подписи переменных заказчика — «заказчик», не «клиент»", () => {
+    const byKey = Object.fromEntries(SMS_VARIABLES.map((v) => [v.key, v.label]));
+    expect(byKey["customer_name"]).toBe("Имя заказчика");
+    expect(byKey["customer_phone"]).toBe("Телефон заказчика");
+    for (const v of SMS_VARIABLES) expect(v.label.toLowerCase()).not.toContain("клиент");
   });
 });
 
