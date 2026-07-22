@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# ⚠️ DEPRECATED — НЕ ИСПОЛЬЗОВАТЬ. Заменён единым git-деплоем deploy.sh (git reset --hard origin/main).
+echo "DEPRECATED: используйте ./deploy.sh (git-based). rsync-деплой из локальной папки отключён." >&2; exit 1
 # deploy-fast.sh — Solo-dev быстрый деплой Floremart.
 #
 # Копирует ТЕКУЩУЮ ЛОКАЛЬНУЮ рабочую папку напрямую на production через rsync --delete.

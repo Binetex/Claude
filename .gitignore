@@ -53,3 +53,7 @@ next-env.d.ts
 # PM2 логи
 /logs/*
 !/logs/.gitkeep
+
+# нормализация git: бэкап старого prod .git и устаревший маркер rsync-деплоя
+/.git.legacy-*
+.deploy-fast.deps.hash
