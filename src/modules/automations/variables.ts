@@ -25,8 +25,6 @@ export const SMS_VARIABLES: readonly SmsVariableDef[] = [
   { key: "review_url", label: "Ссылка на отзыв", example: "https://review..." },
 ] as const;
 
-export const SMS_VARIABLE_KEYS: readonly string[] = SMS_VARIABLES.map((v) => v.key);
-
 /** Тонкий срез данных, из которого собираются переменные (не тащим весь Prisma-объект в чистый модуль). */
 export type OrderVariableSource = {
   orderNumber: string;

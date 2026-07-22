@@ -5,7 +5,7 @@ import { audienceLabel } from "./display";
 import { evaluateConditions } from "./conditions";
 import { computeScheduledAt } from "./delay";
 import { resolveRecipients } from "./audience";
-import { listSmsTriggers, isSupportedTrigger, getSmsTrigger, triggersForEvent } from "./triggers";
+import { listSmsTriggers, isSupportedTrigger, getSmsTrigger } from "./triggers";
 import { buildTestMessage, sendTestSmsViaClient } from "./testSend";
 
 describe("template.renderTemplate", () => {
@@ -150,11 +150,6 @@ describe("triggers registry", () => {
     expect(isSupportedTrigger("ORDER_CREATED")).toBe(true);
     expect(isSupportedTrigger("ANNIVERSARY_REMINDER")).toBe(false);
     expect(getSmsTrigger("nope")).toBeNull();
-  });
-  it("triggersForEvent сопоставляет доменное событие", () => {
-    expect(triggersForEvent("order.created").map((t) => t.type)).toEqual(["ORDER_CREATED"]);
-    expect(triggersForEvent("order.delivery.started").map((t) => t.type)).toEqual(["TRACKING_LINK_AVAILABLE"]);
-    expect(triggersForEvent("order.delivery.completed").map((t) => t.type)).toEqual(["ORDER_DELIVERED"]);
   });
   it("TRACKING_LINK_AVAILABLE требует tracking_url", () => {
     expect(getSmsTrigger("TRACKING_LINK_AVAILABLE")?.requiredVars).toContain("tracking_url");

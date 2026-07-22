@@ -56,8 +56,3 @@ export function getSmsTrigger(type: string): SmsTriggerDef | null {
 export function isSupportedTrigger(type: string): boolean {
   return BY_TYPE.has(type);
 }
-
-/** Все триггеры, привязанные к данному доменному событию (сейчас 1:1, но поддерживаем N). */
-export function triggersForEvent(event: DomainEventName): SmsTriggerDef[] {
-  return SMS_TRIGGERS.filter((t) => t.domainEvent === event);
-}
