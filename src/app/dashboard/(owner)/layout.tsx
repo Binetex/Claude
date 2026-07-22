@@ -10,6 +10,7 @@ const nav: NavItem[] = [
   { href: "/dashboard/florists", label: "Флористы" },
   { href: "/dashboard/burq", label: "Доставка (Burq)" },
   { href: "/dashboard/automations", label: "Автоматизации" },
+  { href: "/dashboard/settings/telegram", label: "Telegram" },
   { href: "/dashboard/users", label: "Пользователи" },
 ];
 

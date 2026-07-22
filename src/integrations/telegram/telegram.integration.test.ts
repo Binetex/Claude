@@ -161,7 +161,7 @@ describe("уведомления владельца", () => {
     fetchMock.mockResolvedValueOnce(okSend(602)).mockResolvedValueOnce(okSend(603)).mockResolvedValueOnce(okSend(604));
 
     await handler(rec({ type: "order.created", orderId: order.id, context: { paymentLabel: "UNPAID" } }));
-    await handler(rec({ type: "payment.pending", orderId: order.id, context: { safeReason: "платёж отклонён" } }));
+    await handler(rec({ type: "payment.failed", orderId: order.id, context: { safeReason: "платёж отклонён" } }));
     await handler(rec({ type: "delivery.problem", orderId: order.id, context: { status: "FAILED", safeReason: "courier failed" } }));
 
     const rows = await tgMessages(order.id);

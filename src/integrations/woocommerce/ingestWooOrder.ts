@@ -184,7 +184,7 @@ export async function ingestWooOrder(
       // Владельцу — только реальный отказ платежа (см. отчёт: обычный краткий pending не шлём).
       if (payment.classification === "PAYMENT_FAILED" && existing.paymentClassification !== "PAYMENT_FAILED") {
         await publishTelegramNotification(prisma, {
-          type: "payment.pending", orderId: existing.id, occurrenceKey: `${existing.id}:PAYMENT_FAILED`,
+          type: "payment.failed", orderId: existing.id, occurrenceKey: `${existing.id}:PAYMENT_FAILED`,
           context: { safeReason: payment.warning ?? "платёж отклонён" },
         });
       }
@@ -313,7 +313,7 @@ export async function ingestWooOrder(
   });
   if (payment.classification === "PAYMENT_FAILED") {
     await publishTelegramNotification(prisma, {
-      type: "payment.pending", orderId: created.id, occurrenceKey: `${created.id}:PAYMENT_FAILED`,
+      type: "payment.failed", orderId: created.id, occurrenceKey: `${created.id}:PAYMENT_FAILED`,
       context: { safeReason: payment.warning ?? "платёж отклонён" },
     });
   }

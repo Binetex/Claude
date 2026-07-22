@@ -2,7 +2,7 @@ import "server-only";
 import type { PrismaClient } from "@/generated/prisma/client";
 import type { OutboxHandler } from "@/outbox/worker";
 import type { OutboxRecord } from "@/outbox/types";
-import { getTelegramConfig, resolveChatId } from "./config";
+import { getTelegramConfig, isTelegramDeliberatelyDisabled, resolveChatId } from "./config";
 import { getTelegramEvent } from "./registry";
 import { TelegramSender } from "./sender";
 import { buttonFor, renderFloristMessage, renderOwnerCreated, renderOwnerDeliveryProblem, renderOwnerPaymentProblem, type OrderSnapshot } from "./templates";
@@ -31,11 +31,11 @@ export function buildTelegramNotifyHandler(prisma: PrismaClient): OutboxHandler 
       return;
     }
 
-    const cfg = getTelegramConfig();
+    const cfg = await getTelegramConfig(prisma);
     const chat = resolveChatId(cfg, def.audience);
     if ("skip" in chat) {
       // Осознанно выключенная интеграция — штатный no-op (аварийный выключатель).
-      if (chat.skip === "telegram_disabled") {
+      if (await isTelegramDeliberatelyDisabled(prisma)) {
         console.info(`[telegram] ${p.type} пропущено: интеграция выключена`);
         return;
       }
@@ -103,7 +103,7 @@ function renderFor(type: TelegramNotifyPayload["type"], order: OrderSnapshot, ct
       return renderFloristMessage(order, { reassigned: true, floristName: ctx.floristName ?? null });
     case "order.created":
       return renderOwnerCreated(order, ctx.paymentLabel ?? "—");
-    case "payment.pending":
+    case "payment.failed":
       return renderOwnerPaymentProblem(order, ctx.safeReason ?? "требуется проверка оплаты");
     case "delivery.problem":
       return renderOwnerDeliveryProblem(order, ctx.status ?? "PROBLEM", ctx.safeReason ?? null);

@@ -10,11 +10,16 @@ import type { TelegramAudience } from "./config";
  *  - основное сообщение владельцу о новом заказе — отдельное, флористским не затирается;
  *  - срочные уведомления владельцу (оплата/доставка) имеют СВОИ ключи и не затирают основное.
  */
+/**
+ * ЗАРЕЗЕРВИРОВАНО на будущее, НЕ реализовано: "payment.pending_too_long" — Airwallex/Klarna
+ * висит в ожидании дольше порога. Требует отложенной проверки по каждому заказу; постоянный
+ * скан заказов сознательно не делаем.
+ */
 export const TELEGRAM_EVENTS = [
   "order.assigned",
   "order.reassigned",
   "order.created",
-  "payment.pending",
+  "payment.failed",
   "delivery.problem",
 ] as const;
 
@@ -48,11 +53,11 @@ const REGISTRY: Record<TelegramEventType, TelegramEventDef> = {
     dedupeKey: (orderId) => `order:${orderId}:owner`,
     description: "Новый заказ (включая неоплаченные) — владельцу для наблюдения за потоком.",
   },
-  "payment.pending": {
-    type: "payment.pending",
+  "payment.failed": {
+    type: "payment.failed",
     audience: "OWNER",
     dedupeKey: (orderId) => `order:${orderId}:owner.payment`,
-    description: "Проблема с оплатой. В MVP публикуется ТОЛЬКО при PAYMENT_FAILED (см. publisher).",
+    description: "Платёж отклонён (PAYMENT_FAILED).",
   },
   "delivery.problem": {
     type: "delivery.problem",

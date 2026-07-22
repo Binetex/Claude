@@ -1032,6 +1032,30 @@ model TelegramMessage {
   @@index([orderId])
 }
 
+/**
+ * Настройки внутренних Telegram-уведомлений (singleton, id="singleton").
+ * Заменяют конфигурацию через .env: владелец задаёт всё из дашборда.
+ *
+ * Секрет хранится ТОЛЬКО зашифрованным (AES-256-GCM, lib/crypto/secretBox) — в UI токен
+ * обратно никогда не отдаётся, показывается лишь факт «настроен».
+ *
+ * `enabled` можно включить лишь после успешной проверки: verifiedAt заполняется при удачном
+ * getMe + тестовых сообщениях. Любое изменение токена или чата сбрасывает verifiedAt и enabled,
+ * иначе можно было бы оставить включённым заведомо нерабочий конфиг.
+ */
+model TelegramSettings {
+  id                String    @id @default("singleton")
+  botTokenEncrypted String?
+  ownerChatId       String?
+  floristsChatId    String?
+  enabled           Boolean   @default(false)
+  verifiedAt        DateTime?
+  botUsername       String? // из getMe — показываем владельцу, что подключён нужный бот
+  lastErrorSafe     String? // безопасная причина последней неудачи, без секретов
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+}
+
 // ─────────────────────────────  BURQ SETTINGS  ─────────────────────────────
 //
 // Глобальные настройки интеграции Burq (единственная строка, id="singleton").
