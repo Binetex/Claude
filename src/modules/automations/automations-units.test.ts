@@ -65,10 +65,17 @@ describe("conditions.evaluateConditions", () => {
     expect(evaluateConditions({ requirePaid: true }, base)).toEqual({ ok: true });
   });
 
-  it("deliveryToday сравнивает по таймзоне", () => {
+  it("«доставка сегодня» больше НЕ условие (стало триггером) — старый ключ игнорируется", () => {
     const now = new Date("2026-07-22T10:00:00Z");
-    expect(evaluateConditions({ deliveryToday: true }, { ...base, deliveryDate: new Date("2026-07-22T20:00:00Z"), now })).toEqual({ ok: true });
-    expect(evaluateConditions({ deliveryToday: true }, { ...base, deliveryDate: new Date("2026-07-23T20:00:00Z"), now })).toMatchObject({ ok: false, skipReason: "not_delivery_today" });
+    // Правило, сохранённое до перевода в триггеры, не должно ничего отсекать.
+    const legacy = { deliveryToday: true } as unknown as Parameters<typeof evaluateConditions>[0];
+    expect(evaluateConditions(legacy, { ...base, deliveryDate: new Date("2026-07-30T20:00:00Z"), now })).toEqual({ ok: true });
+  });
+
+  it("allowCancelledRefunded снимает дефолтное исключение (триггеры возврата/отказа оплаты)", () => {
+    const refunded = { ...base, paymentStatus: "REFUNDED" };
+    expect(evaluateConditions({}, refunded)).toMatchObject({ ok: false, skipReason: "order_cancelled_or_refunded" });
+    expect(evaluateConditions({}, { ...refunded, allowCancelledRefunded: true })).toEqual({ ok: true });
   });
 
   it("apartmentPresent требует непустой номер квартиры", () => {
@@ -142,9 +149,17 @@ describe("терминология: только «Заказчик»/«Полу
 });
 
 describe("triggers registry", () => {
-  it("MVP-триггеры зарегистрированы", () => {
+  it("все триггеры зарегистрированы", () => {
     const types = listSmsTriggers().map((t) => t.type);
-    expect(types).toEqual(["ORDER_CREATED", "TRACKING_LINK_AVAILABLE", "ORDER_DELIVERED"]);
+    expect(types).toEqual([
+      "ORDER_CREATED",
+      "TRACKING_LINK_AVAILABLE",
+      "DELIVERY_TODAY",
+      "PAYMENT_PENDING",
+      "PAYMENT_FAILED",
+      "ORDER_REFUNDED",
+      "ORDER_DELIVERED",
+    ]);
   });
   it("isSupportedTrigger / getSmsTrigger отбрасывают неизвестное", () => {
     expect(isSupportedTrigger("ORDER_CREATED")).toBe(true);

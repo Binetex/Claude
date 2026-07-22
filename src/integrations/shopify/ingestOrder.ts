@@ -9,7 +9,7 @@ import { normalizePhone } from "@/lib/phone";
 import { scheduleDeliveryForNewOrder } from "@/integrations/delivery/burq/scheduleService";
 import { extractShopifyOrderNumber, extractSenderAddress } from "./orderFields";
 import { fetchShopifyDeliveryInstructions } from "./deliveryInstructions";
-import { publishOrderCreatedTrigger } from "@/modules/automations/lifecycle";
+import { publishOrderCreatedTrigger, scheduleDeliveryTodayTrigger, publishPaymentStateTrigger } from "@/modules/automations/lifecycle";
 
 /** Планирование доставки, безопасное для импорта: ошибка логируется, но не роняет приём заказа. */
 async function scheduleDeliverySafe(orderId: string): Promise<void> {
@@ -167,6 +167,9 @@ async function applyUpdateFromShopify(
   // но Shopify его почти всегда присылает). deliveryInstructions best-effort (см. createNewOrder).
   const senderAddress = extractSenderAddress(payload.billing_address);
   const deliveryInstructions = await fetchShopifyDeliveryInstructions(site.id, externalId);
+  // Возврат — платформо-независимый переход (financial_status=refunded → paymentStatus REFUNDED),
+  // в отличие от pending/failed, которые Shopify не различает. Публикуем строго на ПЕРЕХОДЕ.
+  const becameRefunded = paymentStatus === "REFUNDED" && existing.paymentStatus !== "REFUNDED";
   await prisma.order.update({
     where: { id: existing.id },
     data: {
@@ -188,6 +191,9 @@ async function applyUpdateFromShopify(
   });
   if (wasUnpaid && paymentStatus === "PAID") {
     await assignInitial(existing.id);
+  }
+  if (becameRefunded) {
+    await publishPaymentStateTrigger(prisma, { orderId: existing.id, siteId: site.id, triggerType: "ORDER_REFUNDED" });
   }
 }
 
@@ -238,6 +244,8 @@ export async function ingestShopifyOrder(
     await scheduleDeliverySafe(order.id);
     // Авто-SMS: триггер ORDER_CREATED только для НОВОГО заказа (не update/resync/backfill).
     await publishOrderCreatedTrigger(prisma, { orderId: order.id, siteId: site.id });
+    // «Доставка сегодня» — платформо-независимый триггер, планируется и для Shopify.
+    await scheduleDeliveryTodayTrigger(prisma, order.id);
   } catch (err) {
     if (!isUniqueConstraintViolation(err)) throw err;
     const existing = await prisma.order.findFirst({ where: { siteId: site.id, externalId } });

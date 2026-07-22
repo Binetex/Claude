@@ -30,6 +30,7 @@ import { getAppUrl } from "@/lib/appUrl";
 import { TERMINAL_ORDER_STATUSES } from "@/lib/statuses";
 import { normalizePhone } from "@/lib/phone";
 import { onOrderDeliveryChangeSafe } from "@/integrations/delivery/burq/scheduleService";
+import { scheduleDeliveryTodayTrigger } from "@/modules/automations/lifecycle";
 
 async function ownerOnly() {
   await requireRole("OWNER");
@@ -71,6 +72,8 @@ export async function ownerUpdateDelivery(
   });
   // Дата/окно доставки влияют на availableAt и dropoff_at → пере-планировать/пере-создать draft.
   await onOrderDeliveryChangeSafe(prisma, orderId);
+  // Дата сменилась → триггер «Доставка сегодня» должен встать на новый день.
+  await scheduleDeliveryTodayTrigger(prisma, orderId);
   revalidatePath(`/dashboard/orders/${orderId}`);
 }
 

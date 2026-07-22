@@ -62,6 +62,8 @@ export type WooPaymentResult = {
   workable: boolean;
   /** Безопасное предупреждение владельцу (без PII), либо null. */
   warning: string | null;
+  /** Это настроенный BNPL-метод (Airwallex/Klarna). Отличает «ждём подтверждения» от «просто не оплачен». */
+  payLater: boolean;
 };
 
 const DEFAULT_APPROVED = ["AUTHORIZED", "SUCCEEDED", "APPROVED", "PAID", "CAPTURED", "COMPLETED"];
@@ -101,8 +103,14 @@ function minutesSince(iso: string | undefined): number | null {
   return (Date.now() - t) / 60000;
 }
 
-function result(classification: WooPaymentClass, paymentStatus: PaymentStatus, workable: boolean, warning: string | null): WooPaymentResult {
-  return { classification, paymentStatus, workable, warning };
+function result(
+  classification: WooPaymentClass,
+  paymentStatus: PaymentStatus,
+  workable: boolean,
+  warning: string | null,
+  payLater = false
+): WooPaymentResult {
+  return { classification, paymentStatus, workable, warning, payLater };
 }
 
 /**
@@ -134,10 +142,10 @@ export function classifyWooPayment(order: WooOrderForPayment, cfg: WooPaymentCon
   })();
 
   if (evidence === "approved") {
-    return result("PAY_LATER_APPROVED", "PAY_LATER_APPROVED", true, null);
+    return result("PAY_LATER_APPROVED", "PAY_LATER_APPROVED", true, null, true);
   }
   if (evidence === "failed") {
-    return result("PAYMENT_FAILED", "UNPAID", false, "Airwallex/Klarna сообщил об отказе в оплате.");
+    return result("PAYMENT_FAILED", "UNPAID", false, "Airwallex/Klarna сообщил об отказе в оплате.", true);
   }
 
   if (evidence === "unknown") {
@@ -146,23 +154,23 @@ export function classifyWooPayment(order: WooOrderForPayment, cfg: WooPaymentCon
     const base = "Airwallex/Klarna вернул неизвестный платёжный статус — требуется ручная проверка перед передачей флористу.";
     const warn =
       (cfg.unknownBehavior === "HOLD" ? `Заказ удержан: ${base}` : base) + (stalePending ? " Ожидание превысило заданный лимит." : "");
-    return result("UNKNOWN", "UNPAID", false, warn);
+    return result("UNKNOWN", "UNPAID", false, warn, true);
   }
 
   // evidence === "absent": прямого подтверждения из meta нет.
   if (hasTxn) {
     // Есть transaction_id (обычно проставляется при авторизации BNPL) — считаем одобренным,
     // но помечаем предупреждением, что подтверждение косвенное.
-    return result("PAY_LATER_APPROVED", "PAY_LATER_APPROVED", true, "Оплата позже: подтверждена по transaction_id (без явного статуса Airwallex).");
+    return result("PAY_LATER_APPROVED", "PAY_LATER_APPROVED", true, "Оплата позже: подтверждена по transaction_id (без явного статуса Airwallex).", true);
   }
   if (cfg.klarnaPayLaterPendingIsConfirmed) {
     // Владелец явно доверяет: pending этого BNPL-метода = одобрено.
-    return result("PAY_LATER_APPROVED", "PAY_LATER_APPROVED", true, "Оплата позже: принято по настройке магазина (pending BNPL = одобрено).");
+    return result("PAY_LATER_APPROVED", "PAY_LATER_APPROVED", true, "Оплата позже: принято по настройке магазина (pending BNPL = одобрено).", true);
   }
 
   // Подтвердить нельзя — безопасный путь: не отдаём флористу, предупреждаем.
   const warn =
     "Klarna/BNPL заказ в статусе pending без подтверждения оплаты — не передавать флористу до ручной проверки." +
     (stalePending ? " Ожидание превысило заданный лимит." : "");
-  return result("PAYMENT_PENDING", "UNPAID", false, warn);
+  return result("PAYMENT_PENDING", "UNPAID", false, warn, true);
 }

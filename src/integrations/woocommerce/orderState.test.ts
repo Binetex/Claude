@@ -7,6 +7,7 @@ const pay = (over: Partial<WooPaymentResult> = {}): WooPaymentResult => ({
   paymentStatus: "UNPAID",
   workable: false,
   warning: null,
+  payLater: false,
   ...over,
 });
 

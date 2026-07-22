@@ -18,6 +18,9 @@ export type DomainEventMap = {
   "order.delivery.completed": { orderId: string };
   "order.cancelled": { orderId: string; reason: string | null };
   "order.refunded": { orderId: string; amount: number | null };
+  "order.delivery.today": { orderId: string; localDay: string };
+  "order.payment.pending": { orderId: string };
+  "order.payment.failed": { orderId: string };
   "product.synced": { siteId: string; created: number; updated: number };
   "integration.connected": { siteId: string; platform: IntegrationPlatform };
   "integration.failed": { siteId: string; platform: IntegrationPlatform; error: string };

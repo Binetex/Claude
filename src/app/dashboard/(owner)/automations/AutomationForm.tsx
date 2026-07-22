@@ -11,7 +11,7 @@ type VarDef = { key: string; label: string; example: string };
 type SiteOpt = SiteOption;
 type OrderOpt = { id: string; orderNumber: string; siteId: string };
 
-type Conditions = { requirePaid?: boolean; excludeCancelledRefunded?: boolean; deliveryToday?: boolean; apartmentPresent?: boolean };
+type Conditions = { requirePaid?: boolean; excludeCancelledRefunded?: boolean; apartmentPresent?: boolean };
 
 export type AutomationFormInitial = {
   id: string;
@@ -212,10 +212,6 @@ export function AutomationForm({
               <label className="flex items-center gap-2 text-sm text-slate-700">
                 <input type="checkbox" className="h-4 w-4" checked={!!cond.requirePaid} onChange={(e) => setCond((c) => ({ ...c, requirePaid: e.target.checked }))} />
                 Только оплаченные
-              </label>
-              <label className="flex items-center gap-2 text-sm text-slate-700">
-                <input type="checkbox" className="h-4 w-4" checked={!!cond.deliveryToday} onChange={(e) => setCond((c) => ({ ...c, deliveryToday: e.target.checked }))} />
-                Доставка сегодня
               </label>
               <label className="flex items-center gap-2 text-sm text-slate-700">
                 <input type="checkbox" className="h-4 w-4" checked={!!cond.apartmentPresent} onChange={(e) => setCond((c) => ({ ...c, apartmentPresent: e.target.checked }))} />

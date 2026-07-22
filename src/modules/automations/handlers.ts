@@ -20,7 +20,7 @@ import type { OutboxRecord } from "@/outbox/types";
 import { PrismaOutboxRepository } from "@/outbox/prismaRepository";
 import { publishAutomationSend, type AutomationTriggerPayload, type AutomationSendPayload } from "./events";
 import { getSmsTrigger } from "./triggers";
-import { evaluateConditions, type SmsConditions } from "./conditions";
+import { evaluateConditions, isSameLocalDay, type SmsConditions } from "./conditions";
 import { resolveRecipients, type SmsAudience } from "./audience";
 import { computeScheduledAt, type SmsDelayUnit } from "./delay";
 import { buildOrderVariables } from "./variables";
@@ -29,6 +29,9 @@ import { SMS_ORDER_INCLUDE, orderToVariableSource } from "./orderSource";
 import { isAutomationsGloballyDisabled } from "./settings";
 import { logExecution } from "./executionLog";
 import type { ChannelSender } from "./channels/types";
+
+/** Триггеры, для которых заказ ИМЕННО отменён/возвращён — дефолтное исключение не применяем. */
+const ALLOW_CANCELLED_REFUNDED = new Set(["ORDER_REFUNDED", "PAYMENT_FAILED"]);
 
 function isP2002(err: unknown): boolean {
   return !!err && typeof err === "object" && "code" in err && (err as { code?: string }).code === "P2002";
@@ -57,6 +60,9 @@ export function buildAutomationTriggerHandler(prisma: PrismaClient): OutboxHandl
 
     const now = new Date();
 
+    // Задача «доставка сегодня» ставится заранее; к моменту срабатывания дату могли перенести.
+    if (p.triggerType === "DELIVERY_TODAY" && !isSameLocalDay(order.deliveryDate, now, order.site.timezone)) return;
+
     for (const a of automations) {
       const cond = evaluateConditions(a.conditionsJson as SmsConditions | null, {
         orderStatus: order.orderStatus,
@@ -64,6 +70,7 @@ export function buildAutomationTriggerHandler(prisma: PrismaClient): OutboxHandl
         deliveryDate: order.deliveryDate,
         apartment: order.apartment,
         timezone: order.site.timezone,
+        allowCancelledRefunded: ALLOW_CANCELLED_REFUNDED.has(p.triggerType),
         now,
       });
       if (!cond.ok) continue; // условие не выполнено на момент триггера — job не создаём
@@ -167,6 +174,7 @@ export function buildAutomationSendHandler(prisma: PrismaClient, deps: Automatio
       deliveryDate: order.deliveryDate,
       apartment: order.apartment,
       timezone: site.timezone,
+      allowCancelledRefunded: ALLOW_CANCELLED_REFUNDED.has(automation.triggerType),
     });
     if (!cond.ok) return skip(cond.skipReason);
 

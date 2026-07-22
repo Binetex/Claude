@@ -36,6 +36,30 @@ export const SMS_TRIGGERS: readonly SmsTriggerDef[] = [
     requiredVars: ["tracking_url"],
   },
   {
+    type: "DELIVERY_TODAY",
+    label: "Доставка сегодня",
+    description: "Каждый день в заданное время магазина (по умолчанию 9:00) — для всех заказов с доставкой в этот день.",
+    domainEvent: "order.delivery.today",
+  },
+  {
+    type: "PAYMENT_PENDING",
+    label: "Оплата в ожидании (BNPL)",
+    description: "Airwallex/Klarna приняли заказ, но подтверждение оплаты ещё не пришло. Только WooCommerce.",
+    domainEvent: "order.payment.pending",
+  },
+  {
+    type: "PAYMENT_FAILED",
+    label: "Оплата не прошла",
+    description: "Платёж отклонён (в т.ч. отказ Airwallex/Klarna). Только WooCommerce.",
+    domainEvent: "order.payment.failed",
+  },
+  {
+    type: "ORDER_REFUNDED",
+    label: "Оформлен возврат",
+    description: "Заказ полностью возвращён. Частичный возврат триггер не запускает.",
+    domainEvent: "order.refunded",
+  },
+  {
     type: "ORDER_DELIVERED",
     label: "Заказ доставлен",
     description: "После подтверждения доставки (можно с задержкой — напр. просьба об отзыве).",

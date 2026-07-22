@@ -12,13 +12,17 @@ export type SmsConditions = {
   excludeCancelledRefunded?: boolean;
   /** Требовать оплату (PAID или BNPL-approved). */
   requirePaid?: boolean;
-  /** Доставка сегодня (в таймзоне магазина). */
-  deliveryToday?: boolean;
   /** Указан номер квартиры/юнита. */
   apartmentPresent?: boolean;
 };
 
 export type ConditionContext = {
+  /**
+   * Триггеры про возврат/неудачную оплату по смыслу работают ИМЕННО с такими заказами,
+   * поэтому дефолтное исключение отменённых/возвращённых для них не применяется —
+   * иначе правило молча никогда бы не сработало.
+   */
+  allowCancelledRefunded?: boolean;
   orderStatus: string; // OrderStatus
   paymentStatus: string; // PaymentStatus
   deliveryDate: Date | null;
@@ -51,10 +55,9 @@ export function isSameLocalDay(a: Date, b: Date, timezone: string | null): boole
 
 export function evaluateConditions(conditions: SmsConditions | null | undefined, ctx: ConditionContext): ConditionResult {
   const c = conditions ?? {};
-  const now = ctx.now ?? new Date();
 
   // Отменённые/возвращённые исключаются по умолчанию (если явно не выключено).
-  if (c.excludeCancelledRefunded !== false) {
+  if (c.excludeCancelledRefunded !== false && !ctx.allowCancelledRefunded) {
     if (CANCELLED_REFUNDED.has(ctx.orderStatus) || CANCELLED_REFUNDED.has(ctx.paymentStatus)) {
       return { ok: false, skipReason: "order_cancelled_or_refunded" };
     }
@@ -62,12 +65,6 @@ export function evaluateConditions(conditions: SmsConditions | null | undefined,
 
   if (c.requirePaid && !PAID_STATUSES.has(ctx.paymentStatus)) {
     return { ok: false, skipReason: "not_paid" };
-  }
-
-  if (c.deliveryToday) {
-    if (!ctx.deliveryDate || !isSameLocalDay(ctx.deliveryDate, now, ctx.timezone)) {
-      return { ok: false, skipReason: "not_delivery_today" };
-    }
   }
 
   if (c.apartmentPresent && !(ctx.apartment && ctx.apartment.trim().length > 0)) {

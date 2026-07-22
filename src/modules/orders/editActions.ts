@@ -4,6 +4,7 @@ import { requireOrderEditor } from "@/lib/rbac";
 import { prisma } from "@/lib/db";
 import { syncOrderToShopify } from "@/integrations/shopify/pushUpdate";
 import { onOrderDeliveryChangeSafe } from "@/integrations/delivery/burq/scheduleService";
+import { scheduleDeliveryTodayTrigger } from "@/modules/automations/lifecycle";
 import { updateOrderBlock, type OrderBlock, type BlockFormData } from "./updateOrderBlock";
 import { findUnlinkedCommunicationsForOrderPhone, attachUnlinkedCommunicationsToOrder, type OrderPhoneSide } from "@/integrations/quo/communicationsService";
 
@@ -29,6 +30,7 @@ async function runPostSave(block: OrderBlock, orderId: string) {
       await onOrderDeliveryChangeSafe(prisma, orderId); // адрес/телефон получателя = dropoff
     } else if (block === "delivery") {
       await onOrderDeliveryChangeSafe(prisma, orderId); // дата/окно влияют на availableAt/dropoff_at
+      await scheduleDeliveryTodayTrigger(prisma, orderId); // триггер «Доставка сегодня» — на новый день
     } else if (block === "cardNote") {
       await syncOrderToShopify(orderId); // cardMessage уходит в Shopify note
     }

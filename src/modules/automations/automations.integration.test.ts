@@ -218,6 +218,42 @@ describe("SMS engine — trigger → job", () => {
   });
 });
 
+describe("новые триггеры: доставка сегодня и состояния оплаты", () => {
+  it("DELIVERY_TODAY создаёт job для заказа с доставкой СЕГОДНЯ", async () => {
+    const site = await makeSite();
+    const auto = await makeAutomation(site.id, { triggerType: "DELIVERY_TODAY" });
+    const order = await makeOrder(site.id, { deliveryDate: new Date() });
+    await fireTrigger(order, "DELIVERY_TODAY", `${order.id}:today`);
+    expect(await jobsFor(auto.id, order.id)).toHaveLength(1);
+  });
+
+  it("DELIVERY_TODAY НЕ создаёт job, если дату перенесли (устаревшая задача)", async () => {
+    const site = await makeSite();
+    const auto = await makeAutomation(site.id, { triggerType: "DELIVERY_TODAY" });
+    // Задача была поставлена на сегодня, но дату сдвинули на неделю вперёд.
+    const order = await makeOrder(site.id, { deliveryDate: new Date(Date.now() + 7 * 864e5) });
+    await fireTrigger(order, "DELIVERY_TODAY", `${order.id}:stale`);
+    expect(await jobsFor(auto.id, order.id)).toHaveLength(0);
+  });
+
+  it("ORDER_REFUNDED срабатывает, несмотря на дефолтное исключение возвратов", async () => {
+    const site = await makeSite();
+    const auto = await makeAutomation(site.id, { triggerType: "ORDER_REFUNDED" });
+    const order = await makeOrder(site.id, { paymentStatus: "REFUNDED" });
+    await fireTrigger(order, "ORDER_REFUNDED", `${order.id}:ORDER_REFUNDED`);
+    // Без снятия excludeCancelledRefunded правило молча не сработало бы никогда.
+    expect(await jobsFor(auto.id, order.id)).toHaveLength(1);
+  });
+
+  it("обычное правило по-прежнему отсекает возвращённый заказ", async () => {
+    const site = await makeSite();
+    const auto = await makeAutomation(site.id, { triggerType: "ORDER_CREATED" });
+    const order = await makeOrder(site.id, { paymentStatus: "REFUNDED" });
+    await fireTrigger(order, "ORDER_CREATED");
+    expect(await jobsFor(auto.id, order.id)).toHaveLength(0);
+  });
+});
+
 describe("SMS engine — send job", () => {
   async function triggerAndGetJob(siteId: string, order: { id: string; siteId: string }, autoOverrides: Partial<Prisma.AutomationUncheckedCreateInput>, triggerType = "ORDER_CREATED") {
     const auto = await makeAutomation(siteId, autoOverrides);

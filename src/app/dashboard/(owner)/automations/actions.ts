@@ -67,7 +67,6 @@ function normalizeConditions(c: SmsConditions): SmsConditions {
   const out: SmsConditions = {};
   if (c.requirePaid) out.requirePaid = true;
   if (c.excludeCancelledRefunded === false) out.excludeCancelledRefunded = false;
-  if (c.deliveryToday) out.deliveryToday = true;
   if (c.apartmentPresent) out.apartmentPresent = true;
   return out;
 }
@@ -246,6 +245,23 @@ export async function saveSiteReviewUrl(siteId: string, reviewUrl: string): Prom
   const site = await prisma.site.findUnique({ where: { id: siteId }, select: { id: true } });
   if (!site) return { error: "Магазин не найден." };
   await prisma.site.update({ where: { id: siteId }, data: { reviewUrl: value || null } });
+  revalidatePath("/dashboard/automations");
+  return { ok: true };
+}
+
+/**
+ * Время ежедневных триггеров магазина ("HH:mm" локального времени). Используется триггером
+ * «Доставка сегодня»: задача публикуется отложенно на это время локального дня доставки.
+ * Изменение действует на заказы, запланированные ПОСЛЕ сохранения — уже поставленные задачи
+ * останутся на прежнем времени (перепланирование произойдёт при следующем изменении заказа).
+ */
+export async function saveSiteAutomationDailyTime(siteId: string, value: string): Promise<ActionResult> {
+  await requireRole("OWNER");
+  const v = value.trim();
+  if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(v)) return { error: "Время в формате ЧЧ:ММ, например 09:00." };
+  const site = await prisma.site.findUnique({ where: { id: siteId }, select: { id: true } });
+  if (!site) return { error: "Магазин не найден." };
+  await prisma.site.update({ where: { id: siteId }, data: { automationDailyLocalTime: v } });
   revalidatePath("/dashboard/automations");
   return { ok: true };
 }

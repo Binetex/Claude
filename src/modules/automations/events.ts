@@ -28,13 +28,19 @@ export type AutomationSendPayload = { jobId: string; orderId: string };
  * Публикует trigger-событие. Идемпотентно по `sms.trigger:{triggerType}:{occurrenceKey}` —
  * повторный webhook/sync/ingest НЕ создаёт второй факт.
  */
-export async function publishAutomationTrigger(repo: OutboxRepository, p: AutomationTriggerPayload): Promise<{ created: boolean }> {
+export async function publishAutomationTrigger(
+  repo: OutboxRepository,
+  p: AutomationTriggerPayload,
+  /** Отложить факт триггера до этого момента (напр. 9:00 локального дня доставки). */
+  availableAt?: Date
+): Promise<{ created: boolean }> {
   const { created } = await repo.enqueue({
     eventType: AUTOMATION_TRIGGER_EVENT,
     aggregateType: "order",
     aggregateId: p.orderId,
     payload: p,
     idempotencyKey: `sms.trigger:${p.triggerType}:${p.occurrenceKey}`,
+    ...(availableAt ? { availableAt } : {}),
   });
   return { created };
 }

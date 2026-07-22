@@ -1,12 +1,14 @@
 "use client";
 import { useState, useTransition } from "react";
 import { Card, CardBody } from "@/components/ui/Card";
-import { saveSiteReviewUrl } from "./actions";
+import { saveSiteReviewUrl, saveSiteAutomationDailyTime } from "./actions";
 
-type SiteRow = { id: string; name: string; reviewUrl: string | null; quoEnabled: boolean };
+type SiteRow = { id: string; name: string; reviewUrl: string | null; quoEnabled: boolean; automationDailyLocalTime: string };
 
 function Row({ site }: { site: SiteRow }) {
   const [value, setValue] = useState(site.reviewUrl ?? "");
+  const [time, setTime] = useState(site.automationDailyLocalTime || "09:00");
+  const [timeMsg, setTimeMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [pending, start] = useTransition();
 
@@ -30,6 +32,21 @@ function Row({ site }: { site: SiteRow }) {
         Сохранить
       </button>
       {msg && <span className={msg.ok ? "text-xs text-emerald-700" : "text-xs text-red-600"}>{msg.text}</span>}
+
+      <label className="flex items-center gap-1.5 text-xs text-slate-500">
+        Ежедневные триггеры в
+        <input
+          type="time"
+          value={time}
+          onChange={(e) => { setTime(e.target.value); setTimeMsg(null); }}
+          onBlur={() => start(async () => {
+            const r = await saveSiteAutomationDailyTime(site.id, time);
+            setTimeMsg(r?.error ? { ok: false, text: r.error } : { ok: true, text: "✓" });
+          })}
+          className="rounded-md border border-slate-300 px-1.5 py-1 text-sm text-slate-800"
+        />
+      </label>
+      {timeMsg && <span className={timeMsg.ok ? "text-xs text-emerald-700" : "text-xs text-red-600"}>{timeMsg.text}</span>}
     </div>
   );
 }
@@ -39,8 +56,8 @@ export function SiteReviewUrlPanel({ sites }: { sites: SiteRow[] }) {
     <Card>
       <CardBody className="space-y-1">
         <div className="mb-1">
-          <h2 className="text-sm font-semibold text-slate-800">Ссылка на отзыв по магазинам</h2>
-          <p className="text-xs text-slate-500">Используется как переменная <code className="rounded bg-slate-100 px-1">{"{{review_url}}"}</code>. Без неё review-правила не отправляются.</p>
+          <h2 className="text-sm font-semibold text-slate-800">Настройки по магазинам</h2>
+          <p className="text-xs text-slate-500">Ссылка используется как переменная <code className="rounded bg-slate-100 px-1">{"{{review_url}}"}</code> — без неё review-правила не отправляются. Время — когда срабатывают ежедневные триггеры («Доставка сегодня») по местному времени магазина.</p>
         </div>
         {sites.map((s) => <Row key={s.id} site={s} />)}
       </CardBody>

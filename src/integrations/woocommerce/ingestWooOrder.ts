@@ -19,7 +19,8 @@ import { deriveWooOrderState, reconcileOrderState, type OrderState } from "./ord
 import { resolveMappedOrderFields, type OrderMetaMapping } from "./orderMeta";
 import { scheduleDeliveryForNewOrder } from "@/integrations/delivery/burq/scheduleService";
 import { assignInitial } from "@/modules/assignments/service";
-import { publishOrderCreatedTrigger } from "@/modules/automations/lifecycle";
+import { publishOrderCreatedTrigger, scheduleDeliveryTodayTrigger, publishPaymentStateTrigger } from "@/modules/automations/lifecycle";
+import { paymentTriggerFor } from "@/modules/automations/paymentTriggers";
 
 /**
  * Авто-назначение основного флориста при переходе заказа в CONFIRMED (оплачен / в работу) —
@@ -130,7 +131,7 @@ export async function ingestWooOrder(
 
   const existing = await prisma.order.findFirst({
     where: { siteId: site.id, externalId },
-    select: { id: true, orderStatus: true, paymentStatus: true, externalUpdatedAt: true },
+    select: { id: true, orderStatus: true, paymentStatus: true, externalUpdatedAt: true, paymentClassification: true, deliveryDate: true },
   });
 
   // Out-of-order guard: пришедшее событие старше уже применённого — пропускаем.
@@ -169,6 +170,19 @@ export async function ingestWooOrder(
     const prev: OrderState = { orderStatus: existing.orderStatus, paymentStatus: existing.paymentStatus };
     const reconciled = await applyUpdate(existing.id, prev);
     await autoAssignWooIfConfirmed(existing.id, prev, reconciled);
+    if (opts.emitLifecycle) {
+      // Триггеры оплаты — строго на ПЕРЕХОДЕ состояния, иначе каждый resync слал бы повтор.
+      const trigger = paymentTriggerFor(payment, reconciled.paymentStatus);
+      const prevTrigger = paymentTriggerFor(
+        { classification: existing.paymentClassification, payLater: payment.payLater },
+        existing.paymentStatus
+      );
+      if (trigger && trigger !== prevTrigger) {
+        await publishPaymentStateTrigger(prisma, { orderId: existing.id, siteId: site.id, triggerType: trigger });
+      }
+      // Дата доставки могла измениться — планируем «доставку сегодня» на актуальный день.
+      await scheduleDeliveryTodayTrigger(prisma, existing.id);
+    }
     return { status: "updated", orderId: existing.id, classification: payment.classification };
   }
 
@@ -283,7 +297,12 @@ export async function ingestWooOrder(
     console.error(`[burq] не удалось запланировать доставку для заказа ${created.id}:`, e instanceof Error ? e.message : String(e));
   }
   // Авто-SMS: ORDER_CREATED только для нового заказа из ЖИВОГО webhook (не bulk-sync/backfill).
-  if (opts.emitLifecycle) await publishOrderCreatedTrigger(prisma, { orderId: created.id, siteId: site.id });
+  if (opts.emitLifecycle) {
+    await publishOrderCreatedTrigger(prisma, { orderId: created.id, siteId: site.id });
+    await scheduleDeliveryTodayTrigger(prisma, created.id);
+    const trigger = paymentTriggerFor(payment, incomingState.paymentStatus);
+    if (trigger) await publishPaymentStateTrigger(prisma, { orderId: created.id, siteId: site.id, triggerType: trigger });
+  }
   return { status: "created", orderId: created.id, classification: payment.classification };
 }
 
