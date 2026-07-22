@@ -36,23 +36,6 @@ export type ConditionResult = { ok: true } | { ok: false; skipReason: string };
 const PAID_STATUSES = new Set(["PAID", "PAY_LATER_APPROVED"]);
 const CANCELLED_REFUNDED = new Set(["CANCELLED", "REFUNDED", "PARTIALLY_REFUNDED"]);
 
-/** Один ли это локальный день (в указанной таймзоне) для двух дат. */
-export function isSameLocalDay(a: Date, b: Date, timezone: string | null): boolean {
-  const fmt = (d: Date) => {
-    try {
-      return new Intl.DateTimeFormat("en-CA", {
-        year: "numeric",
-        month: "2-digit",
-        day: "2-digit",
-        timeZone: timezone || "UTC",
-      }).format(d);
-    } catch {
-      return new Intl.DateTimeFormat("en-CA", { year: "numeric", month: "2-digit", day: "2-digit", timeZone: "UTC" }).format(d);
-    }
-  };
-  return fmt(a) === fmt(b);
-}
-
 export function evaluateConditions(conditions: SmsConditions | null | undefined, ctx: ConditionContext): ConditionResult {
   const c = conditions ?? {};
 

@@ -3,7 +3,7 @@
  * самое хрупкое место: 9:00 в Лос-Анджелесе и в Нью-Йорке это разные моменты UTC.
  */
 import { describe, it, expect } from "vitest";
-import { computeDailyTriggerAt, deliveryLocalDay } from "./dailySchedule";
+import { computeDailyTriggerAt, deliveryLocalDay, isDeliveryToday } from "./dailySchedule";
 
 describe("computeDailyTriggerAt", () => {
   const past = new Date("2026-07-20T00:00:00Z"); // раньше всех расчётных моментов
@@ -43,5 +43,37 @@ describe("computeDailyTriggerAt", () => {
 describe("deliveryLocalDay", () => {
   it("берёт UTC-календарную дату: поле хранит UTC-полночь ЛОКАЛЬНОГО дня", () => {
     expect(deliveryLocalDay(new Date("2026-07-24T00:00:00Z"))).toBe("2026-07-24");
+  });
+});
+
+describe("isDeliveryToday — тот самый сдвиг на сутки", () => {
+  const tz = "America/Los_Angeles";
+  // Order.deliveryDate = UTC-полночь ЛОКАЛЬНОГО дня доставки.
+  const deliveryToday = new Date("2026-07-22T00:00:00Z");
+
+  it("same-day заказ, пришедший в 14:00 по местному → триггер срабатывает", () => {
+    expect(isDeliveryToday(deliveryToday, tz, new Date("2026-07-22T21:00:00Z"))).toBe(true);
+  });
+
+  it("раннее утро того же локального дня → тоже срабатывает", () => {
+    // 08:00 в Лос-Анджелесе = 15:00 UTC того же числа.
+    expect(isDeliveryToday(deliveryToday, tz, new Date("2026-07-22T15:00:00Z"))).toBe(true);
+  });
+
+  it("поздний вечер по UTC, но ещё тот же день в Лос-Анджелесе → срабатывает", () => {
+    // 23:30 UTC = 16:30 в LA того же числа.
+    expect(isDeliveryToday(deliveryToday, tz, new Date("2026-07-22T23:30:00Z"))).toBe(true);
+  });
+
+  it("доставка завтра → НЕ срабатывает", () => {
+    expect(isDeliveryToday(new Date("2026-07-23T00:00:00Z"), tz, new Date("2026-07-22T21:00:00Z"))).toBe(false);
+  });
+
+  it("доставка вчера (устаревшая задача) → НЕ срабатывает", () => {
+    expect(isDeliveryToday(new Date("2026-07-21T00:00:00Z"), tz, new Date("2026-07-22T21:00:00Z"))).toBe(false);
+  });
+
+  it("без таймзоны магазина берётся дефолтная зона", () => {
+    expect(isDeliveryToday(deliveryToday, null, new Date("2026-07-22T21:00:00Z"))).toBe(true);
   });
 });

@@ -20,7 +20,8 @@ import type { OutboxRecord } from "@/outbox/types";
 import { PrismaOutboxRepository } from "@/outbox/prismaRepository";
 import { publishAutomationSend, type AutomationTriggerPayload, type AutomationSendPayload } from "./events";
 import { getSmsTrigger } from "./triggers";
-import { evaluateConditions, isSameLocalDay, type SmsConditions } from "./conditions";
+import { evaluateConditions, type SmsConditions } from "./conditions";
+import { isDeliveryToday } from "./dailySchedule";
 import { resolveRecipients, type SmsAudience } from "./audience";
 import { computeScheduledAt, type SmsDelayUnit } from "./delay";
 import { buildOrderVariables } from "./variables";
@@ -61,7 +62,7 @@ export function buildAutomationTriggerHandler(prisma: PrismaClient): OutboxHandl
     const now = new Date();
 
     // Задача «доставка сегодня» ставится заранее; к моменту срабатывания дату могли перенести.
-    if (p.triggerType === "DELIVERY_TODAY" && !isSameLocalDay(order.deliveryDate, now, order.site.timezone)) return;
+    if (p.triggerType === "DELIVERY_TODAY" && !isDeliveryToday(order.deliveryDate, order.site.timezone, now)) return;
 
     for (const a of automations) {
       const cond = evaluateConditions(a.conditionsJson as SmsConditions | null, {

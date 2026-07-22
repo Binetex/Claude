@@ -1,4 +1,4 @@
-import { zonedLocalTimeToUtc, DEFAULT_STORE_TZ } from "@/lib/tz";
+import { zonedLocalTimeToUtc, localDateStr, DEFAULT_STORE_TZ } from "@/lib/tz";
 
 /**
  * Момент (UTC), когда должен сработать ежедневный триггер по локальному дню и времени магазина.
@@ -23,4 +23,18 @@ export function computeDailyTriggerAt(
 /** Локальный день доставки для Order.deliveryDate (UTC-полночь локального дня). */
 export function deliveryLocalDay(deliveryDate: Date): string {
   return deliveryDate.toISOString().slice(0, 10);
+}
+
+/**
+ * Наступил ли ЛОКАЛЬНЫЙ день доставки прямо сейчас.
+ *
+ * ВНИМАНИЕ, грабли: Order.deliveryDate — это UTC-полночь ЛОКАЛЬНОГО дня, поэтому его нельзя
+ * пере-конвертировать через таймзону магазина. Для America/Los_Angeles «2026-07-22T00:00Z»
+ * в местной зоне выглядит как 21 июля 17:00, и наивное сравнение двух дат в одной зоне даёт
+ * сдвиг на сутки — триггер не сработал бы никогда. Правильно: день доставки берём как
+ * UTC-календарную дату, а «сегодня» — в зоне магазина (тот же приём, что в списке закупок).
+ */
+export function isDeliveryToday(deliveryDate: Date | null | undefined, tz: string | null | undefined, now: Date = new Date()): boolean {
+  if (!deliveryDate) return false;
+  return localDateStr(deliveryDate, "UTC") === localDateStr(now, tz || DEFAULT_STORE_TZ);
 }
