@@ -8,12 +8,12 @@ import "server-only";
  */
 import type { PrismaClient } from "@/generated/prisma/client";
 import { PrismaOutboxRepository } from "@/outbox/prismaRepository";
-import { publishSmsTrigger } from "./events";
+import { publishAutomationTrigger } from "./events";
 
 export async function publishOrderCreatedTrigger(prisma: PrismaClient, args: { orderId: string; siteId: string }): Promise<void> {
   try {
     const repo = new PrismaOutboxRepository(prisma);
-    await publishSmsTrigger(repo, {
+    await publishAutomationTrigger(repo, {
       orderId: args.orderId,
       siteId: args.siteId,
       triggerType: "ORDER_CREATED",
@@ -29,7 +29,7 @@ export async function publishOrderDeliveredTrigger(prisma: PrismaClient, args: {
     const ord = await prisma.order.findUnique({ where: { id: args.orderId }, select: { siteId: true } });
     if (!ord) return;
     const repo = new PrismaOutboxRepository(prisma);
-    await publishSmsTrigger(repo, {
+    await publishAutomationTrigger(repo, {
       orderId: args.orderId,
       siteId: ord.siteId,
       triggerType: "ORDER_DELIVERED",
@@ -46,7 +46,7 @@ export async function publishTrackingAvailableTrigger(
 ): Promise<void> {
   try {
     const repo = new PrismaOutboxRepository(prisma);
-    await publishSmsTrigger(repo, {
+    await publishAutomationTrigger(repo, {
       orderId: args.orderId,
       siteId: args.siteId,
       triggerType: "TRACKING_LINK_AVAILABLE",

@@ -6,18 +6,21 @@ import { featureFlags } from "@/lib/featureFlags";
 import { getQuoConfig } from "@/integrations/quo/config";
 import { createQuoClient } from "@/integrations/quo/client";
 import { toE164 } from "@/lib/phone";
-import { isSupportedTrigger } from "@/modules/sms/triggers";
-import { buildAutomationPreview } from "@/modules/sms/preview";
-import { buildTestMessage, sendTestSmsViaClient } from "@/modules/sms/testSend";
-import type { SmsConditions } from "@/modules/sms/conditions";
+import { isSupportedTrigger } from "@/modules/automations/triggers";
+import { buildAutomationPreview } from "@/modules/automations/preview";
+import { buildTestMessage, sendTestSmsViaClient } from "@/modules/automations/testSend";
+import { setAutomationsGloballyDisabled } from "@/modules/automations/settings";
+import type { SmsConditions } from "@/modules/automations/conditions";
 
 const AUDIENCES = new Set(["CUSTOMER", "RECIPIENT", "BOTH"]);
 const DELAY_UNITS = new Set(["IMMEDIATE", "MINUTE", "HOUR", "DAY", "WEEK", "MONTH"]);
+const CHANNELS = new Set(["SMS"]); // расширяется вместе с AutomationChannel + ChannelSender
 
 export type AutomationInput = {
   siteId: string;
   name: string;
   active: boolean;
+  channel: "SMS";
   triggerType: string;
   audience: "CUSTOMER" | "RECIPIENT" | "BOTH";
   delayAmount: number;
@@ -31,6 +34,7 @@ export type ActionResult = { ok?: true; id?: string; error?: string; warning?: s
 function validate(input: AutomationInput): string | null {
   if (!input.siteId) return "Выберите магазин.";
   if (!input.name?.trim()) return "Укажите название.";
+  if (!CHANNELS.has(input.channel)) return "Неизвестный канал.";
   if (!isSupportedTrigger(input.triggerType)) return "Неизвестный триггер.";
   if (!AUDIENCES.has(input.audience)) return "Некорректная аудитория.";
   if (!DELAY_UNITS.has(input.delayUnit)) return "Некорректная единица задержки.";
@@ -65,11 +69,12 @@ export async function createAutomation(input: AutomationInput): Promise<ActionRe
   const site = await prisma.site.findUnique({ where: { id: input.siteId }, select: { id: true } });
   if (!site) return { error: "Магазин не найден." };
 
-  const created = await prisma.smsAutomation.create({
+  const created = await prisma.automation.create({
     data: {
       siteId: input.siteId,
       name: input.name.trim(),
       active: !!input.active,
+      channel: input.channel,
       triggerType: input.triggerType,
       audience: input.audience,
       delayAmount: input.delayAmount,
@@ -79,7 +84,7 @@ export async function createAutomation(input: AutomationInput): Promise<ActionRe
     },
     select: { id: true },
   });
-  revalidatePath("/dashboard/sms-marketing");
+  revalidatePath("/dashboard/automations");
   return { ok: true, id: created.id, warning: await reviewUrlWarning(input.siteId, input.template) };
 }
 
@@ -87,15 +92,16 @@ export async function updateAutomation(id: string, input: AutomationInput): Prom
   await requireRole("OWNER");
   const err = validate(input);
   if (err) return { error: err };
-  const existing = await prisma.smsAutomation.findUnique({ where: { id }, select: { id: true, deletedAt: true } });
+  const existing = await prisma.automation.findUnique({ where: { id }, select: { id: true, deletedAt: true } });
   if (!existing || existing.deletedAt) return { error: "Автоматизация не найдена." };
 
-  await prisma.smsAutomation.update({
+  await prisma.automation.update({
     where: { id },
     data: {
       // siteId менять не даём — история job'ов привязана к магазину.
       name: input.name.trim(),
       active: !!input.active,
+      channel: input.channel,
       triggerType: input.triggerType,
       audience: input.audience,
       delayAmount: input.delayAmount,
@@ -104,29 +110,30 @@ export async function updateAutomation(id: string, input: AutomationInput): Prom
       conditionsJson: normalizeConditions(input.conditions),
     },
   });
-  revalidatePath("/dashboard/sms-marketing");
-  revalidatePath(`/dashboard/sms-marketing/${id}`);
+  revalidatePath("/dashboard/automations");
+  revalidatePath(`/dashboard/automations/${id}`);
   return { ok: true, id, warning: await reviewUrlWarning(input.siteId, input.template) };
 }
 
 export async function toggleAutomation(id: string, active: boolean): Promise<ActionResult> {
   await requireRole("OWNER");
-  const existing = await prisma.smsAutomation.findUnique({ where: { id }, select: { deletedAt: true } });
+  const existing = await prisma.automation.findUnique({ where: { id }, select: { deletedAt: true } });
   if (!existing || existing.deletedAt) return { error: "Автоматизация не найдена." };
-  await prisma.smsAutomation.update({ where: { id }, data: { active: !!active } });
-  revalidatePath("/dashboard/sms-marketing");
+  await prisma.automation.update({ where: { id }, data: { active: !!active } });
+  revalidatePath("/dashboard/automations");
   return { ok: true };
 }
 
 export async function duplicateAutomation(id: string): Promise<ActionResult> {
   await requireRole("OWNER");
-  const src = await prisma.smsAutomation.findUnique({ where: { id } });
+  const src = await prisma.automation.findUnique({ where: { id } });
   if (!src || src.deletedAt) return { error: "Автоматизация не найдена." };
-  const copy = await prisma.smsAutomation.create({
+  const copy = await prisma.automation.create({
     data: {
       siteId: src.siteId,
       name: `${src.name} (копия)`,
       active: false, // копия всегда выключена
+      channel: src.channel,
       triggerType: src.triggerType,
       audience: src.audience,
       delayAmount: src.delayAmount,
@@ -136,22 +143,22 @@ export async function duplicateAutomation(id: string): Promise<ActionResult> {
     },
     select: { id: true },
   });
-  revalidatePath("/dashboard/sms-marketing");
+  revalidatePath("/dashboard/automations");
   return { ok: true, id: copy.id };
 }
 
 /** Удаление: hard-delete ТОЛЬКО если истории нет; иначе soft-delete (job'ы сохраняются). */
 export async function deleteAutomation(id: string): Promise<ActionResult> {
   await requireRole("OWNER");
-  const existing = await prisma.smsAutomation.findUnique({ where: { id }, select: { id: true } });
+  const existing = await prisma.automation.findUnique({ where: { id }, select: { id: true } });
   if (!existing) return { error: "Автоматизация не найдена." };
-  const jobs = await prisma.smsAutomationJob.count({ where: { automationId: id } });
+  const jobs = await prisma.automationJob.count({ where: { automationId: id } });
   if (jobs > 0) {
-    await prisma.smsAutomation.update({ where: { id }, data: { deletedAt: new Date(), active: false } });
+    await prisma.automation.update({ where: { id }, data: { deletedAt: new Date(), active: false } });
   } else {
-    await prisma.smsAutomation.delete({ where: { id } });
+    await prisma.automation.delete({ where: { id } });
   }
-  revalidatePath("/dashboard/sms-marketing");
+  revalidatePath("/dashboard/automations");
   return { ok: true };
 }
 
@@ -175,7 +182,7 @@ export async function previewAutomation(orderId: string, template: string, audie
 }
 
 /**
- * Тестовая отправка. НЕ создаёт SmsAutomationJob, НЕ пишет OrderCommunication и НЕ меняет заказ.
+ * Тестовая отправка. НЕ создаёт AutomationJob, НЕ пишет OrderCommunication и НЕ меняет заказ.
  * Отправляет через QUO-номер выбранного Site на введённый вручную номер. Переменные — примерные,
  * поверх подставляются реальные store_name/store_phone/review_url магазина.
  */
@@ -214,6 +221,14 @@ export async function saveSiteReviewUrl(siteId: string, reviewUrl: string): Prom
   const site = await prisma.site.findUnique({ where: { id: siteId }, select: { id: true } });
   if (!site) return { error: "Магазин не найден." };
   await prisma.site.update({ where: { id: siteId }, data: { reviewUrl: value || null } });
-  revalidatePath("/dashboard/sms-marketing");
+  revalidatePath("/dashboard/automations");
+  return { ok: true };
+}
+
+/** Глобальный «рубильник»: при disableAll=true движок не создаёт и не отправляет job'ы. */
+export async function setKillSwitch(disableAll: boolean): Promise<ActionResult> {
+  const user = await requireRole("OWNER");
+  await setAutomationsGloballyDisabled(prisma, !!disableAll, user.id);
+  revalidatePath("/dashboard/automations");
   return { ok: true };
 }

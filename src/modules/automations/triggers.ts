@@ -10,7 +10,7 @@ import type { DomainEventName } from "@/events/types";
  * (job → SKIPPED). Так TRACKING_LINK_AVAILABLE не уходит, пока трек реально не появился.
  */
 export type SmsTriggerDef = {
-  /** Стабильный ключ, хранится в SmsAutomation.triggerType. */
+  /** Стабильный ключ, хранится в Automation.triggerType. */
   type: string;
   label: string;
   description: string;

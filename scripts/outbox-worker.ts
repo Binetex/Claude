@@ -28,8 +28,9 @@ import { BURQ_DRAFT_CREATE_EVENT } from "@/integrations/delivery/burq/schedule";
 import { buildBurqWebhookHandler, BURQ_WEBHOOK_EVENT } from "@/integrations/delivery/burq/webhookHandler";
 import { buildBurqPodRefetchHandler, BURQ_POD_REFETCH_EVENT } from "@/integrations/delivery/burq/podService";
 import { buildQuoWebhookHandler, QUO_WEBHOOK_EVENT } from "@/integrations/quo/webhookHandler";
-import { buildSmsTriggerHandler, buildSmsSendHandler } from "@/modules/sms/handlers";
-import { SMS_TRIGGER_EVENT, SMS_SEND_EVENT } from "@/modules/sms/events";
+import { buildAutomationTriggerHandler, buildAutomationSendHandler } from "@/modules/automations/handlers";
+import { AUTOMATION_TRIGGER_EVENT, AUTOMATION_SEND_EVENT } from "@/modules/automations/events";
+import { createSmsChannelSender } from "@/modules/automations/channels/sms";
 import { getQuoConfig } from "@/integrations/quo/config";
 import { createQuoClient } from "@/integrations/quo/client";
 import { reconcileBurqSchedules } from "@/integrations/delivery/burq/recovery";
@@ -78,13 +79,15 @@ async function main() {
     [BURQ_POD_REFETCH_EVENT]: buildBurqPodRefetchHandler(prisma),
     // QUO (ex-OpenPhone): обработка проверенного webhook-события → OrderCommunication + привязка.
     [QUO_WEBHOOK_EVENT]: buildQuoWebhookHandler(prisma),
-    // SMS-маркетинг: событие заказа → создать job'ы под активные правила Site (отложенно).
-    [SMS_TRIGGER_EVENT]: buildSmsTriggerHandler(prisma),
-    // SMS-маркетинг: отправка одного due job через QUO-номер Site (клиент без авто-ретрая).
-    [SMS_SEND_EVENT]: buildSmsSendHandler(prisma, {
-      getClient: () => {
-        const cfg = getQuoConfig();
-        return cfg && featureFlags.quo ? createQuoClient({ ...cfg, maxRetries: 0 }) : null;
+    // Automation Engine: событие заказа → создать job'ы под активные правила Site (отложенно).
+    [AUTOMATION_TRIGGER_EVENT]: buildAutomationTriggerHandler(prisma),
+    // Automation Engine: отправка одного due job через ChannelSender (SMS — поверх QUO-номера Site).
+    [AUTOMATION_SEND_EVENT]: buildAutomationSendHandler(prisma, {
+      channels: {
+        SMS: createSmsChannelSender(() => {
+          const cfg = getQuoConfig();
+          return cfg && featureFlags.quo ? createQuoClient({ ...cfg, maxRetries: 0 }) : null;
+        }),
       },
     }),
   };

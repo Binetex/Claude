@@ -4,12 +4,14 @@ import { Prisma } from "@/generated/prisma/client";
 import type { OutboxRecord } from "@/outbox/types";
 import type { QuoClient } from "@/integrations/quo/client";
 import { quoErrorFromStatus } from "@/integrations/quo/errors";
-import { buildSmsTriggerHandler, buildSmsSendHandler } from "./handlers";
+import { buildAutomationTriggerHandler, buildAutomationSendHandler } from "./handlers";
+import { createSmsChannelSender } from "./channels/sms";
+import { setAutomationsGloballyDisabled } from "./settings";
 
 /**
- * Интеграция движка авто-SMS на реальной БД (throwaway prisma dev). Прогоняем handler'ы напрямую
- * (worker лишь диспетчеризует по eventType). QUO-клиент — фейковый (без сети). Покрываем 17
- * инженерных сценариев ТЗ (test-send «без production-job» — в sms-units.test.ts).
+ * Интеграция Automation Engine на реальной БД (throwaway prisma dev). Прогоняем handler'ы напрямую
+ * (worker лишь диспетчеризует по eventType), отправка идёт через SMS-ChannelSender с фейковым QUO.
+ * Покрываем инженерные сценарии ТЗ (test-send «без production-job» — в automations-units.test.ts).
  */
 
 const suffix = `smsit-${Date.now()}`;
@@ -18,15 +20,16 @@ const createdOrderIds: string[] = [];
 
 let sendOk = true; // переключатель поведения фейкового клиента (успех/временный сбой 500)
 let sentCount = 0;
-const fakeClient: QuoClient = {
-  async sendMessage() {
+// Частичный мок: реально используется только sendMessage (остальные методы QuoClient не нужны).
+const fakeClient = {
+  async sendMessage(input: { content: string; from: string; to: string[] }) {
     if (!sendOk) throw quoErrorFromStatus(500);
-    return { id: `AC-${suffix}-${sentCount++}`, conversationId: `CN-${suffix}` };
+    return { id: `AC-${suffix}-${sentCount++}`, status: "sent", conversationId: `CN-${suffix}`, from: input.from, to: input.to };
   },
-};
+} as unknown as QuoClient;
 
-const triggerHandler = buildSmsTriggerHandler(prisma);
-const sendHandler = buildSmsSendHandler(prisma, { getClient: () => fakeClient });
+const triggerHandler = buildAutomationTriggerHandler(prisma);
+const sendHandler = buildAutomationSendHandler(prisma, { channels: { SMS: createSmsChannelSender(() => fakeClient) } });
 
 function rec(payload: unknown, attempts = 0, maxAttempts = 8): OutboxRecord {
   return {
@@ -81,8 +84,8 @@ async function makeOrder(siteId: string, overrides: Partial<Prisma.OrderCreateIn
   return order;
 }
 
-function makeAutomation(siteId: string, overrides: Partial<Prisma.SmsAutomationUncheckedCreateInput> = {}) {
-  return prisma.smsAutomation.create({
+function makeAutomation(siteId: string, overrides: Partial<Prisma.AutomationUncheckedCreateInput> = {}) {
+  return prisma.automation.create({
     data: {
       siteId,
       name: `auto ${suffix}`,
@@ -102,15 +105,17 @@ async function fireTrigger(order: { id: string; siteId: string }, triggerType: s
 }
 
 function jobsFor(automationId: string, orderId: string) {
-  return prisma.smsAutomationJob.findMany({ where: { automationId, orderId } });
+  return prisma.automationJob.findMany({ where: { automationId, orderId } });
 }
 
-beforeAll(() => { sendOk = true; });
+beforeAll(async () => { sendOk = true; await setAutomationsGloballyDisabled(prisma, false, null); });
 
 afterAll(async () => {
-  await prisma.smsAutomationJob.deleteMany({});
+  await prisma.automationExecutionLog.deleteMany({});
+  await prisma.automationJob.deleteMany({});
   await prisma.orderCommunication.deleteMany({ where: { orderId: { in: createdOrderIds } } });
-  await prisma.smsAutomation.deleteMany({});
+  await prisma.automation.deleteMany({});
+  await prisma.automationSettings.deleteMany({});
   await prisma.outboxEvent.deleteMany({ where: { eventType: { startsWith: "sms." } } });
   await prisma.order.deleteMany({ where: { id: { in: createdOrderIds } } });
   await prisma.site.deleteMany({ where: { id: { in: createdSiteIds } } });
@@ -183,7 +188,7 @@ describe("SMS engine — trigger → job", () => {
 });
 
 describe("SMS engine — send job", () => {
-  async function triggerAndGetJob(siteId: string, order: { id: string; siteId: string }, autoOverrides: Partial<Prisma.SmsAutomationUncheckedCreateInput>, triggerType = "ORDER_CREATED") {
+  async function triggerAndGetJob(siteId: string, order: { id: string; siteId: string }, autoOverrides: Partial<Prisma.AutomationUncheckedCreateInput>, triggerType = "ORDER_CREATED") {
     const auto = await makeAutomation(siteId, autoOverrides);
     await fireTrigger(order, triggerType);
     const job = (await jobsFor(auto.id, order.id))[0];
@@ -196,7 +201,7 @@ describe("SMS engine — send job", () => {
     const order = await makeOrder(site.id);
     const { job } = await triggerAndGetJob(site.id, order, { template: "Hi {{customer_name}}" });
     await sendHandler(rec({ jobId: job.id, orderId: order.id }));
-    const updated = await prisma.smsAutomationJob.findUniqueOrThrow({ where: { id: job.id } });
+    const updated = await prisma.automationJob.findUniqueOrThrow({ where: { id: job.id } });
     expect(updated.status).toBe("SENT");
     expect(updated.communicationId).toBeTruthy();
     const comm = await prisma.orderCommunication.findUniqueOrThrow({ where: { id: updated.communicationId! } });
@@ -211,7 +216,7 @@ describe("SMS engine — send job", () => {
     const order = await makeOrder(site.id, { senderName: "Anna" });
     const { job } = await triggerAndGetJob(site.id, order, { template: "Hi {{customer_name}} {{nonexistent}}" });
     await sendHandler(rec({ jobId: job.id, orderId: order.id }));
-    const updated = await prisma.smsAutomationJob.findUniqueOrThrow({ where: { id: job.id } });
+    const updated = await prisma.automationJob.findUniqueOrThrow({ where: { id: job.id } });
     expect(updated.renderedTextSnapshot).toBe("Hi Anna");
     expect(updated.renderedTextSnapshot).not.toContain("undefined");
     const comm = await prisma.orderCommunication.findUniqueOrThrow({ where: { id: updated.communicationId! } });
@@ -225,12 +230,12 @@ describe("SMS engine — send job", () => {
     const orderNo = await makeOrder(site.id, { trackingUrl: null });
     const a = await triggerAndGetJob(site.id, orderNo, { triggerType: "TRACKING_LINK_AVAILABLE", template: "Track {{tracking_url}}" }, "TRACKING_LINK_AVAILABLE");
     await sendHandler(rec({ jobId: a.job.id, orderId: orderNo.id }));
-    expect((await prisma.smsAutomationJob.findUniqueOrThrow({ where: { id: a.job.id } })).status).toBe("SKIPPED");
+    expect((await prisma.automationJob.findUniqueOrThrow({ where: { id: a.job.id } })).status).toBe("SKIPPED");
     // с треком → SENT
     const orderYes = await makeOrder(site.id, { trackingUrl: "https://track.example/x" });
     const b = await triggerAndGetJob(site.id, orderYes, { triggerType: "TRACKING_LINK_AVAILABLE", template: "Track {{tracking_url}}" }, "TRACKING_LINK_AVAILABLE");
     await sendHandler(rec({ jobId: b.job.id, orderId: orderYes.id }));
-    expect((await prisma.smsAutomationJob.findUniqueOrThrow({ where: { id: b.job.id } })).status).toBe("SENT");
+    expect((await prisma.automationJob.findUniqueOrThrow({ where: { id: b.job.id } })).status).toBe("SENT");
   });
 
   it("6b. Заказ отменён к моменту отправки → SKIP (повторная проверка условий)", async () => {
@@ -240,7 +245,7 @@ describe("SMS engine — send job", () => {
     const { job } = await triggerAndGetJob(site.id, order, {});
     await prisma.order.update({ where: { id: order.id }, data: { orderStatus: "CANCELLED" } });
     await sendHandler(rec({ jobId: job.id, orderId: order.id }));
-    const updated = await prisma.smsAutomationJob.findUniqueOrThrow({ where: { id: job.id } });
+    const updated = await prisma.automationJob.findUniqueOrThrow({ where: { id: job.id } });
     expect(updated.status).toBe("SKIPPED");
     expect(updated.lastErrorSafe).toBe("order_cancelled_or_refunded");
   });
@@ -252,7 +257,7 @@ describe("SMS engine — send job", () => {
     const { job } = await triggerAndGetJob(site.id, order, {});
     await prisma.site.update({ where: { id: site.id }, data: { quoEnabled: false } });
     await sendHandler(rec({ jobId: job.id, orderId: order.id }));
-    expect((await prisma.smsAutomationJob.findUniqueOrThrow({ where: { id: job.id } })).status).toBe("SKIPPED");
+    expect((await prisma.automationJob.findUniqueOrThrow({ where: { id: job.id } })).status).toBe("SKIPPED");
   });
 
   it("17. review_url берётся из своего Site; без неё review-правило SKIP", async () => {
@@ -268,7 +273,7 @@ describe("SMS engine — send job", () => {
     const orderN = await makeOrder(siteNo.id);
     const n = await triggerAndGetJob(siteNo.id, orderN, { template: "Review {{review_url}}" });
     await sendHandler(rec({ jobId: n.job.id, orderId: orderN.id }));
-    expect((await prisma.smsAutomationJob.findUniqueOrThrow({ where: { id: n.job.id } })).status).toBe("SKIPPED");
+    expect((await prisma.automationJob.findUniqueOrThrow({ where: { id: n.job.id } })).status).toBe("SKIPPED");
   });
 
   it("13. Временный сбой отправки → retry (job остаётся SCHEDULED, throw), затем терминальный FAILED", async () => {
@@ -277,12 +282,12 @@ describe("SMS engine — send job", () => {
     const { job } = await triggerAndGetJob(site.id, order, {});
     sendOk = false; // QUO 500
     await expect(sendHandler(rec({ jobId: job.id, orderId: order.id }, 0, 8))).rejects.toThrow();
-    let updated = await prisma.smsAutomationJob.findUniqueOrThrow({ where: { id: job.id } });
+    let updated = await prisma.automationJob.findUniqueOrThrow({ where: { id: job.id } });
     expect(updated.status).toBe("SCHEDULED"); // остаётся для повтора
     expect(updated.lastErrorSafe).toBe("quo_server");
     // последняя попытка → терминальный FAILED без throw
     await sendHandler(rec({ jobId: job.id, orderId: order.id }, 8, 8));
-    updated = await prisma.smsAutomationJob.findUniqueOrThrow({ where: { id: job.id } });
+    updated = await prisma.automationJob.findUniqueOrThrow({ where: { id: job.id } });
     expect(updated.status).toBe("FAILED");
     sendOk = true;
   });
@@ -293,10 +298,10 @@ describe("SMS engine — send job", () => {
     const order = await makeOrder(site.id, { senderName: "Anna" });
     const { auto, job } = await triggerAndGetJob(site.id, order, { template: "Hi {{customer_name}}" });
     await sendHandler(rec({ jobId: job.id, orderId: order.id }));
-    const snapshot = (await prisma.smsAutomationJob.findUniqueOrThrow({ where: { id: job.id } })).renderedTextSnapshot;
+    const snapshot = (await prisma.automationJob.findUniqueOrThrow({ where: { id: job.id } })).renderedTextSnapshot;
     expect(snapshot).toBe("Hi Anna");
-    await prisma.smsAutomation.update({ where: { id: auto.id }, data: { template: "Totally different {{customer_name}}" } });
-    const after = await prisma.smsAutomationJob.findUniqueOrThrow({ where: { id: job.id } });
+    await prisma.automation.update({ where: { id: auto.id }, data: { template: "Totally different {{customer_name}}" } });
+    const after = await prisma.automationJob.findUniqueOrThrow({ where: { id: job.id } });
     expect(after.renderedTextSnapshot).toBe("Hi Anna"); // снимок не меняется
   });
 
@@ -310,5 +315,49 @@ describe("SMS engine — send job", () => {
     await sendHandler(rec({ jobId: job.id, orderId: order.id })); // повтор
     const commsAfterSecond = await prisma.orderCommunication.count({ where: { orderId: order.id } });
     expect(commsAfterSecond).toBe(commsAfterFirst); // без дубля OrderCommunication
+  });
+});
+
+describe("Global kill switch + Execution Log", () => {
+  it("19. Kill switch: новые job'ы не создаются, а запланированный не отправляется (SKIP)", async () => {
+    // Trigger при включённом рубильнике → job не создаётся.
+    const site = await makeSite();
+    const autoA = await makeAutomation(site.id);
+    const orderA = await makeOrder(site.id);
+    await setAutomationsGloballyDisabled(prisma, true, null);
+    await fireTrigger(orderA, "ORDER_CREATED");
+    expect(await jobsFor(autoA.id, orderA.id)).toHaveLength(0);
+
+    // Job создан при выключенном рубильнике, затем рубильник включён → send SKIP.
+    await setAutomationsGloballyDisabled(prisma, false, null);
+    const orderB = await makeOrder(site.id);
+    await fireTrigger(orderB, "ORDER_CREATED");
+    const job = (await jobsFor(autoA.id, orderB.id))[0];
+    expect(job.status).toBe("SCHEDULED");
+    await setAutomationsGloballyDisabled(prisma, true, null);
+    await sendHandler(rec({ jobId: job.id, orderId: orderB.id }));
+    const updated = await prisma.automationJob.findUniqueOrThrow({ where: { id: job.id } });
+    expect(updated.status).toBe("SKIPPED");
+    expect(updated.lastErrorSafe).toBe("global_kill_switch");
+    await setAutomationsGloballyDisabled(prisma, false, null); // восстановить
+  });
+
+  it("20. Execution Log отражает этапы успешной отправки по порядку", async () => {
+    sendOk = true;
+    const site = await makeSite();
+    const auto = await makeAutomation(site.id, { template: "Hi {{customer_name}}" });
+    const order = await makeOrder(site.id, { senderName: "Anna" });
+    await fireTrigger(order, "ORDER_CREATED");
+    const job = (await jobsFor(auto.id, order.id))[0];
+    await sendHandler(rec({ jobId: job.id, orderId: order.id }));
+
+    const logs = await prisma.automationExecutionLog.findMany({ where: { jobId: job.id }, orderBy: { createdAt: "asc" }, select: { stage: true } });
+    const stages = logs.map((l) => l.stage);
+    for (const s of ["scheduled", "picked", "rendered", "provider_accepted", "sent"]) {
+      expect(stages).toContain(s);
+    }
+    // Порядок ключевых этапов сохранён.
+    expect(stages.indexOf("picked")).toBeLessThan(stages.indexOf("rendered"));
+    expect(stages.indexOf("rendered")).toBeLessThan(stages.indexOf("sent"));
   });
 });

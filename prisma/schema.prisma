@@ -362,8 +362,8 @@ model Site {
   quoConnectionError String? // безопасный текст ошибки последней проверки (без секретов)
 
   // ── SMS-маркетинг ──
-  reviewUrl      String? // ссылка на отзыв для {{review_url}}; пусто → review-правила не отправляются
-  smsAutomations SmsAutomation[]
+  reviewUrl   String? // ссылка на отзыв для {{review_url}}; пусто → review-правила не отправляются
+  automations Automation[]
 
   // Запрет двух активных Site одного платформенного домена (двойное подключение).
   @@unique([platform, normalizedShopDomain])
@@ -598,7 +598,7 @@ model Order {
   deliveryIntent DeliveryIntent?
   deliveries     Delivery[]
   audits         OrderAudit[]
-  smsJobs        SmsAutomationJob[]
+  automationJobs AutomationJob[]
 
   // NULL допустим много раз (Postgres: NULL != NULL) — не мешает заказам без внешнего источника.
   // Источник истины для идемпотентности вебхуков (см. ingestShopifyOrder) — не полагаемся
@@ -710,7 +710,7 @@ model OrderCommunication {
   sendKey      String? @unique
   sentByUserId String? // кто из сотрудников админки отправил (User.id), для исходящих
 
-  smsJobs SmsAutomationJob[] // авто-SMS job'ы, чьё сообщение записано в эту коммуникацию
+  automationJobs AutomationJob[] // авто-SMS job'ы, чьё сообщение записано в эту коммуникацию
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1120,35 +1120,42 @@ enum SmsJobStatus {
   CANCELLED
 }
 
-model SmsAutomation {
-  id             String       @id @default(cuid())
+// Канал доставки автоматизации. SMS — первый и пока единственный; расширяется (EMAIL/PUSH/…)
+// БЕЗ изменения модели Automation — через ChannelSender-реестр (src/modules/automations/channels).
+enum AutomationChannel {
+  SMS
+}
+
+model Automation {
+  id             String            @id @default(cuid())
   siteId         String
-  site           Site         @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  site           Site              @relation(fields: [siteId], references: [id], onDelete: Cascade)
   name           String
-  active         Boolean      @default(false) // после deploy все правила выключены
+  active         Boolean           @default(false) // после deploy все правила выключены
+  channel        AutomationChannel @default(SMS) // канал доставки (пока только SMS)
   triggerType    String // валидируется app-registry; строкой — для расширяемости без миграции
   audience       SmsAudience
-  delayAmount    Int          @default(0)
-  delayUnit      SmsDelayUnit @default(IMMEDIATE)
-  template       String
-  conditionsJson Json? // расширяемые условия (не отменён / оплачен / поле есть / есть телефон + на будущее)
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
+  delayAmount    Int               @default(0)
+  delayUnit      SmsDelayUnit      @default(IMMEDIATE)
+  template       String // текст шаблона inline (отдельная Template-сущность — фаза 2)
+  conditionsJson Json? // расширяемые условия (нормализованные AutomationCondition — фаза 2)
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
   deletedAt      DateTime? // soft-delete при наличии истории
 
-  jobs SmsAutomationJob[]
+  jobs AutomationJob[]
 
   @@index([siteId, active])
   @@index([triggerType])
 }
 
-model SmsAutomationJob {
-  id           String        @id @default(cuid())
+model AutomationJob {
+  id           String     @id @default(cuid())
   automationId String
   // Restrict: правило с историей нельзя удалить физически (только soft-delete) — job'ы сохраняются.
-  automation   SmsAutomation @relation(fields: [automationId], references: [id], onDelete: Restrict)
+  automation   Automation @relation(fields: [automationId], references: [id], onDelete: Restrict)
   orderId      String
-  order        Order         @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  order        Order      @relation(fields: [orderId], references: [id], onDelete: Cascade)
 
   recipientType   SmsRecipientType // только CUSTOMER | RECIPIENT
   phoneNormalized String // E.164 адресата (для дедупа BOTH и истории)
@@ -1164,13 +1171,41 @@ model SmsAutomationJob {
   skippedAt         DateTime?
   failedAt          DateTime?
   lastErrorSafe     String? // без PII/секретов
-  providerMessageId String? // id сообщения у QUO
+  providerMessageId String? // id сообщения у провайдера (для SMS — QUO)
   attempts          Int       @default(0)
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
+
+  executionLogs AutomationExecutionLog[]
 
   @@index([status, scheduledAt])
   @@index([automationId, status])
   @@index([orderId])
   @@index([communicationId])
+}
+
+// Глобальный «рубильник» автоматизаций (singleton, id="singleton"). При disableAll=true новые
+// job'ы не создаются и не отправляются. Строка создаётся лениво при первом переключении (без seed).
+model AutomationSettings {
+  id              String   @id @default("singleton")
+  disableAll      Boolean  @default(false)
+  updatedByUserId String?
+  updatedAt       DateTime @updatedAt
+}
+
+// Журнал выполнения — только для РЕАЛЬНО созданных Job. Пошаговая трассировка (scheduled →
+// picked → rendered → provider_accepted → sent/skipped/failed) для быстрой диагностики.
+// Без секретов/полного provider payload (только detailSafe).
+model AutomationExecutionLog {
+  id           String        @id @default(cuid())
+  jobId        String
+  job          AutomationJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  automationId String
+  orderId      String?
+  stage        String // scheduled | picked | rendered | provider_accepted | sent | skipped | failed
+  detailSafe   String? // безопасная деталь (причина skip, safe error, provider message id) — без PII/секретов
+  createdAt    DateTime      @default(now())
+
+  @@index([jobId, createdAt])
+  @@index([automationId, createdAt])
 }

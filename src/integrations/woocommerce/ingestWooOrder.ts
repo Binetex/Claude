@@ -19,7 +19,7 @@ import { deriveWooOrderState, reconcileOrderState, type OrderState } from "./ord
 import { resolveMappedOrderFields, type OrderMetaMapping } from "./orderMeta";
 import { scheduleDeliveryForNewOrder } from "@/integrations/delivery/burq/scheduleService";
 import { assignInitial } from "@/modules/assignments/service";
-import { publishOrderCreatedTrigger } from "@/modules/sms/lifecycle";
+import { publishOrderCreatedTrigger } from "@/modules/automations/lifecycle";
 
 /**
  * Авто-назначение основного флориста при переходе заказа в CONFIRMED (оплачен / в работу) —

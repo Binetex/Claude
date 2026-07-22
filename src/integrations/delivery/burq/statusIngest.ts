@@ -13,7 +13,7 @@ import { Prisma, type PrismaClient } from "@/generated/prisma/client";
 import type { DeliveryProviderStatus, DeliveryEventSource } from "@/generated/prisma/enums";
 import { mapBurqStatus, orderStatusForDelivery, isDeliveredStatus } from "./statusMap";
 import { shouldApplyDeliveryUpdate } from "./reconcile";
-import { publishTrackingAvailableTrigger } from "@/modules/sms/lifecycle";
+import { publishTrackingAvailableTrigger } from "@/modules/automations/lifecycle";
 import { decideCostUpdate } from "./costCapture";
 import { recomputeEstimatedProfit } from "@/modules/pricing/service";
 

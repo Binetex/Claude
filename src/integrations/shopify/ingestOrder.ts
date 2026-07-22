@@ -9,7 +9,7 @@ import { normalizePhone } from "@/lib/phone";
 import { scheduleDeliveryForNewOrder } from "@/integrations/delivery/burq/scheduleService";
 import { extractShopifyOrderNumber, extractSenderAddress } from "./orderFields";
 import { fetchShopifyDeliveryInstructions } from "./deliveryInstructions";
-import { publishOrderCreatedTrigger } from "@/modules/sms/lifecycle";
+import { publishOrderCreatedTrigger } from "@/modules/automations/lifecycle";
 
 /** Планирование доставки, безопасное для импорта: ошибка логируется, но не роняет приём заказа. */
 async function scheduleDeliverySafe(orderId: string): Promise<void> {

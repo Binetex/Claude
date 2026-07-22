@@ -17,6 +17,7 @@ export type AutomationFormInitial = {
   siteId: string;
   name: string;
   active: boolean;
+  channel: "SMS";
   triggerType: string;
   audience: "CUSTOMER" | "RECIPIENT" | "BOTH";
   delayAmount: number;
@@ -54,6 +55,7 @@ export function AutomationForm({
   const [siteId, setSiteId] = useState(initial?.siteId ?? sites[0]?.id ?? "");
   const [name, setName] = useState(initial?.name ?? "");
   const [active, setActive] = useState(initial?.active ?? false);
+  const channel = "SMS" as const; // пока единственный канал; выбор появится с EMAIL/PUSH/…
   const [triggerType, setTriggerType] = useState(initial?.triggerType ?? triggers[0]?.type ?? "");
   const [audience, setAudience] = useState<AutomationInput["audience"]>(initial?.audience ?? "CUSTOMER");
   const [delayUnit, setDelayUnit] = useState<AutomationInput["delayUnit"]>(initial?.delayUnit ?? "IMMEDIATE");
@@ -87,6 +89,7 @@ export function AutomationForm({
       siteId,
       name,
       active,
+      channel,
       triggerType,
       audience,
       delayAmount: delayUnit === "IMMEDIATE" ? 0 : Math.max(0, Math.floor(Number(delayAmount) || 0)),
@@ -105,7 +108,7 @@ export function AutomationForm({
       if (res.warning) { setSaveMsg({ ok: true, text: `Сохранено. ${res.warning}` }); }
       // Небольшая пауза, чтобы показать предупреждение; иначе сразу к списку.
       if (res.warning) return;
-      router.push("/dashboard/sms-marketing");
+      router.push("/dashboard/automations");
       router.refresh();
     });
   }
@@ -127,7 +130,7 @@ export function AutomationForm({
     <div className="mx-auto max-w-3xl space-y-4">
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-bold text-slate-800">{initial ? "Редактирование автоматизации" : "Новая автоматизация"}</h1>
-        <Button variant="ghost" size="sm" onClick={() => router.push("/dashboard/sms-marketing")}>← К списку</Button>
+        <Button variant="ghost" size="sm" onClick={() => router.push("/dashboard/automations")}>← К списку</Button>
       </div>
 
       <Card>
@@ -145,7 +148,14 @@ export function AutomationForm({
             </label>
           </div>
 
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <label className="space-y-1">
+              <span className="text-xs text-slate-500">Канал</span>
+              <select value={channel} disabled className="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm disabled:bg-slate-50">
+                <option value="SMS">SMS</option>
+              </select>
+              <span className="text-[11px] text-slate-400">EMAIL/PUSH/… — позже</span>
+            </label>
             <label className="space-y-1">
               <span className="text-xs text-slate-500">Событие (триггер)</span>
               <select value={triggerType} onChange={(e) => setTriggerType(e.target.value)} className="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm">
@@ -220,7 +230,7 @@ export function AutomationForm({
           <div className="flex items-center gap-2 border-t border-slate-100 pt-3">
             <Button size="sm" disabled={pending} onClick={save}>{initial ? "Сохранить" : "Создать"}</Button>
             {saveMsg && <span className={saveMsg.ok ? "text-xs text-emerald-700" : "text-xs text-red-600"}>{saveMsg.text}</span>}
-            {saveMsg?.ok && initial && <Button size="sm" variant="ghost" onClick={() => { router.push("/dashboard/sms-marketing"); router.refresh(); }}>К списку</Button>}
+            {saveMsg?.ok && initial && <Button size="sm" variant="ghost" onClick={() => { router.push("/dashboard/automations"); router.refresh(); }}>К списку</Button>}
           </div>
         </CardBody>
       </Card>

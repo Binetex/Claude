@@ -12,7 +12,7 @@ import { publishEvent } from "@/outbox/publisher";
 import { isBurqRuntimeEnabled } from "@/lib/featureFlags";
 import { applyDeliveryStatusUpdate } from "./statusIngest";
 import { refetchPodForDelivery, BURQ_POD_REFETCH_EVENT, BURQ_POD_REFETCH_DELAY_MS } from "./podService";
-import { publishOrderDeliveredTrigger } from "@/modules/sms/lifecycle";
+import { publishOrderDeliveredTrigger } from "@/modules/automations/lifecycle";
 import type { BurqWebhookEvent } from "./types";
 
 export const BURQ_WEBHOOK_EVENT = "burq.webhook.received";
