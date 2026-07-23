@@ -7,7 +7,7 @@ import { resolveOwnerBot, resolveFloristBot, resolveBotById, type BotLookup, typ
 import { isTelegramGloballyEnabled } from "./config";
 import { TelegramSender } from "./sender";
 import {
-  buttonFor,
+  buttonsFor,
   renderFloristMessage,
   renderFloristHandedOver,
   renderOwnerCreated,
@@ -15,6 +15,7 @@ import {
   renderOwnerPaymentProblem,
   type OrderSnapshot,
 } from "./templates";
+import { getOrderItemImages } from "@/modules/orders/images";
 import type { TelegramNotifyPayload } from "./events";
 
 /**
@@ -80,12 +81,18 @@ export function buildTelegramNotifyHandler(prisma: PrismaClient): OutboxHandler 
 
     const bot: ResolvedBot = lookup.bot;
     const text = renderFor(p.type, order, ctx);
-    const button = buttonFor(p.type, order.id);
+    const buttons = buttonsFor(p.type, order);
+    // Фото — только у сообщений флористу и только если у заказа есть картинка букета.
+    const wantPhoto = def.audience === "FLORIST" && !!order.imageUrl;
     const sender = new TelegramSender(bot.token);
 
     if (existing) {
       if (existing.lastText === text) return; // нечего менять
-      const edited = await sender.editMessage(existing.chatId, existing.messageId, text, button);
+      // Фото-сообщение и текстовое правятся разными методами и не конвертируются: выбираем по
+      // тому, чем сообщение было отправлено (existing.isPhoto), а не по текущему наличию фото.
+      const edited = existing.isPhoto
+        ? await sender.editMessageCaption(existing.chatId, existing.messageId, text, buttons)
+        : await sender.editMessage(existing.chatId, existing.messageId, text, buttons);
       if (edited.ok) {
         await prisma.telegramMessage.update({ where: { dedupeKey }, data: { lastText: text, eventType: p.type } });
         return;
@@ -98,7 +105,15 @@ export function buildTelegramNotifyHandler(prisma: PrismaClient): OutboxHandler 
       // Сообщение удалено/нередактируемо — отправим новое вместо него.
     }
 
-    const sent = await sender.sendMessage(bot.chatId, text, button);
+    // Пытаемся отправить с фото; если фото не отправилось (битый URL, недоступно) — откатываемся
+    // на текст, чтобы уведомление всё равно дошло. Временный сбой — на повтор через outbox.
+    let sent = wantPhoto ? await sender.sendPhoto(bot.chatId, order.imageUrl!, text, buttons) : await sender.sendMessage(bot.chatId, text, buttons);
+    let isPhoto = wantPhoto && sent.ok;
+    if (wantPhoto && !sent.ok && !sent.retryable) {
+      console.warn(`[telegram] фото для заказа ${order.id} не отправлено (${sent.code}) — отправляю текстом`);
+      sent = await sender.sendMessage(bot.chatId, text, buttons);
+      isPhoto = false;
+    }
     if (!sent.ok) {
       if (sent.retryable) throw new Error(`telegram_send_transient:${sent.code}`);
       console.error(`[telegram] send ${p.type} order ${order.id} не удалось: ${sent.code}`);
@@ -116,8 +131,9 @@ export function buildTelegramNotifyHandler(prisma: PrismaClient): OutboxHandler 
         orderId: order.id,
         eventType: p.type,
         lastText: text,
+        isPhoto,
       },
-      update: { chatId: bot.chatId, messageId: sent.messageId, botId: bot.id, lastText: text, eventType: p.type },
+      update: { chatId: bot.chatId, messageId: sent.messageId, botId: bot.id, lastText: text, eventType: p.type, isPhoto },
     });
   };
 }
@@ -145,10 +161,13 @@ async function loadOrderSnapshot(prisma: PrismaClient, orderId: string): Promise
       recipientName: true, addressLine: true, apartment: true, city: true, zip: true,
       cardMessage: true, deliveryInstructions: true,
       site: { select: { name: true } },
-      items: { select: { name: true, variantName: true, quantity: true, floristCompositionSnapshot: true } },
+      items: { select: { name: true, variantName: true, quantity: true, floristCompositionSnapshot: true, image: true, parentImageUrl: true, variantImageUrl: true } },
     },
   });
   if (!o) return null;
+  // Фото для сообщения флориста — основное (родительское) фото первой позиции.
+  const first = o.items[0];
+  const imageUrl = first ? getOrderItemImages(first).primary : null;
   return {
     id: o.id,
     orderNumber: o.orderNumber,
@@ -162,6 +181,7 @@ async function loadOrderSnapshot(prisma: PrismaClient, orderId: string): Promise
     zip: o.zip,
     cardMessage: o.cardMessage,
     deliveryInstructions: o.deliveryInstructions,
+    imageUrl,
     items: o.items.map((i) => ({ name: i.name, variantName: i.variantName, quantity: i.quantity, composition: i.floristCompositionSnapshot })),
   };
 }

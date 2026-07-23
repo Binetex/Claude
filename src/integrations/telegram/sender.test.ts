@@ -26,11 +26,33 @@ describe("sendMessage", () => {
     expect(JSON.parse(fetchMock.mock.calls[0][1].body).chat_id).toBe("-1001234567890123");
   });
 
-  it("кнопка Open Order уходит как inline_keyboard", async () => {
+  it("кнопки уходят одним рядом inline_keyboard", async () => {
     fetchMock.mockResolvedValueOnce(reply({ ok: true, result: { message_id: 1 } }));
-    await new TelegramSender("t").sendMessage("-100", "текст", { text: "Open Order", url: "https://x/y" });
+    await new TelegramSender("t").sendMessage("-100", "текст", [
+      { text: "Open Order", url: "https://x/y" },
+      { text: "📍 Google Maps", url: "https://maps/z" },
+    ]);
     const body = JSON.parse(fetchMock.mock.calls[0][1].body);
-    expect(body.reply_markup.inline_keyboard[0][0]).toEqual({ text: "Open Order", url: "https://x/y" });
+    expect(body.reply_markup.inline_keyboard[0]).toEqual([
+      { text: "Open Order", url: "https://x/y" },
+      { text: "📍 Google Maps", url: "https://maps/z" },
+    ]);
+  });
+
+  it("sendPhoto шлёт фото с подписью и кнопками", async () => {
+    fetchMock.mockResolvedValueOnce(reply({ ok: true, result: { message_id: 77 } }));
+    const r = await new TelegramSender("t").sendPhoto("-100", "https://cdn/x.jpg", "подпись", [{ text: "Open", url: "https://o" }]);
+    expect(r).toEqual({ ok: true, messageId: "77" });
+    expect(String(fetchMock.mock.calls[0][0])).toContain("/sendPhoto");
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.photo).toBe("https://cdn/x.jpg");
+    expect(body.caption).toBe("подпись");
+  });
+
+  it("editMessageCaption правит подпись фото-сообщения", async () => {
+    fetchMock.mockResolvedValueOnce(reply({ ok: true, result: {} }));
+    expect(await new TelegramSender("t").editMessageCaption("-100", "77", "новая", [])).toEqual({ ok: true });
+    expect(String(fetchMock.mock.calls[0][0])).toContain("/editMessageCaption");
   });
 
   it("429 → ждём retry_after и повторяем", async () => {

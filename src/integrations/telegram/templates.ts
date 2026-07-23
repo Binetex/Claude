@@ -1,11 +1,12 @@
 import { getAppUrl } from "@/lib/appUrl";
+import { CAPTION_LIMIT, type TelegramButton } from "./sender";
 import type { TelegramEventType } from "./registry";
 
 /**
  * Тексты внутренних уведомлений. Чистые функции — тестируются без сети и БД.
  *
  * ВАЖНО: флористу НЕ показываем финансы владельца (прибыль, себестоимость доставки, цену
- * клиента) — состав уведомления повторяет то, что флорист и так видит в своей карточке заказа.
+ * клиента). Открытку флористу тоже не показываем (по требованию владельца).
  */
 export type OrderSnapshot = {
   id: string;
@@ -20,6 +21,7 @@ export type OrderSnapshot = {
   zip: string | null;
   cardMessage: string | null;
   deliveryInstructions: string | null;
+  imageUrl: string | null; // основное фото букета (parent) для сообщения флористу
   items: { name: string; variantName: string | null; quantity: number; composition: string | null }[];
 };
 
@@ -31,7 +33,8 @@ function fmtDate(d: Date | null): string | null {
   return d.toISOString().slice(0, 10);
 }
 
-function address(o: OrderSnapshot): string | null {
+/** Адрес одной строкой — и для текста, и для запроса в Google Maps. */
+export function addressText(o: OrderSnapshot): string | null {
   const parts = [o.addressLine, o.apartment, o.city, o.zip].filter((p) => p && p.trim());
   return parts.length ? parts.join(", ") : null;
 }
@@ -43,7 +46,7 @@ function itemsBlock(o: OrderSnapshot): string {
     const comp = i.composition?.trim() ? `\n   ${esc(i.composition.trim()).split("\n").join("\n   ")}` : "";
     return `• ${esc(title)}${comp}`;
   });
-  return `\nСостав:\n${rows.join("\n")}\n`;
+  return `\n🌷 <b>Состав:</b>\n${rows.join("\n")}\n`;
 }
 
 export function floristOrderUrl(orderId: string): string {
@@ -54,23 +57,58 @@ export function ownerOrderUrl(orderId: string): string {
   return `${getAppUrl()}/dashboard/orders/${orderId}`;
 }
 
-/** Основное сообщение флористам. `reassigned` меняет только заголовок — тело одинаковое. */
+export function googleMapsUrl(address: string): string {
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`;
+}
+
+/** Шапка со временем и адресом — общая для «новый заказ» и «передан». Время и адрес выделены. */
+function deliveryHead(o: OrderSnapshot): string {
+  const date = fmtDate(o.deliveryDate);
+  const win = o.deliveryWindow?.trim();
+  // Время доставки в течение дня — жирным: флористу это важнее даты.
+  const when = [date ? `📅 ${esc(date)}` : "", win ? `⏰ <b>${esc(win)}</b>` : ""].filter(Boolean).join("   ");
+  const addr = addressText(o);
+  return (
+    (when ? `${when}\n` : "") +
+    (o.recipientName ? `👤 ${esc(o.recipientName)}\n` : "") +
+    (addr ? `📍 <b>${esc(addr)}</b>\n` : "")
+  );
+}
+
+/**
+ * Основное сообщение флористу. Идёт подписью под фото букета (если оно есть). Открытку не
+ * показываем; адрес и время доставки выделены.
+ */
 export function renderFloristMessage(o: OrderSnapshot, opts: { reassigned?: boolean; floristName?: string | null } = {}): string {
   const head = opts.reassigned ? "🔄 <b>Заказ передан</b>" : "🌸 <b>Новый заказ</b>";
   const who = opts.floristName ? ` → ${esc(opts.floristName)}` : "";
-  return (
-    `${head}${who}\n` +
-    `<b>${esc(o.orderNumber)}</b> · ${esc(o.siteName)}\n\n` +
-    line("Доставка", [fmtDate(o.deliveryDate), o.deliveryWindow].filter(Boolean).join(" ")) +
-    line("Получатель", o.recipientName) +
-    line("Адрес", address(o)) +
+  const body =
+    `${head}${who} · <b>${esc(o.orderNumber)}</b> · ${esc(o.siteName)}\n\n` +
+    deliveryHead(o) +
     itemsBlock(o) +
-    line("Открытка", o.cardMessage) +
-    line("Инструкции", o.deliveryInstructions)
-  ).trimEnd();
+    line("📝 Инструкции", o.deliveryInstructions);
+  return capForPhoto(body.trimEnd(), !!o.imageUrl);
 }
 
-/** Владельцу: новый заказ. Финансы намеренно не включаем — в MVP это поток, а не отчёт. */
+/**
+ * Сообщение прежнему флористу: заказ у него забрали. Состав уже не нужен — важно, что заказ
+ * не его. Отправляется/правится ЕГО же ботом.
+ */
+export function renderFloristHandedOver(o: OrderSnapshot, toName: string | null): string {
+  const body =
+    `↪️ <b>Заказ передан${toName ? ` → ${esc(toName)}` : ""}</b> · <b>${esc(o.orderNumber)}</b>\n\n` +
+    deliveryHead(o) +
+    `\nЭтот заказ больше не за вами.`;
+  return capForPhoto(body.trimEnd(), !!o.imageUrl);
+}
+
+/** У фото подпись ограничена 1024 символами; текст без фото — нет. Обрезаем аккуратно. */
+function capForPhoto(text: string, isPhoto: boolean): string {
+  if (!isPhoto || text.length <= CAPTION_LIMIT) return text;
+  return text.slice(0, CAPTION_LIMIT - 1).trimEnd() + "…";
+}
+
+/** Владельцу: новый заказ. Финансы намеренно не включаем — это поток, а не отчёт. */
 export function renderOwnerCreated(o: OrderSnapshot, paymentLabel: string): string {
   return (
     `🆕 <b>Новый заказ</b>\n` +
@@ -78,7 +116,7 @@ export function renderOwnerCreated(o: OrderSnapshot, paymentLabel: string): stri
     line("Оплата", paymentLabel) +
     line("Доставка", [fmtDate(o.deliveryDate), o.deliveryWindow].filter(Boolean).join(" ")) +
     line("Получатель", o.recipientName) +
-    line("Адрес", address(o))
+    line("Адрес", addressText(o))
   ).trimEnd();
 }
 
@@ -102,20 +140,14 @@ export function renderOwnerDeliveryProblem(o: OrderSnapshot, status: string, saf
 }
 
 /**
- * Сообщение прежнему флористу: заказ у него забрали. Полный состав уже не нужен — важно, что
- * заказ больше не его. Отправляется ЕГО ботом (чужое сообщение отредактировать нельзя).
+ * Кнопки под сообщением. Флорист получает «Open Order» + «Google Maps» (если есть адрес):
+ * карта открывает адрес получателя. Владелец — только «Open Order».
  */
-export function renderFloristHandedOver(o: OrderSnapshot, toName: string | null): string {
-  return (
-    `↪️ <b>Заказ передан${toName ? ` → ${esc(toName)}` : ""}</b>\n` +
-    `<b>${esc(o.orderNumber)}</b> · ${esc(o.siteName)}\n\n` +
-    line("Доставка", [fmtDate(o.deliveryDate), o.deliveryWindow].filter(Boolean).join(" ")) +
-    line("Получатель", o.recipientName) +
-    `\nЭтот заказ больше не за вами.`
-  ).trimEnd();
-}
-
-export function buttonFor(type: TelegramEventType, orderId: string): { text: string; url: string } {
+export function buttonsFor(type: TelegramEventType, o: OrderSnapshot): TelegramButton[] {
   const forFlorist = type === "order.assigned" || type === "order.handed_over";
-  return { text: "Open Order", url: forFlorist ? floristOrderUrl(orderId) : ownerOrderUrl(orderId) };
+  if (!forFlorist) return [{ text: "Open Order", url: ownerOrderUrl(o.id) }];
+  const buttons: TelegramButton[] = [{ text: "🧾 Open Order", url: floristOrderUrl(o.id) }];
+  const addr = addressText(o);
+  if (addr) buttons.push({ text: "📍 Google Maps", url: googleMapsUrl(addr) });
+  return buttons;
 }

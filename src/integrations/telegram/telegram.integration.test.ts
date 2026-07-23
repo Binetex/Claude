@@ -95,7 +95,7 @@ async function makeOrder(siteId: string) {
       recipientName: "Ann Recipient", recipientPhone: "+13105550001",
       addressLine: "1 Main St", city: "LA", zip: "90001",
       itemsTotal: new Prisma.Decimal(100), customerTotal: new Prisma.Decimal(100),
-      items: { create: [{ name: "Roses", variantName: "Standard", quantity: 1, externalPrice: new Prisma.Decimal(100), floristCompositionSnapshot: "24 roses" }] },
+      items: { create: [{ name: "Roses", variantName: "Standard", quantity: 1, externalPrice: new Prisma.Decimal(100), floristCompositionSnapshot: "24 roses", parentImageUrl: "https://cdn.example/roses.jpg" }] },
     },
   });
   createdOrderIds.push(order.id);
@@ -133,8 +133,9 @@ describe("персональные боты флористов", () => {
 
     const rows = await tgMessages(order.id);
     expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({ chatId: "111", messageId: "501", audience: "FLORIST" });
+    expect(rows[0]).toMatchObject({ chatId: "111", messageId: "501", audience: "FLORIST", isPhoto: true });
     expect(rows[0].dedupeKey).toBe(`order:${order.id}:florist:${natasha.id}`);
+    expect(String(fetchMock.mock.calls[0][0])).toContain("/sendPhoto"); // ушло фото букета
     expect(tokenOfCall(0)).toBe("token-Наташа"); // именно её токен
   });
 
@@ -174,8 +175,8 @@ describe("персональные боты флористов", () => {
     expect(oldMsg.messageId).toBe("701");              // сообщение то же самое
     expect(oldMsg.eventType).toBe("order.handed_over");
     expect(oldMsg.lastText).toContain("передан");
-    // Правка ушла токеном ОТДАЮЩЕГО — чужим ботом Telegram бы не дал.
-    expect(String(fetchMock.mock.calls[2][0])).toContain("editMessageText");
+    // Фото-сообщение правится editMessageCaption (не editMessageText), и токеном ОТДАЮЩЕГО.
+    expect(String(fetchMock.mock.calls[2][0])).toContain("editMessageCaption");
     expect(tokenOfCall(2)).toBe("token-Отдающий");
 
     const newMsg = rows.find((r) => r.chatId === "302")!;
@@ -231,6 +232,23 @@ describe("персональные боты флористов", () => {
     const rows = await tgMessages(order.id);
     expect(rows).toHaveLength(1);
     expect(rows[0].messageId).toBe("999");
+  });
+
+  it("битое фото → падаем на текст, isPhoto=false, уведомление доходит", async () => {
+    const site = await makeSite();
+    const f = await makeFlorist("Битое-фото", { chatId: "1201" });
+    const order = await makeOrder(site.id);
+    fetchMock
+      .mockResolvedValueOnce(reply({ ok: false, error_code: 400, description: "wrong file identifier/HTTP URL specified" }, 400)) // sendPhoto
+      .mockResolvedValueOnce(okSend(1301)); // sendMessage текстом
+
+    await handler(rec({ type: "order.assigned", orderId: order.id, floristId: f.id, context: { floristName: "Битое-фото" } }));
+
+    expect(String(fetchMock.mock.calls[0][0])).toContain("/sendPhoto");
+    expect(String(fetchMock.mock.calls[1][0])).toContain("/sendMessage");
+    const rows = await tgMessages(order.id);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ messageId: "1301", isPhoto: false });
   });
 });
 

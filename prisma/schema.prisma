@@ -1037,7 +1037,10 @@ model TelegramMessage {
   botId     String?
   bot       TelegramBot?     @relation(fields: [botId], references: [id], onDelete: SetNull)
   eventType String
-  lastText  String? // последний отправленный текст — не редактируем, если он не изменился
+  lastText  String? // последний отправленный текст/подпись — не редактируем, если не изменился
+  // Сообщение с фото и текстовое правятся разными методами Telegram (editMessageCaption vs
+  // editMessageText) и не конвертируются. Храним тип, чтобы при передаче заказа выбрать верный.
+  isPhoto   Boolean          @default(false)
   createdAt DateTime         @default(now())
   updatedAt DateTime         @updatedAt
 
