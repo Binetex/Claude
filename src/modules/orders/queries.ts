@@ -21,6 +21,9 @@ export type OrderFilters = {
   search?: string;
   sortBy?: "deliveryDate" | "createdAt" | "orderStatus";
   sortDir?: "asc" | "desc";
+  /** Пагинация. Без perPage выборка не ограничивается (поведение прежних вызовов). */
+  page?: number;
+  perPage?: number;
 };
 
 const DONE_STATUSES: OrderStatus[] = [
@@ -79,10 +82,19 @@ function buildWhere(f: OrderFilters): Prisma.OrderWhereInput {
  */
 function buildOrderBy(f: OrderFilters): Prisma.OrderOrderByWithRelationInput[] {
   const dir = f.sortDir ?? "asc";
-  if (f.sortBy === "orderStatus") return [{ orderStatus: dir }, { deliveryDate: "desc" }];
-  if (f.sortBy === "deliveryDate") return [{ deliveryDate: dir }, { externalCreatedAt: "desc" }];
-  if (f.sortBy === "createdAt") return [{ externalCreatedAt: dir }]; // «Дата создания» = дата размещения заказа
-  return [{ deliveryDate: "desc" }, { externalCreatedAt: "desc" }]; // дефолт: ближайшие к доставке сверху
+  // id в конце — тай-брейк: без него заказы с одинаковой датой могут переставляться между
+  // страницами (порядок неустойчив), и один и тот же заказ попадёт на две страницы либо ни на одну.
+  const tail: Prisma.OrderOrderByWithRelationInput = { id: "desc" };
+  if (f.sortBy === "orderStatus") return [{ orderStatus: dir }, { deliveryDate: "desc" }, tail];
+  if (f.sortBy === "deliveryDate") return [{ deliveryDate: dir }, { externalCreatedAt: "desc" }, tail];
+  if (f.sortBy === "createdAt") return [{ externalCreatedAt: dir }, tail]; // «Дата создания» = дата размещения заказа
+  return [{ deliveryDate: "desc" }, { externalCreatedAt: "desc" }, tail]; // дефолт: ближайшие к доставке сверху
+}
+
+/** take/skip только когда задан perPage — иначе выборка полная, как раньше. */
+function buildPage(f: OrderFilters): { take?: number; skip?: number } {
+  if (!f.perPage || f.perPage < 1) return {};
+  return { take: f.perPage, skip: (Math.max(1, f.page ?? 1) - 1) * f.perPage };
 }
 
 // ─────────── ВЛАДЕЛЕЦ ───────────
@@ -91,8 +103,14 @@ export async function listForOwner(f: OrderFilters = {}) {
     where: buildWhere(f),
     include: orderInclude,
     orderBy: buildOrderBy(f),
+    ...buildPage(f),
   });
   return orders.map(serializeForOwner);
+}
+
+/** Сколько заказов под фильтр всего — для пейджера и счётчика в заголовке. */
+export async function countOrders(f: OrderFilters = {}) {
+  return prisma.order.count({ where: buildWhere(f) });
 }
 
 export async function getForOwner(id: string) {

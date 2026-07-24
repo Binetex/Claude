@@ -1,6 +1,7 @@
 "use client";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { useState } from "react";
+import { useOrdersNav, NavSpinner } from "./OrdersNav";
 import { Search, SlidersHorizontal } from "lucide-react";
 import { orderStatusMeta } from "@/lib/statuses";
 import { Button } from "@/components/ui/button";
@@ -39,8 +40,8 @@ export function OrderFiltersBar({
   basePath?: string;
   showFloristFilter?: boolean;
 }) {
-  const router = useRouter();
   const params = useSearchParams();
+  const { pending, go } = useOrdersNav();
   const [advanced, setAdvanced] = useState(
     !!(current.status || current.siteId || current.floristId || current.date || current.sortBy)
   );
@@ -51,7 +52,10 @@ export function OrderFiltersBar({
       if (v) p.set(k, v);
       else p.delete(k);
     }
-    router.push(`${basePath}?${p.toString()}`);
+    // Любая смена фильтра — снова с первой страницы: на пятой странице «Всех» после
+    // выбора «Сегодня» была бы пустота.
+    p.delete("page");
+    go(`${basePath}?${p.toString()}`);
   }
 
   const activePreset = current.preset ?? (current.date || current.status || current.siteId || current.floristId ? "" : "today");
@@ -64,9 +68,10 @@ export function OrderFiltersBar({
           {presets.map((p) => (
             <button
               key={p.key}
+              disabled={pending}
               onClick={() => update({ preset: p.key, date: undefined, from: undefined, to: undefined })}
               className={cn(
-                "rounded-md px-3 py-1 text-sm font-medium transition-colors",
+                "rounded-md px-3 py-1 text-sm font-medium transition-colors disabled:cursor-not-allowed",
                 activePreset === p.key ? "bg-white text-slate-900 shadow-xs" : "text-slate-500 hover:text-slate-800"
               )}
             >
@@ -74,6 +79,7 @@ export function OrderFiltersBar({
             </button>
           ))}
         </div>
+        <NavSpinner />
 
         <Input
           type="date"
@@ -144,7 +150,7 @@ export function OrderFiltersBar({
               <option key={o.value} value={o.value}>{o.label}</option>
             ))}
           </Select>
-          <Button variant="ghost" size="sm" onClick={() => router.push(basePath)}>Сбросить</Button>
+          <Button variant="ghost" size="sm" disabled={pending} onClick={() => go(basePath)}>Сбросить</Button>
         </div>
       )}
     </div>
