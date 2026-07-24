@@ -5,6 +5,7 @@
  */
 import { revalidatePath } from "next/cache";
 import { requireRole } from "@/lib/rbac";
+import { saveAirwallexSettings as _saveAw, verifyAirwallex as _verifyAw, setAirwallexMonitoring as _setAwMon } from "@/integrations/airwallex/settings";
 import { isCredentialCryptoConfigured } from "@/lib/crypto/secretBox";
 import { connectWooCommerce, updateWooCredentials, disconnectWooSite } from "@/integrations/woocommerce/management";
 import { checkWooConnection } from "@/integrations/woocommerce/connection";
@@ -158,4 +159,33 @@ export async function ownerSaveWooPaymentConfig(_prev: FormState, formData: Form
   });
   revalidatePath("/dashboard/sites");
   return { ok: true, message: "Настройки оплаты сохранены." };
+}
+
+// ── Airwallex Payment Monitoring (Фаза A: настройки + Verify) ──
+export async function ownerSaveAirwallex(_prev: FormState, formData: FormData): Promise<FormState> {
+  await requireRole("OWNER");
+  const siteId = String(formData.get("siteId") ?? "");
+  const env = String(formData.get("airwallexApiEnv") ?? "prod") === "demo" ? "demo" : "prod";
+  const r = await _saveAw(prisma, siteId, {
+    clientId: String(formData.get("airwallexClientId") ?? ""),
+    apiKey: String(formData.get("airwallexApiKey") ?? ""),
+    env,
+    pendingThresholdMin: Number(formData.get("airwallexPendingThresholdMin") ?? 30) || 30,
+  });
+  revalidatePath("/dashboard/sites");
+  return "error" in r ? { error: r.error } : { ok: true, message: "Сохранено. Выполните Verify." };
+}
+
+export async function ownerVerifyAirwallex(siteId: string): Promise<FormState> {
+  await requireRole("OWNER");
+  const r = await _verifyAw(prisma, siteId);
+  revalidatePath("/dashboard/sites");
+  return r.ok ? { ok: true, message: r.message } : { error: r.message };
+}
+
+export async function ownerToggleAirwallexMonitoring(siteId: string, enabled: boolean): Promise<FormState> {
+  await requireRole("OWNER");
+  const r = await _setAwMon(prisma, siteId, enabled);
+  revalidatePath("/dashboard/sites");
+  return "error" in r ? { error: r.error } : { ok: true, message: enabled ? "Мониторинг включён." : "Мониторинг выключен." };
 }

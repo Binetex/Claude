@@ -8,6 +8,7 @@ import { SiteNameForm } from "./SiteNameForm";
 import { SiteSyncControls } from "./SiteSyncControls";
 import { WooSiteControls } from "./WooSiteControls";
 import { WooSettings } from "./WooSettings";
+import { AirwallexMonitoringPanel } from "./AirwallexMonitoringPanel";
 import { SiteTimezoneSetting } from "./SiteTimezoneSetting";
 import { SiteBurqDropoffSetting } from "./SiteBurqDropoffSetting";
 import { SiteQuoSetting } from "./SiteQuoSetting";
@@ -57,6 +58,9 @@ export default async function SitesPage() {
           consumerSecretMask: true, lastConnectionCheckAt: true, lastProductSyncAt: true, lastOrderSyncAt: true,
           orderMetaMapping: true, airwallexEnabled: true, klarnaPayLaterPendingIsConfirmed: true,
           airwallexPaymentMethodIds: true, airwallexMetaKeys: true, payLaterMaxWaitMinutes: true, unknownBehavior: true,
+          airwallexMonitoringEnabled: true, airwallexApiClientIdEncrypted: true, airwallexApiKeyEncrypted: true,
+          airwallexApiKeyMask: true, airwallexApiEnv: true, airwallexPendingThresholdMin: true,
+          airwallexApiVerifiedAt: true, airwallexApiConnStatus: true, airwallexApiErrorSafe: true,
         },
       },
       _count: { select: { orders: true, products: true, wooWebhooks: true } },
@@ -154,6 +158,21 @@ export default async function SitesPage() {
                       paymentIntentStatusKey: (s.wooConnection.airwallexMetaKeys as { paymentIntentStatusKey?: string } | null)?.paymentIntentStatusKey ?? null,
                       payLaterMaxWaitMinutes: s.wooConnection.payLaterMaxWaitMinutes,
                       unknownBehavior: s.wooConnection.unknownBehavior,
+                    }}
+                  />
+                  <AirwallexMonitoringPanel
+                    siteId={s.id}
+                    initial={{
+                      monitoringEnabled: s.wooConnection.airwallexMonitoringEnabled,
+                      clientIdConfigured: !!s.wooConnection.airwallexApiClientIdEncrypted,
+                      apiKeyConfigured: !!s.wooConnection.airwallexApiKeyEncrypted,
+                      apiKeyMask: s.wooConnection.airwallexApiKeyMask,
+                      env: s.wooConnection.airwallexApiEnv === "demo" ? "demo" : "prod",
+                      pendingThresholdMin: s.wooConnection.airwallexPendingThresholdMin,
+                      verifiedAt: s.wooConnection.airwallexApiVerifiedAt ? s.wooConnection.airwallexApiVerifiedAt.toISOString() : null,
+                      connStatus: s.wooConnection.airwallexApiConnStatus,
+                      errorSafe: s.wooConnection.airwallexApiErrorSafe,
+                      cryptoConfigured: quoCrypto,
                     }}
                   />
                 </div>

@@ -789,6 +789,17 @@ model WooCommerceConnection {
   connStatus      WooConnStatus @default(CONNECTING)
   connectionError String? // безопасный текст (без секретов/PII)
 
+  // ── Airwallex Payment Monitoring (API-опрос статуса платежа; отдельно от разбора meta выше) ──
+  airwallexMonitoringEnabled    Boolean   @default(false) // checkbox «Airwallex Payment Monitoring»
+  airwallexApiClientIdEncrypted String? // secretBox
+  airwallexApiKeyEncrypted      String? // secretBox
+  airwallexApiKeyMask           String? // "****abcd" — для UI без расшифровки
+  airwallexApiEnv               String    @default("prod") // "prod" | "demo"
+  airwallexPendingThresholdMin  Int       @default(30) // порог «долгого pending», минут
+  airwallexApiVerifiedAt        DateTime? // включить мониторинг можно только после успешного Verify
+  airwallexApiConnStatus        String? // "ok" | "unauthorized" | "error"
+  airwallexApiErrorSafe         String? // безопасная ошибка, без секретов
+
   storeName  String?
   currency   String?
   timezone   String?
