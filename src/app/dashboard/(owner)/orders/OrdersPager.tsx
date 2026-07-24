@@ -3,9 +3,7 @@ import { useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
 import { useOrdersNav } from "./OrdersNav";
-
-export const PER_PAGE_OPTIONS = [20, 50, 100, 200] as const;
-export const DEFAULT_PER_PAGE = 20;
+import { PER_PAGE_OPTIONS, DEFAULT_PER_PAGE } from "./paging";
 
 /**
  * Пейджер списка заказов. Страница и размер страницы живут в URL, поэтому ссылку на конкретную
