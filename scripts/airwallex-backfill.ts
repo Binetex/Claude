@@ -4,17 +4,25 @@ import "dotenv/config";
  * DRY-RUN по умолчанию; реальная запись требует ЯВНОГО --live --confirm.
  *
  *   npx tsx scripts/airwallex-backfill.ts --site THEFLOW --orders 20291,20253
+ *   npx tsx scripts/airwallex-backfill.ts --site THEFLOW --orders 20291,20253 --probe
  *   npx tsx scripts/airwallex-backfill.ts --site THEFLOW --orders 20291,20253 --live --confirm
  *   npx tsx scripts/airwallex-backfill.ts --site THEFLOW --limit 1        # без списка: N свежих
+ *
+ * --probe: одноразовый READ-ONLY запрос статуса в Airwallex (GET payment_intent) с показом сырого
+ * статуса, последней попытки и нормализации. Ничего не пишет, ничего не рассылает — способ узнать
+ * реальный статус платежа, не заводя мониторинг. Единственный режим, который ходит в Airwallex.
+ *
+ * --from-now: OVERRIDE для теста старого заказа — отсчёт 7-дневного потолка от «сейчас», а не от
+ * даты заказа. Без него заказ старше 7 дней не берётся в мониторинг (потолок уже истёк).
  *
  * Что делает: по каждому заказу читает свежие данные из Woo (status, payment_method,
  * payment_method_title, transaction_id, meta) и, если найден однозначный payment intent,
  * создаёт запись AirwallexPayment. Задачу сверки НЕ ставит — её подхватит штатный диспетчер
  * воркера в течение 5 минут (backfill не дублирует планирование и заодно проверяет диспетчер).
  *
- * Чего НЕ делает НИКОГДА: не ходит в Airwallex API, не шлёт Telegram, не меняет business status
- * заказа (paymentStatus, paymentClassification, orderStatus, назначение флориста, статус в Woo).
- * В dry-run не пишет в БД вообще.
+ * Чего НЕ делает НИКОГДА: не шлёт Telegram и не меняет business status заказа (paymentStatus,
+ * paymentClassification, orderStatus, назначение флориста, статус в Woo). В Airwallex ходит только
+ * с --probe. В dry-run не пишет в БД вообще.
  *
  * Гейты: Verify Airwallex у сайта обязателен всегда; включённая галочка мониторинга — только
  * для --live, чтобы backfill не стал способом обойти порядок включения.
@@ -23,7 +31,9 @@ import { prisma } from "@/lib/db";
 import { resolveWooCredentials } from "@/integrations/woocommerce/credentials";
 import { wooGet } from "@/integrations/woocommerce/client";
 import { extractIntentId, upsertAirwallexPayment, WOO_INTENT_META_KEY } from "@/integrations/airwallex/reconcile";
-import { isAirwallexMethod, initialStopAt } from "@/integrations/airwallex/policy";
+import { isAirwallexMethod, initialStopAt, normalize } from "@/integrations/airwallex/policy";
+import { AirwallexClient } from "@/integrations/airwallex/client";
+import { resolveAirwallexCreds } from "@/integrations/airwallex/settings";
 
 function arg(name: string): string | undefined {
   const i = process.argv.indexOf(`--${name}`);
@@ -64,8 +74,10 @@ async function main() {
 
   const refs = (arg("orders") ?? arg("order") ?? "").split(",").map((s) => s.trim()).filter(Boolean);
   const limit = Number(arg("limit") ?? "1");
-  const live = flag("live") && flag("confirm");
-  const mode = live ? "LIVE" : "DRY-RUN";
+  const probe = flag("probe");
+  const live = flag("live") && flag("confirm") && !probe; // probe никогда не пишет
+  const fromNow = flag("from-now");
+  const mode = probe ? "PROBE (read-only)" : live ? "LIVE" : "DRY-RUN";
 
   const site = await prisma.site.findFirst({
     where: { shortName },
@@ -122,7 +134,8 @@ async function main() {
     }
 
     const intentId = extractIntentId(woo?.meta_data);
-    const firstSeenAt = o.externalCreatedAt ?? now;
+    // --from-now: явный override для теста старого заказа, иначе отсчёт от даты заказа.
+    const firstSeenAt = fromNow ? now : (o.externalCreatedAt ?? now);
     const stopAt = initialStopAt(firstSeenAt);
     const expired = stopAt.getTime() <= now.getTime();
     const wooMethodOk = isAirwallexMethod(woo?.payment_method);
@@ -146,11 +159,31 @@ async function main() {
       `transaction_id:          ${woo?.transaction_id?.trim() ? mask(woo.transaction_id) : "—"}\n` +
       `intent id (masked):      ${mask(intentId)}   [${WOO_INTENT_META_KEY}]\n` +
       `Airwallex meta найдено:  ${relevantMeta(woo?.meta_data).join("; ") || "—"}\n` +
-      `firstSeenAt:             ${firstSeenAt.toISOString()}  (дата заказа)\n` +
+      `firstSeenAt:             ${firstSeenAt.toISOString()}  (${fromNow ? "сейчас, override --from-now" : "дата заказа"})\n` +
       `stopCheckingAt:          ${stopAt.toISOString()}${expired ? "  ← ИСТЁК" : ""}\n` +
       `nextCheckAt:             ${blocked ? "—" : `${now.toISOString()} (сразу)`}\n` +
-      `запись мониторинга:      ${blocked ? `НЕ будет — ${blocked}` : live ? "создаётся сейчас" : "БУДЕТ создана (dry-run: не создана)"}`
+      `запись мониторинга:      ${probe ? "не создаётся (probe — только чтение)" : blocked ? `НЕ будет — ${blocked}` : live ? "создаётся сейчас" : "БУДЕТ создана (dry-run: не создана)"}`
     );
+
+    // PROBE: единственное место, где скрипт обращается в Airwallex. Только чтение статуса.
+    if (probe) {
+      if (!intentId) { console.log(`статус в Airwallex:      не запрошен — нет intent id`); continue; }
+      const creds = await resolveAirwallexCreds(prisma, site.id);
+      if (!creds) { console.log(`статус в Airwallex:      не запрошен — креды не настроены`); continue; }
+      const pi = await new AirwallexClient(creds).getPaymentIntent(intentId);
+      if (!pi.ok) {
+        console.log(`статус в Airwallex:      ОШИБКА ЗАПРОСА (${pi.code})`);
+      } else if (!pi.found) {
+        console.log(`статус в Airwallex:      intent НЕ НАЙДЕН (404) → NOT_FOUND`);
+      } else {
+        console.log(
+          `статус в Airwallex:      ${pi.rawStatus}  →  нормализовано: ${normalize(pi.rawStatus, pi.latestAttemptStatus)}\n` +
+          `  последняя попытка:     ${mask(pi.latestAttemptId)} status=${pi.latestAttemptStatus ?? "—"}\n` +
+          `  суммы:                 amount=${pi.amount ?? "—"} captured=${pi.capturedAmount ?? "—"} ${pi.currency ?? ""}`
+        );
+      }
+      continue;
+    }
 
     if (blocked || !live || !intentId) continue;
 
@@ -162,7 +195,8 @@ async function main() {
   }
 
   console.log(`\n=== Итог (${mode}): создано записей ${live ? created : 0} ===`);
-  if (!live) console.log("Это был dry-run: БД не изменена, в Airwallex не ходили. Для записи: --live --confirm");
+  if (probe) console.log("Это был probe: БД не изменена, Telegram не отправлялся, мониторинг не заведён.");
+  else if (!live) console.log("Это был dry-run: БД не изменена, в Airwallex не ходили. Для записи: --live --confirm");
   else console.log("Сверку выполнит диспетчер воркера в течение 5 минут (один запрос в Airwallex на заказ).");
   await prisma.$disconnect();
 }
