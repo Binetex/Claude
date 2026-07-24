@@ -116,6 +116,22 @@ describe("приём заказа", () => {
     expect(jobs).toHaveLength(1);
   });
 
+  it("backfill старого заказа: потолок считается от даты заказа, а не от момента вставки", async () => {
+    const siteId = await makeSite();
+    const order = await makeOrder(siteId);
+    const created = new Date(Date.now() - 2 * 24 * 60 * 60_000); // заказ двухдневной давности
+
+    await upsertAirwallexPayment(prisma, {
+      orderId: order.id, siteId, paymentIntentId: "int_old", paymentMethod: "airwallex_card", firstSeenAt: created,
+    });
+
+    const r = await rec(order.id);
+    expect(r.firstSeenAt.getTime()).toBe(created.getTime());
+    // 7 дней от даты заказа → остаётся 5, а не 7: старый заказ не получает полный срок заново.
+    const daysLeft = (r.stopCheckingAt!.getTime() - Date.now()) / (24 * 60 * 60_000);
+    expect(Math.round(daysLeft)).toBe(5);
+  });
+
   it("не-Airwallex gateway → запись не создаётся (#20295)", async () => {
     const siteId = await makeSite();
     const order = await makeOrder(siteId, { paymentMethod: "ppcp-gateway" });

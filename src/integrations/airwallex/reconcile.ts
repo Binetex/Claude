@@ -181,20 +181,25 @@ async function fetchWooPaymentFacts(
  */
 export async function upsertAirwallexPayment(
   prisma: PrismaClient,
-  input: { orderId: string; siteId: string; paymentIntentId: string | null; paymentMethod: string | null }
+  input: {
+    orderId: string; siteId: string; paymentIntentId: string | null; paymentMethod: string | null;
+    /** Backfill старого заказа: отсчёт 7-дневного потолка от даты заказа, а не от момента вставки. */
+    firstSeenAt?: Date;
+  }
 ): Promise<{ created: boolean; intentChanged: boolean }> {
   const existing = await prisma.airwallexPayment.findUnique({ where: { orderId: input.orderId } });
   const now = new Date();
 
   if (!existing) {
+    const firstSeenAt = input.firstSeenAt ?? now;
     await prisma.airwallexPayment.create({
       data: {
         orderId: input.orderId, siteId: input.siteId,
         paymentIntentId: input.paymentIntentId, paymentMethod: input.paymentMethod,
-        firstSeenAt: now,
+        firstSeenAt,
         // Потолок мониторинга ставится СРАЗУ при создании — иначе NOT_STARTED/ACTION_REQUIRED/
         // AUTHORIZED_NOT_CAPTURED/FAILED могли бы опрашиваться без ограничения.
-        stopCheckingAt: initialStopAt(now),
+        stopCheckingAt: initialStopAt(firstSeenAt),
         nextCheckAt: now, // новый intent проверяем сразу
         monitoringActive: true,
       },
