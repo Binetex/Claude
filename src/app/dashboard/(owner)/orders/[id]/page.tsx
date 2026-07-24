@@ -12,6 +12,7 @@ import { formatMoney } from "@/lib/money";
 import { fmtDate, fmtDateTime, formatOrderNumber } from "@/lib/format";
 import { TERMINAL_ORDER_STATUSES } from "@/lib/statuses";
 import { OrderItemComposition } from "@/components/OrderItemComposition";
+import { AirwallexPanel } from "./AirwallexPanel";
 import { UpdateCompositionButton } from "../UpdateCompositionButton";
 import { OwnerOrderControls } from "./OwnerOrderControls";
 import { ContactEditDialog } from "./ContactEditDialog";
@@ -318,6 +319,9 @@ export default async function OwnerOrderPage({ params }: { params: Promise<{ id:
               />
             </CardBody>
           </Card>
+
+          {/* Сверка платежа с Airwallex — только владельцу */}
+          {order.airwallex && <AirwallexPanel aw={order.airwallex} />}
 
           {/* Общение (SMS/звонки) через QUO */}
           <OrderCommunications

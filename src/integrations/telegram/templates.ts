@@ -129,6 +129,40 @@ export function renderOwnerPaymentProblem(o: OrderSnapshot, safeReason: string):
   ).trimEnd();
 }
 
+/** Платёж Airwallex завис дольше порога. */
+export function renderOwnerPendingTooLong(o: OrderSnapshot, minutes: string | null, status: string | null): string {
+  return (
+    `⏳ <b>Оплата долго в ожидании</b>\n` +
+    `<b>${esc(o.orderNumber)}</b> · ${esc(o.siteName)}\n\n` +
+    line("Статус Airwallex", status) +
+    line("В ожидании", minutes ? `${minutes} мин` : null) +
+    line("Доставка", fmtDate(o.deliveryDate))
+  ).trimEnd();
+}
+
+/** Airwallex и WooCommerce разошлись — самый важный сигнал сверки. */
+export function renderOwnerStatusMismatch(o: OrderSnapshot, mismatchType: string | null, normalized: string | null): string {
+  const human =
+    mismatchType === "airwallex_paid_woo_unpaid" ? "Airwallex подтвердил оплату, а в WooCommerce её нет"
+    : mismatchType === "airwallex_failed_woo_paid" ? "В WooCommerce заказ оплачен, а Airwallex сообщает об отказе"
+    : "Статусы оплаты расходятся";
+  return (
+    `❗️ <b>Расхождение статуса оплаты</b>\n` +
+    `<b>${esc(o.orderNumber)}</b> · ${esc(o.siteName)}\n\n` +
+    line("Что не так", human) +
+    line("Airwallex", normalized)
+  ).trimEnd();
+}
+
+/** Платёж не найден в Airwallex после повторов. */
+export function renderOwnerPaymentNotFound(o: OrderSnapshot): string {
+  return (
+    `🔍 <b>Платёж не найден в Airwallex</b>\n` +
+    `<b>${esc(o.orderNumber)}</b> · ${esc(o.siteName)}\n\n` +
+    `Intent не найден после нескольких проверок — возможно, оплата шла другим способом.`
+  ).trimEnd();
+}
+
 export function renderOwnerDeliveryProblem(o: OrderSnapshot, status: string, safeReason: string | null): string {
   return (
     `🚨 <b>Проблема с доставкой</b>\n` +

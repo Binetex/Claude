@@ -28,7 +28,7 @@ export type AirwallexIntentStatus =
   | "UNKNOWN";
 
 export type PaymentIntentResult =
-  | { ok: true; found: true; status: AirwallexIntentStatus; rawStatus: string; latestAttemptStatus: string | null; capturedAmount: number | null; amount: number | null; currency: string | null }
+  | { ok: true; found: true; status: AirwallexIntentStatus; rawStatus: string; latestAttemptStatus: string | null; latestAttemptId: string | null; capturedAmount: number | null; amount: number | null; currency: string | null }
   | { ok: true; found: false } // 404 — intent не найден
   | { ok: false; retryable: boolean; code: string; reauth?: boolean };
 
@@ -129,7 +129,7 @@ export class AirwallexClient {
       amount?: number;
       currency?: string;
       captured_amount?: number;
-      latest_payment_attempt?: { status?: string } | null;
+      latest_payment_attempt?: { id?: string; status?: string } | null;
     };
     const rawStatus = String(o.status ?? "");
     return {
@@ -138,6 +138,7 @@ export class AirwallexClient {
       status: normalizeStatus(rawStatus),
       rawStatus,
       latestAttemptStatus: o.latest_payment_attempt?.status ?? null,
+      latestAttemptId: o.latest_payment_attempt?.id ?? null,
       capturedAmount: typeof o.captured_amount === "number" ? o.captured_amount : null,
       amount: typeof o.amount === "number" ? o.amount : null,
       currency: o.currency ?? null,

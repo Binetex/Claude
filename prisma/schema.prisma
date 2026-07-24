@@ -259,6 +259,18 @@ enum SyncKind {
 // сообщение у флористов и у владельца — они не затирают друг друга.
 // Назначение бота. Разные боты могут указывать на ОДИН чат — chatId живёт на боте,
 // а не на аудитории, поэтому это не создаёт конфликта.
+enum AirwallexNormalizedStatus {
+  PAID
+  AUTHORIZED_NOT_CAPTURED
+  PENDING
+  ACTION_REQUIRED
+  FAILED
+  NOT_STARTED
+  CANCELLED
+  NOT_FOUND
+  UNKNOWN
+}
+
 enum TelegramBotPurpose {
   OWNER
   FLORIST
@@ -618,6 +630,8 @@ model Order {
   telegramMessages TelegramMessage[]
   audits         OrderAudit[]
   automationJobs AutomationJob[]
+  airwallexPayment AirwallexPayment?
+  airwallexChecks  AirwallexCheck[]
 
   // NULL допустим много раз (Postgres: NULL != NULL) — не мешает заказам без внешнего источника.
   // Источник истины для идемпотентности вебхуков (см. ingestShopifyOrder) — не полагаемся
@@ -1108,6 +1122,58 @@ model TelegramSettings {
   lastErrorSafe     String? // безопасная причина последней неудачи, без секретов
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
+}
+
+/**
+ * Текущее состояние Airwallex-платежа заказа (1:1). Одна активная запись на заказ (MVP):
+ * при смене intent id старое уходит в AirwallexCheck, запись сбрасывается на новый intent.
+ * Режим наблюдения: business status заказа НЕ меняется.
+ */
+model AirwallexPayment {
+  id                    String                     @id @default(cuid())
+  orderId               String                     @unique
+  order                 Order                      @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  siteId                String
+  paymentIntentId       String?
+  paymentMethod         String?
+  lastRawStatus         String?
+  lastAttemptId         String?
+  lastAttemptStatus     String?
+  normalizedStatus      AirwallexNormalizedStatus?
+  firstSeenAt           DateTime                   @default(now())
+  firstPendingAt        DateTime?
+  lastCheckedAt         DateTime?
+  nextCheckAt           DateTime?
+  stopCheckingAt        DateTime?
+  pendingAlertSentAt    DateTime?
+  failedAlertAttemptId  String?
+  notFoundCount         Int                        @default(0)
+  consecutiveErrorCount Int                        @default(0)
+  monitoringActive      Boolean                    @default(true)
+  safeError             String?
+  createdAt             DateTime                   @default(now())
+  updatedAt             DateTime                   @updatedAt
+
+  @@index([siteId, monitoringActive, nextCheckAt])
+}
+
+/** Компактный журнал сверок Airwallex (без полного raw payload). */
+model AirwallexCheck {
+  id               String                     @id @default(cuid())
+  orderId          String
+  order            Order                      @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  siteId           String
+  paymentIntentId  String?
+  attemptId        String?
+  rawStatus        String?
+  attemptStatus    String?
+  normalizedStatus AirwallexNormalizedStatus?
+  outcome          String
+  safeError        String?
+  checkedAt        DateTime                   @default(now())
+
+  @@index([orderId, checkedAt])
+  @@index([siteId, checkedAt])
 }
 
 // ─────────────────────────────  BURQ SETTINGS  ─────────────────────────────

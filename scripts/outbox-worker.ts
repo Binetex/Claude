@@ -32,6 +32,9 @@ import { buildAutomationTriggerHandler, buildAutomationSendHandler } from "@/mod
 import { AUTOMATION_TRIGGER_EVENT, AUTOMATION_SEND_EVENT } from "@/modules/automations/events";
 import { buildTelegramNotifyHandler } from "@/integrations/telegram/handler";
 import { TELEGRAM_NOTIFY_EVENT } from "@/integrations/telegram/events";
+import { buildAirwallexVerifyHandler } from "@/integrations/airwallex/handler";
+import { AIRWALLEX_VERIFY_EVENT } from "@/integrations/airwallex/events";
+import { dispatchAirwallexChecks } from "@/integrations/airwallex/dispatcher";
 import { createSmsChannelSender } from "@/modules/automations/channels/sms";
 import { getQuoConfig } from "@/integrations/quo/config";
 import { createQuoClient } from "@/integrations/quo/client";
@@ -84,6 +87,8 @@ async function main() {
     // Automation Engine: событие заказа → создать job'ы под активные правила Site (отложенно).
     // Внутренние Telegram-уведомления сотрудникам: один обработчик на все типы событий.
     [TELEGRAM_NOTIFY_EVENT]: buildTelegramNotifyHandler(prisma),
+    // Сверка платежа с Airwallex (режим наблюдения: business status заказа не меняется).
+    [AIRWALLEX_VERIFY_EVENT]: buildAirwallexVerifyHandler(prisma),
     [AUTOMATION_TRIGGER_EVENT]: buildAutomationTriggerHandler(prisma),
     // Automation Engine: отправка одного due job через ChannelSender (SMS — поверх QUO-номера Site).
     [AUTOMATION_SEND_EVENT]: buildAutomationSendHandler(prisma, {
@@ -133,6 +138,20 @@ async function main() {
   reconcileTimer?.unref?.();
   if (reconcileTimer) log("burq.reconcile.enabled", { intervalMs: reconcileMs });
   else log("burq.reconcile.disabled", { reason: "BURQ_RUNTIME_ENABLED=false" });
+
+  // Диспетчер Airwallex: один индексированный SELECT раз в 5 минут, LIMIT 50, задачи — в outbox.
+  // Отдельного планировщика нет. Выключается флагом AIRWALLEX_MONITORING_ENABLED=false.
+  const awMs = Number(process.env.AIRWALLEX_DISPATCH_MS ?? 300_000); // 5 мин
+  const awTimer = process.env.AIRWALLEX_MONITORING_ENABLED === "true"
+    ? setInterval(() => {
+        if (shuttingDown) return;
+        dispatchAirwallexChecks(prisma)
+          .then((r) => { if (r.selected > 0) log("airwallex.dispatch.tick", r); })
+          .catch((err) => log("airwallex.dispatch.error", { error: err instanceof Error ? err.message : String(err) }));
+      }, awMs)
+    : null;
+  awTimer?.unref?.();
+  log(awTimer ? "airwallex.dispatch.enabled" : "airwallex.dispatch.disabled", { intervalMs: awTimer ? awMs : undefined });
 
   log("worker.started", { workerId: worker.id });
   try {

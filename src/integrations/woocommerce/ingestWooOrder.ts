@@ -22,6 +22,7 @@ import { assignInitial } from "@/modules/assignments/service";
 import { publishOrderCreatedTrigger, scheduleDeliveryTodayTrigger, publishPaymentStateTrigger } from "@/modules/automations/lifecycle";
 import { paymentTriggerFor } from "@/modules/automations/paymentTriggers";
 import { publishTelegramNotification } from "@/integrations/telegram/events";
+import { onWooOrderIngestedForAirwallex } from "@/integrations/airwallex/reconcile";
 
 /**
  * Авто-назначение основного флориста при переходе заказа в CONFIRMED (оплачен / в работу) —
@@ -171,6 +172,8 @@ export async function ingestWooOrder(
     const prev: OrderState = { orderStatus: existing.orderStatus, paymentStatus: existing.paymentStatus };
     const reconciled = await applyUpdate(existing.id, prev);
     await autoAssignWooIfConfirmed(existing.id, prev, reconciled);
+    // Airwallex-мониторинг: держим intent id свежим и на update (новая попытка оплаты).
+    await onWooOrderIngestedForAirwallex(prisma, { orderId: existing.id, siteId: site.id, paymentMethod: wooOrder.payment_method ?? null, meta: wooOrder.meta_data });
     if (opts.emitLifecycle) {
       // Триггеры оплаты — строго на ПЕРЕХОДЕ состояния, иначе каждый resync слал бы повтор.
       const trigger = paymentTriggerFor(payment, reconciled.paymentStatus);
@@ -305,6 +308,7 @@ export async function ingestWooOrder(
     console.error(`[burq] не удалось запланировать доставку для заказа ${created.id}:`, e instanceof Error ? e.message : String(e));
   }
   // Авто-SMS: ORDER_CREATED только для нового заказа из ЖИВОГО webhook (не bulk-sync/backfill).
+  await onWooOrderIngestedForAirwallex(prisma, { orderId: created.id, siteId: site.id, paymentMethod: wooOrder.payment_method ?? null, meta: wooOrder.meta_data });
   // Владельцу — о ЛЮБОМ новом заказе, включая неоплаченный. Строго при первом создании строки
   // Order: ветка create достижима только один раз, resync/повторный webhook идут в update.
   await publishTelegramNotification(prisma, {

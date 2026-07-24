@@ -13,6 +13,9 @@ import {
   renderOwnerCreated,
   renderOwnerDeliveryProblem,
   renderOwnerPaymentProblem,
+  renderOwnerPendingTooLong,
+  renderOwnerStatusMismatch,
+  renderOwnerPaymentNotFound,
   type OrderSnapshot,
 } from "./templates";
 import { getOrderItemImages } from "@/modules/orders/images";
@@ -147,7 +150,13 @@ function renderFor(type: TelegramNotifyPayload["type"], order: OrderSnapshot, ct
     case "order.created":
       return renderOwnerCreated(order, ctx.paymentLabel ?? "—");
     case "payment.failed":
-      return renderOwnerPaymentProblem(order, ctx.safeReason ?? "требуется проверка оплаты");
+      return renderOwnerPaymentProblem(order, ctx.safeReason ?? ctx.attemptStatus ?? "платёж отклонён");
+    case "payment.pending_too_long":
+      return renderOwnerPendingTooLong(order, ctx.pendingMinutes ?? null, ctx.normalized ?? null);
+    case "payment.status_mismatch":
+      return renderOwnerStatusMismatch(order, ctx.mismatchType ?? null, ctx.normalized ?? null);
+    case "payment.not_found":
+      return renderOwnerPaymentNotFound(order);
     case "delivery.problem":
       return renderOwnerDeliveryProblem(order, ctx.status ?? "PROBLEM", ctx.safeReason ?? null);
   }

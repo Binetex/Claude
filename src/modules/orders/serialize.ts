@@ -2,8 +2,15 @@ import { Prisma } from "@/generated/prisma/client";
 import { toNumber } from "@/lib/money";
 import { getOrderItemImages } from "./images";
 
+/** "int_uspdw9pdbhk4383b0pz" → "int_…83b0pz" — достаточно для сверки, без длинного хвоста. */
+function shortIntent(id: string): string {
+  return id.length <= 14 ? id : `${id.slice(0, 4)}…${id.slice(-6)}`;
+}
+
 // Полный набор связей для карточки заказа.
 export const orderInclude = {
+  // Состояние сверки с Airwallex — отдаётся ТОЛЬКО владельцу (см. serializeForOwner).
+  airwallexPayment: true,
   site: true,
   items: true,
   currentFlorist: { include: { user: { select: { name: true } } } },
@@ -76,6 +83,23 @@ export function serializeForOwner(o: OrderWithRelations) {
     },
     syncStatus: o.syncStatus,
     priceMode: o.priceMode,
+    airwallex: o.airwallexPayment
+      ? {
+          paymentMethod: o.airwallexPayment.paymentMethod,
+          // Intent показываем сокращённо — полный id владельцу не нужен в списке.
+          intentIdShort: o.airwallexPayment.paymentIntentId ? shortIntent(o.airwallexPayment.paymentIntentId) : null,
+          rawStatus: o.airwallexPayment.lastRawStatus,
+          normalizedStatus: o.airwallexPayment.normalizedStatus,
+          attemptStatus: o.airwallexPayment.lastAttemptStatus,
+          lastCheckedAt: o.airwallexPayment.lastCheckedAt,
+          nextCheckAt: o.airwallexPayment.nextCheckAt,
+          pendingSinceMinutes: o.airwallexPayment.firstPendingAt
+            ? Math.max(0, Math.round((Date.now() - o.airwallexPayment.firstPendingAt.getTime()) / 60000))
+            : null,
+          monitoringActive: o.airwallexPayment.monitoringActive,
+          safeError: o.airwallexPayment.safeError,
+        }
+      : null,
     items: o.items.map((i) => ({
       id: i.id,
       name: i.name,

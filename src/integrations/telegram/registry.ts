@@ -17,6 +17,9 @@ export const TELEGRAM_EVENTS = [
   "order.handed_over",
   "order.created",
   "payment.failed",
+  "payment.pending_too_long",
+  "payment.status_mismatch",
+  "payment.not_found",
   "delivery.problem",
 ] as const;
 
@@ -62,6 +65,27 @@ const REGISTRY: Record<TelegramEventType, TelegramEventDef> = {
     perFlorist: false,
     dedupeKey: ({ orderId }) => `order:${orderId}:owner.payment`,
     description: "Платёж отклонён (PAYMENT_FAILED).",
+  },
+  "payment.pending_too_long": {
+    type: "payment.pending_too_long",
+    audience: "OWNER",
+    perFlorist: false,
+    dedupeKey: ({ orderId }) => `order:${orderId}:owner.pending_long`,
+    description: "Платёж Airwallex висит в ожидании дольше порога магазина.",
+  },
+  "payment.status_mismatch": {
+    type: "payment.status_mismatch",
+    audience: "OWNER",
+    perFlorist: false,
+    dedupeKey: ({ orderId }) => `order:${orderId}:owner.mismatch`,
+    description: "Статус оплаты в Airwallex расходится с WooCommerce.",
+  },
+  "payment.not_found": {
+    type: "payment.not_found",
+    audience: "OWNER",
+    perFlorist: false,
+    dedupeKey: ({ orderId }) => `order:${orderId}:owner.not_found`,
+    description: "Платёж не найден в Airwallex после нескольких попыток.",
   },
   "delivery.problem": {
     type: "delivery.problem",
