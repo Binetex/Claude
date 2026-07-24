@@ -2,7 +2,7 @@ import "server-only";
 import { prisma } from "@/lib/db";
 import { DEFAULT_STORE_TZ, utcDayRangeForLocalToday } from "@/lib/tz";
 import { toNumber } from "@/lib/money";
-import { TERMINAL_ORDER_STATUSES } from "@/lib/statuses";
+import { TERMINAL_ORDER_STATUSES, IN_WORK_ORDER_STATUSES } from "@/lib/statuses";
 import type { OrderStatus } from "@/generated/prisma/enums";
 
 // Требуют назначения: не ждут оплаты и не терминальные (выполнен/отменён).
@@ -26,7 +26,6 @@ export async function getOwnerDashboard() {
     ordersToday,
     ordersTomorrow,
     unassigned,
-    awaitingAccept,
     inProgress,
     ready,
     inTransit,
@@ -36,8 +35,9 @@ export async function getOwnerDashboard() {
     prisma.order.count({ where: { deliveryDate: { gte: today.gte, lt: today.lt } } }),
     prisma.order.count({ where: { deliveryDate: { gte: tomorrow.gte, lt: tomorrow.lt } } }),
     prisma.order.count({ where: { assignmentStatus: "UNASSIGNED", orderStatus: { notIn: NOT_NEEDING_ASSIGNMENT } } }),
-    prisma.order.count({ where: { assignmentStatus: "ASSIGNED" } }),
-    prisma.order.count({ where: { orderStatus: "IN_PROGRESS" } }),
+    // «В работе» = вся группа статусов у флориста. Считать один IN_PROGRESS нельзя: назначение
+    // с авто-принятием ставит FLORIST_ACCEPTED, поэтому счётчик всегда показывал ноль.
+    prisma.order.count({ where: { orderStatus: { in: IN_WORK_ORDER_STATUSES } } }),
     prisma.order.count({ where: { orderStatus: "READY" } }),
     prisma.order.count({ where: { orderStatus: "IN_TRANSIT" } }),
     prisma.order.count({ where: { orderStatus: "DELIVERED", deliveryDate: { gte: today.gte, lt: today.lt } } }),
@@ -66,7 +66,6 @@ export async function getOwnerDashboard() {
       ordersToday,
       ordersTomorrow,
       unassigned,
-      awaitingAccept,
       inProgress,
       ready,
       inTransit,

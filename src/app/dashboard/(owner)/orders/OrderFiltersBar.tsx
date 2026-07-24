@@ -3,12 +3,11 @@ import { useSearchParams } from "next/navigation";
 import { useState } from "react";
 import { useOrdersNav, NavSpinner } from "./OrdersNav";
 import { Search, SlidersHorizontal } from "lucide-react";
-import { orderStatusMeta } from "@/lib/statuses";
+import { orderStatusFilterOptions, statusFilterValue } from "@/lib/statuses";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { cn } from "@/lib/cn";
-import type { OrderStatus } from "@/generated/prisma/enums";
 import type { OrderFilters } from "@/modules/orders/queries";
 
 const presets = [
@@ -111,13 +110,15 @@ export function OrderFiltersBar({
       {advanced && (
         <div className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-white p-3">
           <Select
-            value={current.status ?? ""}
+            // Ссылка может содержать ASSIGNED/FLORIST_ACCEPTED — в списке такого пункта нет,
+            // поэтому показываем общий «В работе», иначе select молча сбросится на «Все статусы».
+            value={statusFilterValue(current.status)}
             onChange={(e) => update({ status: e.target.value || undefined })}
             wrapperClassName="w-full sm:w-48"
           >
             <option value="">Все статусы</option>
-            {(Object.keys(orderStatusMeta) as OrderStatus[]).map((s) => (
-              <option key={s} value={s}>{orderStatusMeta[s].label}</option>
+            {orderStatusFilterOptions.map((s) => (
+              <option key={s.value} value={s.value}>{s.label}</option>
             ))}
           </Select>
           <Select

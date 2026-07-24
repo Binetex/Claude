@@ -50,7 +50,6 @@ export default async function DashboardPage() {
         <StatCard label="Заказы сегодня" value={metrics.ordersToday} />
         <StatCard label="Заказы завтра" value={metrics.ordersTomorrow} />
         <StatCard label="Без флориста" value={metrics.unassigned} tone={metrics.unassigned > 0 ? "danger" : "default"} />
-        <StatCard label="Ожидают принятия" value={metrics.awaitingAccept} tone={metrics.awaitingAccept > 0 ? "warning" : "default"} />
         <StatCard label="В работе" value={metrics.inProgress} />
         <StatCard label="Готовы" value={metrics.ready} tone={metrics.ready > 0 ? "success" : "default"} />
         <StatCard label="В пути" value={metrics.inTransit} />

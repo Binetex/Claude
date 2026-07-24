@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { Prisma } from "@/generated/prisma/client";
 import type { OrderStatus } from "@/generated/prisma/enums";
 import { startOfDay, endOfDay, addDays } from "date-fns";
+import { IN_WORK_ORDER_STATUSES } from "@/lib/statuses";
 import {
   orderInclude,
   serializeForOwner,
@@ -54,6 +55,8 @@ function buildWhere(f: OrderFilters): Prisma.OrderWhereInput {
   }
 
   if (f.preset === "done") where.orderStatus = { in: DONE_STATUSES };
+  // Фильтр «В работе» ищет всю группу: пользователь выбирает смысл, а не значение enum.
+  else if (f.status && IN_WORK_ORDER_STATUSES.includes(f.status)) where.orderStatus = { in: IN_WORK_ORDER_STATUSES };
   else if (f.status) where.orderStatus = f.status;
 
   if (f.siteId) where.siteId = f.siteId;

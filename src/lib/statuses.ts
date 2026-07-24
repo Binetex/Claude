@@ -17,11 +17,22 @@ const TONE = {
   danger: "bg-red-50 text-red-700 border-red-200",
 } as const;
 
+/**
+ * Три состояния с одинаковым смыслом «заказ у флориста, идёт работа»:
+ *  - ASSIGNED — легаси старого flow (assign + отдельное «принять»), новых не появляется;
+ *  - FLORIST_ACCEPTED — то, что ставит текущее назначение с авто-принятием;
+ *  - IN_PROGRESS — исторический переход «начать работу», на практике не используется.
+ * Разделять их в интерфейсе нечем: передача заказа флористу и означает, что он в работе,
+ * а если флорист не берёт — он передаёт заказ дальше сам. Поэтому в UI это ОДИН статус,
+ * а в БД значения остаются как есть (миграция ради косметики не нужна).
+ */
+export const IN_WORK_ORDER_STATUSES: OrderStatus[] = ["ASSIGNED", "FLORIST_ACCEPTED", "IN_PROGRESS"];
+
 export const orderStatusMeta: Record<OrderStatus, Meta> = {
   AWAITING_PAYMENT: { label: "Ожидает оплаты", className: TONE.neutral },
   CONFIRMED: { label: "Подтверждён", className: TONE.neutral },
-  ASSIGNED: { label: "Назначен флористу", className: TONE.info },
-  FLORIST_ACCEPTED: { label: "Флорист принял", className: TONE.info },
+  ASSIGNED: { label: "В работе", className: TONE.info },
+  FLORIST_ACCEPTED: { label: "В работе", className: TONE.info },
   IN_PROGRESS: { label: "В работе", className: TONE.info },
   READY: { label: "Готов", className: TONE.success },
   AWAITING_COURIER: { label: "Ожидает курьера", className: TONE.info },
@@ -30,6 +41,29 @@ export const orderStatusMeta: Record<OrderStatus, Meta> = {
   PROBLEM: { label: "Проблема", className: TONE.danger },
   CANCELLED: { label: "Отменён", className: TONE.neutral },
 };
+
+/**
+ * Пункты фильтра по статусу — по одному на СМЫСЛ, а не на значение enum. Три «рабочих»
+ * статуса схлопнуты в один пункт (см. IN_WORK_ORDER_STATUSES), иначе в списке три
+ * одинаковых «В работе», из которых два ничего не находят.
+ */
+export const orderStatusFilterOptions: { value: OrderStatus; label: string }[] = [
+  { value: "AWAITING_PAYMENT", label: orderStatusMeta.AWAITING_PAYMENT.label },
+  { value: "CONFIRMED", label: orderStatusMeta.CONFIRMED.label },
+  { value: "IN_PROGRESS", label: orderStatusMeta.IN_PROGRESS.label }, // покрывает всю группу «в работе»
+  { value: "READY", label: orderStatusMeta.READY.label },
+  { value: "AWAITING_COURIER", label: orderStatusMeta.AWAITING_COURIER.label },
+  { value: "IN_TRANSIT", label: orderStatusMeta.IN_TRANSIT.label },
+  { value: "DELIVERED", label: orderStatusMeta.DELIVERED.label },
+  { value: "PROBLEM", label: orderStatusMeta.PROBLEM.label },
+  { value: "CANCELLED", label: orderStatusMeta.CANCELLED.label },
+];
+
+/** Значение для select фильтра: вся группа «в работе» показывается одним пунктом IN_PROGRESS. */
+export function statusFilterValue(status?: OrderStatus | null): string {
+  if (!status) return "";
+  return IN_WORK_ORDER_STATUSES.includes(status) ? "IN_PROGRESS" : status;
+}
 
 /**
  * Метка статуса заказа с UI-различием «оплата не прошла» (WooCommerce `failed`) от обычного
@@ -54,10 +88,15 @@ export const paymentStatusMeta: Record<PaymentStatus, Meta> = {
   PARTIALLY_REFUNDED: { label: "Частичный возврат", className: "bg-orange-100 text-orange-800 border-orange-200" },
 };
 
+/**
+ * ASSIGNED и ACCEPTED различались, пока флорист принимал заказ отдельным действием. Сейчас
+ * назначение сразу активирует заказ, поэтому «ожидает принятия» не существует как состояние:
+ * ASSIGNED остался только у старых заказов. Обоим — одна метка «Назначен флористу».
+ */
 export const assignmentStatusMeta: Record<AssignmentStatus, Meta> = {
   UNASSIGNED: { label: "Требует назначения", className: "bg-red-100 text-red-800 border-red-200" },
-  ASSIGNED: { label: "Ожидает принятия", className: "bg-indigo-100 text-indigo-800 border-indigo-200" },
-  ACCEPTED: { label: "Принят флористом", className: "bg-violet-100 text-violet-800 border-violet-200" },
+  ASSIGNED: { label: "Назначен флористу", className: TONE.info },
+  ACCEPTED: { label: "Назначен флористу", className: TONE.info },
 };
 
 export const deliveryStatusMeta: Record<DeliveryStatus, Meta> = {

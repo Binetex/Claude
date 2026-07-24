@@ -29,7 +29,10 @@ export default async function OwnerOrderPage({ params }: { params: Promise<{ id:
   if (!order) notFound();
 
   const florists = await prisma.florist.findMany({ include: { user: true }, orderBy: { createdAt: "asc" } });
-  const showAssignment = !(TERMINAL_ORDER_STATUSES as string[]).includes(order.orderStatus);
+  // Бейдж назначения показываем, только когда он что-то добавляет к статусу заказа —
+  // то есть флориста ещё нет. Назначенный заказ и так виден по статусу «В работе».
+  const showAssignment =
+    !(TERMINAL_ORDER_STATUSES as string[]).includes(order.orderStatus) && order.assignmentStatus === "UNASSIGNED";
 
   // QUO: история коммуникаций + номер магазина. Обёрнуто в try/catch — временная недоступность
   // не должна ронять карточку заказа (историю читаем из локальной БД, не из QUO).
