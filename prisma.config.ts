@@ -9,6 +9,13 @@ export default defineConfig({
     path: "prisma/migrations",
   },
   datasource: {
-    url: process.env["DATABASE_URL"],
+    // Только для CLI-команд (migrate/introspect) — runtime сюда не смотрит, он поднимает
+    // клиент через driver adapter с DATABASE_URL (см. src/lib/db.ts).
+    //
+    // Миграции идут по ПРЯМОМУ подключению, в обход Neon pooler: migrate берёт сессионную
+    // advisory-блокировку, а транзакционный пулер переиспользует серверные соединения — при
+    // обрыве по таймауту блокировка залипала в пуле и валила все следующие деплои (P1002).
+    // Без DIRECT_URL (локальная разработка, throwaway-БД) поведение прежнее.
+    url: process.env["DIRECT_URL"] ?? process.env["DATABASE_URL"],
   },
 });
