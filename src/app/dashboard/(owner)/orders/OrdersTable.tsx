@@ -116,10 +116,11 @@ function DesktopCard({ o, ind, hideFinance, hideFlorist, hrefBase }: { o: Orders
           <ItemsList o={o} imgSize="h-[60px] w-[60px]" nameClass="text-[13px]" />
         </div>
 
-        {/* Доставка */}
-        <div className="w-28 shrink-0 whitespace-nowrap">
+        {/* Доставка. Ширина фиксирована 112px, перенос разрешён: длинное окно Shopify
+            («11:30 AM - 5:00 PM») иначе растягивало колонку и ломало ряд. */}
+        <div className="w-28 shrink-0">
           <div className="text-[11px] text-slate-500">{fmtDate(o.deliveryDate)}</div>
-          <div className="text-[13px] font-bold text-slate-900">{o.deliveryWindow}</div>
+          <div className="text-[12px] font-bold text-slate-900">{o.deliveryWindow}</div>
         </div>
 
         {/* Получатель */}
@@ -184,7 +185,7 @@ function MobileCard({ o, ind, hideFinance, hideFlorist, hrefBase }: { o: OrdersT
 
       <div className="mt-2 space-y-1 text-[11px]">
         <div className="text-slate-500">
-          {fmtDate(o.deliveryDate)} · <span className="text-[14px] font-bold text-slate-900">{o.deliveryWindow}</span>
+          {fmtDate(o.deliveryDate)} · <span className="text-[13px] font-bold text-slate-900">{o.deliveryWindow}</span>
         </div>
         <div>
           <span className="font-medium text-slate-800">{o.recipientName}</span>
