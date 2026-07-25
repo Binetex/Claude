@@ -1,16 +1,18 @@
 import Link from "next/link";
 import { requireFlorist } from "@/lib/rbac";
 import { listForFlorist, type OrderFilters } from "@/modules/orders/queries";
-import { Card } from "@/components/ui/Card";
-import { OrderStatusBadge } from "@/components/StatusBadge";
-import { ZoomableImage } from "@/components/ImageLightbox";
-import { formatMoney } from "@/lib/money";
-import { fmtDate, formatOrderNumber } from "@/lib/format";
+import { OrderFiltersBar } from "@/app/dashboard/(owner)/orders/OrderFiltersBar";
+import { OrdersTable } from "@/app/dashboard/(owner)/orders/OrdersTable";
+import { OrdersNavProvider, OrdersPendingArea } from "@/app/dashboard/(owner)/orders/OrdersNav";
 import { PurchaseListBlock } from "@/components/PurchaseListBlock";
+import { PageHeader } from "@/components/ui/misc";
+import { Button } from "@/components/ui/button";
+import type { OrderStatus } from "@/generated/prisma/enums";
 
 export const dynamic = "force-dynamic";
 
-const tabs = [
+/** У флориста есть своя вкладка «Готовые» — остальные совпадают с владельцем. */
+const FLORIST_PRESETS = [
   { key: "today", label: "Сегодня" },
   { key: "tomorrow", label: "Завтра" },
   { key: "all", label: "Все" },
@@ -24,64 +26,66 @@ export default async function FloristHome({
 }) {
   const user = await requireFlorist();
   const sp = await searchParams;
-  const preset = (sp.tab as OrderFilters["preset"]) || "today";
-  const orders = await listForFlorist(user.floristId, { preset });
+
+  const filters: OrderFilters = {
+    // ?tab= — формат старых ссылок флориста; продолжаем его понимать.
+    preset:
+      ((sp.preset ?? sp.tab) as OrderFilters["preset"]) ||
+      (sp.date || sp.from || sp.to || sp.status ? undefined : "today"),
+    date: sp.date,
+    from: sp.from,
+    to: sp.to,
+    status: sp.status as OrderStatus | undefined,
+    search: sp.search,
+    sortBy: sp.sortBy as OrderFilters["sortBy"],
+    sortDir: sp.sortDir as OrderFilters["sortDir"],
+  };
+
+  const orders = await listForFlorist(user.floristId, filters);
 
   return (
-    <div className="mx-auto max-w-2xl space-y-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-xl font-bold text-slate-800">Мои заказы</h1>
-        <Link href="/dashboard/f/print-notes" className="rounded-md bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white">Открытки для печати</Link>
-      </div>
+    <div className="space-y-4">
+      <PageHeader
+        title={
+          <span className="flex items-baseline gap-2">
+            Мои заказы <span className="text-sm font-normal text-slate-400">{orders.length}</span>
+          </span>
+        }
+        actions={
+          <Button asChild variant="outline" size="sm">
+            <Link href="/dashboard/f/print-notes">Открытки для печати</Link>
+          </Button>
+        }
+      />
 
       {/* Список закупки на сегодня — только назначенные этому флористу заказы */}
       <PurchaseListBlock floristId={user.floristId} />
 
-      {/* Вкладки */}
-      <div className="flex gap-2 overflow-x-auto">
-        {tabs.map((t) => (
-          <Link
-            key={t.key}
-            href={`/dashboard/f?tab=${t.key}`}
-            className={`whitespace-nowrap rounded-full px-4 py-2 text-sm font-medium ${
-              preset === t.key ? "bg-slate-800 text-white" : "bg-white text-slate-600 border border-slate-200"
-            }`}
-          >
-            {t.label}
-          </Link>
-        ))}
-      </div>
+      <OrdersNavProvider>
+        <OrderFiltersBar
+          sites={[]}
+          florists={[]}
+          current={filters}
+          basePath="/dashboard/f"
+          presets={FLORIST_PRESETS}
+          showFloristFilter={false}
+          showSiteFilter={false}
+        />
 
-      {orders.length === 0 && (
-        <div className="py-12 text-center text-sm text-slate-400">Заказов нет</div>
-      )}
-
-      <div className="space-y-3">
-        {orders.map((o) => (
-          <Card key={o.id} className="overflow-hidden">
-            <Link href={`/dashboard/f/${o.id}`} className="block">
-              {o.items[0]?.image && (
-                <ZoomableImage src={o.items[0].image} alt="" className="h-44 w-full object-cover" />
-              )}
-              <div className="space-y-2 p-4">
-                <div className="flex items-start justify-between gap-2">
-                  <div>
-                    <div className="text-base font-semibold text-slate-800">{o.items[0]?.name}{o.items.length > 1 && ` +${o.items.length - 1}`}</div>
-                    <div className="text-sm text-slate-500">{formatOrderNumber(o.orderNumber)} · {o.site.name}</div>
-                  </div>
-                  <OrderStatusBadge status={o.orderStatus} paymentFailed={o.paymentFailed} />
-                </div>
-                <div className="grid grid-cols-2 gap-1 text-sm text-slate-600">
-                  <div>📅 {fmtDate(o.deliveryDate)}</div>
-                  <div>🕐 {o.deliveryWindow}</div>
-                  <div className="col-span-2">📍 {o.addressLine}, {o.city}</div>
-                </div>
-                <div className="text-lg font-bold text-slate-800">💵 {formatMoney(o.floristTotal)}</div>
-              </div>
-            </Link>
-          </Card>
-        ))}
-      </div>
+        <OrdersPendingArea>
+          {/* Тот же список, что у владельца: без сумм заказчика и без колонки флориста —
+              флорист видит только собственную цену (floristTotal). */}
+          <OrdersTable
+            // finance у флориста — это раскладка заказчика (только при полной видимости) и в
+            // список она не идёт; таблице отдаём лишь его собственную цену.
+            orders={orders.map((o) => ({ ...o, finance: undefined }))}
+            hideFinance
+            hideFlorist
+            hrefBase="/dashboard/f"
+            groupByDay={filters.preset === "all"}
+          />
+        </OrdersPendingArea>
+      </OrdersNavProvider>
     </div>
   );
 }

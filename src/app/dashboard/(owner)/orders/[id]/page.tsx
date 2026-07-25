@@ -1,15 +1,15 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
 import { format } from "date-fns";
 import { getForOwner } from "@/modules/orders/queries";
 import { prisma } from "@/lib/db";
 import { Card, CardHeader, CardTitle, CardBody } from "@/components/ui/Card";
+import { OrderPageShell } from "@/components/orders/OrderPageShell";
 import { OrderStatusBadge, PaymentStatusBadge } from "@/components/StatusBadge";
 import { ZoomableImage } from "@/components/ImageLightbox";
 import { OrderItemImages } from "@/components/OrderItemImages";
 import { Separator } from "@/components/ui/misc";
 import { formatMoney } from "@/lib/money";
-import { fmtDate, fmtDateTime, formatOrderNumber } from "@/lib/format";
+import { fmtDateTime } from "@/lib/format";
 import { OrderItemComposition } from "@/components/OrderItemComposition";
 import { AirwallexPanel } from "./AirwallexPanel";
 import { UpdateCompositionButton } from "../UpdateCompositionButton";
@@ -139,29 +139,21 @@ export default async function OwnerOrderPage({ params }: { params: Promise<{ id:
   const deliveryCompletedAt: Date | null = deliveredEvt ? (deliveredEvt.occurredAt ?? deliveredEvt.receivedAt) : (currentDelivery?.deliveredAt ?? null);
 
   return (
-    <div className="space-y-4">
-      <Link href="/dashboard/orders" className="text-sm text-slate-500 hover:underline">← Все заказы</Link>
-
-      {/* Шапка */}
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-        <h1 className="text-xl font-semibold text-slate-900">{formatOrderNumber(order.orderNumber)}</h1>
-        <span className="text-sm text-slate-500">{order.site.name}</span>
-        <div className="flex flex-wrap gap-1.5">
+    <OrderPageShell
+      backHref="/dashboard/orders"
+      backLabel="Все заказы"
+      orderNumber={order.orderNumber}
+      siteName={order.site.name}
+      badges={
+        <>
           <OrderStatusBadge status={order.orderStatus} paymentFailed={order.paymentFailed} />
           {showPayment && <PaymentStatusBadge status={order.paymentStatus} />}
-        </div>
-      </div>
-
-      {/* Доставка — крупно */}
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg border border-slate-200 bg-white px-4 py-2.5">
-        <span className="text-xs tracking-wide text-slate-400 uppercase">Доставка</span>
-        <span className="text-base font-semibold text-slate-900">{fmtDate(order.deliveryDate)}</span>
-        {order.deliveryWindow && <span className="text-base font-bold text-slate-900">{order.deliveryWindow}</span>}
-      </div>
-
-      <div className="grid gap-4 lg:grid-cols-3">
-        {/* Левая колонка — данные */}
-        <div className="space-y-4 lg:col-span-2">
+        </>
+      }
+      deliveryDate={order.deliveryDate}
+      deliveryWindow={order.deliveryWindow}
+      left={
+        <>
           {/* Открытка и заметка — важное, наверху */}
           <CardNoteCard orderId={order.id} updatedAt={order.updatedAt} cardMessage={order.cardMessage} customerNote={order.customerNote} />
 
@@ -356,28 +348,24 @@ export default async function OwnerOrderPage({ params }: { params: Promise<{ id:
               </ul>
             </CardBody>
           </Card>
-        </div>
-
-        {/* Правая колонка — управление */}
-        <div className="lg:col-span-1">
-          <div className="sticky top-16">
-            <OwnerOrderControls
-              orderId={order.id}
-              updatedAt={order.updatedAt}
-              order={{
-                orderStatus: order.orderStatus,
-                deliveryDate: format(new Date(order.deliveryDate), "yyyy-MM-dd"),
-                deliveryWindow: order.deliveryWindow,
-                priceMode: order.priceMode,
-                floristTotal: order.finance.floristTotal,
-                currentFloristId: order.currentFloristId,
-              }}
-              florists={florists.map((f) => ({ id: f.id, name: f.user.name }))}
-            />
-          </div>
-        </div>
-      </div>
-    </div>
+        </>
+      }
+      right={
+        <OwnerOrderControls
+          orderId={order.id}
+          updatedAt={order.updatedAt}
+          order={{
+            orderStatus: order.orderStatus,
+            deliveryDate: format(new Date(order.deliveryDate), "yyyy-MM-dd"),
+            deliveryWindow: order.deliveryWindow,
+            priceMode: order.priceMode,
+            floristTotal: order.finance.floristTotal,
+            currentFloristId: order.currentFloristId,
+          }}
+          florists={florists.map((f) => ({ id: f.id, name: f.user.name }))}
+        />
+      }
+    />
   );
 }
 

@@ -30,6 +30,11 @@ export type OrdersTableOrder = {
   zip: string;
   items: { id: string; name: string; variantName: string | null; image: string | null; quantity: number }[];
   finance?: { customerTotal: number; floristTotal: number } | null;
+  /**
+   * Своя цена флориста. Отдельно от finance: флористу сериализатор не отдаёт суммы заказчика,
+   * поэтому при hideFinance показываем только это поле — иначе его заработок исчез бы из списка.
+   */
+  floristTotal?: number | null;
   currentFloristName?: string | null;
   currentFloristAvatarUrl?: string | null;
 };
@@ -149,13 +154,21 @@ function DesktopCard({ o, ind, hideFinance, hideFlorist, hrefBase }: { o: Orders
           </div>
         )}
 
-        {/* Суммы (без прибыли) — скрыты для колл-центра/флориста. */}
+        {/* Суммы (без прибыли) — скрыты для колл-центра. */}
         {!hideFinance && o.finance && (
           <div className="w-24 shrink-0 text-right leading-tight">
             <div className="font-medium text-slate-800">{formatMoney(o.finance.customerTotal)}</div>
             <div className="text-[10px] text-slate-400">сумма</div>
             <div className="mt-1 text-slate-600">{formatMoney(o.finance.floristTotal)}</div>
             <div className="text-[10px] text-slate-400">флористу</div>
+          </div>
+        )}
+
+        {/* Флорист: только собственный заработок. */}
+        {hideFinance && o.floristTotal != null && (
+          <div className="w-24 shrink-0 text-right leading-tight">
+            <div className="font-medium text-slate-800">{formatMoney(o.floristTotal)}</div>
+            <div className="text-[10px] text-slate-400">вам</div>
           </div>
         )}
       </div>
@@ -174,6 +187,9 @@ function MobileCard({ o, ind, hideFinance, hideFlorist, hrefBase }: { o: OrdersT
           </Link>
           {!hideFinance && o.finance && (
             <span className="text-[13px] font-semibold text-slate-700">{formatMoney(o.finance.customerTotal)}</span>
+          )}
+          {hideFinance && o.floristTotal != null && (
+            <span className="text-[13px] font-semibold text-slate-700">{formatMoney(o.floristTotal)}</span>
           )}
         </div>
         <span className="text-[10px] text-slate-400">{o.site.name}</span>

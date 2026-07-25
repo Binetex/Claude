@@ -11,7 +11,7 @@ import { Select } from "@/components/ui/select";
 import { cn } from "@/lib/cn";
 import type { OrderFilters } from "@/modules/orders/queries";
 
-const presets = [
+const DEFAULT_PRESETS = [
   { key: "today", label: "Сегодня" },
   { key: "tomorrow", label: "Завтра" },
   { key: "all", label: "Все" },
@@ -33,12 +33,18 @@ export function OrderFiltersBar({
   current,
   basePath = "/dashboard/orders",
   showFloristFilter = true,
+  showSiteFilter = true,
+  presets = DEFAULT_PRESETS,
 }: {
   sites: { id: string; name: string }[];
   florists: { id: string; name: string }[];
   current: OrderFilters;
   basePath?: string;
   showFloristFilter?: boolean;
+  /** Магазин выбирает владелец и колл-центр; флористу назначают заказы, фильтр ему не нужен. */
+  showSiteFilter?: boolean;
+  /** Свой набор вкладок. У флориста добавляется «Готовые» (preset=done). */
+  presets?: { key: string; label: string }[];
 }) {
   const params = useSearchParams();
   const { pending, go } = useOrdersNav();
@@ -129,14 +135,16 @@ export function OrderFiltersBar({
               <option key={s.value} value={s.value}>{s.label}</option>
             ))}
           </Select>
-          <Select
-            value={current.siteId ?? ""}
-            onChange={(e) => update({ siteId: e.target.value || undefined })}
-            wrapperClassName="w-full sm:w-44"
-          >
-            <option value="">Все сайты</option>
-            {sites.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-          </Select>
+          {showSiteFilter && (
+            <Select
+              value={current.siteId ?? ""}
+              onChange={(e) => update({ siteId: e.target.value || undefined })}
+              wrapperClassName="w-full sm:w-44"
+            >
+              <option value="">Все сайты</option>
+              {sites.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </Select>
+          )}
           {showFloristFilter && (
             <Select
               value={current.floristId ?? ""}
