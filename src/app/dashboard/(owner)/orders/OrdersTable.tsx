@@ -116,9 +116,10 @@ function DesktopCard({ o, ind, hideFinance, hideFlorist, hrefBase }: { o: Orders
           <ItemsList o={o} imgSize="h-[60px] w-[60px]" nameClass="text-[13px]" />
         </div>
 
-        {/* Доставка. Ширина фиксирована 112px, перенос разрешён: длинное окно Shopify
-            («11:30 AM - 5:00 PM») иначе растягивало колонку и ломало ряд. */}
-        <div className="w-28 shrink-0">
+        {/* Доставка. 96px подобраны так, чтобы 24-часовое окно Woo («11:00 - 15:00») влезало
+            в одну строку, а длинное окно Shopify («11:30 AM - 5:00 PM») переносилось по
+            разделителю. mr-2 (а не padding) даёт воздух до получателя, не съедая эти 96px. */}
+        <div className="mr-2 w-24 shrink-0">
           <div className="text-[11px] text-slate-500">{fmtDate(o.deliveryDate)}</div>
           <div className="text-[12px] font-bold text-slate-900">{o.deliveryWindow}</div>
         </div>
