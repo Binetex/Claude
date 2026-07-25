@@ -35,7 +35,7 @@ export default async function OwnerOrdersPage({
     // чтобы совпадало с подсвеченной вкладкой (см. OrderFiltersBar.activePreset).
     preset:
       (sp.preset as OrderFilters["preset"]) ||
-      (sp.date || sp.status || sp.siteId || sp.floristId ? undefined : "today"),
+      (sp.date || sp.from || sp.to || sp.status || sp.siteId || sp.floristId ? undefined : "today"),
     date: sp.date,
     from: sp.from,
     to: sp.to,

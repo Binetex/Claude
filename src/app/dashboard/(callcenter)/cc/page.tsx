@@ -16,8 +16,10 @@ export default async function CallCenterOrders({
     // По умолчанию показываем «Сегодня» — совпадает с подсвеченной вкладкой (OrderFiltersBar).
     preset:
       (sp.preset as OrderFilters["preset"]) ||
-      (sp.date || sp.status || sp.siteId ? undefined : "today"),
+      (sp.date || sp.from || sp.to || sp.status || sp.siteId ? undefined : "today"),
     date: sp.date,
+    from: sp.from,
+    to: sp.to,
     status: sp.status as OrderStatus | undefined,
     siteId: sp.siteId,
     search: sp.search,

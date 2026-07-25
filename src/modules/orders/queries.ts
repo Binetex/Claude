@@ -34,17 +34,22 @@ const DONE_STATUSES: OrderStatus[] = [
   "DELIVERED",
 ];
 
+/** Границы календарного дня «YYYY-MM-DD» в UTC — под формат хранения deliveryDate. */
+const utcDayStart = (ymd: string) => new Date(`${ymd}T00:00:00.000Z`);
+const utcDayEnd = (ymd: string) => new Date(`${ymd}T23:59:59.999Z`);
+
 function buildWhere(f: OrderFilters): Prisma.OrderWhereInput {
   const where: Prisma.OrderWhereInput = {};
 
-  // Дата доставки
+  // Дата доставки. deliveryDate хранится как UTC-полночь ЛОКАЛЬНОГО дня доставки, поэтому
+  // границы считаем строго в UTC («T00:00:00Z»), а не через локальный день процесса: иначе
+  // при сервере не в UTC выборка съезжала бы на сутки. Сейчас прод в UTC — поведение то же.
   if (f.date) {
-    const d = new Date(f.date + "T00:00:00");
-    where.deliveryDate = { gte: startOfDay(d), lte: endOfDay(d) };
+    where.deliveryDate = { gte: utcDayStart(f.date), lte: utcDayEnd(f.date) };
   } else if (f.from || f.to) {
     where.deliveryDate = {
-      ...(f.from ? { gte: startOfDay(new Date(f.from + "T00:00:00")) } : {}),
-      ...(f.to ? { lte: endOfDay(new Date(f.to + "T00:00:00")) } : {}),
+      ...(f.from ? { gte: utcDayStart(f.from) } : {}),
+      ...(f.to ? { lte: utcDayEnd(f.to) } : {}),
     };
   } else if (f.preset === "today") {
     const now = new Date();
@@ -64,8 +69,13 @@ function buildWhere(f: OrderFilters): Prisma.OrderWhereInput {
 
   if (f.search) {
     const q = f.search.trim();
+    // В списке номер показан как «#20211», а в БД лежит «THEFLOW-20211»: скопированный из
+    // интерфейса номер с решёткой не находился. Ищем и по введённому тексту, и по варианту
+    // без ведущих «#»/«№» — второй нужен только для номера заказа.
+    const bare = q.replace(/^[#№]+\s*/, "");
     where.OR = [
       { orderNumber: { contains: q, mode: "insensitive" } },
+      ...(bare && bare !== q ? [{ orderNumber: { contains: bare, mode: "insensitive" as const } }] : []),
       { senderName: { contains: q, mode: "insensitive" } },
       { recipientName: { contains: q, mode: "insensitive" } },
       { recipientPhone: { contains: q, mode: "insensitive" } },

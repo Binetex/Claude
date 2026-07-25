@@ -57,7 +57,14 @@ export function OrderFiltersBar({
     go(`${basePath}?${p.toString()}`);
   }
 
-  const activePreset = current.preset ?? (current.date || current.status || current.siteId || current.floristId ? "" : "today");
+  // Старые ссылки с одиночным ?date= показываем как диапазон «этот день — этот день»,
+  // чтобы поля не выглядели пустыми при активном фильтре.
+  const rangeFrom = current.from ?? current.date ?? "";
+  const rangeTo = current.to ?? current.date ?? "";
+
+  const activePreset =
+    current.preset ??
+    (current.date || current.from || current.to || current.status || current.siteId || current.floristId ? "" : "today");
 
   return (
     <div className="space-y-2.5">
@@ -80,12 +87,41 @@ export function OrderFiltersBar({
         </div>
         <NavSpinner />
 
-        <Input
-          type="date"
-          defaultValue={current.date}
-          onChange={(e) => update({ date: e.target.value, preset: undefined })}
-          className="w-auto"
-        />
+        {/* Диапазон дат доставки. Нативные date-инпуты (в проекте нет библиотеки календаря) —
+            зато свой календарь у каждой платформы и работающий ввод с клавиатуры.
+            Одна дата = «с» и «по» в один день; можно задать и одну границу. */}
+        <div className="flex items-center gap-1">
+          <Input
+            type="date"
+            aria-label="Доставка с"
+            value={rangeFrom}
+            max={rangeTo || undefined}
+            disabled={pending}
+            onChange={(e) => update({ from: e.target.value, to: rangeTo, date: undefined, preset: undefined })}
+            className="w-auto"
+          />
+          <span className="text-xs text-slate-400">–</span>
+          <Input
+            type="date"
+            aria-label="Доставка по"
+            value={rangeTo}
+            min={rangeFrom || undefined}
+            disabled={pending}
+            onChange={(e) => update({ from: rangeFrom, to: e.target.value, date: undefined, preset: undefined })}
+            className="w-auto"
+          />
+          {(rangeFrom || rangeTo) && (
+            <button
+              type="button"
+              disabled={pending}
+              onClick={() => update({ from: undefined, to: undefined, date: undefined })}
+              className="rounded-md px-1.5 py-1 text-xs text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+              aria-label="Сбросить даты"
+            >
+              ✕
+            </button>
+          )}
+        </div>
 
         <div className="ml-auto flex items-center gap-2">
           <div className="relative">
