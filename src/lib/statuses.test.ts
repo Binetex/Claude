@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { resolveOrderStatusMeta, orderStatusMeta, orderStatusFilterOptions, statusFilterValue, IN_WORK_ORDER_STATUSES } from "./statuses";
+import { resolveOrderStatusMeta, orderStatusMeta, orderStatusFilterOptions, statusFilterValue, IN_WORK_ORDER_STATUSES, manualOrderStatuses } from "./statuses";
 
 describe("resolveOrderStatusMeta — различие failed vs pending без миграции", () => {
   it("AWAITING_PAYMENT + paymentFailed → «Ошибка оплаты» (danger tone)", () => {
@@ -43,5 +43,23 @@ describe("группа «в работе» — один статус вмест�
     expect(statusFilterValue("ASSIGNED")).toBe("IN_PROGRESS");
     expect(statusFilterValue("DELIVERED")).toBe("DELIVERED");
     expect(statusFilterValue(null)).toBe("");
+  });
+
+  /**
+   * Группа «в работе» сводится к IN_PROGRESS — и в фильтре, и в ручном выборе статуса
+   * (StatusForm). Если IN_PROGRESS уберут из выбираемых вручную, заказ в работе начнёт
+   * показывать в select чужой статус — как раз тот баг, ради которого нужна нормализация.
+   */
+  it("представитель группы «в работе» остаётся выбираемым вручную", () => {
+    expect(manualOrderStatuses).toContain("IN_PROGRESS");
+  });
+
+  it("статусы вне ручного выбора известны и не расширяются молча", () => {
+    const notManual = (Object.keys(orderStatusMeta) as (keyof typeof orderStatusMeta)[]).filter(
+      (s) => !manualOrderStatuses.includes(s)
+    );
+    // Их ставит система: оплата и назначение флориста. Для них StatusForm рисует
+    // отдельный нередактируемый пункт «(текущий)».
+    expect(new Set(notManual)).toEqual(new Set(["AWAITING_PAYMENT", "ASSIGNED", "FLORIST_ACCEPTED"]));
   });
 });

@@ -1,6 +1,6 @@
 "use client";
 import { useState } from "react";
-import { manualOrderStatuses, orderStatusMeta } from "@/lib/statuses";
+import { manualOrderStatuses, orderStatusMeta, IN_WORK_ORDER_STATUSES } from "@/lib/statuses";
 import { Card, CardHeader, CardTitle, CardBody } from "@/components/ui/Card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -41,18 +41,28 @@ export function OrderStatusDateControls({
 }
 
 function StatusForm({ orderId, updatedAt, current }: { orderId: string; updatedAt: string; current: OrderStatus }) {
-  const [status, setStatus] = useState<OrderStatus>(current);
+  // Текущий статус может отсутствовать в списке выбираемых вручную (AWAITING_PAYMENT ставит
+  // оплата, ASSIGNED/FLORIST_ACCEPTED — назначение). Тогда select показал бы ПЕРВЫЙ пункт
+  // вместо реального статуса, и «ОК» без выбора молча переписал бы заказ. Поэтому группу
+  // «в работе» сводим к её выбираемому представителю, а нестандартный статус добавляем
+  // отдельным нередактируемым пунктом.
+  const selectable = IN_WORK_ORDER_STATUSES.includes(current) ? "IN_PROGRESS" : current;
+  const isManual = manualOrderStatuses.includes(selectable);
+  const [status, setStatus] = useState<OrderStatus>(selectable);
   const { pending, conflict, save, acceptCurrentVersion } = useBlockSave(orderId, "status", updatedAt);
   return (
     <div className="space-y-2">
       <div className="flex gap-2">
         <Select value={status} onChange={(e) => setStatus(e.target.value as OrderStatus)}>
+          {!isManual && (
+            <option value={selectable} disabled>{orderStatusMeta[current].label} (текущий)</option>
+          )}
           {manualOrderStatuses.map((s) => (
             <option key={s} value={s}>{orderStatusMeta[s].label}</option>
           ))}
         </Select>
         <Button
-          disabled={pending}
+          disabled={pending || status === selectable}
           onClick={() => save({ orderStatus: status }, { successMessage: "Статус обновлён" })}
         >
           ОК
