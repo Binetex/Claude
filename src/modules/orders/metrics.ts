@@ -2,6 +2,7 @@ import "server-only";
 import { prisma } from "@/lib/db";
 import { DEFAULT_STORE_TZ, utcDayRangeForLocalToday } from "@/lib/tz";
 import { toNumber } from "@/lib/money";
+import { computeEstimatedProfit } from "@/modules/pricing/profit";
 import { TERMINAL_ORDER_STATUSES, IN_WORK_ORDER_STATUSES } from "@/lib/statuses";
 import type { OrderStatus } from "@/generated/prisma/enums";
 
@@ -41,9 +42,14 @@ export async function getOwnerDashboard() {
     prisma.order.count({ where: { orderStatus: "READY" } }),
     prisma.order.count({ where: { orderStatus: "IN_TRANSIT" } }),
     prisma.order.count({ where: { orderStatus: "DELIVERED", deliveryDate: { gte: today.gte, lt: today.lt } } }),
+    // estimatedProfit НЕ суммируем: поле обновляется только при назначении флориста и
+    // устаревает. Прибыль считаем из составляющих той же формулой, что и карточка заказа.
     prisma.order.aggregate({
       where: { deliveryDate: { gte: today.gte, lt: today.lt }, paymentStatus: "PAID" },
-      _sum: { customerTotal: true, floristTotal: true, deliveryActualCost: true, estimatedProfit: true },
+      _sum: {
+        customerTotal: true, floristTotal: true, deliveryActualCost: true,
+        itemsTotal: true, tax: true, tip: true, deliveryCustomerCost: true,
+      },
     }),
   ]);
 
@@ -73,7 +79,14 @@ export async function getOwnerDashboard() {
       revenueToday: toNumber(financeToday._sum.customerTotal),
       floristCostToday: toNumber(financeToday._sum.floristTotal),
       deliveryCostToday: toNumber(financeToday._sum.deliveryActualCost),
-      profitToday: toNumber(financeToday._sum.estimatedProfit),
+      profitToday: computeEstimatedProfit({
+        itemsTotal: toNumber(financeToday._sum.itemsTotal),
+        tax: toNumber(financeToday._sum.tax),
+        tip: toNumber(financeToday._sum.tip),
+        deliveryCustomerCost: toNumber(financeToday._sum.deliveryCustomerCost),
+        floristTotal: toNumber(financeToday._sum.floristTotal),
+        deliveryActualCost: toNumber(financeToday._sum.deliveryActualCost),
+      }),
     },
     attention: attention.map((o) => ({
       id: o.id,

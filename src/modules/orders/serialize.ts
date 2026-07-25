@@ -1,5 +1,6 @@
 import { Prisma } from "@/generated/prisma/client";
 import { toNumber } from "@/lib/money";
+import { computeEstimatedProfit } from "@/modules/pricing/profit";
 import { getOrderItemImages } from "./images";
 
 /** "int_uspdw9pdbhk4383b0pz" → "int_…83b0pz" — достаточно для сверки, без длинного хвоста. */
@@ -123,7 +124,17 @@ export function serializeForOwner(o: OrderWithRelations) {
       customerTotal: toNumber(o.customerTotal),
       floristTotal: toNumber(o.floristTotal),
       deliveryActualCost: toNumber(o.deliveryActualCost),
-      estimatedProfit: toNumber(o.estimatedProfit),
+      // Считаем ЗДЕСЬ, а не берём сохранённое Order.estimatedProfit: поле обновляется только
+      // при назначении флориста, поэтому устаревало при любом изменении сумм (чаевые, факт
+      // доставки, обновление из Woo) — у двух третей заказов оно было нулевым.
+      estimatedProfit: computeEstimatedProfit({
+        itemsTotal: toNumber(o.itemsTotal),
+        tax: toNumber(o.tax),
+        tip: toNumber(o.tip),
+        deliveryCustomerCost: toNumber(o.deliveryCustomerCost),
+        floristTotal: toNumber(o.floristTotal),
+        deliveryActualCost: toNumber(o.deliveryActualCost),
+      }),
     },
     assignments: o.assignments.map((a) => ({
       floristName: a.florist.user.name,

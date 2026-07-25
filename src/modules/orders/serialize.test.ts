@@ -95,11 +95,15 @@ function makeOrder(financeVisibility: "MAKER_ONLY" | "FULL" = "MAKER_ONLY"): Ord
 
 describe("serializeForOwner — видит всё", () => {
   const o = serializeForOwner(makeOrder());
-  it("включает полную финансовую раскладку и прибыль", () => {
-    expect(o.finance.estimatedProfit).toBe(18);
+  it("включает полную финансовую раскладку", () => {
     expect(o.finance.deliveryActualCost).toBe(12);
     expect(o.finance.customerTotal).toBe(123);
     expect(o.finance.floristTotal).toBe(70);
+  });
+  it("прибыль считается заново, а не берётся из устаревшего поля заказа", () => {
+    // В заказе лежит estimatedProfit = 18, но это значение обновляется только при назначении
+    // флориста и устаревает. Считаем из составляющих: (100 + 8 + 5 + 10) − (70 + 12) = 41.
+    expect(o.finance.estimatedProfit).toBe(41);
   });
   it("включает цену клиента и цену флориста по позициям", () => {
     expect(o.items[0].externalPrice).toBe(100);

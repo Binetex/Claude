@@ -1,6 +1,8 @@
 import "server-only";
 import { prisma } from "@/lib/db";
 import { Prisma } from "@/generated/prisma/client";
+import { toNumber } from "@/lib/money";
+import { computeEstimatedProfit } from "./profit";
 
 type ItemForPricing = {
   id: string;
@@ -134,14 +136,18 @@ export async function recomputeEstimatedProfit(
 ) {
   const order = await tx.order.findUnique({ where: { id: orderId } });
   if (!order) return;
-  // Прибыль ≈ сумма товаров (без налога) − цена флориста − фактическая доставка + чаевые.
-  // Чаевые целиком идут владельцу (налог — сквозной, в прибыль не входит).
-  const profit = order.itemsTotal
-    .sub(order.floristTotal)
-    .sub(order.deliveryActualCost)
-    .add(order.tip);
+  // Формула — одна на весь проект (см. computeEstimatedProfit): доход клиента минус наши
+  // расходы. Раньше здесь не учитывалась «Доставка (заказчик)» и налог.
+  const profit = computeEstimatedProfit({
+    itemsTotal: toNumber(order.itemsTotal),
+    tax: toNumber(order.tax),
+    tip: toNumber(order.tip),
+    deliveryCustomerCost: toNumber(order.deliveryCustomerCost),
+    floristTotal: toNumber(order.floristTotal),
+    deliveryActualCost: toNumber(order.deliveryActualCost),
+  });
   await tx.order.update({
     where: { id: orderId },
-    data: { estimatedProfit: profit },
+    data: { estimatedProfit: new Prisma.Decimal(profit.toFixed(2)) },
   });
 }
