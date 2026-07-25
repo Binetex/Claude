@@ -1,7 +1,6 @@
 import type {
   OrderStatus,
   PaymentStatus,
-  AssignmentStatus,
   DeliveryStatus,
   SyncStatus,
 } from "@/generated/prisma/enums";
@@ -30,7 +29,8 @@ export const IN_WORK_ORDER_STATUSES: OrderStatus[] = ["ASSIGNED", "FLORIST_ACCEP
 
 export const orderStatusMeta: Record<OrderStatus, Meta> = {
   AWAITING_PAYMENT: { label: "Ожидает оплаты", className: TONE.neutral },
-  CONFIRMED: { label: "Подтверждён", className: TONE.neutral },
+  // Оплачен и ждёт флориста. «Подтверждён» ничего не говорило: подтверждает заказ оплата.
+  CONFIRMED: { label: "Оплачен", className: TONE.success },
   ASSIGNED: { label: "В работе", className: TONE.info },
   FLORIST_ACCEPTED: { label: "В работе", className: TONE.info },
   IN_PROGRESS: { label: "В работе", className: TONE.info },
@@ -88,16 +88,8 @@ export const paymentStatusMeta: Record<PaymentStatus, Meta> = {
   PARTIALLY_REFUNDED: { label: "Частичный возврат", className: "bg-orange-100 text-orange-800 border-orange-200" },
 };
 
-/**
- * ASSIGNED и ACCEPTED различались, пока флорист принимал заказ отдельным действием. Сейчас
- * назначение сразу активирует заказ, поэтому «ожидает принятия» не существует как состояние:
- * ASSIGNED остался только у старых заказов. Обоим — одна метка «Назначен флористу».
- */
-export const assignmentStatusMeta: Record<AssignmentStatus, Meta> = {
-  UNASSIGNED: { label: "Требует назначения", className: "bg-red-100 text-red-800 border-red-200" },
-  ASSIGNED: { label: "Назначен флористу", className: TONE.info },
-  ACCEPTED: { label: "Назначен флористу", className: TONE.info },
-};
+// Метки статуса назначения не нужны: назначение автоматическое, отдельного «принятия» нет,
+// а бейдж только дублировал статус заказа. AssignmentStatus остаётся в БД и в сериализации.
 
 export const deliveryStatusMeta: Record<DeliveryStatus, Meta> = {
   PENDING: { label: "Ожидает", className: "bg-slate-100 text-slate-700 border-slate-200" },

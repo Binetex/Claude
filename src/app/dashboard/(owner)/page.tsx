@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { getOwnerDashboard } from "@/modules/orders/metrics";
 import { Card, CardHeader, CardTitle, CardBody } from "@/components/ui/Card";
-import { OrderStatusBadge, AssignmentStatusBadge } from "@/components/StatusBadge";
+import { OrderStatusBadge } from "@/components/StatusBadge";
 import { PageHeader, StatCard, EmptyState } from "@/components/ui/misc";
 import { formatMoney } from "@/lib/money";
 import { fmtDate, formatOrderNumber } from "@/lib/format";
@@ -92,7 +92,7 @@ export default async function DashboardPage() {
                     orderNumber={formatOrderNumber(o.orderNumber)}
                     primary={`${o.siteName} · ${o.recipientName}`}
                     meta={`Доставка: ${fmtDate(o.deliveryDate)}`}
-                    badge={<AssignmentStatusBadge status={o.assignmentStatus} />}
+                    badge={<OrderStatusBadge status={o.orderStatus} paymentFailed={o.paymentFailed} />}
                   />
                 ))}
               </ul>

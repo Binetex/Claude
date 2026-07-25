@@ -4,13 +4,12 @@ import { format } from "date-fns";
 import { getForOwner } from "@/modules/orders/queries";
 import { prisma } from "@/lib/db";
 import { Card, CardHeader, CardTitle, CardBody } from "@/components/ui/Card";
-import { OrderStatusBadge, PaymentStatusBadge, AssignmentStatusBadge } from "@/components/StatusBadge";
+import { OrderStatusBadge, PaymentStatusBadge } from "@/components/StatusBadge";
 import { ZoomableImage } from "@/components/ImageLightbox";
 import { OrderItemImages } from "@/components/OrderItemImages";
 import { Separator } from "@/components/ui/misc";
 import { formatMoney } from "@/lib/money";
 import { fmtDate, fmtDateTime, formatOrderNumber } from "@/lib/format";
-import { TERMINAL_ORDER_STATUSES } from "@/lib/statuses";
 import { OrderItemComposition } from "@/components/OrderItemComposition";
 import { AirwallexPanel } from "./AirwallexPanel";
 import { UpdateCompositionButton } from "../UpdateCompositionButton";
@@ -29,10 +28,11 @@ export default async function OwnerOrderPage({ params }: { params: Promise<{ id:
   if (!order) notFound();
 
   const florists = await prisma.florist.findMany({ include: { user: true }, orderBy: { createdAt: "asc" } });
-  // Бейдж назначения показываем, только когда он что-то добавляет к статусу заказа —
-  // то есть флориста ещё нет. Назначенный заказ и так виден по статусу «В работе».
-  const showAssignment =
-    !(TERMINAL_ORDER_STATUSES as string[]).includes(order.orderStatus) && order.assignmentStatus === "UNASSIGNED";
+  // Бейдж назначения не показываем вовсе: назначение происходит автоматически, а «нет флориста»
+  // видно по самому блоку назначения ниже и по дашборду. Дублировать статус заказа не нужно.
+  // Оплату показываем, только когда она НЕ обычная: «Оплачен» рядом со статусом «Оплачен» —
+  // это одно и то же слово дважды.
+  const showPayment = order.paymentStatus !== "PAID";
 
   // QUO: история коммуникаций + номер магазина. Обёрнуто в try/catch — временная недоступность
   // не должна ронять карточку заказа (историю читаем из локальной БД, не из QUO).
@@ -148,8 +148,7 @@ export default async function OwnerOrderPage({ params }: { params: Promise<{ id:
         <span className="text-sm text-slate-500">{order.site.name}</span>
         <div className="flex flex-wrap gap-1.5">
           <OrderStatusBadge status={order.orderStatus} paymentFailed={order.paymentFailed} />
-          <PaymentStatusBadge status={order.paymentStatus} />
-          {showAssignment && <AssignmentStatusBadge status={order.assignmentStatus} />}
+          {showPayment && <PaymentStatusBadge status={order.paymentStatus} />}
         </div>
       </div>
 
