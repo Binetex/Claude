@@ -47,7 +47,7 @@ export default async function FloristOrderPage({ params }: { params: Promise<{ i
       left={
         <>
           {/* Открытка и заметка — важное, наверху (как у владельца). */}
-          <CardNoteCard orderId={order.id} updatedAt={order.updatedAt} cardMessage={order.cardMessage} customerNote={order.customerNote} />
+          <CardNoteCard orderId={order.id} updatedAt={order.updatedAt} cardMessage={order.cardMessage} customerNote={order.customerNote} showPrint />
 
           {/* Товары. Цены — только свои: цена заказчика флористу не отдаётся сериализатором. */}
           <Card>

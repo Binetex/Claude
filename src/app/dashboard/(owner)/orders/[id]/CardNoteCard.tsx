@@ -1,6 +1,7 @@
 "use client";
 import { useState } from "react";
 import { CopyButton } from "@/components/CopyButton";
+import { PrintCardButton } from "@/components/PrintCardButton";
 import { Card, CardHeader, CardTitle, CardBody } from "@/components/ui/Card";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
@@ -12,11 +13,15 @@ export function CardNoteCard({
   updatedAt,
   cardMessage,
   customerNote,
+  showPrint = false,
 }: {
   orderId: string;
   updatedAt: string;
   cardMessage: string;
   customerNote: string;
+  /** Кнопка печати открытки. Включается точечно (кабинет флориста); у владельца и
+      колл-центра блок остаётся прежним. */
+  showPrint?: boolean;
 }) {
   const [card, setCard] = useState(cardMessage);
   const [note, setNote] = useState(customerNote);
@@ -46,9 +51,14 @@ export function CardNoteCard({
       </CardHeader>
       <CardBody className="space-y-3">
         <div>
-          <div className="mb-1 flex items-center justify-between">
+          <div className="mb-1 flex flex-wrap items-center justify-between gap-1.5">
             <span className="text-xs font-medium text-slate-500">Текст открытки</span>
-            <CopyButton text={card} />
+            <span className="flex flex-wrap items-center gap-1.5">
+              <CopyButton text={card} />
+              {showPrint && (
+                <PrintCardButton orderId={orderId} hasCardMessage={card.trim() !== ""} dirty={dirty} />
+              )}
+            </span>
           </div>
           <Textarea value={card} onChange={(e) => setCard(e.target.value)} rows={3} placeholder="Текст открытки…" />
         </div>

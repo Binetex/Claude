@@ -1,4 +1,5 @@
 "use client";
+import { printCardsUrl } from "@/lib/print/printUrl";
 import { useState, useTransition } from "react";
 
 type SaveResult = { ok?: boolean; error?: string; message?: string };
@@ -41,7 +42,7 @@ export function PrintNoteRow({ order, save }: { order: PrintNoteRowOrder; save: 
       setMsg({ ok: false, text: "Сначала сохраните текст открытки" });
       return;
     }
-    window.open(`/print/order-cards?ids=${encodeURIComponent(order.orderId)}`, "_blank", "noopener");
+    window.open(printCardsUrl(order.orderId), "_blank", "noopener");
   };
 
   return (
