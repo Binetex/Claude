@@ -1,3 +1,13 @@
+/**
+ * Внутреннее поле открытки, px (при 96 CSS px на дюйм). ЕДИНСТВЕННЫЙ источник значения:
+ * его же берёт PrintDocument, когда считает доступную область для замера текста. Если задать
+ * padding только здесь, замер разъедется с вёрсткой и длинный текст переполнит половину.
+ *
+ * Поле листа задано через @page margin: 0, поэтому это и есть итоговое расстояние от края
+ * бумаги до текста — двойного отступа нет.
+ */
+export const CARD_PADDING_PX = 120;
+
 /** Печатный CSS открыток. US Letter (НЕ A4). 1 лист = 1 заказ, обе половины центрированы H+V. */
 export const PRINT_CSS = `
 @page { size: Letter portrait; margin: 0; }
@@ -15,7 +25,7 @@ export const PRINT_CSS = `
 /* Линия разреза строго посередине листа */
 .cut-line { border-top: 1px dashed #94a3b8; }
 .half {
-  width: 8.5in; height: 5.5in; box-sizing: border-box; padding: 0.5in;
+  width: 8.5in; height: 5.5in; box-sizing: border-box; padding: ${CARD_PADDING_PX}px;
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   text-align: center; overflow: hidden;
   font-family: var(--font-lora), Georgia, serif; color: #111;

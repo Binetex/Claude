@@ -4,11 +4,11 @@ import { splitCardIntoParts } from "@/lib/print/splitNote";
 import { buildOrderHalves, packOrderSheets, type Half, type Sheet, type RecipientInfo } from "@/lib/print/packSheets";
 import { escapeHtml, isBlankCardMessage } from "@/lib/print/cardText";
 import type { PrintOrder } from "@/modules/print/loadPrintable";
-import { PRINT_CSS } from "./printCss";
+import { PRINT_CSS, CARD_PADDING_PX } from "./printCss";
 
 const PX = 96; // CSS px на дюйм — экранный замер согласован с печатью
 const HALF_H = 5.5 * PX;
-const PAD = 0.5 * PX; // поле карточки
+const PAD = CARD_PADDING_PX; // поле карточки — то же значение, что в CSS (.half padding)
 const NOTE_W = 8.5 * PX - 2 * PAD; // ширина текстовой области
 const MSG_AREA_H = HALF_H - 2 * PAD - 12; // доступная высота текста открытки в половине
 

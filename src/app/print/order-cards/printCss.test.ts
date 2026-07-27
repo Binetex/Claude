@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { PRINT_CSS } from "./printCss";
+import { PRINT_CSS, CARD_PADDING_PX } from "./printCss";
 
 describe("print CSS (§14: 13,14)", () => {
   it("13) использует US Letter, а не A4", () => {
@@ -21,5 +21,31 @@ describe("print CSS (§14: 13,14)", () => {
 
   it("между половинами — пунктирная линия разреза", () => {
     expect(PRINT_CSS).toMatch(/\.cut-line\s*\{[^}]*dashed/);
+  });
+});
+
+describe("поле открытки", () => {
+  it("120px со всех сторон — одним значением, а не по сторонам", () => {
+    expect(CARD_PADDING_PX).toBe(120);
+    expect(PRINT_CSS).toMatch(/\.half\s*\{[^}]*padding:\s*120px;/);
+  });
+
+  it("поле листа нулевое — иначе отступ сложился бы дважды", () => {
+    // @page margin: 0 → расстояние от края бумаги до текста задаёт только padding половины.
+    expect(PRINT_CSS).toMatch(/@page\s*\{[^}]*margin:\s*0\s*;/);
+  });
+
+  it("текст помещается в половину: поля не съедают всю высоту", () => {
+    const PX = 96;
+    const halfH = 5.5 * PX;
+    const msgAreaH = halfH - 2 * CARD_PADDING_PX - 12;
+    // Даже самым крупным шрифтом (16pt ≈ 21.3px, line-height 1.4) остаётся место
+    // на несколько строк — иначе короткая записка уезжала бы на второй лист.
+    expect(msgAreaH).toBeGreaterThan(21.3 * 1.4 * 3);
+  });
+
+  it("ширина текста остаётся разумной для переноса слов", () => {
+    const noteW = 8.5 * 96 - 2 * CARD_PADDING_PX;
+    expect(noteW).toBeGreaterThan(400); // иначе длинные слова начнут рвать вёрстку
   });
 });
