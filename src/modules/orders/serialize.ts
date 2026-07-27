@@ -208,6 +208,9 @@ export function serializeForFlorist(o: OrderWithRelations) {
       // externalPrice (цена клиента) НЕ включается.
     })),
     floristTotal: toNumber(o.floristTotal), // только его сумма
+    // Read-only признак режима видимости — чтобы интерфейс не угадывал его по наличию
+    // блока finance. Прав не добавляет: что показывать, решает состав полей ниже.
+    financeVisibility: isFull ? ("FULL" as const) : ("MAKER_ONLY" as const),
     ...(isFull
       ? {
           finance: {

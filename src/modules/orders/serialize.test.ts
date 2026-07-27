@@ -153,6 +153,10 @@ describe("serializeForFlorist (MAKER_ONLY) — только своя цена", 
     expect((o as Record<string, unknown>).currentFloristName).toBeUndefined();
     expect((o as Record<string, unknown>).currentFloristId).toBeUndefined();
   });
+  it("режим видимости отдаётся интерфейсу явно", () => {
+    // UI выбирает, какую сумму показать, по этому полю — а не по косвенному наличию finance.
+    expect(o.financeVisibility).toBe("MAKER_ONLY");
+  });
 });
 
 describe("serializeForFlorist (FULL) — расширенная раскладка, но без секретов владельца", () => {
@@ -169,6 +173,36 @@ describe("serializeForFlorist (FULL) — расширенная раскладк
   });
   it("позиция всё ещё без цены клиента", () => {
     expect((o.items[0] as Record<string, unknown>).externalPrice).toBeUndefined();
+  });
+  it("режим видимости отдаётся интерфейсу явно", () => {
+    expect(o.financeVisibility).toBe("FULL");
+  });
+  it("собственная цена продолжает приходить — она лишь не показывается в карточке", () => {
+    // Скрытие блока «Ваша цена изготовления» — визуальное: данные и права не менялись.
+    expect(o.floristTotal).toBe(70);
+  });
+});
+
+/**
+ * Что показывать флористу в списке — производная ТОЛЬКО от financeVisibility.
+ * Логика вынесена в тест как чистое правило, потому что в странице это одно выражение.
+ */
+describe("сумма в списке заказов флориста", () => {
+  const pick = (f: ReturnType<typeof serializeForFlorist>) =>
+    f.financeVisibility === "FULL"
+      ? { amount: f.finance?.customerTotal ?? null, label: "сумма заказа" }
+      : { amount: f.floristTotal, label: "вам" };
+
+  it("FULL → итог заказчика с подписью «сумма заказа»", () => {
+    expect(pick(serializeForFlorist(makeOrder("FULL")))).toEqual({ amount: 123, label: "сумма заказа" });
+  });
+
+  it("MAKER_ONLY → своя цена изготовления с подписью «вам»", () => {
+    expect(pick(serializeForFlorist(makeOrder("MAKER_ONLY")))).toEqual({ amount: 70, label: "вам" });
+  });
+
+  it("MAKER_ONLY никогда не получает сумму заказчика — показывать было бы нечего", () => {
+    expect(serializeForFlorist(makeOrder("MAKER_ONLY")).finance).toBeUndefined();
   });
 });
 

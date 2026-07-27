@@ -166,8 +166,10 @@ export default async function FloristOrderPage({ params }: { params: Promise<{ i
       }
       right={
         <>
-          {/* Стоимость — заметным блоком, первой в колонке управления. */}
-          <FloristPriceCard floristTotal={order.floristTotal} />
+          {/* Цена изготовления — только флористу с MAKER_ONLY. При FULL владелец показывает
+              суммы заказчика, и собственная себестоимость в карточке не нужна. Данные и права
+              не меняются: floristTotal по-прежнему приходит, просто не отображается. */}
+          {order.financeVisibility !== "FULL" && <FloristPriceCard floristTotal={order.floristTotal} />}
 
           <FloristQuickActions mapsUrl={mapsUrl} recipientPhone={order.recipientPhone} />
 

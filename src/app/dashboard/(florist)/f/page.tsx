@@ -43,6 +43,10 @@ export default async function FloristHome({
 
   const orders = await listForFlorist(user.floristId, filters);
 
+  // Режим видимости берём из уже сериализованных заказов — отдельного запроса не нужно,
+  // у одного флориста он одинаков для всех его заказов.
+  const fullFinance = orders[0]?.financeVisibility === "FULL";
+
   return (
     <div className="space-y-4">
       <PageHeader
@@ -73,12 +77,18 @@ export default async function FloristHome({
         />
 
         <OrdersPendingArea>
-          {/* Тот же список, что у владельца: без сумм заказчика и без колонки флориста —
-              флорист видит только собственную цену (floristTotal). */}
+          {/* Тот же список, что у владельца, но одна сумма вместо раскладки. Какая именно —
+              решает financeVisibility флориста (существующая настройка, прав не добавляет):
+              FULL уже видит суммы заказчика, поэтому показываем итог заказа; MAKER_ONLY —
+              свою цену изготовления, как было. */}
           <OrdersTable
-            // finance у флориста — это раскладка заказчика (только при полной видимости) и в
-            // список она не идёт; таблице отдаём лишь его собственную цену.
-            orders={orders.map((o) => ({ ...o, finance: undefined }))}
+            orders={orders.map((o) => ({
+              ...o,
+              // Раскладку заказчика в список не отдаём — только одну сумму.
+              finance: undefined,
+              sideAmount: fullFinance ? o.finance?.customerTotal ?? null : o.floristTotal,
+            }))}
+            sideAmountLabel={fullFinance ? "сумма заказа" : "вам"}
             hideFinance
             hideFlorist
             hrefBase="/dashboard/f"
