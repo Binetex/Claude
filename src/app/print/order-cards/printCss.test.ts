@@ -44,6 +44,17 @@ describe("поле открытки", () => {
     expect(msgAreaH).toBeGreaterThan(21.3 * 1.4 * 3);
   });
 
+  it("лист и половина защищены от разрыва между страницами принтера", () => {
+    expect(PRINT_CSS).toMatch(/\.sheet\s*\{[^}]*break-inside:\s*avoid/);
+    expect(PRINT_CSS).toMatch(/\.half\s*\{[^}]*break-inside:\s*avoid/);
+  });
+
+  it("замерочный элемент переносит слова так же, как карточка", () => {
+    // Иначе подобранный кегль не совпадёт с реальной вёрсткой на длинных ссылках.
+    expect(PRINT_CSS).toMatch(/\.measurer\s*\{[^}]*overflow-wrap:\s*anywhere/);
+    expect(PRINT_CSS).toMatch(/\.half\s*\{[^}]*overflow-wrap:\s*anywhere/);
+  });
+
   it("ширина текста остаётся разумной для переноса слов", () => {
     const noteW = 8.5 * 96 - 2 * CARD_PADDING_PX;
     expect(noteW).toBeGreaterThan(400); // иначе длинные слова начнут рвать вёрстку

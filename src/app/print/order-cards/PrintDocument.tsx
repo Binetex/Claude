@@ -1,6 +1,7 @@
 "use client";
 import { useLayoutEffect, useRef, useState } from "react";
 import { splitCardIntoParts } from "@/lib/print/splitNote";
+import { fitFontPt } from "@/lib/print/fitText";
 import { buildOrderHalves, packOrderSheets, type Half, type Sheet, type RecipientInfo } from "@/lib/print/packSheets";
 import { escapeHtml, isBlankCardMessage } from "@/lib/print/cardText";
 import type { PrintOrder } from "@/modules/print/loadPrintable";
@@ -12,13 +13,12 @@ const PAD = CARD_PADDING_PX; // поле карточки — то же знач
 const NOTE_W = 8.5 * PX - 2 * PAD; // ширина текстовой области
 const MSG_AREA_H = HALF_H - 2 * PAD - 12; // доступная высота текста открытки в половине
 
-/** Размер шрифта текста открытки по длине: 16 / 14 / 12pt (никогда < 12pt). */
-function pickFontPt(text: string): number {
-  const n = text.trim().length;
-  if (n <= 160) return 16;
-  if (n <= 420) return 14;
-  return 12;
-}
+/**
+ * Диапазон кегля текста открытки. Базовый — как раньше; ниже минимума не опускаемся,
+ * дальше уже перенос на следующую половину.
+ */
+const BASE_FONT_PT = 16;
+const MIN_FONT_PT = 12;
 
 function recipientOf(o: PrintOrder): RecipientInfo {
   return {
@@ -53,13 +53,25 @@ export function PrintDocument({ orders }: { orders: PrintOrder[] }) {
 
     const perOrder: Half[][] = orders.map((o) => {
       const recipient = recipientOf(o);
-      if (isBlankCardMessage(o.cardMessage)) return buildOrderHalves(recipient, [], 16);
-      const fontPt = pickFontPt(o.cardMessage);
-      const parts = splitCardIntoParts(
+      if (isBlankCardMessage(o.cardMessage)) return buildOrderHalves(recipient, [], BASE_FONT_PT);
+
+      // Кегль подбирается ДЛЯ КАЖДОЙ открытки отдельно: короткая записка не должна мельчать
+      // из-за того, что в этом же документе печатается длинная.
+      const { fontPt, fits } = fitFontPt(
         o.cardMessage,
-        { firstHeightPx: MSG_AREA_H, contHeightPx: MSG_AREA_H },
-        (t) => measure(t, fontPt)
+        { basePt: BASE_FONT_PT, minPt: MIN_FONT_PT, areaHeightPx: MSG_AREA_H },
+        measure
       );
+
+      // Поместилось целиком — одна половина, без разрыва. Иначе (даже на минимуме не влезло)
+      // разбиваем на части тем же минимальным кеглем: текст не обрезаем.
+      const parts = fits
+        ? [o.cardMessage]
+        : splitCardIntoParts(
+            o.cardMessage,
+            { firstHeightPx: MSG_AREA_H, contHeightPx: MSG_AREA_H },
+            (t) => measure(t, fontPt)
+          );
       return buildOrderHalves(recipient, parts.length ? parts : [o.cardMessage], fontPt);
     });
 

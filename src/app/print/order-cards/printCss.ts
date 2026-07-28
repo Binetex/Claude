@@ -11,7 +11,9 @@ export const CARD_PADDING_PX = 120;
 /** Печатный CSS открыток. US Letter (НЕ A4). 1 лист = 1 заказ, обе половины центрированы H+V. */
 export const PRINT_CSS = `
 @page { size: Letter portrait; margin: 0; }
-.measurer { position: absolute; left: -99999px; top: 0; visibility: hidden; box-sizing: border-box; font-family: var(--font-lora), Georgia, serif; text-align: center; }
+/* Замерочный элемент обязан переносить текст ТОЧНО так же, как .half — иначе подобранный
+   кегль не совпадёт с реальной вёрсткой (особенно на длинных словах и ссылках). */
+.measurer { position: absolute; left: -99999px; top: 0; visibility: hidden; box-sizing: border-box; font-family: var(--font-lora), Georgia, serif; text-align: center; overflow-wrap: anywhere; }
 .toolbar { position: sticky; top: 0; display: flex; gap: 12px; align-items: center; padding: 12px 16px; background: #0f172a; color: #fff; z-index: 10; }
 .toolbar-title { font: 600 14px system-ui, sans-serif; margin-right: auto; }
 .toolbar-btn { font: 600 13px system-ui, sans-serif; padding: 8px 14px; border-radius: 8px; border: 0; background: #22c55e; color: #08260f; cursor: pointer; }
@@ -21,6 +23,8 @@ export const PRINT_CSS = `
 .sheet {
   width: 8.5in; height: 11in; margin: 0 auto; background: #fff; box-sizing: border-box;
   display: flex; flex-direction: column; page-break-after: always; break-after: page;
+  /* Лист — единое целое: половина не должна уезжать на следующую страницу принтера. */
+  page-break-inside: avoid; break-inside: avoid;
 }
 /* Линия разреза строго посередине листа */
 .cut-line { border-top: 1px dashed #94a3b8; }
@@ -28,6 +32,9 @@ export const PRINT_CSS = `
   width: 8.5in; height: 5.5in; box-sizing: border-box; padding: ${CARD_PADDING_PX}px;
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   text-align: center; overflow: hidden;
+  page-break-inside: avoid; break-inside: avoid;
+  /* Длинное слово или ссылка переносятся, а не вылезают за поле. */
+  overflow-wrap: anywhere;
   font-family: var(--font-lora), Georgia, serif; color: #111;
 }
 /* Получатель — по центру, ФИО обычного размера (как основной текст) */
