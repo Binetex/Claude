@@ -123,3 +123,45 @@ describe("пагинация и диапазон вместе", () => {
     expect(new Set(ids).size).toBe(3); // без пересечений
   });
 });
+
+/**
+ * «Сегодня»/«Завтра» считаются по календарному дню МАГАЗИНА (LA), а не по дню процесса.
+ * Раньше здесь брался день сервера (UTC), и каждый вечер после 17:00 по Лос-Анджелесу
+ * вкладка «Сегодня» показывала завтрашние заказы — при этом список закупки, который всегда
+ * считал по таймзоне магазина, справедливо говорил «на сегодня закупок нет».
+ */
+describe("вкладки «Сегодня» и «Завтра» — по дню магазина", () => {
+  const laDay = (d: Date) =>
+    new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles", year: "numeric", month: "2-digit", day: "2-digit" }).format(d);
+
+  it("заказ на завтрашний день магазина не попадает в «Сегодня»", async () => {
+    const tomorrowLa = new Date(`${laDay(new Date(Date.now() + 86400000))}T00:00:00.000Z`);
+    const o = await makeOrder(`TOMORROW-${suffix}`, laDay(new Date(Date.now() + 86400000)));
+    expect(o.deliveryDate.getTime()).toBe(tomorrowLa.getTime());
+
+    const today = mine(await listForOwner({ siteId, preset: "today" }));
+    expect(today.map((x) => x.orderNumber)).not.toContain(o.orderNumber);
+
+    const tomorrow = mine(await listForOwner({ siteId, preset: "tomorrow" }));
+    expect(tomorrow.map((x) => x.orderNumber)).toContain(o.orderNumber);
+  });
+
+  it("заказ на сегодняшний день магазина виден в «Сегодня» и не виден в «Завтра»", async () => {
+    const o = await makeOrder(`TODAY-${suffix}`, laDay(new Date()));
+
+    const today = mine(await listForOwner({ siteId, preset: "today" }));
+    expect(today.map((x) => x.orderNumber)).toContain(o.orderNumber);
+
+    const tomorrow = mine(await listForOwner({ siteId, preset: "tomorrow" }));
+    expect(tomorrow.map((x) => x.orderNumber)).not.toContain(o.orderNumber);
+  });
+
+  it("вкладка и список закупки сходятся в определении «сегодня»", async () => {
+    // Обе стороны должны считать один и тот же календарный день магазина.
+    const todayLa = laDay(new Date());
+    const rows = mine(await listForOwner({ siteId, preset: "today" }));
+    for (const r of rows) {
+      expect(new Date(r.deliveryDate).toISOString().slice(0, 10)).toBe(todayLa);
+    }
+  });
+});
