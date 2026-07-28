@@ -2,7 +2,7 @@
 import { printCardsUrl } from "@/lib/print/printUrl";
 import { useState, useTransition } from "react";
 
-type SaveResult = { ok?: boolean; error?: string; message?: string };
+export type SaveResult = { ok?: boolean; error?: string; message?: string };
 
 export type PrintNoteRowOrder = {
   orderId: string;

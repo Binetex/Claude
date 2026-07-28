@@ -108,6 +108,34 @@ describe("loadPrintableCards — доступ (§14: 9,10,11)", () => {
     expect(cards.map((c) => c.orderId).sort()).toEqual([ids.o1, ids.o2].sort());
   });
 
+  it("day=tomorrow: берёт завтрашние заказы и не берёт сегодняшние", async () => {
+    const tomorrow = new Date(today.getTime() + 24 * 60 * 60 * 1000);
+    const t1 = await makeOrder("t1", { currentFloristId: floristA, cardMessage: "Завтрашний", deliveryDate: tomorrow });
+
+    const tom = await loadPrintableCards({ role: "FLORIST", floristId: floristA }, { day: "tomorrow" });
+    expect(tom.map((c) => c.orderId)).toEqual([t1]);
+
+    // Сегодняшняя выборка завтрашний заказ не захватывает.
+    const tod = await loadPrintableCards({ role: "FLORIST", floristId: floristA }, { day: "today" });
+    expect(tod.map((c) => c.orderId)).not.toContain(t1);
+  });
+
+  it("day=tomorrow уважает те же правила: чужие, cancelled и refunded не попадают", async () => {
+    const tomorrow = new Date(today.getTime() + 24 * 60 * 60 * 1000);
+    const foreign = await makeOrder("t2", { currentFloristId: floristB, cardMessage: "Чужой завтра", deliveryDate: tomorrow });
+    await makeOrder("t3", { currentFloristId: floristA, cardMessage: "Отменён", orderStatus: "CANCELLED", deliveryDate: tomorrow });
+
+    const tom = await loadPrintableCards({ role: "FLORIST", floristId: floristA }, { day: "tomorrow" });
+    expect(tom.map((c) => c.orderId)).not.toContain(foreign);
+    expect(tom.every((c) => c.hasCardMessage)).toBe(true);
+  });
+
+  it("без day и без todayAll поведение прежнее (по умолчанию сегодня)", async () => {
+    const byFlag = await loadPrintableCards({ role: "FLORIST", floristId: floristA }, { todayAll: true });
+    const byDay = await loadPrintableCards({ role: "FLORIST", floristId: floristA }, { day: "today" });
+    expect(byDay.map((c) => c.orderId)).toEqual(byFlag.map((c) => c.orderId));
+  });
+
   it("11) пустой cardMessage НЕ подменяется customerNote", async () => {
     const cards = await loadPrintableCards({ role: "FLORIST", floristId: floristA }, { ids: [ids.o2] });
     expect(cards[0].cardMessage).toBe(""); // именно пусто, не «INTERNAL NOTE»

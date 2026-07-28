@@ -75,10 +75,13 @@ function toPrintOrder(o: Row): PrintOrder {
 
 export type PrintAccessUser = { role: Role; floristId?: string | null };
 
+/** День доставки для массовой печати. Считается по таймзоне КАЖДОГО магазина. */
+export type PrintDay = "today" | "tomorrow";
+
 /** Заказы для печати с учётом прав. Пустой массив — если доступа нет / выбор пуст. */
 export async function loadPrintableCards(
   user: PrintAccessUser,
-  opts: { ids?: string[]; todayAll?: boolean; siteId?: string; includeBlank?: boolean }
+  opts: { ids?: string[]; todayAll?: boolean; day?: PrintDay; siteId?: string; includeBlank?: boolean }
 ): Promise<PrintOrder[]> {
   const where: Prisma.OrderWhereInput = {};
   if (user.role === "FLORIST") {
@@ -97,8 +100,10 @@ export async function loadPrintableCards(
     return rows.map(toPrintOrder); // явный выбор: все статусы, пустой текст — на рендере плейсхолдер
   }
 
-  if (opts.todayAll) {
-    // Берём широкое UTC-окно (±2 дня), затем фильтруем «сегодня» ПО Site.timezone каждого магазина.
+  if (opts.todayAll || opts.day) {
+    const day: PrintDay = opts.day ?? "today";
+    // Берём широкое UTC-окно (±2 дня), затем фильтруем нужный день ПО Site.timezone каждого
+    // магазина: у разных магазинов «сегодня» может начинаться в разные моменты.
     const now = Date.now();
     where.deliveryDate = { gte: new Date(now - 2 * 86400000), lt: new Date(now + 2 * 86400000) };
     where.orderStatus = { notIn: ["CANCELLED", "DELIVERED"] };
@@ -107,7 +112,7 @@ export async function loadPrintableCards(
     return rows
       .filter(
         (o) =>
-          deliveryDayBucket(o.deliveryDate, o.site.timezone) === "today" &&
+          deliveryDayBucket(o.deliveryDate, o.site.timezone) === day &&
           (opts.includeBlank || !isBlankCardMessage(o.cardMessage)) // список вкладки показывает и пустые
       )
       .map(toPrintOrder);

@@ -57,7 +57,7 @@ export default async function FloristHome({
         }
         actions={
           <Button asChild variant="outline" size="sm">
-            <Link href="/dashboard/f/print-notes">Открытки для печати</Link>
+            <Link href="/dashboard/f/print-notes">Печать записок</Link>
           </Button>
         }
       />
