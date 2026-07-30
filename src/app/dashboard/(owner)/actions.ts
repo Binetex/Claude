@@ -8,7 +8,7 @@ import { CARD_MESSAGE_MAX } from "@/lib/print/cardText";
 import { hashPassword } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { Prisma } from "@/generated/prisma/client";
-import type { OrderStatus, FloristFinanceVisibility } from "@/generated/prisma/enums";
+import type { OrderStatus, FloristFinanceVisibility, Role } from "@/generated/prisma/enums";
 import {
   reassignManual,
   setManualFloristPrice,
@@ -443,4 +443,65 @@ export async function ownerCreateUser(
   revalidatePath("/dashboard/users");
   revalidatePath("/dashboard/florists");
   return { success: true, email, password };
+}
+
+/**
+ * Владелец правит существующего пользователя: имя, email, роль, статус и — при желании —
+ * пароль. Пустое поле пароля означает «оставить текущий»: сам пароль нигде не читается и не
+ * показывается, в БД лежит только hash (та же hashPassword, что при создании).
+ *
+ * Права проверяются на сервере (ownerOnly) — форму можно отправить в обход интерфейса.
+ */
+export async function ownerUpdateUser(
+  _prev: unknown,
+  formData: FormData
+): Promise<{ error?: string; success?: true }> {
+  await ownerOnly();
+
+  const userId = String(formData.get("userId") ?? "").trim();
+  const name = String(formData.get("name") ?? "").trim();
+  const email = String(formData.get("email") ?? "").trim().toLowerCase();
+  const role = String(formData.get("role") ?? "") as Role;
+  const active = String(formData.get("active") ?? "") === "true";
+  const newPassword = String(formData.get("newPassword") ?? "");
+
+  if (!userId) return { error: "Не указан пользователь." };
+  if (name.length < 2) return { error: "Укажите имя (минимум 2 символа)." };
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { error: "Некорректный email." };
+  if (!["OWNER", "FLORIST", "CALL_CENTER"].includes(role)) return { error: "Выберите роль." };
+  // Пустой пароль — штатный случай (не меняем). Заданный проверяем по длине.
+  if (newPassword && newPassword.length < 8) return { error: "Пароль — минимум 8 символов." };
+
+  const current = await prisma.user.findUnique({ where: { id: userId }, select: { id: true, role: true } });
+  if (!current) return { error: "Пользователь не найден." };
+
+  // Email уникален: занят ли он ДРУГИМ пользователем.
+  const dup = await prisma.user.findUnique({ where: { email }, select: { id: true } });
+  if (dup && dup.id !== userId) return { error: `Email ${email} уже занят другим пользователем.` };
+
+  await prisma.$transaction(async (tx) => {
+    await tx.user.update({
+      where: { id: userId },
+      data: {
+        name,
+        email,
+        role,
+        active,
+        // Хеш перезаписываем ТОЛЬКО когда пароль реально ввели.
+        ...(newPassword ? { passwordHash: await hashPassword(newPassword) } : {}),
+      },
+    });
+
+    // Роль сменили на флориста, а профиля нет — заводим, иначе кабинет флориста будет
+    // недоступен (requireFlorist требует и роль, и floristId). Существующий профиль и его
+    // financeVisibility не трогаем.
+    if (role === "FLORIST" && current.role !== "FLORIST") {
+      const florist = await tx.florist.findUnique({ where: { userId }, select: { id: true } });
+      if (!florist) await tx.florist.create({ data: { userId, financeVisibility: "MAKER_ONLY" } });
+    }
+  });
+
+  revalidatePath("/dashboard/users");
+  revalidatePath("/dashboard/florists");
+  return { success: true };
 }

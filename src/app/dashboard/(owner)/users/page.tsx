@@ -3,6 +3,7 @@ import { Card, CardHeader, CardTitle, CardBody } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import type { Role } from "@/generated/prisma/enums";
 import { CreateUserForm } from "./CreateUserForm";
+import { EditUserDialog } from "./EditUserDialog";
 
 export const dynamic = "force-dynamic";
 
@@ -34,17 +35,17 @@ export default async function UsersPage() {
           <thead>
             <tr className="border-b border-slate-100 text-left text-xs text-slate-500">
               <th className="px-3 py-2">Имя</th>
-              <th className="px-3 py-2">Роль</th>
               <th className="px-3 py-2">Email</th>
-              <th className="px-3 py-2">Телефон</th>
-              <th className="px-3 py-2">Telegram</th>
+              <th className="px-3 py-2">Роль</th>
               <th className="px-3 py-2">Статус</th>
+              <th className="px-3 py-2 text-right">Действие</th>
             </tr>
           </thead>
           <tbody>
             {users.map((u) => (
               <tr key={u.id} className="border-b border-slate-50">
                 <td className="px-3 py-2 font-medium text-slate-800">{u.name}</td>
+                <td className="px-3 py-2 text-slate-600">{u.email}</td>
                 <td className="px-3 py-2">
                   {roleLabel[u.role]}
                   {u.florist && (
@@ -53,13 +54,13 @@ export default async function UsersPage() {
                     </span>
                   )}
                 </td>
-                <td className="px-3 py-2 text-slate-600">{u.email}</td>
-                <td className="px-3 py-2 text-slate-600">{u.phone ?? "—"}</td>
-                <td className="px-3 py-2 text-slate-600">{u.telegramId ?? "—"}</td>
                 <td className="px-3 py-2">
                   <Badge className={u.active ? "bg-emerald-100 text-emerald-800 border-emerald-200" : "bg-slate-100 text-slate-600 border-slate-200"}>
                     {u.active ? "активен" : "отключён"}
                   </Badge>
+                </td>
+                <td className="px-3 py-2 text-right">
+                  <EditUserDialog user={{ id: u.id, name: u.name, email: u.email, role: u.role, active: u.active }} />
                 </td>
               </tr>
             ))}
