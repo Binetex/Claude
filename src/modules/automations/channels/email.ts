@@ -2,15 +2,16 @@ import "server-only";
 /**
  * EMAIL-канал: реализация ChannelSender поверх существующей Email-интеграции (settings.ts +
  * brevo.ts, Stage 1). Гейтинг (магазин настроил Email? домен подтверждён? есть шаблон для этого
- * события?) выполняет resolveSiteEmailConfig/resolveSiteTemplateId и мапится в skip (config-
- * проблема, не сбой отправки) — так же, как store_no_quo_number у SMS.
+ * события?) выполняет resolveSiteEmailConfig/resolveEmailTemplateForAutomation и мапится в skip
+ * (config-проблема, не сбой отправки) — так же, как store_no_quo_number у SMS. Шаблон — override
+ * правила (ctx.emailTemplateIdOverride), если задан, иначе общий шаблон магазина (Stage 2.1).
  *
  * Идемпотентность — по ctx.idempotencyKey, ключ формирует движок (handlers.ts) per-attempt.
  */
 import type { PrismaClient } from "@/generated/prisma/client";
 import { createBrevoProvider } from "@/integrations/email/brevo";
 import { resolveBrevoApiKey } from "@/integrations/email/accountKey";
-import { resolveSiteEmailConfig, resolveSiteTemplateId } from "@/integrations/email/settings";
+import { resolveSiteEmailConfig, resolveEmailTemplateForAutomation } from "@/integrations/email/settings";
 import type { ChannelSender, ChannelSendContext, ChannelSendResult } from "./types";
 
 // Config/precondition-коды: магазин ещё не готов слать Email → job SKIPPED, не FAILED.
@@ -37,7 +38,11 @@ export function createEmailChannelSender(prisma: PrismaClient): ChannelSender {
       const cfg = await resolveSiteEmailConfig(prisma, ctx.siteId);
       if (!cfg.ok) return { ok: false, code: cfg.skip, retryable: false, skip: true };
 
-      const tpl = await resolveSiteTemplateId(prisma, ctx.siteId, ctx.triggerType);
+      const tpl = await resolveEmailTemplateForAutomation(prisma, {
+        siteId: ctx.siteId,
+        triggerType: ctx.triggerType,
+        automationTemplateId: ctx.emailTemplateIdOverride,
+      });
       if (!tpl.ok) return { ok: false, code: tpl.skip, retryable: false, skip: true };
 
       const apiKey = await resolveBrevoApiKey(prisma);

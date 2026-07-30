@@ -359,6 +359,7 @@ export function buildAutomationSendHandler(prisma: PrismaClient, deps: Automatio
       phoneNormalized: job.phoneNormalized,
       emailNormalized: job.emailNormalized,
       triggerType: automation.triggerType,
+      emailTemplateIdOverride: automation.brevoTemplateId,
       text,
       vars,
       idempotencyKey: `${job.idempotencyKey}:a${job.attempts}`,

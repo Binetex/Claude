@@ -112,6 +112,29 @@ export async function resolveSiteTemplateId(
   return { ok: true, templateId: row.brevoTemplateId };
 }
 
+export type ResolveRuleTemplateResult =
+  | { ok: true; templateId: number; source: "automation" | "site" }
+  | { ok: false; skip: EmailConfigSkip; safeError: string };
+
+/**
+ * Template ID для КОНКРЕТНОГО правила (Stage 2.1). Override правила (Automation.brevoTemplateId)
+ * приоритетнее общего шаблона магазина; если override не задан — as-is поведение Stage 2
+ * (SiteEmailTemplate по siteId+triggerType). Используется и реальной отправкой
+ * (channels/email.ts), и read-only подсказкой в форме правила — единая логика, один источник
+ * истины для «какой шаблон реально уйдёт».
+ */
+export async function resolveEmailTemplateForAutomation(
+  prisma: PrismaClient,
+  args: { siteId: string; triggerType: string; automationTemplateId: number | null }
+): Promise<ResolveRuleTemplateResult> {
+  if (args.automationTemplateId != null) {
+    return { ok: true, templateId: args.automationTemplateId, source: "automation" };
+  }
+  const site = await resolveSiteTemplateId(prisma, args.siteId, args.triggerType);
+  if (!site.ok) return site;
+  return { ok: true, templateId: site.templateId, source: "site" };
+}
+
 /**
  * Настройки всех магазинов сразу — страница «Сайты» рендерит их списком, а каждый лишний
  * round-trip к БД там заметен. Магазин без настроек — это выключенный Email, а не ошибка,

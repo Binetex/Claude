@@ -1345,6 +1345,14 @@ model Automation {
   emailEnabled         Boolean @default(false)
   /** «Email, если SMS недоступно» — имеет смысл только при smsEnabled=true (проверяется при сохранении). */
   emailFallbackEnabled Boolean @default(false)
+  /**
+   * Override Brevo Template ID именно ЭТОГО правила (Stage 2.1). null (по умолчанию) → берём
+   * общий шаблон магазина под это triggerType (SiteEmailTemplate). Заполнен → это правило шлёт
+   * СВОИМ шаблоном, даже если у магазина/других правил на то же событие настроен другой —
+   * так два правила на одно событие (сегменты, разные тексты) не заставляют держать два
+   * SiteEmailTemplate под одну и ту же пару siteId+triggerType (там unique-ограничение).
+   */
+  brevoTemplateId Int?
 
   triggerType    String // валидируется app-registry; строкой — для расширяемости без миграции
   audience       SmsAudience

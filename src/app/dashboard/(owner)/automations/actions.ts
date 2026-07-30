@@ -11,7 +11,7 @@ import { buildAutomationPreview } from "@/modules/automations/preview";
 import { buildTestMessage, sendTestSmsViaClient } from "@/modules/automations/testSend";
 import { setAutomationsGloballyDisabled } from "@/modules/automations/settings";
 import type { SmsConditions } from "@/modules/automations/conditions";
-import { resolveSiteEmailConfig, resolveSiteTemplateId } from "@/integrations/email/settings";
+import { resolveSiteEmailConfig, resolveEmailTemplateForAutomation } from "@/integrations/email/settings";
 
 const AUDIENCES = new Set(["CUSTOMER", "RECIPIENT", "BOTH"]);
 const DELAY_UNITS = new Set(["IMMEDIATE", "MINUTE", "HOUR", "DAY", "WEEK", "MONTH"]);
@@ -25,6 +25,8 @@ export type AutomationInput = {
   smsEnabled: boolean;
   emailEnabled: boolean;
   emailFallbackEnabled: boolean;
+  /** Override общего шаблона магазина именно для этого правила (Stage 2.1). null = не задан. */
+  brevoTemplateId: number | null;
   triggerType: string;
   audience: "CUSTOMER" | "RECIPIENT" | "BOTH";
   delayAmount: number;
@@ -40,6 +42,9 @@ function validate(input: AutomationInput): string | null {
   if (!input.name?.trim()) return "Укажите название.";
   if (!input.smsEnabled && !input.emailEnabled) return "Выберите хотя бы один канал: SMS или Email.";
   if (input.emailFallbackEnabled && !input.smsEnabled) return "«Email, если SMS недоступно» имеет смысл только при включённом SMS.";
+  if (input.brevoTemplateId != null && (!Number.isInteger(input.brevoTemplateId) || input.brevoTemplateId <= 0)) {
+    return "Template ID правила должен быть целым положительным числом.";
+  }
   if (!isSupportedTrigger(input.triggerType)) return "Неизвестный триггер.";
   if (!AUDIENCES.has(input.audience)) return "Некорректная аудитория.";
   if (!DELAY_UNITS.has(input.delayUnit)) return "Некорректная единица задержки.";
@@ -94,6 +99,7 @@ export async function createAutomation(input: AutomationInput): Promise<ActionRe
       smsEnabled: input.smsEnabled,
       emailEnabled: input.emailEnabled,
       emailFallbackEnabled: input.smsEnabled && input.emailFallbackEnabled,
+      brevoTemplateId: input.brevoTemplateId,
       triggerType: input.triggerType,
       audience: input.audience,
       delayAmount: input.delayAmount,
@@ -138,6 +144,7 @@ export async function updateAutomation(id: string, input: AutomationInput): Prom
       smsEnabled: input.smsEnabled,
       emailEnabled: input.emailEnabled,
       emailFallbackEnabled: input.smsEnabled && input.emailFallbackEnabled,
+      brevoTemplateId: input.brevoTemplateId,
       triggerType: input.triggerType,
       audience: input.audience,
       delayAmount: input.delayAmount,
@@ -172,6 +179,7 @@ export async function duplicateAutomation(id: string): Promise<ActionResult> {
       smsEnabled: src.smsEnabled,
       emailEnabled: src.emailEnabled,
       emailFallbackEnabled: src.emailFallbackEnabled,
+      brevoTemplateId: src.brevoTemplateId,
       triggerType: src.triggerType,
       audience: src.audience,
       delayAmount: src.delayAmount,
@@ -220,21 +228,23 @@ export async function previewAutomation(orderId: string, template: string, audie
 }
 
 export type SiteEmailTemplateStatus =
-  | { ready: true; templateId: number }
+  | { ready: true; templateId: number; source: "automation" | "site" }
   | { ready: false; reason: string };
 
 /**
- * Готов ли выбранный магазин слать Email для ЭТОГО события (форма показывает статус вместо
- * дублирования настроек отправителя/домена — они находятся в /dashboard/sites, а не в правиле).
+ * Готов ли выбранный магазин слать Email для ЭТОГО события С УЧЁТОМ возможного override
+ * шаблона у самого правила (Stage 2.1) — форма показывает статус вместо дублирования настроек
+ * отправителя/домена (они на /dashboard/sites) И вместо дублирования логики резолва шаблона
+ * (resolveEmailTemplateForAutomation — тот же код, что реально используется при отправке).
  */
-export async function checkSiteEmailTemplate(siteId: string, triggerType: string): Promise<SiteEmailTemplateStatus> {
+export async function checkSiteEmailTemplate(siteId: string, triggerType: string, ruleTemplateId: number | null = null): Promise<SiteEmailTemplateStatus> {
   await requireRole("OWNER");
   if (!siteId || !isSupportedTrigger(triggerType)) return { ready: false, reason: "site_or_trigger_missing" };
   const cfg = await resolveSiteEmailConfig(prisma, siteId);
   if (!cfg.ok) return { ready: false, reason: cfg.skip };
-  const tpl = await resolveSiteTemplateId(prisma, siteId, triggerType);
+  const tpl = await resolveEmailTemplateForAutomation(prisma, { siteId, triggerType, automationTemplateId: ruleTemplateId });
   if (!tpl.ok) return { ready: false, reason: tpl.skip };
-  return { ready: true, templateId: tpl.templateId };
+  return { ready: true, templateId: tpl.templateId, source: tpl.source };
 }
 
 /**

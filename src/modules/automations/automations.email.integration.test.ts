@@ -141,7 +141,10 @@ beforeAll(async () => {
 
 beforeEach(() => {
   fetchMock.mockReset();
-  fetchMock.mockResolvedValue(brevoJson(201, { messageId: "m" }));
+  // ВАЖНО: mockResolvedValue отдавал бы ОДИН и тот же объект Response на каждый вызов — тело
+  // Response читается один раз (res.text() в brevo.ts), второй fetch в тесте падал бы с "Body
+  // has already been read". mockImplementation создаёт свежий Response на каждый вызов.
+  fetchMock.mockImplementation(async () => brevoJson(201, { messageId: "m" }));
   process.env.BREVO_API_KEY = "test-key";
 });
 
@@ -401,5 +404,81 @@ describe("Не разрешает сохранить/включить и обы�
     const jobs = await jobsFor(auto.id, order.id);
     const emailJobs = jobs.filter((j) => j.channel === "EMAIL");
     expect(emailJobs).toHaveLength(1); // не два (обычный + fallback)
+  });
+});
+
+describe("Stage 2.1 — Template ID на уровне правила (override)", () => {
+  it("два правила одного события у одного магазина используют РАЗНЫЕ шаблоны", async () => {
+    const site = await makeSite(18);
+    // Общий шаблон магазина под ORDER_CREATED (используется только тем правилом, у которого нет override).
+    await setupSiteEmail(site.id, "orders@site18.example", 900);
+
+    const autoA = await makeAutomation(site.id, { name: "rule A", emailEnabled: true, brevoTemplateId: 801 });
+    const autoB = await makeAutomation(site.id, { name: "rule B", emailEnabled: true, brevoTemplateId: 802 });
+
+    const orderA = await makeOrder(site.id);
+    const orderB = await makeOrder(site.id);
+    await fireTrigger(orderA);
+    await fireTrigger(orderB);
+
+    const jobA = (await jobsFor(autoA.id, orderA.id))[0];
+    const jobB = (await jobsFor(autoB.id, orderB.id))[0];
+    await sendHandler(rec({ jobId: jobA.id, orderId: orderA.id }));
+    await sendHandler(rec({ jobId: jobB.id, orderId: orderB.id }));
+
+    const bodyA = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+    const bodyB = JSON.parse(fetchMock.mock.calls[1][1].body as string);
+    expect(bodyA.templateId).toBe(801);
+    expect(bodyB.templateId).toBe(802);
+    expect(bodyA.templateId).not.toBe(bodyB.templateId);
+  });
+
+  it("правило БЕЗ override использует общий шаблон магазина (SiteEmailTemplate)", async () => {
+    const site = await makeSite(19);
+    await setupSiteEmail(site.id, "orders@site19.example", 950);
+    const auto = await makeAutomation(site.id, { emailEnabled: true }); // brevoTemplateId не задан
+    const order = await makeOrder(site.id);
+    await fireTrigger(order);
+    const job = (await jobsFor(auto.id, order.id))[0];
+    await sendHandler(rec({ jobId: job.id, orderId: order.id }));
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+    expect(body.templateId).toBe(950);
+  });
+
+  it("override одного магазина не подходит для другого — resolveEmailTemplateForAutomation не путает site", async () => {
+    const siteA = await makeSite("20a");
+    const siteB = await makeSite("20b");
+    await setupSiteEmail(siteA.id, "orders@site20a.example", 1001);
+    await setupSiteEmail(siteB.id, "orders@site20b.example", 1002);
+    // Правило с override привязано к siteA — отправитель и шаблон должны остаться его.
+    const autoA = await makeAutomation(siteA.id, { emailEnabled: true, brevoTemplateId: 777 });
+    const orderA = await makeOrder(siteA.id);
+    await fireTrigger(orderA);
+    const jobA = (await jobsFor(autoA.id, orderA.id))[0];
+    await sendHandler(rec({ jobId: jobA.id, orderId: orderA.id }));
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+    expect(body.sender.email).toBe("orders@site20a.example");
+    expect(body.sender.email).not.toBe("orders@site20b.example");
+    expect(body.templateId).toBe(777); // override, не 1001 и не 1002
+  });
+
+  it("fallback использует ТОТ ЖЕ override, что назначен правилу", async () => {
+    const site = await makeSite(21);
+    await setupSiteEmail(site.id, "orders@site21.example", 960); // общий шаблон магазина — НЕ должен использоваться
+    const auto = await makeAutomation(site.id, { smsEnabled: true, emailFallbackEnabled: true, brevoTemplateId: 861 });
+    const order = await makeOrder(site.id);
+    await fireTrigger(order);
+    const smsJob = (await jobsFor(auto.id, order.id)).find((j) => j.channel === "SMS")!;
+
+    sendOk = false;
+    await sendHandler(rec({ jobId: smsJob.id, orderId: order.id }, 8, 8)); // финальный провал SMS
+    sendOk = true;
+
+    const emailJob = (await jobsFor(auto.id, order.id)).find((j) => j.channel === "EMAIL")!;
+    expect(emailJob.status).toBe("SCHEDULED");
+    await sendHandler(rec({ jobId: emailJob.id, orderId: order.id }));
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+    expect(body.templateId).toBe(861); // override правила, не 960
   });
 });

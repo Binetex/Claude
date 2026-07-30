@@ -30,6 +30,7 @@ export type AutomationFormInitial = {
   smsEnabled: boolean;
   emailEnabled: boolean;
   emailFallbackEnabled: boolean;
+  brevoTemplateId: number | null;
   triggerType: string;
   audience: "CUSTOMER" | "RECIPIENT" | "BOTH";
   delayAmount: number;
@@ -70,6 +71,8 @@ export function AutomationForm({
   const [smsEnabled, setSmsEnabled] = useState(initial?.smsEnabled ?? true);
   const [emailEnabled, setEmailEnabled] = useState(initial?.emailEnabled ?? false);
   const [emailFallbackEnabled, setEmailFallbackEnabled] = useState(initial?.emailFallbackEnabled ?? false);
+  // Строкой (не числом) — чтобы поле можно было временно очистить при редактировании без NaN.
+  const [brevoTemplateIdInput, setBrevoTemplateIdInput] = useState(initial?.brevoTemplateId != null ? String(initial.brevoTemplateId) : "");
   const [triggerType, setTriggerType] = useState(initial?.triggerType ?? triggers[0]?.type ?? "");
   const [audience, setAudience] = useState<AutomationInput["audience"]>(initial?.audience ?? "CUSTOMER");
   const [delayUnit, setDelayUnit] = useState<AutomationInput["delayUnit"]>(initial?.delayUnit ?? "IMMEDIATE");
@@ -93,9 +96,17 @@ export function AutomationForm({
   // setState в эффекте здесь запрещён линтером) при каждом изменении входных данных проверки.
   const [emailStatus, setEmailStatus] = useState<SiteEmailTemplateStatus | null>(null);
   const [, startEmailStatusCheck] = useTransition();
-  function refreshEmailStatus(siteId: string, trigger: string, wantEmail: boolean) {
+  function refreshEmailStatus(siteId: string, trigger: string, wantEmail: boolean, ruleTemplateId: number | null) {
     if (!wantEmail || !siteId || !trigger) { setEmailStatus(null); return; }
-    startEmailStatusCheck(async () => setEmailStatus(await checkSiteEmailTemplate(siteId, trigger)));
+    startEmailStatusCheck(async () => setEmailStatus(await checkSiteEmailTemplate(siteId, trigger, ruleTemplateId)));
+  }
+
+  /** null = не задан (используется шаблон магазина); NaN/невалидное — тоже null, сервер отдельно провалидирует. */
+  function parsedTemplateId(raw: string): number | null {
+    const trimmed = raw.trim();
+    if (!trimmed) return null;
+    const n = Number(trimmed);
+    return Number.isInteger(n) && n > 0 ? n : null;
   }
 
   /** Магазин убрали из правила → сбрасываем выбор песочницы (и заказ/preview вместе с ним). */
@@ -108,7 +119,7 @@ export function AutomationForm({
     setSandboxSiteId(siteId);
     setPreviewOrderId("");
     setPreview(null);
-    refreshEmailStatus(siteId, triggerType, emailEnabled || emailFallbackEnabled);
+    refreshEmailStatus(siteId, triggerType, emailEnabled || emailFallbackEnabled, parsedTemplateId(brevoTemplateIdInput));
   }
 
   const ordersForSite = useMemo(() => recentOrders.filter((o) => o.siteId === sandboxSiteId), [recentOrders, sandboxSiteId]);
@@ -134,6 +145,7 @@ export function AutomationForm({
       smsEnabled,
       emailEnabled,
       emailFallbackEnabled: smsEnabled && emailFallbackEnabled,
+      brevoTemplateId: emailEnabled || emailFallbackEnabled ? parsedTemplateId(brevoTemplateIdInput) : null,
       triggerType,
       audience,
       delayAmount: delayUnit === "IMMEDIATE" ? 0 : Math.max(0, Math.floor(Number(delayAmount) || 0)),
@@ -207,7 +219,7 @@ export function AutomationForm({
               <label className="flex items-center gap-2 text-sm text-slate-700">
                 <input
                   type="checkbox" className="h-4 w-4" checked={emailEnabled}
-                  onChange={(e) => { setEmailEnabled(e.target.checked); refreshEmailStatus(sandboxSiteId, triggerType, e.target.checked || emailFallbackEnabled); }}
+                  onChange={(e) => { setEmailEnabled(e.target.checked); refreshEmailStatus(sandboxSiteId, triggerType, e.target.checked || emailFallbackEnabled, parsedTemplateId(brevoTemplateIdInput)); }}
                 />
                 Email
               </label>
@@ -215,14 +227,27 @@ export function AutomationForm({
                 <label className="flex items-center gap-2 text-sm text-slate-700">
                   <input
                     type="checkbox" className="h-4 w-4" checked={emailFallbackEnabled}
-                    onChange={(e) => { setEmailFallbackEnabled(e.target.checked); refreshEmailStatus(sandboxSiteId, triggerType, emailEnabled || e.target.checked); }}
+                    onChange={(e) => { setEmailFallbackEnabled(e.target.checked); refreshEmailStatus(sandboxSiteId, triggerType, emailEnabled || e.target.checked, parsedTemplateId(brevoTemplateIdInput)); }}
                   />
                   Email, если SMS недоступно
                 </label>
               )}
             </div>
             {(emailEnabled || emailFallbackEnabled) && (
-              <EmailReadinessHint status={emailStatus} siteChosen={!!sandboxSiteId} siteName={sandboxSite?.name} />
+              <div className="space-y-1">
+                <label className="flex items-center gap-2 text-xs text-slate-500">
+                  Brevo Template ID этого правила (необязательно)
+                  <input
+                    value={brevoTemplateIdInput}
+                    onChange={(e) => setBrevoTemplateIdInput(e.target.value)}
+                    onBlur={() => refreshEmailStatus(sandboxSiteId, triggerType, true, parsedTemplateId(brevoTemplateIdInput))}
+                    inputMode="numeric"
+                    placeholder="пусто = шаблон магазина по умолчанию"
+                    className="w-64 rounded-md border border-slate-300 px-2 py-1 text-sm text-slate-700"
+                  />
+                </label>
+                <EmailReadinessHint status={emailStatus} siteChosen={!!sandboxSiteId} siteName={sandboxSite?.name} />
+              </div>
             )}
           </div>
 
@@ -231,7 +256,7 @@ export function AutomationForm({
               <span className="text-xs text-slate-500">Событие (триггер)</span>
               <select
                 value={triggerType}
-                onChange={(e) => { setTriggerType(e.target.value); refreshEmailStatus(sandboxSiteId, e.target.value, emailEnabled || emailFallbackEnabled); }}
+                onChange={(e) => { setTriggerType(e.target.value); refreshEmailStatus(sandboxSiteId, e.target.value, emailEnabled || emailFallbackEnabled, parsedTemplateId(brevoTemplateIdInput)); }}
                 className="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm"
               >
                 {triggers.map((t) => <option key={t.type} value={t.type}>{t.label}</option>)}
@@ -382,11 +407,20 @@ function EmailReadinessHint({ status, siteChosen, siteName }: { status: SiteEmai
   }
   if (!status) return null;
   if (status.ready) {
-    return <p className="text-[11px] text-emerald-700">Email готов для «{siteName}»: Brevo Template ID {status.templateId}.</p>;
+    return (
+      <p className="text-[11px] text-emerald-700">
+        {status.source === "automation"
+          ? `Используется шаблон правила: ID ${status.templateId}.`
+          : `Используется шаблон магазина по умолчанию: ID ${status.templateId} (задан на странице «Сайты»).`}
+      </p>
+    );
   }
+  const hint = status.reason === "site_template_missing"
+    ? "нет Brevo-шаблона ни в этом правиле, ни у магазина по умолчанию для этого события"
+    : EMAIL_SKIP_LABEL[status.reason] ?? status.reason;
   return (
     <p className="text-[11px] text-amber-600">
-      Email для «{siteName}» пока не отправится: {EMAIL_SKIP_LABEL[status.reason] ?? status.reason}. Настройте на странице «Сайты».
+      Email для «{siteName}» пока не отправится: {hint}. Укажите Template ID выше или настройте магазин на странице «Сайты».
     </p>
   );
 }

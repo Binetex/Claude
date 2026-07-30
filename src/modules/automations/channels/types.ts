@@ -19,6 +19,8 @@ export type ChannelSendContext = {
   emailNormalized: string | null;
   /** Событие правила (Automation.triggerType) — EMAIL-каналу нужно для выбора Brevo-шаблона магазина. */
   triggerType: string;
+  /** Override Automation.brevoTemplateId (Stage 2.1). null → EMAIL-канал берёт шаблон магазина. */
+  emailTemplateIdOverride: number | null;
   text: string; // уже отрендеренный текст (SMS); EMAIL использует params, не text
   /** Переменные шаблона (для EMAIL — params, передаются в Brevo как есть). */
   vars: Record<string, string>;

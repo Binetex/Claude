@@ -45,6 +45,7 @@ export default async function EditAutomationPage({ params }: { params: Promise<{
     smsEnabled: automation.smsEnabled,
     emailEnabled: automation.emailEnabled,
     emailFallbackEnabled: automation.emailFallbackEnabled,
+    brevoTemplateId: automation.brevoTemplateId,
     triggerType: automation.triggerType,
     audience: automation.audience,
     delayAmount: automation.delayAmount,
