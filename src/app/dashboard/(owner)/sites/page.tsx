@@ -13,6 +13,8 @@ import { SiteTimezoneSetting } from "./SiteTimezoneSetting";
 import { SiteBurqDropoffSetting } from "./SiteBurqDropoffSetting";
 import { SiteQuoSetting } from "./SiteQuoSetting";
 import { SiteQuoWebhookSecurity } from "./SiteQuoWebhookSecurity";
+import { SiteEmailPanel } from "./SiteEmailPanel";
+import { loadSiteEmailSettingsViews } from "@/integrations/email/settings";
 import { listQuoSigningSecretsMasked } from "@/integrations/quo/signingSecrets";
 import { getQuoSigningKeys } from "@/integrations/quo/config";
 import { isCredentialCryptoConfigured } from "@/lib/crypto/secretBox";
@@ -87,6 +89,7 @@ export default async function SitesPage() {
     return { products: pick("PRODUCTS"), orders: pick("ORDERS") };
   };
 
+  const emailViews = await loadSiteEmailSettingsViews(prisma, sites.map((s) => s.id));
   const quoSecrets = await listQuoSigningSecretsMasked(prisma).catch(() => []);
   const quoEnvCount = getQuoSigningKeys().length;
   const quoCrypto = isCredentialCryptoConfigured();
@@ -232,6 +235,8 @@ export default async function SitesPage() {
                   quoConnectionError: s.quoConnectionError,
                 }}
               />
+
+              <SiteEmailPanel siteId={s.id} initial={emailViews[s.id]} />
 
               <div>
                 <div className="mb-1 text-xs text-slate-400">Приоритет флористов</div>

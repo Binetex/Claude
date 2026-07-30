@@ -394,6 +394,10 @@ model Site {
   reviewUrl   String? // ссылка на отзыв для {{review_url}}; пусто → review-правила не отправляются
   automationSites AutomationSite[]
 
+  // ── Email-рассылки (Brevo) — настройки СВОИ у каждого магазина ──
+  emailSettings  SiteEmailSettings?
+  emailTemplates SiteEmailTemplate[]
+
   // Запрет двух активных Site одного платформенного домена (двойное подключение).
   @@unique([platform, normalizedShopDomain])
 }
@@ -1408,4 +1412,61 @@ model AutomationExecutionLog {
 
   @@index([jobId, createdAt])
   @@index([automationId, createdAt])
+}
+
+// ─────────────────────────────  EMAIL (BREVO)  ─────────────────────────────
+
+/**
+ * Email-настройки ОДНОГО магазина. Отдельная модель (а не поля на Site) по образцу
+ * WooCommerceConnection: набор полей растёт, и держать его рядом с Site неудобно.
+ *
+ * Секретов здесь нет: API-ключ Brevo — общий на аккаунт и живёт только в переменных
+ * окружения. Здесь лежит лишь то, чем магазины отличаются друг от друга: отправитель,
+ * reply-to и состояние проверки. Всё выключено по умолчанию (enabled = false), поэтому
+ * появление модели ничего не рассылает.
+ */
+model SiteEmailSettings {
+  id     String @id @default(cuid())
+  siteId String @unique
+  site   Site   @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  enabled     Boolean @default(false) // главный выключатель Email для магазина
+  senderEmail String? // напр. orders@theflow.la — домен должен быть подтверждён в Brevo
+  senderName  String? // «The Flow» — видимое имя отправителя
+  replyTo     String? // куда попадут ответы клиентов (может отличаться от отправителя)
+  /** Числовой sender id в Brevo. Необязателен: Brevo принимает и пару name+email. */
+  brevoSenderId String?
+
+  /** Отметка владельца, что домен отправителя подтверждён в Brevo через DNS. */
+  domainVerifiedAt DateTime?
+
+  // Результат последнего тестового письма — как у QUO/Airwallex: статус + безопасная ошибка.
+  lastTestAt     DateTime?
+  lastTestStatus String? // ok | error
+  lastErrorSafe  String? // без ключей и адресов получателя
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+/**
+ * Brevo Template ID для пары «магазин + событие». HTML-шаблоны живут в Brevo (свой логотип,
+ * цвета и footer у каждого магазина) — здесь только идентификатор.
+ *
+ * triggerType хранится строкой и валидируется реестром триггеров (как в Automation), поэтому
+ * новое событие не требует миграции.
+ */
+model SiteEmailTemplate {
+  id     String @id @default(cuid())
+  siteId String
+  site   Site   @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  triggerType     String // ORDER_CREATED | ORDER_DELIVERED | …
+  brevoTemplateId Int // id шаблона в Brevo
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([siteId, triggerType])
+  @@index([siteId])
 }
