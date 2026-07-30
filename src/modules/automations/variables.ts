@@ -3,6 +3,7 @@
  * готовые к подстановке (даты/деньги отформатированы). Пустые/отсутствующие данные дают "" —
  * рендер сам решает, что показать/пропустить (см. template.ts), «undefined» в текст не попадает.
  */
+import { localDateStr } from "@/lib/tz";
 
 export type SmsVariableDef = { key: string; label: string; example: string };
 
@@ -51,18 +52,18 @@ function s(v: string | null | undefined): string {
   return v == null ? "" : String(v);
 }
 
-function formatDate(d: Date | null, timezone: string | null): string {
+/**
+ * Дата доставки для шаблона.
+ *
+ * ВНИМАНИЕ, ТЕ ЖЕ ГРАБЛИ, ЧТО В dailySchedule.ts: `Order.deliveryDate` — это UTC-полночь
+ * ЛОКАЛЬНОГО дня доставки, а не момент времени. Форматировать её В ТАЙМЗОНЕ МАГАЗИНА НЕЛЬЗЯ:
+ * «2026-07-31T00:00Z» в America/Los_Angeles — это 30 июля 17:00, и клиент получал бы SMS
+ * с датой на сутки раньше настоящей. Локальный день доставки — это ровно UTC-календарная
+ * дата поля, поэтому здесь всегда "UTC" (тот же приём, что в isDeliveryToday и в списке закупок).
+ */
+function formatDeliveryDate(d: Date | null): string {
   if (!d) return "";
-  try {
-    return new Intl.DateTimeFormat("en-CA", {
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      timeZone: timezone || "UTC",
-    }).format(d);
-  } catch {
-    return new Intl.DateTimeFormat("en-CA", { year: "numeric", month: "2-digit", day: "2-digit", timeZone: "UTC" }).format(d);
-  }
+  return localDateStr(d, "UTC");
 }
 
 function formatMoney(total: number | null): string {
@@ -83,7 +84,7 @@ export function buildOrderVariables(src: OrderVariableSource): Record<string, st
     sender_phone: s(src.senderPhone),
     recipient_phone: s(src.recipientPhone),
     delivery_address: joinAddress(src.addressLine, src.apartment, src.city),
-    delivery_date: formatDate(src.deliveryDate, src.timezone),
+    delivery_date: formatDeliveryDate(src.deliveryDate),
     delivery_time: s(src.deliveryWindow),
     tracking_url: s(src.trackingUrl),
     store_name: s(src.storeName),
