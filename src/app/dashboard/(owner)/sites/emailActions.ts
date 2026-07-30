@@ -2,11 +2,10 @@
 /**
  * Email-настройки магазина (owner-only).
  *
- * Общий API key Brevo здесь НЕ фигурирует: он живёт только в env, в формы не приходит и наружу
- * не отдаётся. Действия меняют лишь per-Site поля: отправитель, reply-to, sender ID, шаблоны.
- *
- * Тестовое письмо — единственное место этапа 1, которое реально обращается к Brevo, и только по
- * явному нажатию владельца.
+ * Действия здесь делятся на два уровня: per-Site (отправитель, reply-to, sender ID, шаблоны —
+ * ownerSaveSiteEmail и т.п.) и общий Brevo API key на весь workspace (ownerSaveBrevoApiKey и
+ * т.п., см. accountKey.ts). Ключ хранится зашифрованным в БД, полное значение из формы в
+ * ответ НИКОГДА не возвращается и не логируется — только маска.
  */
 import { revalidatePath } from "next/cache";
 import { requireRole } from "@/lib/rbac";
@@ -14,6 +13,7 @@ import { prisma } from "@/lib/db";
 import { createBrevoProvider } from "@/integrations/email/brevo";
 import { saveSiteEmailSettings, saveSiteEmailTemplate } from "@/integrations/email/settings";
 import { sendSiteTestEmail } from "@/integrations/email/testSend";
+import { resolveBrevoApiKey, saveBrevoApiKey, clearBrevoApiKey, verifyAndRecordBrevoConnection } from "@/integrations/email/accountKey";
 
 type Result = { ok?: true; message?: string; error?: string };
 
@@ -77,9 +77,45 @@ export async function ownerSaveSiteEmailTemplate(siteId: string, triggerType: st
  */
 export async function ownerSendSiteTestEmail(siteId: string, to: string): Promise<Result> {
   await requireRole("OWNER");
-  const res = await sendSiteTestEmail(prisma, createBrevoProvider(), { siteId, to });
+  const apiKey = await resolveBrevoApiKey(prisma);
+  const res = await sendSiteTestEmail(prisma, createBrevoProvider(apiKey), { siteId, to });
   revalidatePath("/dashboard/sites");
   return res.ok
     ? { ok: true, message: `Письмо отправлено${res.providerMessageId ? "" : " (Brevo не вернул messageId)"}` }
     : { error: res.safeError };
+}
+
+/** Аудит действий с общим ключом БЕЗ значения (только маска) — по образцу QUO signing secrets. */
+function auditBrevoKeyAction(event: "saved" | "cleared", userId: string, maskedSuffix: string | null) {
+  console.info(JSON.stringify({ scope: "integration-secret", provider: "BREVO", kind: "api_key", event, userId, maskedSuffix }));
+}
+
+/** Сохраняет/заменяет общий Brevo API key (весь workspace, не per-Site). Полное значение не логируется и не возвращается. */
+export async function ownerSaveBrevoApiKey(_prev: unknown, fd: FormData): Promise<Result> {
+  const user = await requireRole("OWNER");
+  const raw = String(fd.get("apiKey") ?? "");
+  const res = await saveBrevoApiKey(prisma, raw);
+  if (!res.ok) return { error: res.error };
+  auditBrevoKeyAction("saved", user.id, res.maskedSuffix);
+  revalidatePath("/dashboard/sites");
+  return { ok: true, message: "API key сохранён. Проверьте подключение перед включением рассылок." };
+}
+
+/** Удаляет ключ из БД (после этого действует только env, если он задан). */
+export async function ownerClearBrevoApiKey(): Promise<Result> {
+  const user = await requireRole("OWNER");
+  await clearBrevoApiKey(prisma);
+  auditBrevoKeyAction("cleared", user.id, null);
+  revalidatePath("/dashboard/sites");
+  return { ok: true, message: "Ключ удалён из БД." };
+}
+
+/** GET /v3/account — подтверждает, что ключ реально работает, без отправки писем. */
+export async function ownerVerifyBrevoConnection(): Promise<Result> {
+  await requireRole("OWNER");
+  const res = await verifyAndRecordBrevoConnection(prisma);
+  revalidatePath("/dashboard/sites");
+  return res.ok
+    ? { ok: true, message: `Подключение подтверждено${res.accountEmail ? ` (аккаунт: ${res.accountEmail})` : ""}` }
+    : { error: res.error };
 }

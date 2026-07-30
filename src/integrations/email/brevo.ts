@@ -39,11 +39,15 @@ export function isBrevoConfigured(): boolean {
   return !!process.env.BREVO_API_KEY?.trim();
 }
 
-export function createBrevoProvider(): EmailProvider {
+/**
+ * `apiKeyOverride` — ключ, разрешённый вызывающим кодом (обычно из БД через accountKey.ts,
+ * приоритетнее env). Не передан → берём env BREVO_API_KEY, как раньше (обратная совместимость).
+ */
+export function createBrevoProvider(apiKeyOverride?: string | null): EmailProvider {
   return {
     name: "brevo",
     async sendTemplate(params: EmailSendParams): Promise<EmailSendResult> {
-      const apiKey = process.env.BREVO_API_KEY?.trim();
+      const apiKey = apiKeyOverride !== undefined ? apiKeyOverride?.trim() : process.env.BREVO_API_KEY?.trim();
       if (!apiKey) {
         return {
           ok: false,
@@ -151,4 +155,49 @@ function brevoErrorCode(status: number, rawBody: string): string {
     return "brevo_bad_request";
   }
   return `brevo_http_${status}`;
+}
+
+export type VerifyAccountResult =
+  | { ok: true; accountEmail: string | null }
+  | { ok: false; code: string; safeError: string };
+
+/**
+ * Лёгкая проверка подключения (GET /v3/account) — ничего не отправляет, только подтверждает,
+ * что ключ валиден. Используется кнопкой «Проверить подключение» в панели Brevo API key.
+ */
+export async function verifyBrevoApiKey(apiKey: string): Promise<VerifyAccountResult> {
+  const key = apiKey.trim();
+  if (!key) {
+    return { ok: false, code: "email_not_configured", safeError: "API key пуст." };
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+  try {
+    const res = await fetch("https://api.brevo.com/v3/account", {
+      method: "GET",
+      headers: { "api-key": key, accept: "application/json" },
+      signal: controller.signal,
+    });
+    const text = await res.text();
+    if (!res.ok) {
+      const code = brevoErrorCode(res.status, text);
+      return { ok: false, code, safeError: `Brevo ответил ${res.status} (${code}).` };
+    }
+    try {
+      const json = text ? (JSON.parse(text) as { email?: string }) : null;
+      return { ok: true, accountEmail: json?.email ?? null };
+    } catch {
+      return { ok: true, accountEmail: null };
+    }
+  } catch (err) {
+    const aborted = err instanceof Error && err.name === "AbortError";
+    return {
+      ok: false,
+      code: aborted ? "brevo_timeout" : "brevo_network",
+      safeError: aborted ? "Brevo не ответил за 15 секунд." : "Сеть недоступна при обращении к Brevo.",
+    };
+  } finally {
+    clearTimeout(timer);
+  }
 }

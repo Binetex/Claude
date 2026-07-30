@@ -14,7 +14,9 @@ import { SiteBurqDropoffSetting } from "./SiteBurqDropoffSetting";
 import { SiteQuoSetting } from "./SiteQuoSetting";
 import { SiteQuoWebhookSecurity } from "./SiteQuoWebhookSecurity";
 import { SiteEmailPanel } from "./SiteEmailPanel";
+import { BrevoAccountPanel } from "./BrevoAccountPanel";
 import { loadSiteEmailSettingsViews } from "@/integrations/email/settings";
+import { getBrevoAccountView } from "@/integrations/email/accountKey";
 import { listQuoSigningSecretsMasked } from "@/integrations/quo/signingSecrets";
 import { getQuoSigningKeys } from "@/integrations/quo/config";
 import { isCredentialCryptoConfigured } from "@/lib/crypto/secretBox";
@@ -90,6 +92,7 @@ export default async function SitesPage() {
   };
 
   const emailViews = await loadSiteEmailSettingsViews(prisma, sites.map((s) => s.id));
+  const brevoAccountView = await getBrevoAccountView(prisma);
   const quoSecrets = await listQuoSigningSecretsMasked(prisma).catch(() => []);
   const quoEnvCount = getQuoSigningKeys().length;
   const quoCrypto = isCredentialCryptoConfigured();
@@ -102,6 +105,8 @@ export default async function SitesPage() {
         <div className="mb-2 text-sm font-semibold text-slate-700">Подключить новый магазин</div>
         <SiteConnectPanel />
       </Card>
+
+      <BrevoAccountPanel view={brevoAccountView} />
 
       <SiteQuoWebhookSecurity
         secrets={quoSecrets.map((s) => ({ id: s.id, maskedSuffix: s.maskedSuffix, createdAt: s.createdAt.toISOString() }))}

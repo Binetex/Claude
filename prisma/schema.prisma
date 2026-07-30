@@ -1270,6 +1270,21 @@ model IntegrationSecret {
   @@index([provider, kind, active])
 }
 
+/**
+ * Статус последней проверки подключения к Brevo (singleton, одна строка). Сам ключ здесь НЕ
+ * хранится — он лежит в IntegrationSecret (provider="BREVO", kind="api_key"); эта таблица —
+ * только результат «Проверить подключение» (GET /v3/account), чтобы бейдж в UI переживал refresh.
+ */
+model BrevoAccountStatus {
+  id           String    @id @default(cuid())
+  connStatus   String? // "CONNECTED" | "ERROR"
+  verifiedAt   DateTime?
+  accountEmail String? // email Brevo-аккаунта из /v3/account — только для UI-индикации
+  errorSafe    String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+}
+
 // ─────────────────────────────  SMS-МАРКЕТИНГ  ─────────────────────────────
 //
 // Движок правил авто-SMS: SmsAutomation (правило) + SmsAutomationJob (задача + история).

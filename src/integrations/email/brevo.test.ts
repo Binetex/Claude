@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { createBrevoProvider, isValidEmail, normalizeEmail, isBrevoConfigured } from "./brevo";
+import { createBrevoProvider, isValidEmail, normalizeEmail, isBrevoConfigured, verifyBrevoApiKey } from "./brevo";
 
 const fetchMock = vi.fn();
 vi.stubGlobal("fetch", fetchMock);
@@ -183,5 +183,65 @@ describe("ошибки провайдера", () => {
     fetchMock.mockResolvedValue(new Response(null, { status: 204 }));
     const res = await createBrevoProvider().sendTemplate(baseParams);
     expect(res).toEqual({ ok: true, providerMessageId: null });
+  });
+});
+
+describe("ключ, переданный явно (из БД), приоритетнее env", () => {
+  it("apiKeyOverride используется вместо env, даже если env не задан", async () => {
+    delete process.env.BREVO_API_KEY; // явно нет env — override всё равно должен сработать
+    fetchMock.mockResolvedValue(json(201, { messageId: "m" }));
+    const res = await createBrevoProvider("db-key-123").sendTemplate(baseParams);
+    expect(res).toEqual({ ok: true, providerMessageId: "m" });
+    const [, init] = fetchMock.mock.calls[0];
+    expect((init.headers as Record<string, string>)["api-key"]).toBe("db-key-123");
+  });
+
+  it("apiKeyOverride=null — конфигурация отсутствует, даже если env задан", async () => {
+    process.env.BREVO_API_KEY = "env-key";
+    const res = await createBrevoProvider(null).sendTemplate(baseParams);
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.code).toBe("email_not_configured");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("apiKeyOverride не передан (undefined) — как раньше, читаем env", async () => {
+    process.env.BREVO_API_KEY = "env-key";
+    fetchMock.mockResolvedValue(json(201, { messageId: "m" }));
+    await createBrevoProvider().sendTemplate(baseParams);
+    const [, init] = fetchMock.mock.calls[0];
+    expect((init.headers as Record<string, string>)["api-key"]).toBe("env-key");
+  });
+});
+
+describe("verifyBrevoApiKey — GET /v3/account", () => {
+  it("успех возвращает email аккаунта, ничего не отправляя", async () => {
+    fetchMock.mockResolvedValue(json(200, { email: "agency@example.com" }));
+    const res = await verifyBrevoApiKey("some-key");
+    expect(res).toEqual({ ok: true, accountEmail: "agency@example.com" });
+    expect(fetchMock.mock.calls[0][0]).toBe("https://api.brevo.com/v3/account");
+    expect(fetchMock.mock.calls[0][1].method).toBe("GET");
+  });
+
+  it("401 — ключ невалиден", async () => {
+    fetchMock.mockResolvedValue(json(401, { message: "unauthorized" }));
+    const res = await verifyBrevoApiKey("bad-key");
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.code).toBe("brevo_unauthorized");
+  });
+
+  it("пустой ключ — не ходим в сеть", async () => {
+    const res = await verifyBrevoApiKey("   ");
+    expect(res.ok).toBe(false);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("сетевой сбой — безопасная ошибка без утечки деталей", async () => {
+    fetchMock.mockRejectedValue(new Error("ECONNRESET at 10.0.0.1"));
+    const res = await verifyBrevoApiKey("some-key");
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
+      expect(res.code).toBe("brevo_network");
+      expect(res.safeError).not.toContain("10.0.0.1");
+    }
   });
 });

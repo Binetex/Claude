@@ -12,7 +12,8 @@ import "server-only";
  */
 import type { PrismaClient } from "@/generated/prisma/client";
 import { isSupportedTrigger } from "@/modules/automations/triggers";
-import { isBrevoConfigured, normalizeEmail } from "./brevo";
+import { normalizeEmail } from "./brevo";
+import { isBrevoConfiguredAnywhere } from "./accountKey";
 
 export type SiteEmailConfig = {
   siteId: string;
@@ -24,8 +25,8 @@ export type SiteEmailConfig = {
 };
 
 /**
- * Что отдаётся в UI. Секретов здесь нет по построению: общий API key живёт только в env, а
- * `brevoApiKeyConfigured` — это факт его наличия, не значение.
+ * Что отдаётся в UI. Секретов здесь нет по построению: общий API key живёт зашифрованным в БД
+ * (приоритетнее) либо в env, а `brevoApiKeyConfigured` — это факт его наличия, не значение.
  */
 export type SiteEmailSettingsView = {
   enabled: boolean;
@@ -59,8 +60,8 @@ export type ResolveConfigResult =
  * в истории была самой информативной.
  */
 export async function resolveSiteEmailConfig(prisma: PrismaClient, siteId: string): Promise<ResolveConfigResult> {
-  if (!isBrevoConfigured()) {
-    return { ok: false, skip: "email_not_configured", safeError: "Brevo не настроен: нет BREVO_API_KEY." };
+  if (!(await isBrevoConfiguredAnywhere(prisma))) {
+    return { ok: false, skip: "email_not_configured", safeError: "Brevo не настроен: нет API key (ни в БД, ни в BREVO_API_KEY)." };
   }
 
   const site = await prisma.site.findUnique({
@@ -120,16 +121,16 @@ export async function loadSiteEmailSettingsViews(
   prisma: PrismaClient,
   siteIds: string[]
 ): Promise<Record<string, SiteEmailSettingsView>> {
-  const [rows, templates] = await Promise.all([
+  const [rows, templates, apiKeyConfigured] = await Promise.all([
     prisma.siteEmailSettings.findMany({ where: { siteId: { in: siteIds } } }),
     prisma.siteEmailTemplate.findMany({
       where: { siteId: { in: siteIds } },
       select: { siteId: true, triggerType: true, brevoTemplateId: true },
     }),
+    isBrevoConfiguredAnywhere(prisma),
   ]);
 
   const bySite = new Map(rows.map((r) => [r.siteId, r]));
-  const apiKeyConfigured = isBrevoConfigured();
 
   const out: Record<string, SiteEmailSettingsView> = {};
   for (const siteId of siteIds) {
