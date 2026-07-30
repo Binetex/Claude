@@ -3,7 +3,16 @@ import { useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Card, CardBody } from "@/components/ui/Card";
 import { Button } from "@/components/ui/button";
-import { createAutomation, updateAutomation, previewAutomation, sendTestSms, type AutomationInput, type PreviewActionResult } from "./actions";
+import {
+  createAutomation,
+  updateAutomation,
+  previewAutomation,
+  sendTestSms,
+  checkSiteEmailTemplate,
+  type AutomationInput,
+  type PreviewActionResult,
+  type SiteEmailTemplateStatus,
+} from "./actions";
 import { SiteMultiSelect, type SiteOption } from "./SiteMultiSelect";
 
 type TriggerOpt = { type: string; label: string; description: string };
@@ -18,7 +27,9 @@ export type AutomationFormInitial = {
   siteIds: string[];
   name: string;
   active: boolean;
-  channel: "SMS";
+  smsEnabled: boolean;
+  emailEnabled: boolean;
+  emailFallbackEnabled: boolean;
   triggerType: string;
   audience: "CUSTOMER" | "RECIPIENT" | "BOTH";
   delayAmount: number;
@@ -56,7 +67,9 @@ export function AutomationForm({
   const [siteIds, setSiteIds] = useState<string[]>(initial?.siteIds ?? []);
   const [name, setName] = useState(initial?.name ?? "");
   const [active, setActive] = useState(initial?.active ?? false);
-  const channel = "SMS" as const; // пока единственный канал; выбор появится с EMAIL/PUSH/…
+  const [smsEnabled, setSmsEnabled] = useState(initial?.smsEnabled ?? true);
+  const [emailEnabled, setEmailEnabled] = useState(initial?.emailEnabled ?? false);
+  const [emailFallbackEnabled, setEmailFallbackEnabled] = useState(initial?.emailFallbackEnabled ?? false);
   const [triggerType, setTriggerType] = useState(initial?.triggerType ?? triggers[0]?.type ?? "");
   const [audience, setAudience] = useState<AutomationInput["audience"]>(initial?.audience ?? "CUSTOMER");
   const [delayUnit, setDelayUnit] = useState<AutomationInput["delayUnit"]>(initial?.delayUnit ?? "IMMEDIATE");
@@ -74,6 +87,17 @@ export function AutomationForm({
   const [sandboxSiteId, setSandboxSiteId] = useState<string>(initial?.siteIds[0] ?? "");
   const selectedSites = useMemo(() => sites.filter((s) => siteIds.includes(s.id)), [sites, siteIds]);
 
+  // Статус Email-шаблона выбранного (для preview/test) магазина под текущее событие. Настройки
+  // отправителя/домена/Template ID живут в /dashboard/sites — здесь только READ-ONLY индикация,
+  // чтобы не дублировать источник истины в самом правиле. Запрашивается явно (не в useEffect —
+  // setState в эффекте здесь запрещён линтером) при каждом изменении входных данных проверки.
+  const [emailStatus, setEmailStatus] = useState<SiteEmailTemplateStatus | null>(null);
+  const [, startEmailStatusCheck] = useTransition();
+  function refreshEmailStatus(siteId: string, trigger: string, wantEmail: boolean) {
+    if (!wantEmail || !siteId || !trigger) { setEmailStatus(null); return; }
+    startEmailStatusCheck(async () => setEmailStatus(await checkSiteEmailTemplate(siteId, trigger)));
+  }
+
   /** Магазин убрали из правила → сбрасываем выбор песочницы (и заказ/preview вместе с ним). */
   function changeSiteIds(next: string[]) {
     setSiteIds(next);
@@ -84,6 +108,7 @@ export function AutomationForm({
     setSandboxSiteId(siteId);
     setPreviewOrderId("");
     setPreview(null);
+    refreshEmailStatus(siteId, triggerType, emailEnabled || emailFallbackEnabled);
   }
 
   const ordersForSite = useMemo(() => recentOrders.filter((o) => o.siteId === sandboxSiteId), [recentOrders, sandboxSiteId]);
@@ -106,7 +131,9 @@ export function AutomationForm({
       siteIds,
       name,
       active,
-      channel,
+      smsEnabled,
+      emailEnabled,
+      emailFallbackEnabled: smsEnabled && emailFallbackEnabled,
       triggerType,
       audience,
       delayAmount: delayUnit === "IMMEDIATE" ? 0 : Math.max(0, Math.floor(Number(delayAmount) || 0)),
@@ -114,6 +141,12 @@ export function AutomationForm({
       template,
       conditions: cond,
     };
+  }
+
+  /** Fallback имеет смысл только при включённом SMS — выключаем его вместе с SMS. */
+  function setSms(v: boolean) {
+    setSmsEnabled(v);
+    if (!v) setEmailFallbackEnabled(false);
   }
 
   function save() {
@@ -164,28 +197,55 @@ export function AutomationForm({
             </div>
           </div>
 
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-            <label className="space-y-1">
-              <span className="text-xs text-slate-500">Канал</span>
-              <select value={channel} disabled className="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm disabled:bg-slate-50">
-                <option value="SMS">SMS</option>
-              </select>
-              <span className="text-[11px] text-slate-400">EMAIL/PUSH/… — позже</span>
-            </label>
+          <div className="space-y-1">
+            <span className="text-xs text-slate-500">Каналы</span>
+            <div className="flex flex-wrap items-center gap-4 rounded-md border border-slate-200 px-3 py-2">
+              <label className="flex items-center gap-2 text-sm text-slate-700">
+                <input type="checkbox" className="h-4 w-4" checked={smsEnabled} onChange={(e) => setSms(e.target.checked)} />
+                SMS
+              </label>
+              <label className="flex items-center gap-2 text-sm text-slate-700">
+                <input
+                  type="checkbox" className="h-4 w-4" checked={emailEnabled}
+                  onChange={(e) => { setEmailEnabled(e.target.checked); refreshEmailStatus(sandboxSiteId, triggerType, e.target.checked || emailFallbackEnabled); }}
+                />
+                Email
+              </label>
+              {smsEnabled && (
+                <label className="flex items-center gap-2 text-sm text-slate-700">
+                  <input
+                    type="checkbox" className="h-4 w-4" checked={emailFallbackEnabled}
+                    onChange={(e) => { setEmailFallbackEnabled(e.target.checked); refreshEmailStatus(sandboxSiteId, triggerType, emailEnabled || e.target.checked); }}
+                  />
+                  Email, если SMS недоступно
+                </label>
+              )}
+            </div>
+            {(emailEnabled || emailFallbackEnabled) && (
+              <EmailReadinessHint status={emailStatus} siteChosen={!!sandboxSiteId} siteName={sandboxSite?.name} />
+            )}
+          </div>
+
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <label className="space-y-1">
               <span className="text-xs text-slate-500">Событие (триггер)</span>
-              <select value={triggerType} onChange={(e) => setTriggerType(e.target.value)} className="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm">
+              <select
+                value={triggerType}
+                onChange={(e) => { setTriggerType(e.target.value); refreshEmailStatus(sandboxSiteId, e.target.value, emailEnabled || emailFallbackEnabled); }}
+                className="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm"
+              >
                 {triggers.map((t) => <option key={t.type} value={t.type}>{t.label}</option>)}
               </select>
               {selectedTrigger && <span className="text-[11px] text-slate-400">{selectedTrigger.description}</span>}
             </label>
             <label className="space-y-1">
-              <span className="text-xs text-slate-500">Аудитория</span>
+              <span className="text-xs text-slate-500">Аудитория (SMS)</span>
               <select value={audience} onChange={(e) => setAudience(e.target.value as AutomationInput["audience"])} className="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm">
                 <option value="CUSTOMER">Заказчик</option>
                 <option value="RECIPIENT">Получатель</option>
                 <option value="BOTH">Оба (при совпадении номера — одно сообщение заказчику)</option>
               </select>
+              <span className="text-[11px] text-slate-400">Email всегда идёт заказчику (email получателя цветов в заказе не хранится).</span>
             </label>
           </div>
 
@@ -222,8 +282,8 @@ export function AutomationForm({
 
           {/* Шаблон + переменные */}
           <div className="space-y-2">
-            <span className="text-xs text-slate-500">Текст SMS</span>
-            <textarea ref={textareaRef} value={template} onChange={(e) => setTemplate(e.target.value)} rows={6} maxLength={1600} className="w-full rounded-md border border-slate-300 px-3 py-2 font-mono text-sm" placeholder="Hi {{recipient_name}}, your flower delivery from {{store_name}} is on the way. Track: {{tracking_url}}" />
+            <span className="text-xs text-slate-500">Текст SMS{!smsEnabled && " (SMS выключен — текст не используется)"}</span>
+            <textarea ref={textareaRef} value={template} onChange={(e) => setTemplate(e.target.value)} rows={6} maxLength={1600} disabled={!smsEnabled} className="w-full rounded-md border border-slate-300 px-3 py-2 font-mono text-sm disabled:bg-slate-50 disabled:text-slate-400" placeholder="Hi {{recipient_name}}, your flower delivery from {{store_name}} is on the way. Track: {{tracking_url}}" />
             <div className="text-right text-[11px] text-slate-400">{template.length}/1600</div>
             <div className="flex flex-wrap gap-1">
               {variables.map((v) => (
@@ -299,5 +359,34 @@ export function AutomationForm({
         </CardBody>
       </Card>
     </div>
+  );
+}
+
+const EMAIL_SKIP_LABEL: Record<string, string> = {
+  site_or_trigger_missing: "выберите магазин для preview/test выше",
+  email_not_configured: "не настроен общий Brevo API key (см. страницу «Сайты»)",
+  site_email_disabled: "Email выключен у этого магазина",
+  site_email_not_configured: "не задан отправитель у этого магазина",
+  site_domain_not_verified: "домен отправителя не подтверждён",
+  site_template_missing: "нет Brevo Template ID для этого события у этого магазина",
+};
+
+/**
+ * Read-only индикатор готовности EMAIL для выбранного (в блоке preview/test) магазина под
+ * текущее событие. Настройки отправителя/домена/Template ID редактируются на /dashboard/sites —
+ * здесь их сознательно не дублируем, только показываем итог.
+ */
+function EmailReadinessHint({ status, siteChosen, siteName }: { status: SiteEmailTemplateStatus | null; siteChosen: boolean; siteName?: string }) {
+  if (!siteChosen) {
+    return <p className="text-[11px] text-amber-600">Для Email выберите магазин в блоке preview/test ниже — по нему проверяется готовность шаблона.</p>;
+  }
+  if (!status) return null;
+  if (status.ready) {
+    return <p className="text-[11px] text-emerald-700">Email готов для «{siteName}»: Brevo Template ID {status.templateId}.</p>;
+  }
+  return (
+    <p className="text-[11px] text-amber-600">
+      Email для «{siteName}» пока не отправится: {EMAIL_SKIP_LABEL[status.reason] ?? status.reason}. Настройте на странице «Сайты».
+    </p>
   );
 }

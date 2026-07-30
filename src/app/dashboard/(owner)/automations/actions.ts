@@ -11,17 +11,20 @@ import { buildAutomationPreview } from "@/modules/automations/preview";
 import { buildTestMessage, sendTestSmsViaClient } from "@/modules/automations/testSend";
 import { setAutomationsGloballyDisabled } from "@/modules/automations/settings";
 import type { SmsConditions } from "@/modules/automations/conditions";
+import { resolveSiteEmailConfig, resolveSiteTemplateId } from "@/integrations/email/settings";
 
 const AUDIENCES = new Set(["CUSTOMER", "RECIPIENT", "BOTH"]);
 const DELAY_UNITS = new Set(["IMMEDIATE", "MINUTE", "HOUR", "DAY", "WEEK", "MONTH"]);
-const CHANNELS = new Set(["SMS"]); // расширяется вместе с AutomationChannel + ChannelSender
 
 export type AutomationInput = {
   /** Магазины правила (M:N). Один шаблон/триггер/условия — на все выбранные Site. */
   siteIds: string[];
   name: string;
   active: boolean;
-  channel: "SMS";
+  /** Каналы доставки. Хотя бы один обязателен; fallback имеет смысл только при smsEnabled. */
+  smsEnabled: boolean;
+  emailEnabled: boolean;
+  emailFallbackEnabled: boolean;
   triggerType: string;
   audience: "CUSTOMER" | "RECIPIENT" | "BOTH";
   delayAmount: number;
@@ -35,13 +38,18 @@ export type ActionResult = { ok?: true; id?: string; error?: string; warning?: s
 function validate(input: AutomationInput): string | null {
   if (!Array.isArray(input.siteIds) || input.siteIds.length === 0) return "Выберите хотя бы один магазин.";
   if (!input.name?.trim()) return "Укажите название.";
-  if (!CHANNELS.has(input.channel)) return "Неизвестный канал.";
+  if (!input.smsEnabled && !input.emailEnabled) return "Выберите хотя бы один канал: SMS или Email.";
+  if (input.emailFallbackEnabled && !input.smsEnabled) return "«Email, если SMS недоступно» имеет смысл только при включённом SMS.";
   if (!isSupportedTrigger(input.triggerType)) return "Неизвестный триггер.";
   if (!AUDIENCES.has(input.audience)) return "Некорректная аудитория.";
   if (!DELAY_UNITS.has(input.delayUnit)) return "Некорректная единица задержки.";
   if (!Number.isInteger(input.delayAmount) || input.delayAmount < 0) return "Задержка должна быть неотрицательным целым числом.";
-  if (!input.template?.trim()) return "Введите текст сообщения.";
-  if (input.template.length > 1600) return "Слишком длинный шаблон (макс. 1600 символов).";
+  // SMS-текст (template) обязателен только когда SMS реально включён — Email-only правило может
+  // не иметь inline-текста (у Email — Brevo-шаблон per Site, настраивается в /dashboard/sites).
+  if (input.smsEnabled) {
+    if (!input.template?.trim()) return "Введите текст SMS.";
+    if (input.template.length > 1600) return "Слишком длинный шаблон (макс. 1600 символов).";
+  }
   return null;
 }
 
@@ -83,7 +91,9 @@ export async function createAutomation(input: AutomationInput): Promise<ActionRe
       sites: { create: resolved.ids.map((siteId) => ({ siteId })) },
       name: input.name.trim(),
       active: !!input.active,
-      channel: input.channel,
+      smsEnabled: input.smsEnabled,
+      emailEnabled: input.emailEnabled,
+      emailFallbackEnabled: input.smsEnabled && input.emailFallbackEnabled,
       triggerType: input.triggerType,
       audience: input.audience,
       delayAmount: input.delayAmount,
@@ -125,7 +135,9 @@ export async function updateAutomation(id: string, input: AutomationInput): Prom
       },
       name: input.name.trim(),
       active: !!input.active,
-      channel: input.channel,
+      smsEnabled: input.smsEnabled,
+      emailEnabled: input.emailEnabled,
+      emailFallbackEnabled: input.smsEnabled && input.emailFallbackEnabled,
       triggerType: input.triggerType,
       audience: input.audience,
       delayAmount: input.delayAmount,
@@ -157,7 +169,9 @@ export async function duplicateAutomation(id: string): Promise<ActionResult> {
       sites: { create: src.sites.map((s) => ({ siteId: s.siteId })) },
       name: `${src.name} (копия)`,
       active: false, // копия всегда выключена
-      channel: src.channel,
+      smsEnabled: src.smsEnabled,
+      emailEnabled: src.emailEnabled,
+      emailFallbackEnabled: src.emailFallbackEnabled,
       triggerType: src.triggerType,
       audience: src.audience,
       delayAmount: src.delayAmount,
@@ -203,6 +217,24 @@ export async function previewAutomation(orderId: string, template: string, audie
     recipients: res.recipients.map((r) => `${r.recipientType === "CUSTOMER" ? "Заказчик" : "Получатель"}: ${r.phoneNormalized}`),
     skipped: res.skipped.map((s) => `${s.recipientType === "CUSTOMER" ? "Заказчик" : "Получатель"}: ${s.reason}`),
   };
+}
+
+export type SiteEmailTemplateStatus =
+  | { ready: true; templateId: number }
+  | { ready: false; reason: string };
+
+/**
+ * Готов ли выбранный магазин слать Email для ЭТОГО события (форма показывает статус вместо
+ * дублирования настроек отправителя/домена — они находятся в /dashboard/sites, а не в правиле).
+ */
+export async function checkSiteEmailTemplate(siteId: string, triggerType: string): Promise<SiteEmailTemplateStatus> {
+  await requireRole("OWNER");
+  if (!siteId || !isSupportedTrigger(triggerType)) return { ready: false, reason: "site_or_trigger_missing" };
+  const cfg = await resolveSiteEmailConfig(prisma, siteId);
+  if (!cfg.ok) return { ready: false, reason: cfg.skip };
+  const tpl = await resolveSiteTemplateId(prisma, siteId, triggerType);
+  if (!tpl.ok) return { ready: false, reason: tpl.skip };
+  return { ready: true, templateId: tpl.templateId };
 }
 
 /**

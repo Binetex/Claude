@@ -13,8 +13,15 @@ export type ChannelSendContext = {
   orderId: string;
   siteId: string;
   recipientType: "CUSTOMER" | "RECIPIENT";
-  phoneNormalized: string; // адресат (для SMS/телефонных каналов)
-  text: string; // уже отрендеренный текст
+  /** Адресат для SMS/телефонных каналов. У EMAIL-job'ов — null. */
+  phoneNormalized: string | null;
+  /** Адресат для EMAIL-канала (нормализованный, всегда CUSTOMER). У SMS-job'ов — null. */
+  emailNormalized: string | null;
+  /** Событие правила (Automation.triggerType) — EMAIL-каналу нужно для выбора Brevo-шаблона магазина. */
+  triggerType: string;
+  text: string; // уже отрендеренный текст (SMS); EMAIL использует params, не text
+  /** Переменные шаблона (для EMAIL — params, передаются в Brevo как есть). */
+  vars: Record<string, string>;
   /** Ключ идемпотентности отправки (движок формирует его per-attempt). */
   idempotencyKey: string;
 };

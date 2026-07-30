@@ -57,3 +57,17 @@ export function maskPhoneDisplay(e164: string | null | undefined): string {
   if (e164.length <= 4) return "•".repeat(e164.length);
   return `${"•".repeat(Math.max(0, e164.length - 4))}${e164.slice(-4)}`;
 }
+
+/** Маскирует email для истории: показываем первую букву и домен, остальное скрыто. */
+export function maskEmailDisplay(email: string | null | undefined): string {
+  if (!email) return "—";
+  const at = email.indexOf("@");
+  if (at <= 0) return "•".repeat(email.length);
+  const local = email.slice(0, at);
+  const domain = email.slice(at);
+  return `${local[0]}${"•".repeat(Math.max(1, local.length - 1))}${domain}`;
+}
+
+export function channelLabel(channel: string): string {
+  return channel === "EMAIL" ? "Email" : channel === "SMS" ? "SMS" : channel;
+}

@@ -33,7 +33,9 @@ export function resolveRecipients(audience: SmsAudience, order: AudienceSource):
     const raw = target === "CUSTOMER" ? order.senderPhone : order.recipientPhone;
     const e164 = toE164(raw);
     if (!e164) {
-      skipped.push({ recipientType: target, reason: "invalid_or_missing_phone" });
+      // Различаем «нет номера вообще» и «есть, но не парсится» — Email-fallback (Stage 2)
+      // записывает разные причины в историю (PHONE_MISSING / PHONE_INVALID).
+      skipped.push({ recipientType: target, reason: raw && raw.trim() ? "PHONE_INVALID" : "PHONE_MISSING" });
       continue;
     }
     // Совпал с номером заказчика → это заказчик (даже если целились в получателя).

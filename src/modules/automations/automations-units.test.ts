@@ -125,10 +125,16 @@ describe("audience.resolveRecipients", () => {
     const r = resolveRecipients("RECIPIENT", { senderPhone: "+15551112222", recipientPhone: "+15553334444" });
     expect(r.recipients).toEqual([{ recipientType: "RECIPIENT", phoneNormalized: "+15553334444" }]);
   });
-  it("отсутствующий/битый номер пропускается с причиной", () => {
+  it("отсутствующий номер пропускается с причиной PHONE_MISSING", () => {
     const r = resolveRecipients("RECIPIENT", { senderPhone: null, recipientPhone: "" });
     expect(r.recipients).toHaveLength(0);
-    expect(r.skipped[0]).toMatchObject({ recipientType: "RECIPIENT", reason: "invalid_or_missing_phone" });
+    expect(r.skipped[0]).toMatchObject({ recipientType: "RECIPIENT", reason: "PHONE_MISSING" });
+  });
+
+  it("нераспознаваемый номер пропускается с причиной PHONE_INVALID", () => {
+    const r = resolveRecipients("RECIPIENT", { senderPhone: null, recipientPhone: "abc" });
+    expect(r.recipients).toHaveLength(0);
+    expect(r.skipped[0]).toMatchObject({ recipientType: "RECIPIENT", reason: "PHONE_INVALID" });
   });
 });
 

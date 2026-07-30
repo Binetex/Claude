@@ -50,7 +50,7 @@ export default async function AutomationsPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-bold text-slate-800">Автоматизации</h1>
-          <p className="text-sm text-slate-500">Правила автоматических уведомлений по событиям заказа. Канал: SMS (позже — Email/Push/…). Новые правила создаются выключенными.</p>
+          <p className="text-sm text-slate-500">Правила автоматических уведомлений по событиям заказа: SMS и/или Email. Новые правила создаются выключенными.</p>
         </div>
         <Link href="/dashboard/automations/new">
           <Button size="sm">Создать автоматизацию</Button>
@@ -109,7 +109,14 @@ export default async function AutomationsPage() {
                         </details>
                       )}
                     </td>
-                    <td className="px-3 py-2 text-slate-600">{a.channel}</td>
+                    <td className="px-3 py-2 text-slate-600">
+                      <span className="flex flex-wrap items-center gap-1">
+                        {a.smsEnabled && <span className="rounded border border-sky-200 bg-sky-50 px-1.5 py-px text-[11px] text-sky-700">SMS</span>}
+                        {a.emailEnabled && <span className="rounded border border-violet-200 bg-violet-50 px-1.5 py-px text-[11px] text-violet-700">Email</span>}
+                        {a.emailFallbackEnabled && <span className="rounded border border-slate-200 bg-slate-50 px-1.5 py-px text-[11px] text-slate-500">+ fallback</span>}
+                        {!a.smsEnabled && !a.emailEnabled && <span className="text-amber-600">Канал не выбран</span>}
+                      </span>
+                    </td>
                     <td className="px-3 py-2">
                       {trigger ? (
                         <span className="text-slate-700">{trigger.label}</span>

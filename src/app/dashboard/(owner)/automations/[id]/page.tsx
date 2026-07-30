@@ -3,7 +3,7 @@ import { prisma } from "@/lib/db";
 import { Card, CardBody } from "@/components/ui/Card";
 import { listSmsTriggers } from "@/modules/automations/triggers";
 import { SMS_VARIABLES } from "@/modules/automations/variables";
-import { audienceLabel, jobStatusLabel, jobStatusClass, maskPhoneDisplay } from "@/modules/automations/display";
+import { audienceLabel, jobStatusLabel, jobStatusClass, maskPhoneDisplay, maskEmailDisplay, channelLabel } from "@/modules/automations/display";
 import { AutomationForm, type AutomationFormInitial } from "../AutomationForm";
 import type { SmsConditions } from "@/modules/automations/conditions";
 
@@ -42,7 +42,9 @@ export default async function EditAutomationPage({ params }: { params: Promise<{
     siteIds: automation.sites.map((s) => s.siteId),
     name: automation.name,
     active: automation.active,
-    channel: automation.channel,
+    smsEnabled: automation.smsEnabled,
+    emailEnabled: automation.emailEnabled,
+    emailFallbackEnabled: automation.emailFallbackEnabled,
     triggerType: automation.triggerType,
     audience: automation.audience,
     delayAmount: automation.delayAmount,
@@ -67,8 +69,9 @@ export default async function EditAutomationPage({ params }: { params: Promise<{
                 <thead className="border-y border-slate-200 bg-slate-50 text-left text-xs text-slate-500">
                   <tr>
                     <th className="px-3 py-2">Заказ</th>
+                    <th className="px-3 py-2">Канал</th>
                     <th className="px-3 py-2">Адресат</th>
-                    <th className="px-3 py-2">Телефон</th>
+                    <th className="px-3 py-2">Контакт</th>
                     <th className="px-3 py-2">Запланировано</th>
                     <th className="px-3 py-2">Статус</th>
                     <th className="px-3 py-2">Отправлено</th>
@@ -76,12 +79,13 @@ export default async function EditAutomationPage({ params }: { params: Promise<{
                   </tr>
                 </thead>
                 <tbody>
-                  {jobs.length === 0 && <tr><td colSpan={7} className="px-3 py-8 text-center text-slate-400">Задач ещё нет</td></tr>}
+                  {jobs.length === 0 && <tr><td colSpan={8} className="px-3 py-8 text-center text-slate-400">Задач ещё нет</td></tr>}
                   {jobs.map((j) => (
                     <tr key={j.id} className="border-b border-slate-100 last:border-0">
                       <td className="px-3 py-2 text-slate-700">{j.order?.orderNumber ?? "—"}</td>
+                      <td className="px-3 py-2 text-slate-600">{channelLabel(j.channel)}</td>
                       <td className="px-3 py-2 text-slate-600">{audienceLabel(j.recipientType)}</td>
-                      <td className="px-3 py-2 font-mono text-slate-600">{maskPhoneDisplay(j.phoneNormalized)}</td>
+                      <td className="px-3 py-2 font-mono text-slate-600">{j.channel === "EMAIL" ? maskEmailDisplay(j.emailNormalized) : maskPhoneDisplay(j.phoneNormalized)}</td>
                       <td className="px-3 py-2 text-slate-500">{new Date(j.scheduledAt).toLocaleString("ru-RU")}</td>
                       <td className="px-3 py-2">
                         <span className={`rounded border px-1.5 py-px text-[11px] font-medium ${jobStatusClass(j.status)}`}>{jobStatusLabel(j.status)}</span>

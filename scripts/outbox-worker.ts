@@ -36,6 +36,7 @@ import { buildAirwallexVerifyHandler } from "@/integrations/airwallex/handler";
 import { AIRWALLEX_VERIFY_EVENT } from "@/integrations/airwallex/events";
 import { dispatchAirwallexChecks } from "@/integrations/airwallex/dispatcher";
 import { createSmsChannelSender } from "@/modules/automations/channels/sms";
+import { createEmailChannelSender } from "@/modules/automations/channels/email";
 import { getQuoConfig } from "@/integrations/quo/config";
 import { createQuoClient } from "@/integrations/quo/client";
 import { reconcileBurqSchedules } from "@/integrations/delivery/burq/recovery";
@@ -90,13 +91,15 @@ async function main() {
     // Сверка платежа с Airwallex (режим наблюдения: business status заказа не меняется).
     [AIRWALLEX_VERIFY_EVENT]: buildAirwallexVerifyHandler(prisma),
     [AUTOMATION_TRIGGER_EVENT]: buildAutomationTriggerHandler(prisma),
-    // Automation Engine: отправка одного due job через ChannelSender (SMS — поверх QUO-номера Site).
+    // Automation Engine: отправка одного due job через ChannelSender (SMS — поверх QUO-номера Site,
+    // EMAIL — поверх Brevo с ключом и настройками магазина из БД, см. integrations/email).
     [AUTOMATION_SEND_EVENT]: buildAutomationSendHandler(prisma, {
       channels: {
         SMS: createSmsChannelSender(() => {
           const cfg = getQuoConfig();
           return cfg && featureFlags.quo ? createQuoClient({ ...cfg, maxRetries: 0 }) : null;
         }),
+        EMAIL: createEmailChannelSender(prisma),
       },
     }),
   };
