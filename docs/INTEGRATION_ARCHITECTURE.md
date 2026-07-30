@@ -4,6 +4,15 @@
 Составлено Integration Architect (2026-07-17). Реализация — additively поверх
 существующего `src/integrations/` (см. `src/integrations/types.ts`).
 
+> **Обновлено 2026-07-30.** Часть плана из этого документа не была реализована так, как
+> задумывалась изначально: `OrderSourceAdapter` и `MessagingAdapter` (упомянутые ниже как
+> «текущие») были ranние stage-1-заглушки (`console.log`, без реальных вызовов) и **удалены**
+> при архитектурной чистке — реальные потоки заказов пошли напрямую через
+> `OrderAdapter`/`WebhookAdapter`/`registry.ts` (Shopify/WooCommerce, оба реальные), а реальная
+> отправка SMS/Email в автоматизациях реализована отдельно, в обход изначально задуманного
+> единого `MessagingAdapter` (см. §9). Секции ниже оставлены как есть для истории замысла;
+> актуальный статус — в `docs/HANDOFF.md`.
+
 ## 1. Принцип
 Бизнес-модули и UI зависят ТОЛЬКО от нормализованных типов и интерфейсов адаптеров.
 Платформенная специфика (Shopify/Woo/Burq/Quo/Telegram) живёт исключительно внутри
@@ -37,16 +46,17 @@ UI / modules ──▶ Normalized types + Adapter interfaces ──▶ Registry 
 
 | Интерфейс | Назначение | Существует? |
 |---|---|---|
-| `CatalogAdapter` | импорт товаров/вариантов (stream) | ✅ есть |
-| `OrderAdapter` | parseWebhook → `NormalizedOrder`, pushUpdate | ↔ расширяет текущий `OrderSourceAdapter` |
-| `DeliveryAdapter` | createDelivery, getStatus, parseWebhook → `NormalizedDeliveryEvent` | ✅ есть (расширить) |
-| `MessagingAdapter` | send(command) → `MessageResult` по каналам | ↔ унифицирует текущий SMS/email |
-| `WebhookAdapter` | verify(raw, headers, secret) → ok/replay/invalid; extractEventId | 🆕 |
-| `ConnectionAdapter` | connect/disconnect/status, credential shape | 🆕 |
+| `CatalogAdapter` | импорт товаров/вариантов (stream) | ✅ есть, Shopify+WooCommerce реальные |
+| `OrderAdapter` | parseWebhook → `NormalizedOrder`, pushUpdate | ✅ есть; замышлявшийся `OrderSourceAdapter` — **удалён** (был неиспользуемой заглушкой) |
+| `DeliveryAdapter` | createDelivery, getStatus, parseWebhook → `NormalizedDeliveryEvent` | ⚠️ этот интерфейс (в `integrations/types.ts`) — **удалён** вместе с заглушкой; реальная доставка — `integrations/delivery/burq/*`, свой контракт |
+| `MessagingAdapter` | send(command) → `MessageResult` по каналам | ⚠️ **удалён** как неиспользуемая заглушка. Реальная отправка сейчас: `modules/automations/channels/*` (`ChannelSender`, SMS/Email автоматизаций, реальный) + `src/messaging/*` (mock-only, используется одним обработчиком `order.delivery.completed` — см. HANDOFF §8, техдолг) |
+| `WebhookAdapter` | verify(raw, headers, secret) → ok/replay/invalid; extractEventId | ✅ есть |
+| `ConnectionAdapter` | connect/disconnect/status, credential shape | ✅ есть |
 
-Совместимость: текущий `OrderSourceAdapter`/`MessagingAdapter` сохраняются как есть; новые
-контракты добавляются рядом и внедряются по мере появления второго реального потребителя
-(правило «не абстрагировать ради будущего» — см. `AUTONOMOUS_REFACTOR_REPORT.md`).
+Совместимость: изначально задумывалось держать `OrderSourceAdapter`/`MessagingAdapter` рядом
+с новыми контрактами до появления второго реального потребителя. На практике второй потребитель
+так и не появился до реального Shopify+WooCommerce (которые пошли через `OrderAdapter`
+напрямую) — обе заглушки остались неиспользуемым мёртвым кодом и были удалены 2026-07-30.
 
 ## 4. Реестры
 - `integrations/catalog.ts` — `getCatalogAdapter(platform)` (есть).
@@ -79,11 +89,22 @@ credentials не используются**; провайдер возвраща
 `order.delivery.completed` может фан-аутить: SMS + Telegram + email + completion-sync в Shopify/Woo —
 через подписчиков, НЕ хардкодом в webhook-хендлере.
 
-## 9. Уведомления
-Единый `MessageCommand` (channel, to, templateId, vars, idempotencyKey) → `MessagingAdapter.send`
-→ `MessageResult` (status, providerId, error?, retryable?). Шаблоны — `messaging/templates.ts`.
-Провайдеры SMS/email/Telegram/push реализуются за этим интерфейсом; ночью — mock-провайдеры.
-Quo и Telegram — безопасные skeleton-адаптеры без production-вызовов.
+## 9. Уведомления (как получилось на практике, не как задумывалось)
+
+Единый `MessagingAdapter`/`MessageCommand` так и не стал точкой входа для реальной отправки.
+Вместо этого сложились два независимых пути:
+
+- **`modules/automations/channels/*`** (`ChannelSender`) — реальный, рабочий: SMS через QUO,
+  Email через Brevo (per-Site настройки + опциональный override шаблона на уровне правила).
+  Питает Automation Engine (`modules/automations/handlers.ts` + `outbox`).
+- **`src/messaging/*`** (`MessagingService`, `subscribers.ts`, `templates.ts`) — обслуживает
+  ровно один обработчик, `order.delivery.completed`, и до сих пор работает **только на
+  mock-провайдерах** (`messaging/providers/mock.ts`) — реальных SMS/Email/Telegram/push оттуда
+  не уходит. Зафиксировано как технический долг для отдельного аудита (см. `HANDOFF.md` §8):
+  либо подключить сюда реальных провайдеров, либо переписать этот обработчик на `channels/*`.
+
+Quo и Telegram как самостоятельные интеграции (звонки/записи, бот) реализованы отдельно в
+`integrations/quo/*` и `integrations/telegram/*` — они реальные и не связаны с этим слоем.
 
 ## 10. Статус по платформам
 | Платформа | Каталог | Заказы | Доставка | Сообщения | Вебхуки |

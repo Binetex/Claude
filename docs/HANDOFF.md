@@ -1,7 +1,8 @@
 # Handoff — Floremart
 
 Дата: 2026-07-17 (базовый handoff). **Обновлено 2026-07-21** — см. раздел 0 и `CHANGELOG.md`.
-Актуальная ветка: `refactor/agent-architecture-foundation` (запушена и задеплоена на floremart.com).
+**Обновлено 2026-07-30** — см. раздел 0.1 (Email/Automation, архитектурная чистка).
+Актуальная ветка: `main` (деплой на floremart.com — `git push` + `./deploy.sh` на сервере).
 
 ---
 
@@ -24,6 +25,73 @@ handoff (2026-07-17):
   в `CHANGELOG.md`.
 - **Ветка/деплой:** прод деплоится с `refactor/agent-architecture-foundation` через ручной rsync +
   `prisma migrate deploy` + `next build` + `pm2 reload`. `main` отстаёт (см. раздел про merge).
+
+---
+
+## 0.1 Обновление 2026-07-30 (Email/Automation + архитектурная чистка)
+
+**Важно:** между обновлением 2026-07-21 (выше) и этим прошло много несвязанной работы, которая
+здесь не задокументирована (реальные WooCommerce/QUO/Burq/Airwallex, флористы в проде, печать
+открыток, редактирование пользователей и т.д.) — таблица feature-флагов в §5 и статусы в §8/§10
+ниже **устарели и для этих интеграций больше не верны** (WooCommerce/QUO/Burq реальные, не
+заглушки). Полный рефреш этого документа под текущее состояние — отдельная задача, не делалась
+здесь: ниже только то, что относится непосредственно к Email/Automation-работе этой сессии.
+
+**Email-рассылки (Brevo), Stage 1 → 2.1 — задеплоено, live:**
+- **Stage 1**: per-Site Email-настройки (`SiteEmailSettings`/`SiteEmailTemplate`), Brevo-клиент,
+  общий API key хранится зашифрованным в БД через UI (`/dashboard/sites` → «Brevo API key»),
+  не в `.env` — добавлен именно так по явному запросу владельца (SSH-запись секрета в `.env`
+  блокировалась классификатором Auto Mode на запись production-конфигурации).
+- **Stage 2**: автоматизации получили независимые SMS/Email-флаги
+  (`Automation.smsEnabled/emailEnabled/emailFallbackEnabled`) вместо одного канала. Email всегда
+  уходит заказчику (`Order.senderEmail`), независимо от аудитории правила. Fallback («Email, если
+  SMS недоступно») срабатывает и на отсутствующем/некорректном телефоне (на триггере), и на
+  финальном провале SMS после исчерпания retry (на отправке) — без дублей, если обычный Email
+  уже включён отдельно.
+- **Stage 2.1**: опциональный `Automation.brevoTemplateId` — правило может переопределить общий
+  шаблон магазина под конкретное событие (нужно для сегментов/разных писем на одно событие,
+  которые раньше упирались в `@@unique([siteId, triggerType])` у `SiteEmailTemplate`).
+- Проверено вживую на Julie's Flowers (production): подключение к Brevo подтверждено
+  (`CONNECTED`, аккаунт `belfordus@gmail.com`), тестовое письмо ушло через UI. Полный
+  end-to-end на реальном заказе (SMS+Email одновременно, оба вида fallback, история
+  `AutomationJob`) владелец планирует проверить самостоятельно позже — Stage Email считается
+  условно завершённым до этой проверки.
+- Тесты: 149 automation+email тестов (vitest, throwaway `prisma dev` БД, Brevo замокан через
+  `fetch`), покрывают все сценарии из ТЗ (одновременная отправка, оба fallback, идемпотентность,
+  изоляция по магазинам, override шаблона).
+
+**Архитектурная чистка (по итогам быстрого аудита всего проекта, 2026-07-30):**
+Удалён целый неиспользуемый слой «этап 1»-заглушек, оставшийся от самого раннего архитектурного
+наброска (`docs/INTEGRATION_ARCHITECTURE.md`, обновлён отдельно — см. правки там) и полностью
+превзойдённый реальными реализациями:
+- `src/lib/jobs.ts` — заглушка очереди задач («потом заменить на BullMQ»), без потребителей.
+- `src/integrations/messaging/quo.ts` — заглушка `MessagingAdapter`, нигде не импортировалась.
+- `src/integrations/woocommerce/adapter.ts`, `src/integrations/shopify/adapter.ts` — заглушки
+  `OrderSourceAdapter` (только `console.log`), вытеснены реальным webhook/REST-приёмом в тех же
+  директориях.
+- `src/integrations/delivery/burq.ts` (отдельный файл, НЕ папка `delivery/burq/` — та реальная)
+  — заглушка `DeliveryAdapter`.
+- Из `src/integrations/types.ts` убраны осиротевшие интерфейсы (`OrderSourceAdapter`,
+  `ExternalOrderPayload`, `MessagingAdapter`, `DeliveryAdapter`).
+- `Automation.channel` + enum `AutomationChannel` — устаревшее поле Stage 1, вытесненное
+  флагами `smsEnabled`/`emailEnabled`/`emailFallbackEnabled` (Stage 2). Удалено миграцией
+  `20260730160000_drop_automation_legacy_channel` (DROP COLUMN + DROP TYPE).
+
+Каждое удаление подтверждено `grep` на отсутствие импортов + чистым `tsc --noEmit` после
+удаления + отсутствием регрессий в полном прогоне тестов.
+
+**Оставленный технический долг (сознательно не тронут в этой сессии):**
+- **`src/messaging/*`** (`MessagingService`, `subscribers.ts`, `templates.ts`,
+  `providers/mock.ts`) — в отличие от удалённого выше, это НЕ мёртвый код: реально используется
+  outbox-обработчиком `order.delivery.completed` (см. `scripts/outbox-worker.ts`), но провайдеры
+  там **только mock** — реальные SMS/Email/Telegram/push уведомления о доставленном заказе не
+  уходят. Требует отдельного решения: либо подключить реальных провайдеров под этим слоем, либо
+  переписать обработчик на уже рабочий `modules/automations/channels/*` (как сделано для
+  Email/SMS автоматизаций) и удалить `src/messaging/*` целиком. Не делать заодно с чисткой
+  мёртвого кода — это отдельное архитектурное решение, а не уборка.
+- `docs/REFACTOR_BACKLOG.md` описывает тот же ранний «этап 1»-слой (нормализованные адаптеры,
+  event bus, `messaging/`) как актуальный план — тоже устарел этим же образом, не обновлялся в
+  этой сессии (вне запрошенного объёма правки).
 
 Ниже — базовый handoff от 2026-07-17 (для истории; часть пунктов уже неактуальна).
 
