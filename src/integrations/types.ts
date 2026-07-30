@@ -1,39 +1,13 @@
 /**
  * Контракты адаптеров внешних систем.
- * Бизнес-логика зависит ТОЛЬКО от этих интерфейсов, а не от конкретных API.
- * На этапе 1 реализации — заглушки; позже подключаются реальные Shopify/Woo/Quo/Burq.
+ * Бизнес-логика зависит ТОЛЬКО от этих интерфейсов, а не от конкретных API —
+ * реализации живут в src/integrations/{shopify,woocommerce,delivery,quo}/*.
  */
 import type {
   IntegrationPlatform,
   NormalizedOrder,
   NormalizedDeliveryEvent,
 } from "@/integrations/normalized";
-
-export type ExternalOrderPayload = {
-  externalId: string;
-  raw: unknown;
-};
-
-/** Источник заказов (WooCommerce / Shopify). */
-export interface OrderSourceAdapter {
-  platform: "WOOCOMMERCE" | "SHOPIFY";
-  /** Разобрать сырое тело вебхука во внутренний вид (этап 2). */
-  parseWebhook(body: unknown): ExternalOrderPayload;
-  /** Отправить разрешённые изменения обратно на сайт (дата доставки, статус). */
-  pushUpdate(externalId: string, changes: Record<string, unknown>): Promise<void>;
-}
-
-/** Сообщения клиентам (Quo): SMS/email. */
-export interface MessagingAdapter {
-  sendSms(to: string, body: string): Promise<void>;
-  sendEmail(to: string, subject: string, body: string): Promise<void>;
-}
-
-/** Доставка (Burq). */
-export interface DeliveryAdapter {
-  createDelivery(orderId: string): Promise<{ trackingUrl: string }>;
-  getStatus(trackingId: string): Promise<string>;
-}
 
 // ───────────────────────────  КАТАЛОГ ТОВАРОВ  ───────────────────────────
 //

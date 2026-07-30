@@ -1325,22 +1325,14 @@ enum SmsJobStatus {
   CANCELLED
 }
 
-// Канал доставки автоматизации. SMS — первый и пока единственный; расширяется (EMAIL/PUSH/…)
-// БЕЗ изменения модели Automation — через ChannelSender-реестр (src/modules/automations/channels).
-enum AutomationChannel {
-  SMS
-}
-
 model Automation {
-  id      String  @id @default(cuid())
-  name    String
-  active  Boolean @default(false) // после deploy все правила выключены
-  // Устаревшее поле (Stage 1): канал теперь определяется smsEnabled/emailEnabled ниже. Оставлено
-  // для обратной совместимости старых строк, приложение его больше не читает.
-  channel AutomationChannel @default(SMS)
+  id     String  @id @default(cuid())
+  name   String
+  active Boolean @default(false) // после deploy все правила выключены
 
-  // Stage 2: независимые флаги каналов. Существующие правила после миграции получают ровно
-  // прежнее поведение (SMS вкл, Email и fallback выкл) — значения по умолчанию НЕ случайны.
+  // Каналы доставки — независимые флаги (расширяется без изменения модели через
+  // ChannelSender-реестр, src/modules/automations/channels). Значения по умолчанию НЕ случайны:
+  // это ровно то поведение, что было до появления Email (SMS вкл, Email и fallback выкл).
   smsEnabled           Boolean @default(true)
   emailEnabled         Boolean @default(false)
   /** «Email, если SMS недоступно» — имеет смысл только при smsEnabled=true (проверяется при сохранении). */
