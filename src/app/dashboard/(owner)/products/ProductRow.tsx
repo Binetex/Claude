@@ -52,8 +52,14 @@ function CompositionIndicator({ filled, total }: { filled: number; total: number
   return <span className="text-xs font-medium text-amber-700">Заполнено {filled} из {total}</span>;
 }
 
-export function ProductRow({ p }: { p: ProductVM }) {
+/**
+ * `backQuery` — текущий запрос каталога (фильтры, сортировка, страница) строкой. Уезжает в
+ * ссылку товара, чтобы «← Товары» в карточке вернуло ровно туда, откуда ушли, а не на первую
+ * страницу без фильтров.
+ */
+export function ProductRow({ p, backQuery }: { p: ProductVM; backQuery?: string }) {
   const [open, setOpen] = useState(false);
+  const href = backQuery ? `/dashboard/products/${p.id}?back=${encodeURIComponent(backQuery)}` : `/dashboard/products/${p.id}`;
 
   return (
     <>
@@ -72,7 +78,7 @@ export function ProductRow({ p }: { p: ProductVM }) {
           )}
         </td>
         <td className="px-3 py-2">
-          <Link href={`/dashboard/products/${p.id}`} className="font-medium text-slate-800 hover:text-slate-950 hover:underline">
+          <Link href={href} className="font-medium text-slate-800 hover:text-slate-950 hover:underline">
             {p.name}
           </Link>
         </td>
@@ -108,7 +114,7 @@ export function ProductRow({ p }: { p: ProductVM }) {
         </td>
         <td className="px-3 py-2">
           <div className="flex flex-col items-start gap-1">
-            <Link href={`/dashboard/products/${p.id}`} className="text-xs text-sky-600 hover:text-sky-800">
+            <Link href={href} className="text-xs text-sky-600 hover:text-sky-800">
               Редактировать
             </Link>
             {(p.onlineUrl ?? (p.platform === "SHOPIFY" ? null : p.adminUrl)) && (

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { prisma } from "@/lib/db";
 import { Prisma } from "@/generated/prisma/client";
 import type { ProductStatus } from "@/generated/prisma/enums";
@@ -11,8 +12,15 @@ import { formatMoney, toNumber } from "@/lib/money";
 import { ProductRow, type ProductVM, type VariantVM } from "./ProductRow";
 import { SyncProductsBar } from "./SyncProductsBar";
 import { ownerGetProductsSyncSummary } from "@/app/dashboard/(owner)/actions";
+// Пейджер и разбор page/perPage переиспользуются из списка заказов — тот же вид и то же
+// поведение, что владелец уже знает по «Заказам»; заводить второй свой не нужно.
+import { OrdersPager } from "@/app/dashboard/(owner)/orders/OrdersPager";
+import { OrdersNavProvider, OrdersPendingArea } from "@/app/dashboard/(owner)/orders/OrdersNav";
+import { resolvePaging, outOfRangePageUrl } from "@/app/dashboard/(owner)/orders/paging";
 
 export const dynamic = "force-dynamic";
+
+const BASE_PATH = "/dashboard/products";
 
 type SP = Record<string, string | string[] | undefined>;
 const str = (v: string | string[] | undefined): string => (Array.isArray(v) ? v[0] : v ?? "");
@@ -31,6 +39,12 @@ function priceLabel(min: Prisma.Decimal | null, max: Prisma.Decimal | null): str
 
 export default async function ProductsPage({ searchParams }: { searchParams: Promise<SP> }) {
   const sp = await searchParams;
+  // Плоский вид запроса: хелперы пагинации и сборка ссылки «назад» работают со строками.
+  const flat: Record<string, string | undefined> = Object.fromEntries(
+    Object.entries(sp).map(([k, v]) => [k, str(v) || undefined])
+  );
+  const { page, perPage } = resolvePaging(flat);
+
   const q = str(sp.q).trim();
   const siteId = str(sp.site);
   const statusFilter = str(sp.status);
@@ -57,15 +71,24 @@ export default async function ProductsPage({ searchParams }: { searchParams: Pro
   const orderBy: Prisma.ProductOrderByWithRelationInput =
     sort === "price" ? { minPrice: dir } : sort === "synced" ? { lastSyncedAt: dir } : { name: dir };
 
-  const [products, sites, summary] = await Promise.all([
+  // Фильтр по составам считается в памяти (см. ниже) — под него страницу нарезать в БД нельзя,
+  // иначе в выдаче окажется меньше строк, чем размер страницы, а счётчик страниц наврёт.
+  // Поэтому при активном фильтре берём всё и режем после фильтрации, иначе — обычные skip/take.
+  const compFilterActive = comp === "full" || comp === "partial" || comp === "empty";
+
+  const include = {
+    site: { select: { name: true, shortName: true, colorTag: true, platform: true } },
+    variants: { where: { remoteDeleted: false }, orderBy: [{ position: "asc" as const }, { title: "asc" as const }] },
+  };
+
+  const [products, dbTotal, sites, summary] = await Promise.all([
     prisma.product.findMany({
       where,
       orderBy,
-      include: {
-        site: { select: { name: true, shortName: true, colorTag: true, platform: true } },
-        variants: { where: { remoteDeleted: false }, orderBy: [{ position: "asc" }, { title: "asc" }] },
-      },
+      include,
+      ...(compFilterActive ? {} : { skip: (page - 1) * perPage, take: perPage }),
     }),
+    compFilterActive ? Promise.resolve(0) : prisma.product.count({ where }),
     prisma.site.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true } }),
     ownerGetProductsSyncSummary(),
   ]);
@@ -106,13 +129,27 @@ export default async function ProductsPage({ searchParams }: { searchParams: Pro
     };
   });
 
-  // Фильтр по заполненности составов (in-memory — товаров немного).
-  const filteredRows = rows.filter((r) => {
+  // Фильтр по заполненности составов (in-memory — в БД «сколько вариантов заполнено» не выразить
+  // без обхода whitespace-only значений, которые здесь считаются незаполненными).
+  const matched = rows.filter((r) => {
     if (comp === "full") return r.compTotal > 0 && r.compFilled === r.compTotal;
     if (comp === "partial") return r.compFilled > 0 && r.compFilled < r.compTotal;
     if (comp === "empty") return r.compFilled === 0;
     return true;
   });
+
+  // Всего под фильтр и строки текущей страницы. Без фильтра составов страница уже нарезана в БД.
+  const total = compFilterActive ? matched.length : dbTotal;
+  const filteredRows = compFilterActive ? matched.slice((page - 1) * perPage, page * perPage) : matched;
+
+  const outOfRange = outOfRangePageUrl(flat, BASE_PATH, { total, page, perPage });
+  if (outOfRange) redirect(outOfRange);
+
+  // Возврат из карточки товара обратно на эту же страницу каталога: тащим весь текущий запрос
+  // (фильтры, сортировку, страницу) в ссылку товара, иначе «← Товары» кидает на первую страницу.
+  const backQuery = new URLSearchParams(
+    Object.entries(flat).filter(([, v]) => v) as [string, string][]
+  ).toString();
 
   const fieldLabel = "text-[11px] font-medium tracking-wide text-slate-400 uppercase";
 
@@ -121,7 +158,7 @@ export default async function ProductsPage({ searchParams }: { searchParams: Pro
       <PageHeader
         title={
           <span className="flex items-baseline gap-2">
-            Товары <span className="text-sm font-normal text-slate-400">{rows.length}</span>
+            Товары <span className="text-sm font-normal text-slate-400">{total}</span>
           </span>
         }
         description="Цена сайта — из Shopify (только просмотр). Цена флориста и состав букета правятся локально."
@@ -131,6 +168,9 @@ export default async function ProductsPage({ searchParams }: { searchParams: Pro
       {/* Поиск / фильтры / сортировка — GET-форма, состояние в URL */}
       <Card className="p-3">
         <form method="GET" className="flex flex-wrap items-end gap-2">
+          {/* Размер страницы переживает смену фильтров; сама страница намеренно нет —
+              после нового фильтра выдача другая, и оставаться на 5-й странице бессмысленно. */}
+          <input type="hidden" name="perPage" value={String(perPage)} />
           <label className="flex flex-col gap-1">
             <span className={fieldLabel}>Поиск</span>
             <Input name="q" defaultValue={q} placeholder="Название товара…" className="w-56" />
@@ -196,34 +236,42 @@ export default async function ProductsPage({ searchParams }: { searchParams: Pro
         </form>
       </Card>
 
-      <Card className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-slate-100 text-left text-[11px] tracking-wide text-slate-400 uppercase">
-              <th className="px-3 py-2 font-medium">Фото</th>
-              <th className="px-3 py-2 font-medium">Название</th>
-              <th className="px-3 py-2 font-medium">Магазин</th>
-              <th className="px-3 py-2 text-center font-medium">Вар-тов</th>
-              <th className="px-3 py-2 text-right font-medium">Цена сайта</th>
-              <th className="px-3 py-2 text-right font-medium">Цена флориста</th>
-              <th className="px-3 py-2 font-medium">Составы</th>
-              <th className="px-3 py-2 font-medium">Статус</th>
-              <th className="px-3 py-2 font-medium">Действия</th>
-            </tr>
-          </thead>
-          <tbody>
-            {filteredRows.length === 0 ? (
-              <tr>
-                <td colSpan={9} className="px-3 py-10 text-center text-sm text-slate-400">
-                  Товаров нет. Подключите магазин или нажмите «Синхронизировать товары».
-                </td>
-              </tr>
-            ) : (
-              filteredRows.map((p) => <ProductRow key={p.id} p={p} />)
-            )}
-          </tbody>
-        </table>
-      </Card>
+      <OrdersNavProvider>
+        <OrdersPendingArea>
+          <div className="space-y-4">
+            <Card className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-slate-100 text-left text-[11px] tracking-wide text-slate-400 uppercase">
+                    <th className="px-3 py-2 font-medium">Фото</th>
+                    <th className="px-3 py-2 font-medium">Название</th>
+                    <th className="px-3 py-2 font-medium">Магазин</th>
+                    <th className="px-3 py-2 text-center font-medium">Вар-тов</th>
+                    <th className="px-3 py-2 text-right font-medium">Цена сайта</th>
+                    <th className="px-3 py-2 text-right font-medium">Цена флориста</th>
+                    <th className="px-3 py-2 font-medium">Составы</th>
+                    <th className="px-3 py-2 font-medium">Статус</th>
+                    <th className="px-3 py-2 font-medium">Действия</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredRows.length === 0 ? (
+                    <tr>
+                      <td colSpan={9} className="px-3 py-10 text-center text-sm text-slate-400">
+                        Товаров нет. Подключите магазин или нажмите «Синхронизировать товары».
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredRows.map((p) => <ProductRow key={p.id} p={p} backQuery={backQuery} />)
+                  )}
+                </tbody>
+              </table>
+            </Card>
+
+            <OrdersPager page={page} perPage={perPage} total={total} basePath={BASE_PATH} />
+          </div>
+        </OrdersPendingArea>
+      </OrdersNavProvider>
     </div>
   );
 }

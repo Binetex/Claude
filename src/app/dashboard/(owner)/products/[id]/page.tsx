@@ -29,8 +29,28 @@ function truncate(s: string, n = 60): string {
   return s.length > n ? s.slice(0, n) + "…" : s;
 }
 
-export default async function ProductDetailPage({ params }: { params: Promise<{ id: string }> }) {
+/**
+ * Ссылка возврата в каталог. `back` приносит запрос каталога (фильтры, сортировка, страница),
+ * и его надо пересобрать через URLSearchParams, а не подставлять как есть: значение пришло из
+ * URL, и так в ссылку попадут только нормальные пары key=value, а путь останется нашим.
+ */
+function backToCatalog(back: string | undefined): string {
+  const qs = new URLSearchParams(back ?? "").toString();
+  return qs ? `/dashboard/products?${qs}` : "/dashboard/products";
+}
+
+export default async function ProductDetailPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
   const { id } = await params;
+  const sp = await searchParams;
+  const backParam = Array.isArray(sp.back) ? sp.back[0] : sp.back;
+  const backHref = backToCatalog(backParam);
+
   const product = await prisma.product.findUnique({
     where: { id },
     include: {
@@ -51,7 +71,7 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
 
   return (
     <div className="space-y-4">
-      <Link href="/dashboard/products" className="text-sm text-slate-500 hover:underline">← Товары</Link>
+      <Link href={backHref} className="text-sm text-slate-500 hover:underline">← Товары</Link>
 
       {/* Сводка: фото + свойства */}
       <Card>
