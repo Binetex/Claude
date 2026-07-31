@@ -14,6 +14,9 @@ import "server-only";
  *     «Email, если SMS недоступно» (а «обычный» Email отдельно не включён — иначе дублирование),
  *     здесь же реактивно создаётся EMAIL-fallback-job.
  *
+ * Тот же trigger-обработчик стартует ЦЕПОЧКИ (Automation Flows) — отдельной ветвью в конце,
+ * на своих моделях и со своим outbox-событием (см. flows/). Одиночные правила это не меняет.
+ *
  * Канал-агностично: движок знает про «кому/что», а «как отправить» — в ChannelSender. Реальная
  * отправка НЕ дублируется: sendOrderSms/Brevo дедуплицируют по идемпотентности (движок формирует
  * ключ per-attempt). Журнал выполнения ведётся ТОЛЬКО для реально созданных Job.
@@ -39,10 +42,11 @@ import { renderTemplate, extractVariables } from "./template";
 import { SMS_ORDER_INCLUDE, orderToVariableSource } from "./orderSource";
 import { isAutomationsGloballyDisabled } from "./settings";
 import { logExecution } from "./executionLog";
+import { startFlowsForTrigger } from "./flows/engine";
 import type { ChannelSender } from "./channels/types";
 
 /** Триггеры, для которых заказ ИМЕННО отменён/возвращён — дефолтное исключение не применяем. */
-const ALLOW_CANCELLED_REFUNDED = new Set(["ORDER_REFUNDED", "PAYMENT_FAILED"]);
+const ALLOW_CANCELLED_REFUNDED = new Set(["ORDER_REFUNDED", "PAYMENT_FAILED", "ORDER_CANCELLED"]);
 
 function isP2002(err: unknown): boolean {
   return !!err && typeof err === "object" && "code" in err && (err as { code?: string }).code === "P2002";
@@ -172,10 +176,18 @@ export function buildAutomationTriggerHandler(prisma: PrismaClient): OutboxHandl
     if (await isAutomationsGloballyDisabled(prisma)) return;
 
     // Правило может быть привязано к нескольким Site — выбираем по связи AutomationSite.
-    const automations = await prisma.automation.findMany({
-      where: { sites: { some: { siteId: p.siteId } }, triggerType: p.triggerType, active: true, deletedAt: null },
-    });
-    if (automations.length === 0) return;
+    // Цепочки (Automation Flows) отбираются по тем же признакам, но живут в своих моделях:
+    // одиночные правила и цепочки не влияют друг на друга.
+    const [automations, flows] = await Promise.all([
+      prisma.automation.findMany({
+        where: { sites: { some: { siteId: p.siteId } }, triggerType: p.triggerType, active: true, deletedAt: null },
+      }),
+      prisma.automationFlow.findMany({
+        where: { sites: { some: { siteId: p.siteId } }, triggerType: p.triggerType, active: true, deletedAt: null },
+        include: { steps: { orderBy: { position: "asc" } } },
+      }),
+    ]);
+    if (automations.length === 0 && flows.length === 0) return;
 
     const order = await prisma.order.findUnique({ where: { id: p.orderId }, include: SMS_ORDER_INCLUDE });
     if (!order) return; // заказ исчез — планировать нечего
@@ -264,6 +276,11 @@ export function buildAutomationTriggerHandler(prisma: PrismaClient): OutboxHandl
         });
       }
     }
+
+    // Цепочки — отдельной ветвью, ПОСЛЕ одиночных правил: свой eventType, свои модели,
+    // на поведение правил выше не влияет. Условия правил к цепочкам не применяются
+    // (у цепочек их нет), проверка «отменён/возвращён» делается при выполнении шага.
+    await startFlowsForTrigger(prisma, repo, { flows, orderId: p.orderId, siteId: p.siteId, now });
   };
 }
 

@@ -30,6 +30,8 @@ import { buildBurqPodRefetchHandler, BURQ_POD_REFETCH_EVENT } from "@/integratio
 import { buildQuoWebhookHandler, QUO_WEBHOOK_EVENT } from "@/integrations/quo/webhookHandler";
 import { buildAutomationTriggerHandler, buildAutomationSendHandler } from "@/modules/automations/handlers";
 import { AUTOMATION_TRIGGER_EVENT, AUTOMATION_SEND_EVENT } from "@/modules/automations/events";
+import { buildFlowStepHandler } from "@/modules/automations/flows/handler";
+import { FLOW_STEP_EVENT } from "@/modules/automations/flows/events";
 import { buildTelegramNotifyHandler } from "@/integrations/telegram/handler";
 import { TELEGRAM_NOTIFY_EVENT } from "@/integrations/telegram/events";
 import { buildAirwallexVerifyHandler } from "@/integrations/airwallex/handler";
@@ -60,6 +62,16 @@ async function main() {
     .register(providers.EMAIL)
     .register(providers.TELEGRAM)
     .register(providers.PUSH);
+
+  // Каналы автоматизаций — ОДИН реестр на одиночные правила и на цепочки: «как отправить»
+  // не должно разъезжаться между ними.
+  const automationChannels = {
+    SMS: createSmsChannelSender(() => {
+      const cfg = getQuoConfig();
+      return cfg && featureFlags.quo ? createQuoClient({ ...cfg, maxRetries: 0 }) : null;
+    }),
+    EMAIL: createEmailChannelSender(prisma),
+  };
 
   const handlers: Record<string, OutboxHandler> = {
     "order.delivery.completed": buildDeliveryCompletedHandler({
@@ -93,15 +105,10 @@ async function main() {
     [AUTOMATION_TRIGGER_EVENT]: buildAutomationTriggerHandler(prisma),
     // Automation Engine: отправка одного due job через ChannelSender (SMS — поверх QUO-номера Site,
     // EMAIL — поверх Brevo с ключом и настройками магазина из БД, см. integrations/email).
-    [AUTOMATION_SEND_EVENT]: buildAutomationSendHandler(prisma, {
-      channels: {
-        SMS: createSmsChannelSender(() => {
-          const cfg = getQuoConfig();
-          return cfg && featureFlags.quo ? createQuoClient({ ...cfg, maxRetries: 0 }) : null;
-        }),
-        EMAIL: createEmailChannelSender(prisma),
-      },
-    }),
+    [AUTOMATION_SEND_EVENT]: buildAutomationSendHandler(prisma, { channels: automationChannels }),
+    // Automation Flows: выполнение ОДНОГО шага цепочки (WAIT/EMAIL/SMS) и продвижение дальше.
+    // Тот же worker, тот же outbox, те же каналы — отдельной очереди у цепочек нет.
+    [FLOW_STEP_EVENT]: buildFlowStepHandler(prisma, { channels: automationChannels }),
   };
 
   const worker = new OutboxWorker({

@@ -1,7 +1,7 @@
 import "server-only";
 import { prisma } from "@/lib/db";
 import { Prisma } from "@/generated/prisma/client";
-import type { PaymentStatus, OrderStatus, DeliveryStatus } from "@/generated/prisma/enums";
+import type { PaymentStatus } from "@/generated/prisma/enums";
 import { assignInitial } from "@/modules/assignments/service";
 import { createProductImageCache, resolveLineItemImages, type ProductImageCache } from "./productImages";
 import { resolveShopifyAccessToken } from "./customApp/credentials";
@@ -9,7 +9,13 @@ import { normalizePhone } from "@/lib/phone";
 import { scheduleDeliveryForNewOrder } from "@/integrations/delivery/burq/scheduleService";
 import { extractShopifyOrderNumber, extractSenderAddress } from "./orderFields";
 import { fetchShopifyDeliveryInstructions } from "./deliveryInstructions";
-import { publishOrderCreatedTrigger, scheduleDeliveryTodayTrigger, publishPaymentStateTrigger } from "@/modules/automations/lifecycle";
+import {
+  publishOrderCreatedTrigger,
+  scheduleDeliveryTodayTrigger,
+  publishPaymentStateTrigger,
+  publishOrderLifecycleTriggers,
+} from "@/modules/automations/lifecycle";
+import { deriveShopifyOrderState, reconcileShopifyUpdate, type ShopifyStateSignal } from "./orderState";
 import { publishTelegramNotification } from "@/integrations/telegram/events";
 
 /** Планирование доставки, безопасное для импорта: ошибка логируется, но не роняет приём заказа. */
@@ -94,21 +100,9 @@ function mapPaymentStatus(financialStatus: string | null | undefined): PaymentSt
   return "UNPAID";
 }
 
-/**
- * Выводит статус заказа и доставки из Shopify-payload.
- *  - отменён (cancelled_at)            → CANCELLED;
- *  - выполнен (fulfillment=fulfilled)  → DELIVERED (+ доставка DELIVERED);
- *  - иначе оплачен                     → CONFIRMED (требует назначения флориста);
- *  - иначе                             → AWAITING_PAYMENT.
- * Терминальные (CANCELLED/DELIVERED) и не оплаченные назначения флориста НЕ требуют.
- */
-function deriveOrderState(
-  payload: ShopifyOrder,
-  paymentStatus: PaymentStatus
-): { orderStatus: OrderStatus; deliveryStatus?: DeliveryStatus } {
-  if (payload.cancelled_at) return { orderStatus: "CANCELLED" };
-  if (payload.fulfillment_status === "fulfilled") return { orderStatus: "DELIVERED", deliveryStatus: "DELIVERED" };
-  return { orderStatus: paymentStatus === "PAID" ? "CONFIRMED" : "AWAITING_PAYMENT" };
+/** Срез payload, от которого зависит статус (деривация и anti-rollback — в orderState.ts). */
+function stateSignal(payload: ShopifyOrder): ShopifyStateSignal {
+  return { cancelledAt: payload.cancelled_at, fulfillmentStatus: payload.fulfillment_status };
 }
 
 function isUniqueConstraintViolation(err: unknown): boolean {
@@ -171,12 +165,16 @@ async function applyUpdateFromShopify(
   // Возврат — платформо-независимый переход (financial_status=refunded → paymentStatus REFUNDED),
   // в отличие от pending/failed, которые Shopify не различает. Публикуем строго на ПЕРЕХОДЕ.
   const becameRefunded = paymentStatus === "REFUNDED" && existing.paymentStatus !== "REFUNDED";
+  // Статус заказа на update: только терминальные факты платформы (отменён/выполнен) плюс
+  // «оплатили ожидающий заказ» — внутренние рабочие этапы не затираем (см. orderState.ts).
+  const stateUpdate = reconcileShopifyUpdate(existing, stateSignal(payload), paymentStatus);
   await prisma.order.update({
     where: { id: existing.id },
     data: {
       orderNumber: `${site.shortName}-${extractShopifyOrderNumber(payload.name, payload.order_number, externalId)}`,
       paymentStatus,
-      orderStatus: paymentStatus === "PAID" && existing.orderStatus === "AWAITING_PAYMENT" ? "CONFIRMED" : undefined,
+      orderStatus: stateUpdate.orderStatus,
+      ...(stateUpdate.deliveryStatus ? { deliveryStatus: stateUpdate.deliveryStatus } : {}),
       syncStatus: "SYNCED",
       lastSyncedAt: new Date(),
       recipientName,
@@ -196,6 +194,14 @@ async function applyUpdateFromShopify(
   if (becameRefunded) {
     await publishPaymentStateTrigger(prisma, { orderId: existing.id, siteId: site.id, triggerType: "ORDER_REFUNDED" });
   }
+  // Lifecycle-триггеры строго по фактическому переходу: повторный orders/updated с тем же
+  // состоянием (Shopify шлёт их щедро) ничего не публикует.
+  await publishOrderLifecycleTriggers(prisma, {
+    orderId: existing.id,
+    siteId: site.id,
+    prev: { orderStatus: existing.orderStatus, paymentStatus: existing.paymentStatus },
+    next: { orderStatus: stateUpdate.orderStatus ?? existing.orderStatus, paymentStatus },
+  });
 }
 
 /**
@@ -229,7 +235,20 @@ export async function ingestShopifyOrder(
   const externalId = String(payload.id);
 
   if (topic === "orders/cancelled") {
-    await prisma.order.updateMany({ where: { siteId: site.id, externalId }, data: { orderStatus: "CANCELLED" } });
+    const existing = await prisma.order.findFirst({
+      where: { siteId: site.id, externalId },
+      select: { id: true, orderStatus: true, paymentStatus: true },
+    });
+    if (!existing) return;
+    // Повторный orders/cancelled по уже отменённому заказу — ни записи, ни триггера.
+    if (existing.orderStatus === "CANCELLED") return;
+    await prisma.order.update({ where: { id: existing.id }, data: { orderStatus: "CANCELLED" } });
+    await publishOrderLifecycleTriggers(prisma, {
+      orderId: existing.id,
+      siteId: site.id,
+      prev: { orderStatus: existing.orderStatus, paymentStatus: existing.paymentStatus },
+      next: { orderStatus: "CANCELLED", paymentStatus: existing.paymentStatus },
+    });
     return;
   }
 
@@ -245,6 +264,14 @@ export async function ingestShopifyOrder(
     await scheduleDeliverySafe(order.id);
     // Авто-SMS: триггер ORDER_CREATED только для НОВОГО заказа (не update/resync/backfill).
     await publishOrderCreatedTrigger(prisma, { orderId: order.id, siteId: site.id });
+    // «Заказ оплачен» — заказ пришёл к нам уже оплаченным (обычный путь Shopify). ORDER_DELIVERED/
+    // ORDER_CANCELLED на создании не публикуются: это импорт факта, а не наблюдённый переход.
+    await publishOrderLifecycleTriggers(prisma, {
+      orderId: order.id,
+      siteId: site.id,
+      prev: null,
+      next: { orderStatus: order.orderStatus, paymentStatus: order.paymentStatus },
+    });
     // «Доставка сегодня» — платформо-независимый триггер, планируется и для Shopify.
     await scheduleDeliveryTodayTrigger(prisma, order.id);
     // Владельцу — о любом новом заказе. Только здесь: backfillShopifyOrder этот путь не проходит.
@@ -327,7 +354,7 @@ function buildOrderData(
   const deliveryCustomerCost = money(payload.total_shipping_price_set?.shop_money?.amount);
 
   const orderNumber = `${site.shortName}-${extractShopifyOrderNumber(payload.name, payload.order_number, externalId)}`;
-  const { orderStatus, deliveryStatus } = deriveOrderState(payload, paymentStatus);
+  const { orderStatus, deliveryStatus } = deriveShopifyOrderState(stateSignal(payload), paymentStatus);
 
   return {
     orderNumber,

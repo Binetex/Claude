@@ -19,7 +19,12 @@ import { deriveWooOrderState, reconcileOrderState, type OrderState } from "./ord
 import { resolveMappedOrderFields, type OrderMetaMapping } from "./orderMeta";
 import { scheduleDeliveryForNewOrder } from "@/integrations/delivery/burq/scheduleService";
 import { assignInitial } from "@/modules/assignments/service";
-import { publishOrderCreatedTrigger, scheduleDeliveryTodayTrigger, publishPaymentStateTrigger } from "@/modules/automations/lifecycle";
+import {
+  publishOrderCreatedTrigger,
+  scheduleDeliveryTodayTrigger,
+  publishPaymentStateTrigger,
+  publishOrderLifecycleTriggers,
+} from "@/modules/automations/lifecycle";
 import { paymentTriggerFor } from "@/modules/automations/paymentTriggers";
 import { publishTelegramNotification } from "@/integrations/telegram/events";
 import { onWooOrderIngestedForAirwallex } from "@/integrations/airwallex/reconcile";
@@ -184,6 +189,9 @@ export async function ingestWooOrder(
       if (trigger && trigger !== prevTrigger) {
         await publishPaymentStateTrigger(prisma, { orderId: existing.id, siteId: site.id, triggerType: trigger });
       }
+      // Lifecycle-триггеры (оплачен / доставлен / отменён) — по РЕАЛЬНОМУ переходу prev → reconciled,
+      // то есть по тому, что после anti-rollback действительно записано в заказ.
+      await publishOrderLifecycleTriggers(prisma, { orderId: existing.id, siteId: site.id, prev, next: reconciled });
       // Владельцу — только реальный отказ платежа (см. отчёт: обычный краткий pending не шлём).
       if (payment.classification === "PAYMENT_FAILED" && existing.paymentClassification !== "PAYMENT_FAILED") {
         await publishTelegramNotification(prisma, {
@@ -326,6 +334,8 @@ export async function ingestWooOrder(
     await scheduleDeliveryTodayTrigger(prisma, created.id);
     const trigger = paymentTriggerFor(payment, incomingState.paymentStatus);
     if (trigger) await publishPaymentStateTrigger(prisma, { orderId: created.id, siteId: site.id, triggerType: trigger });
+    // Из lifecycle на создании возможен только «заказ оплачен» (заказ пришёл уже оплаченным).
+    await publishOrderLifecycleTriggers(prisma, { orderId: created.id, siteId: site.id, prev: null, next: incomingState });
   }
   return { status: "created", orderId: created.id, classification: payment.classification };
 }

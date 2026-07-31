@@ -8,8 +8,9 @@ import "server-only";
  */
 import type { PrismaClient } from "@/generated/prisma/client";
 import { PrismaOutboxRepository } from "@/outbox/prismaRepository";
-import { publishAutomationTrigger } from "./events";
+import { publishAutomationTrigger, automationTriggerKey } from "./events";
 import { computeDailyTriggerAt, deliveryLocalDay } from "./dailySchedule";
+import { orderLifecycleTriggers, type OrderLifecycleSnapshot } from "./orderLifecycle";
 import { TERMINAL_ORDER_STATUSES } from "@/lib/statuses";
 
 export async function publishOrderCreatedTrigger(prisma: PrismaClient, args: { orderId: string; siteId: string }): Promise<void> {
@@ -26,10 +27,35 @@ export async function publishOrderCreatedTrigger(prisma: PrismaClient, args: { o
   }
 }
 
+/** occurrenceKey платформенного подтверждения доставки (Shopify fulfilled / Woo completed). */
+const platformDeliveredOccurrenceKey = (orderId: string) => `${orderId}:ORDER_DELIVERED`;
+
+/**
+ * Публиковался ли уже ORDER_DELIVERED по этому заказу — ЛЮБЫМ из источников.
+ *
+ * Источников два и occurrenceKey у них разные (курьерский — по конкретной попытке доставки,
+ * платформенный — по заказу), поэтому обычного дедупа outbox по ключу недостаточно: без этой
+ * проверки заказ, доставленный курьером и следом отмеченный fulfilled в Shopify, получил бы
+ * два «доставлено». Проверка идёт по УНИКАЛЬНОМУ индексу idempotencyKey (не скан JSON) и
+ * перебирает ровно те ключи, которые вообще могли быть созданы для этого заказа.
+ */
+async function deliveredTriggerAlreadyPublished(prisma: PrismaClient, orderId: string): Promise<boolean> {
+  const deliveries = await prisma.delivery.findMany({ where: { orderId }, select: { id: true } });
+  const keys = [
+    automationTriggerKey("ORDER_DELIVERED", platformDeliveredOccurrenceKey(orderId)),
+    ...deliveries.map((d) => automationTriggerKey("ORDER_DELIVERED", d.id)),
+  ];
+  const found = await prisma.outboxEvent.count({ where: { idempotencyKey: { in: keys } } });
+  return found > 0;
+}
+
+/** Подтверждение доставки курьером/владельцем (Burq webhook, ручное «отметить доставленным»). */
 export async function publishOrderDeliveredTrigger(prisma: PrismaClient, args: { orderId: string; deliveryId: string }): Promise<void> {
   try {
     const ord = await prisma.order.findUnique({ where: { id: args.orderId }, select: { siteId: true } });
     if (!ord) return;
+    // Заказ мог быть уже отмечен доставленным платформой — второй раз не шлём.
+    if (await deliveredTriggerAlreadyPublished(prisma, args.orderId)) return;
     const repo = new PrismaOutboxRepository(prisma);
     await publishAutomationTrigger(repo, {
       orderId: args.orderId,
@@ -39,6 +65,27 @@ export async function publishOrderDeliveredTrigger(prisma: PrismaClient, args: {
     });
   } catch (err) {
     console.error(`[sms] publishOrderDeliveredTrigger failed for order ${args.orderId}:`, err instanceof Error ? err.message : String(err));
+  }
+}
+
+/**
+ * Подтверждение доставки самой платформой: Shopify `fulfillment_status=fulfilled`,
+ * WooCommerce `completed`. Нужен потому, что курьерский путь (Burq) закрывает только заказы
+ * с доставкой через Burq и вдобавок гейтится BURQ_RUNTIME_ENABLED — без этого публикатора
+ * триггер «Заказ доставлен» на Shopify-магазинах не срабатывал бы вовсе.
+ */
+export async function publishPlatformOrderDeliveredTrigger(prisma: PrismaClient, args: { orderId: string; siteId: string }): Promise<void> {
+  try {
+    if (await deliveredTriggerAlreadyPublished(prisma, args.orderId)) return;
+    const repo = new PrismaOutboxRepository(prisma);
+    await publishAutomationTrigger(repo, {
+      orderId: args.orderId,
+      siteId: args.siteId,
+      triggerType: "ORDER_DELIVERED",
+      occurrenceKey: platformDeliveredOccurrenceKey(args.orderId),
+    });
+  } catch (err) {
+    console.error(`[sms] publishPlatformOrderDeliveredTrigger failed for order ${args.orderId}:`, err instanceof Error ? err.message : String(err));
   }
 }
 
@@ -120,5 +167,45 @@ export async function publishPaymentStateTrigger(
     });
   } catch (err) {
     console.error(`[sms] publishPaymentStateTrigger(${args.triggerType}) failed for order ${args.orderId}:`, err instanceof Error ? err.message : String(err));
+  }
+}
+
+/**
+ * Триггеры жизненного цикла заказа (ORDER_PAID / ORDER_DELIVERED / ORDER_CANCELLED) по
+ * фактическому переходу состояния. Единая точка вызова для Shopify- и WooCommerce-ingest:
+ * решение «был ли переход» принимает чистая orderLifecycleTriggers, здесь — только публикация.
+ *
+ * Вызывать ТОЛЬКО из «живых» путей приёма заказа (у Woo — под opts.emitLifecycle). Bulk-sync и
+ * backfill истории проходить здесь не должны: там переходов нет, есть перенос уже случившегося.
+ *
+ * Best-effort: сбой публикации логируется и не ломает приём заказа (внутри каждого публикатора).
+ */
+export async function publishOrderLifecycleTriggers(
+  prisma: PrismaClient,
+  args: {
+    orderId: string;
+    siteId: string;
+    /** Состояние ДО применения события; null — заказ создаётся прямо сейчас. */
+    prev: OrderLifecycleSnapshot | null;
+    /** Состояние ПОСЛЕ применения (уже с anti-rollback, т.е. то, что реально записано). */
+    next: OrderLifecycleSnapshot;
+  }
+): Promise<void> {
+  for (const triggerType of orderLifecycleTriggers(args.prev, args.next)) {
+    if (triggerType === "ORDER_DELIVERED") {
+      await publishPlatformOrderDeliveredTrigger(prisma, { orderId: args.orderId, siteId: args.siteId });
+      continue;
+    }
+    try {
+      const repo = new PrismaOutboxRepository(prisma);
+      await publishAutomationTrigger(repo, {
+        orderId: args.orderId,
+        siteId: args.siteId,
+        triggerType,
+        occurrenceKey: `${args.orderId}:${triggerType}`, // состояние в ключе → повтор дубля не создаёт
+      });
+    } catch (err) {
+      console.error(`[sms] publishOrderLifecycleTriggers(${triggerType}) failed for order ${args.orderId}:`, err instanceof Error ? err.message : String(err));
+    }
   }
 }

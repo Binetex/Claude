@@ -25,6 +25,16 @@ export type AutomationTriggerPayload = {
 export type AutomationSendPayload = { jobId: string; orderId: string };
 
 /**
+ * Ключ дедупликации trigger-события в outbox. Вынесен отдельно, потому что его нужно уметь
+ * не только строить при публикации, но и ПРОВЕРЯТЬ до неё (см. защиту от двойного
+ * ORDER_DELIVERED из разных источников в lifecycle.ts). Формат исторический — не менять:
+ * от него зависит дедуп уже поставленных в очередь событий.
+ */
+export function automationTriggerKey(triggerType: string, occurrenceKey: string): string {
+  return `sms.trigger:${triggerType}:${occurrenceKey}`;
+}
+
+/**
  * Публикует trigger-событие. Идемпотентно по `sms.trigger:{triggerType}:{occurrenceKey}` —
  * повторный webhook/sync/ingest НЕ создаёт второй факт.
  */
@@ -39,7 +49,7 @@ export async function publishAutomationTrigger(
     aggregateType: "order",
     aggregateId: p.orderId,
     payload: p,
-    idempotencyKey: `sms.trigger:${p.triggerType}:${p.occurrenceKey}`,
+    idempotencyKey: automationTriggerKey(p.triggerType, p.occurrenceKey),
     ...(availableAt ? { availableAt } : {}),
   });
   return { created };

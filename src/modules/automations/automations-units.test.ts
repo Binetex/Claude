@@ -159,6 +159,8 @@ describe("triggers registry", () => {
     const types = listSmsTriggers().map((t) => t.type);
     expect(types).toEqual([
       "ORDER_CREATED",
+      "ORDER_PAID",
+      "ORDER_CANCELLED",
       "TRACKING_LINK_AVAILABLE",
       "DELIVERY_TODAY",
       "PAYMENT_PENDING",

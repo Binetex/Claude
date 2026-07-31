@@ -16,6 +16,7 @@ export type DomainEventMap = {
   "order.ready": { orderId: string; floristId: string | null };
   "order.delivery.started": { orderId: string; trackingUrl: string | null };
   "order.delivery.completed": { orderId: string };
+  "order.paid": { orderId: string };
   "order.cancelled": { orderId: string; reason: string | null };
   "order.refunded": { orderId: string; amount: number | null };
   "order.delivery.today": { orderId: string; localDay: string };

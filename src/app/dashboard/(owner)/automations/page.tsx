@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { getSmsTrigger } from "@/modules/automations/triggers";
 import { audienceLabel, delayLabel } from "@/modules/automations/display";
 import { getAutomationSettings } from "@/modules/automations/settings";
+import { AutomationsTabs } from "./AutomationsTabs";
 import { AutomationRowActions } from "./AutomationRowActions";
 import { SiteReviewUrlPanel } from "./SiteReviewUrlPanel";
 import { KillSwitchToggle } from "./KillSwitchToggle";
@@ -47,16 +48,23 @@ export default async function AutomationsPage() {
 
   return (
     <div className="mx-auto max-w-6xl space-y-5">
+      <div>
+        <h1 className="text-xl font-bold text-slate-800">Автоматизации</h1>
+        <p className="text-sm text-slate-500">
+          Order Notifications — одиночные уведомления по событию заказа: SMS и/или Email. Новые правила создаются выключенными.
+        </p>
+      </div>
+
+      <AutomationsTabs />
+
       <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-bold text-slate-800">Автоматизации</h1>
-          <p className="text-sm text-slate-500">Правила автоматических уведомлений по событиям заказа: SMS и/или Email. Новые правила создаются выключенными.</p>
-        </div>
+        <p className="text-sm text-slate-500">Одно событие — одно сообщение. Для последовательности шагов используйте Marketing Flows.</p>
         <Link href="/dashboard/automations/new">
           <Button size="sm">Создать автоматизацию</Button>
         </Link>
       </div>
 
+      {/* Рубильник общий: гасит и одиночные правила, и цепочки. */}
       <KillSwitchToggle disableAll={settings.disableAll} updatedAt={settings.updatedAt ? settings.updatedAt.toISOString() : null} />
 
       <Card>

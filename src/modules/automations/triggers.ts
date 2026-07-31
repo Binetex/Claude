@@ -29,6 +29,19 @@ export const SMS_TRIGGERS: readonly SmsTriggerDef[] = [
     domainEvent: "order.created",
   },
   {
+    type: "ORDER_PAID",
+    label: "Заказ оплачен",
+    description:
+      "На переходе заказа в оплаченное состояние (включая подтверждённый BNPL — Klarna/Airwallex). Повторная синхронизация уже оплаченного заказа триггер НЕ запускает.",
+    domainEvent: "order.paid",
+  },
+  {
+    type: "ORDER_CANCELLED",
+    label: "Заказ отменён",
+    description: "На переходе заказа в отменённое состояние. Отмена по возврату — это отдельный триггер «Оформлен возврат».",
+    domainEvent: "order.cancelled",
+  },
+  {
     type: "TRACKING_LINK_AVAILABLE",
     label: "Появился трек-номер",
     description: "Когда у доставки впервые появился tracking-ссылка курьера.",
@@ -62,7 +75,8 @@ export const SMS_TRIGGERS: readonly SmsTriggerDef[] = [
   {
     type: "ORDER_DELIVERED",
     label: "Заказ доставлен",
-    description: "После подтверждения доставки (можно с задержкой — напр. просьба об отзыве).",
+    description:
+      "После подтверждения доставки — курьером (Burq), вручную владельцем или самой платформой (Shopify fulfilled / WooCommerce completed). Ровно один раз на заказ, каким бы из источников подтверждение ни пришло.",
     domainEvent: "order.delivery.completed",
   },
 ] as const;

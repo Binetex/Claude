@@ -394,6 +394,10 @@ model Site {
   reviewUrl   String? // ссылка на отзыв для {{review_url}}; пусто → review-правила не отправляются
   automationSites AutomationSite[]
 
+  // ── Automation Flows (цепочки шагов) ──
+  automationFlowSites AutomationFlowSite[]
+  automationFlowRuns  AutomationFlowRun[]
+
   // ── Email-рассылки (Brevo) — настройки СВОИ у каждого магазина ──
   emailSettings  SiteEmailSettings?
   emailTemplates SiteEmailTemplate[]
@@ -634,6 +638,7 @@ model Order {
   telegramMessages TelegramMessage[]
   audits         OrderAudit[]
   automationJobs AutomationJob[]
+  automationFlowRuns AutomationFlowRun[]
   airwallexPayment AirwallexPayment?
   airwallexChecks  AirwallexCheck[]
 
@@ -753,6 +758,7 @@ model OrderCommunication {
   sentByUserId String? // кто из сотрудников админки отправил (User.id), для исходящих
 
   automationJobs AutomationJob[] // авто-SMS job'ы, чьё сообщение записано в эту коммуникацию
+  flowRunSteps   AutomationFlowRunStep[] // шаги цепочек, чьё SMS записано в эту коммуникацию
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1445,6 +1451,162 @@ model AutomationExecutionLog {
 
   @@index([jobId, createdAt])
   @@index([automationId, createdAt])
+}
+
+// ─────────────────────────  AUTOMATION FLOWS (цепочки)  ─────────────────────────
+//
+// Цепочка = линейный список шагов (WAIT / EMAIL / SMS), запускаемый тем же trigger-событием,
+// что и одиночные правила (Automation). Одиночные правила НЕ трогаются: это отдельные модели,
+// отдельный outbox-eventType и отдельная ветка в trigger-обработчике.
+//
+// Отложенность и повторы — существующий durable outbox (availableAt/backoff/dead-letter);
+// второй worker и вторая очередь НЕ создаются.
+//
+// Идемпотентность держится на трёх уровнях: unique(flowId, orderId) — один run на заказ;
+// unique(runId, stepId) — один шаг run'а; статус шага (не SCHEDULED → выходим) — повторная
+// доставка того же outbox-события не отправляет второй раз.
+
+enum FlowStepType {
+  WAIT
+  EMAIL
+  SMS
+}
+
+enum FlowRunStatus {
+  ACTIVE // ждёт выполнения следующего шага
+  COMPLETED // шаги закончились
+  CANCELLED // остановлен (цепочка выключена/удалена, магазин отвязан, заказ отменён)
+}
+
+model AutomationFlow {
+  id     String  @id @default(cuid())
+  name   String
+  active Boolean @default(false) // как и одиночные правила — создаётся ВЫКЛЮЧЕННОЙ
+
+  triggerType String // тот же app-registry, что у Automation (src/modules/automations/triggers.ts)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime? // soft-delete: цепочку с историей физически не удаляем
+
+  steps AutomationFlowStep[]
+  sites AutomationFlowSite[]
+  runs  AutomationFlowRun[]
+
+  @@index([triggerType, active])
+}
+
+// Магазины цепочки (M:N) — тот же приём, что AutomationSite: единственный источник правды.
+model AutomationFlowSite {
+  flowId String
+  siteId String
+
+  flow AutomationFlow @relation(fields: [flowId], references: [id], onDelete: Cascade)
+  site Site           @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@id([flowId, siteId])
+  @@index([siteId])
+}
+
+model AutomationFlowStep {
+  id       String         @id @default(cuid())
+  flowId   String
+  flow     AutomationFlow @relation(fields: [flowId], references: [id], onDelete: Cascade)
+  position Int // 1..N — порядок в вертикальном редакторе
+  type     FlowStepType
+
+  // WAIT: задержка перед следующим шагом. Единица — общий SmsDelayUnit (UI: минуты/часы/дни).
+  waitAmount Int?
+  waitUnit   SmsDelayUnit?
+
+  // EMAIL: Brevo Template ID именно этого шага (у цепочек общего шаблона магазина нет —
+  // маркетинговое письмо всегда своё, поэтому поле обязательно на уровне валидации).
+  brevoTemplateId Int?
+
+  // SMS: inline-текст с теми же переменными {{...}}, что у одиночных правил.
+  template String?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  // Шаг с историей не удаляем физически: run'ы ссылаются на него (Restrict). Запланированные
+  // шаги удалённого шага при выполнении получают SKIPPED и цепочка идёт дальше.
+  deletedAt DateTime?
+
+  runSteps AutomationFlowRunStep[]
+
+  @@unique([flowId, position])
+  @@index([flowId, position])
+}
+
+model AutomationFlowRun {
+  id     String         @id @default(cuid())
+  flowId String
+  // Restrict: цепочку с историей нельзя удалить физически (только soft-delete).
+  flow   AutomationFlow @relation(fields: [flowId], references: [id], onDelete: Restrict)
+
+  orderId String
+  order   Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  siteId  String
+  site    Site   @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  status        FlowRunStatus @default(ACTIVE)
+  currentStepId String? // шаг, который выполняется/ожидает выполнения
+  nextRunAt     DateTime? // время выполнения следующего шага (null — run завершён)
+
+  startedAt       DateTime  @default(now())
+  finishedAt      DateTime?
+  cancelledReason String? // flow_disabled | flow_deleted | site_unlinked | order_cancelled | no_steps
+
+  steps AutomationFlowRunStep[]
+
+  // Один run на пару (цепочка, заказ) НАВСЕГДА. Так повторный факт триггера (в т.ч. из другого
+  // источника — курьер/платформа для «доставлен») не создаёт вторую цепочку по тому же заказу.
+  @@unique([flowId, orderId])
+  @@index([status, nextRunAt])
+  @@index([orderId])
+  @@index([siteId, status])
+}
+
+model AutomationFlowRunStep {
+  id     String            @id @default(cuid())
+  runId  String
+  run    AutomationFlowRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  stepId String
+  // Restrict: пока есть история выполнения, шаг живёт (удаление шага — soft-delete).
+  step   AutomationFlowStep @relation(fields: [stepId], references: [id], onDelete: Restrict)
+
+  // Снимки на момент планирования: история остаётся читаемой, даже если шаг изменили/удалили.
+  position Int
+  type     FlowStepType
+
+  status      SmsJobStatus @default(SCHEDULED) // SCHEDULED|PROCESSING|SENT|SKIPPED|FAILED|CANCELLED
+  scheduledAt DateTime // когда worker должен выполнить шаг
+  channel     String? // "SMS" | "EMAIL"; у WAIT — null
+
+  phoneNormalized String? // адресат SMS (E.164)
+  emailNormalized String? // адресат EMAIL (нормализованный)
+
+  renderedTextSnapshot String? // текст SMS в момент фактической отправки
+  communicationId      String?
+  communication        OrderCommunication? @relation(fields: [communicationId], references: [id], onDelete: SetNull)
+  providerMessageId    String?
+
+  attempts      Int     @default(0)
+  lastErrorSafe String? // без PII/секретов
+
+  sentAt    DateTime?
+  skippedAt DateTime?
+  failedAt  DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  // ЯДРО ИДЕМПОТЕНТНОСТИ: один шаг цепочки в рамках одного run — ровно одна строка.
+  @@unique([runId, stepId])
+  @@index([runId, position])
+  @@index([status, scheduledAt])
+  @@index([communicationId])
 }
 
 // ─────────────────────────────  EMAIL (BREVO)  ─────────────────────────────
