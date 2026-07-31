@@ -14,8 +14,16 @@ import { publishTelegramNotification } from "@/integrations/telegram/events";
 export async function notifyFloristAssigned(
   floristId: string,
   orderId: string,
-  opts: { previousFloristId?: string | null } = {}
+  opts: { previousFloristId?: string | null; assignmentId?: string | null } = {}
 ): Promise<void> {
+  /**
+   * Ключ дедупликации в очереди — по КОНКРЕТНОМУ назначению, а не по паре «заказ + флорист».
+   * Иначе возврат заказа прежнему флористу (A → B → A) давал тот же ключ, что и первое
+   * назначение, очередь считала событие уже опубликованным и уведомление не уходило вовсе.
+   * OrderAssignment создаётся на каждое назначение, поэтому его id — естественная граница
+   * «одно уведомление на одно назначение». Без него (старые вызовы) поведение прежнее.
+   */
+  const per = opts.assignmentId ? `:a${opts.assignmentId}` : "";
   const names = await prisma.florist
     .findMany({
       where: { id: { in: [floristId, ...(opts.previousFloristId ? [opts.previousFloristId] : [])] } },
@@ -28,7 +36,7 @@ export async function notifyFloristAssigned(
     type: "order.assigned",
     orderId,
     floristId,
-    occurrenceKey: `${orderId}:${floristId}`,
+    occurrenceKey: `${orderId}:${floristId}${per}`,
     context: { floristName: nameOf(floristId) },
   });
 
@@ -37,7 +45,7 @@ export async function notifyFloristAssigned(
       type: "order.handed_over",
       orderId,
       floristId: opts.previousFloristId,
-      occurrenceKey: `${orderId}:${opts.previousFloristId}:to:${floristId}`,
+      occurrenceKey: `${orderId}:${opts.previousFloristId}:to:${floristId}${per}`,
       context: { toFloristName: nameOf(floristId) },
     });
   }

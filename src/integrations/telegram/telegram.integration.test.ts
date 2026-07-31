@@ -265,6 +265,74 @@ describe("персональные боты флористов", () => {
   });
 });
 
+describe("возврат заказа прежнему флористу (A → B → A)", () => {
+  it("прежний флорист получает НОВОЕ сообщение, а не молчаливую правку старого", async () => {
+    const site = await makeSite();
+    const a = await makeFlorist("Возврат-A", { chatId: "1500" });
+    const b = await makeFlorist("Возврат-B", { chatId: "1501" });
+    const order = await makeOrder(site.id);
+    fetchMock
+      .mockResolvedValueOnce(okSend(1510)) // A: назначение
+      .mockResolvedValueOnce(okEdit())     // A: пометка «передан»
+      .mockResolvedValueOnce(okSend(1511)) // B: назначение
+      .mockResolvedValueOnce(okEdit())     // B: пометка «передан»
+      .mockResolvedValueOnce(okSend(1512)); // A: НОВОЕ назначение
+
+    await handler(rec({ type: "order.assigned", orderId: order.id, floristId: a.id, context: { floristName: "Возврат-A" } }));
+    // Заказ уходит к B.
+    await handler(rec({ type: "order.handed_over", orderId: order.id, floristId: a.id, context: { toFloristName: "Возврат-B" } }));
+    await handler(rec({ type: "order.assigned", orderId: order.id, floristId: b.id, context: { floristName: "Возврат-B" } }));
+    // И возвращается к A.
+    await handler(rec({ type: "order.handed_over", orderId: order.id, floristId: b.id, context: { toFloristName: "Возврат-A" } }));
+    await handler(rec({ type: "order.assigned", orderId: order.id, floristId: a.id, context: { floristName: "Возврат-A" } }));
+
+    const calls = fetchMock.mock.calls.map((c) => String(c[0]));
+    // Последним должно быть именно ОТПРАВЛЕНИЕ: правка в Telegram уведомление не создаёт,
+    // и флорист не узнал бы, что заказ снова на нём.
+    expect(calls[4]).toContain("/sendPhoto");
+    expect(calls[4]).not.toContain("edit");
+
+    // Строка A теперь указывает на новое сообщение и снова в состоянии «назначен».
+    const rows = await tgMessages(order.id);
+    const rowA = rows.find((r) => r.chatId === "1500");
+    expect(rowA).toMatchObject({ messageId: "1512", eventType: "order.assigned" });
+  });
+
+  it("повторное назначение БЕЗ передачи между ними по-прежнему не спамит", async () => {
+    const site = await makeSite();
+    const f = await makeFlorist("Без-передачи", { chatId: "1520" });
+    const order = await makeOrder(site.id);
+    fetchMock.mockResolvedValueOnce(okSend(1521));
+
+    await handler(rec({ type: "order.assigned", orderId: order.id, floristId: f.id, context: { floristName: "Без-передачи" } }));
+    await handler(rec({ type: "order.assigned", orderId: order.id, floristId: f.id, context: { floristName: "Без-передачи" } }));
+
+    // Текст не изменился → в Telegram вообще не ходим.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(await tgMessages(order.id)).toHaveLength(1);
+  });
+
+  it("при возврате фото позиций приходят заново вместе с новой карточкой", async () => {
+    const site = await makeSite();
+    const a = await makeFlorist("Возврат-фото", { chatId: "1530" });
+    const order = await makeOrder(site.id, ["https://cdn/a.jpg", "https://cdn/b.jpg"]);
+    fetchMock
+      .mockResolvedValueOnce(okAlbum([1541, 1542])) // A: альбом
+      .mockResolvedValueOnce(okSend(1540))          // A: карточка
+      .mockResolvedValueOnce(okEdit())              // A: «передан»
+      .mockResolvedValueOnce(okAlbum([1544, 1545])) // A: альбом заново
+      .mockResolvedValueOnce(okSend(1543));         // A: новая карточка
+
+    await handler(rec({ type: "order.assigned", orderId: order.id, floristId: a.id, context: { floristName: "Возврат-фото" } }));
+    await handler(rec({ type: "order.handed_over", orderId: order.id, floristId: a.id, context: { toFloristName: "Другой" } }));
+    await handler(rec({ type: "order.assigned", orderId: order.id, floristId: a.id, context: { floristName: "Возврат-фото" } }));
+
+    const calls = fetchMock.mock.calls.map((c) => String(c[0]));
+    expect(calls.filter((u) => u.includes("/sendMediaGroup"))).toHaveLength(2);
+    expect(calls[4]).toContain("/sendMessage");
+  });
+});
+
 describe("фото всех позиций заказа", () => {
   it("три позиции → сперва альбом из ВСЕХ трёх, следом текстовая карточка с кнопками", async () => {
     const site = await makeSite();

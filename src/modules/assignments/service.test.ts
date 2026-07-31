@@ -240,6 +240,27 @@ describe("ручная цена и переназначение", () => {
   });
 });
 
+describe("уведомления при возврате заказа прежнему флористу", () => {
+  it("A → B → A даёт ДВА разных события в очереди для A, а не одно", async () => {
+    const order = await makeOrder();
+    await assignInitial(order.id);                          // → A
+    await reassignManual(order.id, floristBId, false); // → B
+    await reassignManual(order.id, floristAId, false); // → обратно к A
+
+    // Ключ очереди раньше был «заказ + флорист», поэтому второе назначение A считалось уже
+    // опубликованным и уведомление не уходило вовсе. Теперь ключ включает id назначения.
+    const events = await prisma.outboxEvent.findMany({
+      where: { aggregateId: order.id, idempotencyKey: { startsWith: "telegram:order.assigned:" } },
+      select: { idempotencyKey: true },
+    });
+    const forA = events.filter((e) => e.idempotencyKey.includes(floristAId));
+    expect(forA).toHaveLength(2);
+    expect(new Set(forA.map((e) => e.idempotencyKey)).size).toBe(2);
+
+    await prisma.outboxEvent.deleteMany({ where: { aggregateId: order.id } });
+  });
+});
+
 describe("handoffOrder (флорист передаёт выбранному, авто-принятие)", () => {
   it("передаёт заказ выбранному: цель сразу ACCEPTED (свежая авто-цена), исходный DECLINED", async () => {
     const order = await makeOrder();

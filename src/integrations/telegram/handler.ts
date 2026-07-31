@@ -92,7 +92,19 @@ export function buildTelegramNotifyHandler(prisma: PrismaClient): OutboxHandler 
     const wantAlbum = def.audience === "FLORIST" && order.albumUrls.length > 0;
     const sender = new TelegramSender(bot.token);
 
-    if (existing) {
+    /**
+     * Заказ ВЕРНУЛСЯ к флористу, у которого уже был: его прежнее сообщение помечено «передан».
+     * Править его нельзя — Telegram о правках не уведомляет, а само сообщение к этому моменту
+     * уехало вверх чата, и флорист просто не узнает, что заказ снова на нём. Поэтому шлём новое,
+     * а прежнее оставляем как есть: оно верно описывает тогдашнюю передачу.
+     */
+    const returning = !!existing && p.type === "order.assigned" && existing.eventType === "order.handed_over";
+    if (returning) {
+      // Альбом привязан к тому же ключу — сбрасываем отметку, чтобы фото пришли с новой карточкой.
+      await prisma.telegramMessage.deleteMany({ where: { dedupeKey: `${dedupeKey}:album` } });
+    }
+
+    if (existing && !returning) {
       if (existing.lastText === text) return; // нечего менять
       // Фото-сообщение и текстовое правятся разными методами и не конвертируются: выбираем по
       // тому, чем сообщение было отправлено (existing.isPhoto), а не по текущему наличию фото.

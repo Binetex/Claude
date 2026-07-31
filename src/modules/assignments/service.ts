@@ -173,6 +173,10 @@ export async function assignAndActivateFlorist(orderId: string, floristId: strin
   const before = await prisma.order.findUnique({ where: { id: orderId }, select: { currentFloristId: true } });
   const previousFloristId = opts.closePrevious ? before?.currentFloristId ?? null : null;
 
+  // Id созданного назначения нужен уведомлению: он различает повторные назначения одному и
+  // тому же флористу (возврат заказа A → B → A), которые иначе схлопывались в очереди.
+  let assignmentId: string | null = null;
+
   await prisma.$transaction(async (tx) => {
     if (opts.closePrevious) {
       await tx.orderAssignment.updateMany({
@@ -189,13 +193,15 @@ export async function assignAndActivateFlorist(orderId: string, floristId: strin
       where: { id: orderId },
       data: { currentFloristId: floristId, assignmentStatus: "ACCEPTED", orderStatus: "FLORIST_ACCEPTED", priceMode, floristTotal: total },
     });
-    await tx.orderAssignment.create({
+    const assignment = await tx.orderAssignment.create({
       data: { orderId, floristId, state: "ACCEPTED", respondedAt: now, priceMode, floristTotalSnapshot: total },
+      select: { id: true },
     });
+    assignmentId = assignment.id;
     await recomputeEstimatedProfit(tx, orderId);
   });
   // Строго один раз после успешной транзакции: уведомление + (пере)планирование доставки под флориста.
-  await notifyFloristAssigned(floristId, orderId, { previousFloristId });
+  await notifyFloristAssigned(floristId, orderId, { previousFloristId, assignmentId });
   await onOrderDeliveryChangeSafe(prisma, orderId);
 }
 
