@@ -378,7 +378,9 @@ describe("авто-назначение флориста (WooCommerce — как
     const r = await ingestWooOrder(site(), wooOrder2() as never, ingestConfig);
     expect(r.status).toBe("created");
     const saved = await prisma.order.findFirst({ where: { siteId, externalId: "6100" }, select: { assignmentStatus: true, currentFloristId: true, orderStatus: true } });
-    expect(saved).toMatchObject({ assignmentStatus: "ASSIGNED", currentFloristId: floristId, orderStatus: "ASSIGNED" });
+    // Модель АВТО-ПРИНЯТИЯ: назначение сразу активно, отдельного «Принять» нет
+    // (см. assignments/service.ts). Тест написан до её появления и ждал промежуточный ASSIGNED.
+    expect(saved).toMatchObject({ assignmentStatus: "ACCEPTED", currentFloristId: floristId, orderStatus: "FLORIST_ACCEPTED" });
   });
 
   it("новый pending (не оплачен) заказ → НЕ назначается (остаётся UNASSIGNED)", async () => {
@@ -390,7 +392,7 @@ describe("авто-назначение флориста (WooCommerce — как
   it("переход pending → processing существующего заказа → назначается флористу", async () => {
     await ingestWooOrder(site(), wooOrder2({ id: 6200, number: "6200", status: "processing", date_modified_gmt: "2026-08-02T12:00:00" }) as never, ingestConfig);
     const saved = await prisma.order.findFirst({ where: { siteId, externalId: "6200" }, select: { assignmentStatus: true, currentFloristId: true } });
-    expect(saved).toMatchObject({ assignmentStatus: "ASSIGNED", currentFloristId: floristId });
+    expect(saved).toMatchObject({ assignmentStatus: "ACCEPTED", currentFloristId: floristId });
   });
 });
 

@@ -17,7 +17,25 @@ import { createMockBurqClient, __resetMockBurqStore, __setMockBurqStatus, __setM
  * миграции 20260719120000_burq_delivery (в т.ч. partial unique index одного текущего attempt).
  * Изолированные фикстуры с уникальным суффиксом, полная очистка после себя. Реальные вызовы
  * Burq НЕ выполняются — mock-клиент. Запускать серийно (--no-file-parallelism).
+ *
+ * BURQ_RUNTIME_ENABLED обязателен: это master gate всей runtime-логики Burq, и без него
+ * планировщик, ingest статусов и webhook-обработчик делают полный no-op. Флаг добавили уже
+ * после написания этих тестов, и они молча проверяли «ничего не произошло» вместо реального
+ * поведения. Никакой тест здесь выключенный гейт не проверяет, поэтому включаем на весь файл.
  */
+process.env.BURQ_RUNTIME_ENABLED = "true";
+
+/**
+ * Время событий доставки — ОТНОСИТЕЛЬНО прогона, а не фиксированной датой.
+ *
+ * Доставка создаётся с providerEventAt = сейчас, и захардкоженный день (был 2026-07-20) с ходом
+ * времени становился старше момента создания: anti-rollback отбрасывал события как stale_event,
+ * и тесты молча проверяли «ничего не произошло». Берём завтрашний день — взаимный порядок
+ * времён внутри тестов сохраняется, включая намеренно «устаревшие» события.
+ */
+const EVENT_DAY = new Date(Date.now() + 864e5).toISOString().slice(0, 10);
+const at = (hhmmss: string) => new Date(`${EVENT_DAY}T${hhmmss}Z`);
+
 const suffix = `burq-${Date.now()}`;
 let siteId: string;
 let floristAId: string;
@@ -125,11 +143,11 @@ describe("Burq status ingestion (anti-rollback, order status, completed)", () =>
     const delivery = await prisma.delivery.findFirst({ where: { orderId, isCurrentAttempt: true } });
     const publish = vi.fn().mockResolvedValue(undefined);
 
-    await applyDeliveryStatusUpdate(prisma, publish, { deliveryId: delivery!.id, rawStatus: "driver_assigned", providerEventId: "e1", occurredAt: new Date("2026-07-20T18:00:00Z"), source: "BURQ_WEBHOOK" });
+    await applyDeliveryStatusUpdate(prisma, publish, { deliveryId: delivery!.id, rawStatus: "driver_assigned", providerEventId: "e1", occurredAt: at("18:00:00"), source: "BURQ_WEBHOOK" });
     expect((await prisma.order.findUnique({ where: { id: orderId } }))!.orderStatus).toBe("AWAITING_COURIER");
     expect(publish).not.toHaveBeenCalled();
 
-    await applyDeliveryStatusUpdate(prisma, publish, { deliveryId: delivery!.id, rawStatus: "delivered", providerEventId: "e2", occurredAt: new Date("2026-07-20T19:00:00Z"), source: "BURQ_WEBHOOK" });
+    await applyDeliveryStatusUpdate(prisma, publish, { deliveryId: delivery!.id, rawStatus: "delivered", providerEventId: "e2", occurredAt: at("19:00:00"), source: "BURQ_WEBHOOK" });
     expect((await prisma.order.findUnique({ where: { id: orderId } }))!.orderStatus).toBe("DELIVERED");
     expect(publish).toHaveBeenCalledWith({ orderId, deliveryId: delivery!.id });
   });
@@ -142,10 +160,10 @@ describe("Burq status ingestion (anti-rollback, order status, completed)", () =>
     const delivery = await prisma.delivery.findFirst({ where: { orderId, isCurrentAttempt: true } });
 
     // Приводим заказ в IN_TRANSIT, затем прилетает attempting reroute.
-    await applyDeliveryStatusUpdate(prisma, vi.fn(), { deliveryId: delivery!.id, rawStatus: "pickup_complete", providerEventId: "p1", occurredAt: new Date("2026-07-20T18:30:00Z"), source: "BURQ_WEBHOOK" });
+    await applyDeliveryStatusUpdate(prisma, vi.fn(), { deliveryId: delivery!.id, rawStatus: "pickup_complete", providerEventId: "p1", occurredAt: at("18:30:00"), source: "BURQ_WEBHOOK" });
     expect((await prisma.order.findUnique({ where: { id: orderId } }))!.orderStatus).toBe("IN_TRANSIT");
 
-    await applyDeliveryStatusUpdate(prisma, vi.fn(), { deliveryId: delivery!.id, rawStatus: "attempting reroute", providerEventId: "r1", occurredAt: new Date("2026-07-20T18:45:00Z"), source: "BURQ_WEBHOOK" });
+    await applyDeliveryStatusUpdate(prisma, vi.fn(), { deliveryId: delivery!.id, rawStatus: "attempting reroute", providerEventId: "r1", occurredAt: at("18:45:00"), source: "BURQ_WEBHOOK" });
     expect((await prisma.delivery.findUnique({ where: { id: delivery!.id } }))!.status).toBe("PROBLEM");
     expect((await prisma.order.findUnique({ where: { id: orderId } }))!.orderStatus).toBe("IN_TRANSIT"); // НЕ PROBLEM
   });
@@ -272,7 +290,8 @@ describe("Proof of Delivery (Path A)", () => {
       const all = await prisma.outboxEvent.findMany({ where: { OR: [{ aggregateId: deliveryId }, { aggregateId: ext }, { aggregateId: orderId }] } });
       for (const e of all) expect(JSON.stringify(e.payload)).not.toContain("pod/");
     } finally {
-      delete process.env.BURQ_RUNTIME_ENABLED;
+      // Флаг включён на весь файл (см. шапку) — возвращаем именно "true", а не удаляем.
+      process.env.BURQ_RUNTIME_ENABLED = "true";
     }
   });
 });
@@ -285,8 +304,8 @@ describe("Retry delivery attempt (provider_canceled → новая попытк�
     await handleBurqDraftCreate({ client: createMockBurqClient(), port }, { orderId, scheduleVersion: 0 });
     const del = await prisma.delivery.findFirst({ where: { orderId, isCurrentAttempt: true } });
     // Стоимость на старой попытке, затем provider_canceled.
-    await applyDeliveryStatusUpdate(prisma, vi.fn(), { deliveryId: del!.id, providerEventId: "e1", occurredAt: new Date("2026-07-20T18:00:00Z"), source: "BURQ_WEBHOOK", rawStatus: "enroute_pickup", provider: "Uber", providerId: "dsp_x", totalAmountDueCents: 1550, currency: "USD" });
-    await applyDeliveryStatusUpdate(prisma, vi.fn(), { deliveryId: del!.id, providerEventId: "e2", occurredAt: new Date("2026-07-20T18:30:00Z"), source: "BURQ_WEBHOOK", rawStatus: "provider_canceled", provider: "Uber", providerId: "dsp_x" });
+    await applyDeliveryStatusUpdate(prisma, vi.fn(), { deliveryId: del!.id, providerEventId: "e1", occurredAt: at("18:00:00"), source: "BURQ_WEBHOOK", rawStatus: "enroute_pickup", provider: "Uber", providerId: "dsp_x", totalAmountDueCents: 1550, currency: "USD" });
+    await applyDeliveryStatusUpdate(prisma, vi.fn(), { deliveryId: del!.id, providerEventId: "e2", occurredAt: at("18:30:00"), source: "BURQ_WEBHOOK", rawStatus: "provider_canceled", provider: "Uber", providerId: "dsp_x" });
     return { orderId, oldDeliveryId: del!.id };
   }
 
@@ -427,7 +446,7 @@ describe("Uber cost capture (Path A)", () => {
   it("Uber → Delivery.finalCost + Order.deliveryActualCost + profit; OrderStatus по статусу, Payment не меняется", async () => {
     const { orderId, deliveryId } = await makeDraftedOrder();
     const before = await prisma.order.findUnique({ where: { id: orderId } });
-    const r = await applyDeliveryStatusUpdate(prisma, vi.fn(), { deliveryId, providerEventId: "e1", occurredAt: new Date("2026-07-20T18:00:00Z"), ...uber() });
+    const r = await applyDeliveryStatusUpdate(prisma, vi.fn(), { deliveryId, providerEventId: "e1", occurredAt: at("18:00:00"), ...uber() });
     expect(r.outcome).toBe("applied");
     const del = await prisma.delivery.findUnique({ where: { id: deliveryId } });
     expect(Number(del!.finalCost)).toBe(15.5);
@@ -467,18 +486,18 @@ describe("Uber cost capture (Path A)", () => {
 
   it("нет суммы → старое значение не обнуляется", async () => {
     const { orderId, deliveryId } = await makeDraftedOrder();
-    await applyDeliveryStatusUpdate(prisma, vi.fn(), { deliveryId, providerEventId: "e1", occurredAt: new Date("2026-07-20T18:00:00Z"), ...uber() });
-    await applyDeliveryStatusUpdate(prisma, vi.fn(), { deliveryId, providerEventId: "e2", occurredAt: new Date("2026-07-20T18:30:00Z"), ...uber({ totalAmountDueCents: null, currency: null }) });
+    await applyDeliveryStatusUpdate(prisma, vi.fn(), { deliveryId, providerEventId: "e1", occurredAt: at("18:00:00"), ...uber() });
+    await applyDeliveryStatusUpdate(prisma, vi.fn(), { deliveryId, providerEventId: "e2", occurredAt: at("18:30:00"), ...uber({ totalAmountDueCents: null, currency: null }) });
     expect(Number((await prisma.order.findUnique({ where: { id: orderId } }))!.deliveryActualCost)).toBe(15.5); // сохранилось
   });
 
   it("более новый webhook обновляет цену; stale — не откатывает", async () => {
     const { orderId, deliveryId } = await makeDraftedOrder();
-    await applyDeliveryStatusUpdate(prisma, vi.fn(), { deliveryId, providerEventId: "e1", occurredAt: new Date("2026-07-20T18:00:00Z"), ...uber({ totalAmountDueCents: 1550 }) });
-    await applyDeliveryStatusUpdate(prisma, vi.fn(), { deliveryId, providerEventId: "e2", occurredAt: new Date("2026-07-20T19:00:00Z"), ...uber({ totalAmountDueCents: 1800 }) });
+    await applyDeliveryStatusUpdate(prisma, vi.fn(), { deliveryId, providerEventId: "e1", occurredAt: at("18:00:00"), ...uber({ totalAmountDueCents: 1550 }) });
+    await applyDeliveryStatusUpdate(prisma, vi.fn(), { deliveryId, providerEventId: "e2", occurredAt: at("19:00:00"), ...uber({ totalAmountDueCents: 1800 }) });
     expect(Number((await prisma.order.findUnique({ where: { id: orderId } }))!.deliveryActualCost)).toBe(18);
     // stale (старее finalCostUpdatedAt) не откатывает
-    await applyDeliveryStatusUpdate(prisma, vi.fn(), { deliveryId, providerEventId: "e3", occurredAt: new Date("2026-07-20T10:00:00Z"), ...uber({ totalAmountDueCents: 500 }) });
+    await applyDeliveryStatusUpdate(prisma, vi.fn(), { deliveryId, providerEventId: "e3", occurredAt: at("10:00:00"), ...uber({ totalAmountDueCents: 500 }) });
     expect(Number((await prisma.order.findUnique({ where: { id: orderId } }))!.deliveryActualCost)).toBe(18);
   });
 
@@ -493,7 +512,7 @@ describe("Uber cost capture (Path A)", () => {
   it("delivered продолжает работать (Order DELIVERED + publish) и с ценой", async () => {
     const { orderId, deliveryId } = await makeDraftedOrder();
     const publish = vi.fn().mockResolvedValue(undefined);
-    await applyDeliveryStatusUpdate(prisma, publish, { deliveryId, providerEventId: "d1", occurredAt: new Date("2026-07-20T20:00:00Z"), ...uber({ rawStatus: "delivered", totalAmountDueCents: 1700 }) });
+    await applyDeliveryStatusUpdate(prisma, publish, { deliveryId, providerEventId: "d1", occurredAt: at("20:00:00"), ...uber({ rawStatus: "delivered", totalAmountDueCents: 1700 }) });
     const ord = await prisma.order.findUnique({ where: { id: orderId } });
     expect(ord!.orderStatus).toBe("DELIVERED");
     expect(Number(ord!.deliveryActualCost)).toBe(17);
