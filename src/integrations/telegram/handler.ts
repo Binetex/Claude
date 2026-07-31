@@ -86,8 +86,10 @@ export function buildTelegramNotifyHandler(prisma: PrismaClient): OutboxHandler 
     const bot: ResolvedBot = lookup.bot;
     const text = renderFor(p.type, order, ctx);
     const buttons = buttonsFor(p.type, order);
-    // Фото — только у сообщений флористу и только если у заказа есть картинка букета.
+    // Фото — только у сообщений флористу. Одно фото прикрепляется к самой карточке,
+    // несколько уходят альбомом отдельным сообщением ПЕРЕД ней (см. sendAlbumOnce).
     const wantPhoto = def.audience === "FLORIST" && !!order.imageUrl;
+    const wantAlbum = def.audience === "FLORIST" && order.albumUrls.length > 0;
     const sender = new TelegramSender(bot.token);
 
     if (existing) {
@@ -107,6 +109,19 @@ export function buildTelegramNotifyHandler(prisma: PrismaClient): OutboxHandler 
         return;
       }
       // Сообщение удалено/нередактируемо — отправим новое вместо него.
+    }
+
+    // Альбом уходит ПЕРВЫМ, чтобы фото оказались над карточкой, а не под ней.
+    if (wantAlbum) {
+      await sendAlbumOnce(prisma, sender, {
+        dedupeKey,
+        chatId: bot.chatId,
+        botId: bot.id,
+        audience: def.audience,
+        orderId: order.id,
+        eventType: p.type,
+        photos: order.albumUrls,
+      });
     }
 
     // Пытаемся отправить с фото; если фото не отправилось (битый URL, недоступно) — откатываемся
@@ -139,40 +154,26 @@ export function buildTelegramNotifyHandler(prisma: PrismaClient): OutboxHandler 
       },
       update: { chatId: bot.chatId, messageId: sent.messageId, botId: bot.id, lastText: text, eventType: p.type, isPhoto },
     });
-
-    // Фото остальных позиций заказа — альбомом под основным сообщением. Только если основное
-    // реально ушло с фото: если первая картинка недоступна, остальные почти наверняка тоже.
-    if (isPhoto && order.extraImageUrls.length > 0) {
-      await sendExtraPhotos(prisma, sender, {
-        dedupeKey,
-        chatId: bot.chatId,
-        botId: bot.id,
-        audience: def.audience,
-        orderId: order.id,
-        eventType: p.type,
-        photos: order.extraImageUrls,
-      });
-    }
   };
 }
 
 /**
- * Альбом с фото ОСТАЛЬНЫХ позиций заказа — отдельным сообщением следом за основным.
+ * Все фото позиций заказа — ОДНИМ альбомом, отдельным сообщением перед карточкой.
  *
- * Почему отдельно, а не одним альбомом целиком: Telegram не разрешает inline-клавиатуру у
- * media group, а у сообщения флористу есть «Open Order» и «Google Maps». Поэтому основное
- * сообщение остаётся прежним (фото первой позиции + подпись + кнопки, редактируемое при передаче
- * заказа), а остальные фото уходят альбомом под ним.
+ * Почему альбом отдельно от текста: Telegram не разрешает inline-клавиатуру у media group
+ * (`sendMediaGroup` не принимает reply_markup вовсе), а у сообщения флористу есть «Open Order»
+ * и «Google Maps». Уместить фото и кнопки в одно сообщение API не даёт ни в каком виде, поэтому
+ * фото идут альбомом сверху, а карточка с кнопками — текстом под ним.
  *
  * Отправляется РОВНО ОДИН РАЗ на заказ и флориста: факт фиксируется отдельной строкой
  * TelegramMessage со своим dedupeKey (схема не менялась — модель позволяет любой ключ).
  * Состав альбома Telegram править не даёт, поэтому при изменении позиций заказа он не
- * пересобирается — осознанный компромисс ради сохранения кнопок на основном сообщении.
+ * пересобирается; редактируется только карточка под ним.
  *
- * Сбой альбома НЕ роняет обработчик: основное уведомление уже доставлено, а повтор всего
- * события привёл бы только к лишним правкам. Временные сбои гасит retry внутри TelegramSender.
+ * Сбой альбома НЕ роняет обработчик: карточка уходит следом в любом случае, уведомление
+ * доходит без фото. Временные сбои гасит retry внутри TelegramSender.
  */
-async function sendExtraPhotos(
+async function sendAlbumOnce(
   prisma: PrismaClient,
   sender: TelegramSender,
   args: {
@@ -264,8 +265,11 @@ async function loadOrderSnapshot(prisma: PrismaClient, orderId: string): Promise
     zip: o.zip,
     cardMessage: o.cardMessage,
     deliveryInstructions: o.deliveryInstructions,
-    imageUrl: photos[0] ?? null,
-    extraImageUrls: photos.slice(1),
+    // Одно фото — прикрепляем прямо к карточке (подпись + кнопки в одном сообщении).
+    // Несколько — все уходят альбомом, а карточка идёт текстом под ним: клавиатуру
+    // Telegram у media group не принимает, поэтому кнопки живут на текстовом сообщении.
+    imageUrl: photos.length === 1 ? photos[0] : null,
+    albumUrls: photos.length > 1 ? photos : [],
     items: o.items.map((i) => ({ name: i.name, variantName: i.variantName, quantity: i.quantity, composition: i.floristCompositionSnapshot })),
   };
 }

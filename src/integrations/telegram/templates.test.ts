@@ -19,7 +19,7 @@ const order: OrderSnapshot = {
   cardMessage: "С днём рождения!",
   deliveryInstructions: "Позвонить за 10 минут",
   imageUrl: "https://cdn.example/bouquet.jpg",
-  extraImageUrls: [],
+  albumUrls: [],
   items: [{ name: "Petal Poetry", variantName: "Standard", quantity: 1, composition: "pink peony (10)\ngreen eucalyptus" }],
 };
 

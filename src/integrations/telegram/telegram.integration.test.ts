@@ -266,35 +266,37 @@ describe("персональные боты флористов", () => {
 });
 
 describe("фото всех позиций заказа", () => {
-  it("три позиции → основное сообщение с первым фото и альбом из остальных двух", async () => {
+  it("три позиции → сперва альбом из ВСЕХ трёх, следом текстовая карточка с кнопками", async () => {
     const site = await makeSite();
     const f = await makeFlorist("Мультифото", { chatId: "1400" });
     const order = await makeOrder(site.id, ["https://cdn/a.jpg", "https://cdn/b.jpg", "https://cdn/c.jpg"]);
-    fetchMock.mockResolvedValueOnce(okSend(1401)).mockResolvedValueOnce(okAlbum([1402, 1403]));
+    fetchMock.mockResolvedValueOnce(okAlbum([1402, 1403, 1404])).mockResolvedValueOnce(okSend(1401));
 
     await handler(rec({ type: "order.assigned", orderId: order.id, floristId: f.id, context: { floristName: "Мультифото" } }));
 
-    // Первое фото — в основном сообщении: только у него могут быть подпись и кнопки.
-    expect(String(fetchMock.mock.calls[0][0])).toContain("/sendPhoto");
-    expect(bodyOfCall(0).photo).toBe("https://cdn/a.jpg");
-    expect(bodyOfCall(0).reply_markup).toBeDefined();
-
-    // Остальные — альбомом следом, без клавиатуры (Telegram её у media group не принимает).
-    expect(String(fetchMock.mock.calls[1][0])).toContain("/sendMediaGroup");
-    expect(bodyOfCall(1).media).toEqual([
+    // Сначала альбом — все фото одним блоком сверху, без клавиатуры (Telegram её у media group
+    // не принимает вовсе).
+    expect(String(fetchMock.mock.calls[0][0])).toContain("/sendMediaGroup");
+    expect(bodyOfCall(0).media).toEqual([
+      { type: "photo", media: "https://cdn/a.jpg" },
       { type: "photo", media: "https://cdn/b.jpg" },
       { type: "photo", media: "https://cdn/c.jpg" },
     ]);
-    expect(bodyOfCall(1).reply_markup).toBeUndefined();
+    expect(bodyOfCall(0).reply_markup).toBeUndefined();
+
+    // Под ним — обычный текст с кнопками. Фото к нему не прикрепляется.
+    expect(String(fetchMock.mock.calls[1][0])).toContain("/sendMessage");
+    expect(bodyOfCall(1).reply_markup).toBeDefined();
     expect(fetchMock).toHaveBeenCalledTimes(2);
 
-    // Альбом учтён отдельной строкой — основное сообщение по-прежнему одно и редактируемое.
+    // Карточка — текстовая, значит при передаче заказа правится editMessageText.
     const rows = await tgMessages(order.id);
     expect(rows).toHaveLength(2);
-    expect(rows.map((r) => r.messageId).sort()).toEqual(["1401", "1402"]);
+    const card = rows.find((r) => r.messageId === "1401");
+    expect(card).toMatchObject({ isPhoto: false });
   });
 
-  it("одна позиция → альбома нет, поведение прежнее", async () => {
+  it("одна позиция → альбома нет: фото прикреплено к самой карточке с кнопками", async () => {
     const site = await makeSite();
     const f = await makeFlorist("Однофото", { chatId: "1410" });
     const order = await makeOrder(site.id);
@@ -302,80 +304,88 @@ describe("фото всех позиций заказа", () => {
 
     await handler(rec({ type: "order.assigned", orderId: order.id, floristId: f.id, context: { floristName: "Однофото" } }));
 
+    // Одно фото делить на два сообщения незачем — прежнее поведение сохранено.
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(await tgMessages(order.id)).toHaveLength(1);
+    expect(String(fetchMock.mock.calls[0][0])).toContain("/sendPhoto");
+    const rows = await tgMessages(order.id);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ isPhoto: true });
   });
 
-  it("одинаковые фото у позиций не дублируются в альбоме", async () => {
+  it("одинаковые фото у позиций не дублируются", async () => {
     const site = await makeSite();
     const f = await makeFlorist("Дубли", { chatId: "1420" });
-    // Две одинаковые позиции + одна другая: альбом должен содержать ровно одно фото.
     const order = await makeOrder(site.id, ["https://cdn/same.jpg", "https://cdn/same.jpg", "https://cdn/other.jpg"]);
-    fetchMock.mockResolvedValueOnce(okSend(1421)).mockResolvedValueOnce(okAlbum([1422]));
+    fetchMock.mockResolvedValueOnce(okAlbum([1422, 1423])).mockResolvedValueOnce(okSend(1421));
 
     await handler(rec({ type: "order.assigned", orderId: order.id, floristId: f.id, context: { floristName: "Дубли" } }));
 
-    expect(bodyOfCall(1).media).toEqual([{ type: "photo", media: "https://cdn/other.jpg" }]);
+    expect(bodyOfCall(0).media).toEqual([
+      { type: "photo", media: "https://cdn/same.jpg" },
+      { type: "photo", media: "https://cdn/other.jpg" },
+    ]);
   });
 
   it("позиции без фото пропускаются", async () => {
     const site = await makeSite();
     const f = await makeFlorist("Без-фото", { chatId: "1430" });
     const order = await makeOrder(site.id, ["https://cdn/a.jpg", null, "https://cdn/c.jpg"]);
-    fetchMock.mockResolvedValueOnce(okSend(1431)).mockResolvedValueOnce(okAlbum([1432]));
+    fetchMock.mockResolvedValueOnce(okAlbum([1432, 1433])).mockResolvedValueOnce(okSend(1431));
 
     await handler(rec({ type: "order.assigned", orderId: order.id, floristId: f.id, context: { floristName: "Без-фото" } }));
 
-    expect(bodyOfCall(1).media).toEqual([{ type: "photo", media: "https://cdn/c.jpg" }]);
+    expect(bodyOfCall(0).media).toEqual([
+      { type: "photo", media: "https://cdn/a.jpg" },
+      { type: "photo", media: "https://cdn/c.jpg" },
+    ]);
   });
 
-  it("повторное событие не шлёт альбом второй раз", async () => {
+  it("две позиции с фото → альбом из двух, одиночным фото не шлём", async () => {
+    const site = await makeSite();
+    const f = await makeFlorist("Двойное", { chatId: "1470" });
+    const order = await makeOrder(site.id, ["https://cdn/a.jpg", "https://cdn/b.jpg"]);
+    fetchMock.mockResolvedValueOnce(okAlbum([1472, 1473])).mockResolvedValueOnce(okSend(1471));
+
+    await handler(rec({ type: "order.assigned", orderId: order.id, floristId: f.id, context: { floristName: "Двойное" } }));
+
+    expect(bodyOfCall(0).media).toHaveLength(2);
+    expect(fetchMock.mock.calls.map((c) => String(c[0])).some((u) => u.includes("/sendPhoto"))).toBe(false);
+  });
+
+  it("повторное событие не шлёт альбом второй раз, правится только карточка", async () => {
     const site = await makeSite();
     const f = await makeFlorist("Повтор-альбома", { chatId: "1440" });
     const order = await makeOrder(site.id, ["https://cdn/a.jpg", "https://cdn/b.jpg"]);
     fetchMock
-      .mockResolvedValueOnce(okSend(1441))       // основное
-      .mockResolvedValueOnce(okAlbum([1442]))    // альбом
-      .mockResolvedValueOnce(okEdit());          // правка подписи при передаче
+      .mockResolvedValueOnce(okAlbum([1442, 1443])) // альбом
+      .mockResolvedValueOnce(okSend(1441))          // карточка
+      .mockResolvedValueOnce(okEdit());             // правка карточки при передаче
 
     await handler(rec({ type: "order.assigned", orderId: order.id, floristId: f.id, context: { floristName: "Повтор-альбома" } }));
     await handler(rec({ type: "order.handed_over", orderId: order.id, floristId: f.id, context: { toFloristName: "Другой" } }));
 
     const calls = fetchMock.mock.calls.map((c) => String(c[0]));
     expect(calls.filter((u) => u.includes("/sendMediaGroup"))).toHaveLength(1);
-    expect(calls[2]).toContain("editMessageCaption");
+    // Карточка текстовая → правится editMessageText, а не подпись фото.
+    expect(calls[2]).toContain("editMessageText");
   });
 
-  it("битое основное фото → альбом не отправляем", async () => {
-    const site = await makeSite();
-    const f = await makeFlorist("Битое-и-альбом", { chatId: "1450" });
-    const order = await makeOrder(site.id, ["https://cdn/broken.jpg", "https://cdn/b.jpg"]);
-    fetchMock
-      .mockResolvedValueOnce(reply({ ok: false, error_code: 400, description: "wrong file identifier/HTTP URL specified" }, 400))
-      .mockResolvedValueOnce(okSend(1451)); // откат на текст
-
-    await handler(rec({ type: "order.assigned", orderId: order.id, floristId: f.id, context: { floristName: "Битое-и-альбом" } }));
-
-    // Если первая картинка недоступна, остальные почти наверняка тоже — альбомом не спамим.
-    expect(fetchMock.mock.calls.map((c) => String(c[0])).some((u) => u.includes("/sendMediaGroup"))).toBe(false);
-    expect(await tgMessages(order.id)).toHaveLength(1);
-  });
-
-  it("сбой альбома не ломает уведомление: основное сообщение сохранено", async () => {
+  it("сбой альбома не ломает уведомление: карточка уходит следом", async () => {
     const site = await makeSite();
     const f = await makeFlorist("Сбой-альбома", { chatId: "1460" });
     const order = await makeOrder(site.id, ["https://cdn/a.jpg", "https://cdn/b.jpg"]);
     fetchMock
-      .mockResolvedValueOnce(okSend(1461))
-      .mockResolvedValueOnce(reply({ ok: false, error_code: 400, description: "wrong file identifier" }, 400));
+      .mockResolvedValueOnce(reply({ ok: false, error_code: 400, description: "wrong file identifier" }, 400))
+      .mockResolvedValueOnce(okSend(1461));
 
     await expect(
       handler(rec({ type: "order.assigned", orderId: order.id, floristId: f.id, context: { floristName: "Сбой-альбома" } }))
     ).resolves.toBeUndefined();
 
+    // Альбом не записан, карточка на месте — уведомление дошло, пусть и без фото.
     const rows = await tgMessages(order.id);
     expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({ messageId: "1461", isPhoto: true });
+    expect(rows[0]).toMatchObject({ messageId: "1461", isPhoto: false });
   });
 });
 
