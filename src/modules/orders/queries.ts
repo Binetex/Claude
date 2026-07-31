@@ -139,6 +139,7 @@ export async function listForCallCenter(f: OrderFilters = {}) {
     where: buildWhere(f),
     include: orderInclude,
     orderBy: buildOrderBy(f),
+    ...buildPage(f),
   });
   return orders.map(serializeForCallCenter);
 }
@@ -150,15 +151,27 @@ export async function getForCallCenter(id: string) {
 
 // ─────────── ФЛОРИСТ ───────────
 // Строго только заказы, где флорист является ТЕКУЩИМ исполнителем.
-export async function listForFlorist(floristId: string, f: OrderFilters = {}) {
+/** Условие «заказы, где этот флорист — ТЕКУЩИЙ исполнитель». Общее для списка и счётчика,
+ *  чтобы пейджер не разошёлся с выборкой. */
+function floristWhere(floristId: string, f: OrderFilters): Prisma.OrderWhereInput {
   const where = buildWhere({ ...f, floristId: undefined });
   where.currentFloristId = floristId;
+  return where;
+}
+
+export async function listForFlorist(floristId: string, f: OrderFilters = {}) {
   const orders = await prisma.order.findMany({
-    where,
+    where: floristWhere(floristId, f),
     include: orderInclude,
     orderBy: buildOrderBy(f),
+    ...buildPage(f),
   });
   return orders.map(serializeForFlorist);
+}
+
+/** Сколько заказов флориста под фильтр всего — для пейджера и счётчика в заголовке. */
+export async function countForFlorist(floristId: string, f: OrderFilters = {}) {
+  return prisma.order.count({ where: floristWhere(floristId, f) });
 }
 
 export async function getForFlorist(id: string, floristId: string) {

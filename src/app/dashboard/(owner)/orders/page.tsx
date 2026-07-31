@@ -4,7 +4,7 @@ import { OrderFiltersBar } from "./OrderFiltersBar";
 import { OrdersTable } from "./OrdersTable";
 import { OrdersNavProvider, OrdersPendingArea } from "./OrdersNav";
 import { OrdersPager } from "./OrdersPager";
-import { PER_PAGE_OPTIONS, DEFAULT_PER_PAGE } from "./paging";
+import { resolvePaging, outOfRangePageUrl } from "./paging";
 import { indicatorsForOrders } from "@/integrations/quo/communicationsService";
 import { BulkFillCompositions } from "./BulkFillCompositions";
 import { PurchaseListBlock } from "@/components/PurchaseListBlock";
@@ -20,15 +20,7 @@ export default async function OwnerOrdersPage({
   searchParams: Promise<Record<string, string | undefined>>;
 }) {
   const sp = await searchParams;
-
-  // Размер страницы — только из белого списка: значение из URL приходит от пользователя,
-  // и произвольное число здесь означало бы «отдай всю базу одним запросом».
-  const requestedPerPage = Number(sp.perPage);
-  const perPage = (PER_PAGE_OPTIONS as readonly number[]).includes(requestedPerPage)
-    ? requestedPerPage
-    : DEFAULT_PER_PAGE;
-  const requestedPage = Number(sp.page);
-  const page = Number.isFinite(requestedPage) && requestedPage > 1 ? Math.floor(requestedPage) : 1;
+  const { page, perPage } = resolvePaging(sp);
 
   const filters: OrderFilters = {
     // По умолчанию (без явного preset/даты/сужающих фильтров) показываем «Сегодня» —
@@ -56,14 +48,8 @@ export default async function OwnerOrdersPage({
     prisma.florist.findMany({ include: { user: true }, orderBy: { createdAt: "asc" } }),
   ]);
 
-  // Страница за пределами выборки (ссылка из старого состояния, «назад» в браузере) — вместо
-  // пустого экрана уводим на последнюю существующую.
-  const lastPage = Math.max(1, Math.ceil(total / perPage));
-  if (page > lastPage) {
-    const p = new URLSearchParams(Object.entries(sp).filter(([, v]) => v) as [string, string][]);
-    p.set("page", String(lastPage));
-    redirect(`/dashboard/orders?${p.toString()}`);
-  }
+  const outOfRange = outOfRangePageUrl(sp, "/dashboard/orders", { total, page, perPage });
+  if (outOfRange) redirect(outOfRange);
 
   // Индикаторы коммуникаций (непрочитанные/пропущенные/последний контакт/preview). Best-effort:
   // недоступность QUO-таблиц не ломает список заказов.
