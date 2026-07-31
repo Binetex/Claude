@@ -22,6 +22,12 @@ export type OrderSnapshot = {
   cardMessage: string | null;
   deliveryInstructions: string | null;
   imageUrl: string | null; // основное фото букета (parent) для сообщения флористу
+  /**
+   * Фото ОСТАЛЬНЫХ позиций заказа — уходят отдельным альбомом следом за основным сообщением.
+   * Уже без imageUrl и без повторов: в заказе из двух одинаковых букетов фото одно.
+   * На рендер текста не влияет, лежит здесь потому, что снимок заказа один на всё сообщение.
+   */
+  extraImageUrls: string[];
   items: { name: string; variantName: string | null; quantity: number; composition: string | null }[];
 };
 

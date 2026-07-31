@@ -49,6 +49,42 @@ describe("sendMessage", () => {
     expect(body.caption).toBe("подпись");
   });
 
+  it("sendMediaGroup шлёт альбом и отдаёт id ПЕРВОГО сообщения группы", async () => {
+    // sendMediaGroup — единственный метод, отвечающий массивом сообщений.
+    fetchMock.mockResolvedValueOnce(reply({ ok: true, result: [{ message_id: 10 }, { message_id: 11 }, { message_id: 12 }] }));
+    const r = await new TelegramSender("t").sendMediaGroup("-100", ["https://cdn/a.jpg", "https://cdn/b.jpg", "https://cdn/c.jpg"]);
+    expect(r).toEqual({ ok: true, messageId: "10" });
+    expect(String(fetchMock.mock.calls[0][0])).toContain("/sendMediaGroup");
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.media).toEqual([
+      { type: "photo", media: "https://cdn/a.jpg" },
+      { type: "photo", media: "https://cdn/b.jpg" },
+      { type: "photo", media: "https://cdn/c.jpg" },
+    ]);
+  });
+
+  it("альбом обрезается до 10 фото — больше Telegram не принимает", async () => {
+    fetchMock.mockResolvedValueOnce(reply({ ok: true, result: [{ message_id: 1 }] }));
+    const urls = Array.from({ length: 14 }, (_, i) => `https://cdn/${i}.jpg`);
+    await new TelegramSender("t").sendMediaGroup("-100", urls);
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.media).toHaveLength(10);
+    expect(body.media[9].media).toBe("https://cdn/9.jpg");
+  });
+
+  it("альбом НЕ несёт клавиатуру — Telegram её у media group не принимает", async () => {
+    fetchMock.mockResolvedValueOnce(reply({ ok: true, result: [{ message_id: 1 }] }));
+    await new TelegramSender("t").sendMediaGroup("-100", ["https://cdn/a.jpg", "https://cdn/b.jpg"]);
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).reply_markup).toBeUndefined();
+  });
+
+  it("сбой альбома отдаётся как обычная ошибка отправки", async () => {
+    fetchMock.mockResolvedValueOnce(reply({ ok: false, error_code: 400, description: "wrong file identifier" }, 400));
+    const r = await new TelegramSender("t").sendMediaGroup("-100", ["https://cdn/a.jpg", "https://cdn/b.jpg"]);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.retryable).toBe(false);
+  });
+
   it("editMessageCaption правит подпись фото-сообщения", async () => {
     fetchMock.mockResolvedValueOnce(reply({ ok: true, result: {} }));
     expect(await new TelegramSender("t").editMessageCaption("-100", "77", "новая", [])).toEqual({ ok: true });

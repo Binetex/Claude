@@ -31,13 +31,19 @@ export type EditResult =
   | { ok: false; needsResend: true }
   | { ok: false; needsResend?: false; retryable: boolean; code: string };
 
+type ApiMessage = { message_id?: number | string };
+
 type ApiResponse = {
   ok: boolean;
-  result?: { message_id?: number | string };
+  // sendMediaGroup отвечает МАССИВОМ сообщений (по одному на фото), остальные методы — одним.
+  result?: ApiMessage | ApiMessage[];
   error_code?: number;
   description?: string;
   parameters?: { retry_after?: number };
 };
+
+/** Сколько фото Telegram принимает в одном альбоме. */
+export const MEDIA_GROUP_LIMIT = 10;
 
 const NOT_MODIFIED = "message is not modified";
 const UNEDITABLE = [
@@ -48,6 +54,12 @@ const UNEDITABLE = [
 ];
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** id сообщения из ответа API; для альбома — id ПЕРВОГО сообщения группы. */
+function firstMessageId(result: ApiResponse["result"]): string | null {
+  const m = Array.isArray(result) ? result[0] : result;
+  return m?.message_id != null ? String(m.message_id) : null;
+}
 
 /** Кнопки одним рядом. Пустой массив → без клавиатуры. */
 function keyboard(buttons?: TelegramButton[]): Record<string, unknown> {
@@ -95,8 +107,8 @@ export class TelegramSender {
 
   private toSend(r: Awaited<ReturnType<TelegramSender["callWithRetry"]>>): SendResult {
     const { res, status, networkError } = r;
-    const id = res?.result?.message_id;
-    if (res?.ok && id != null) return { ok: true, messageId: String(id) };
+    const id = firstMessageId(res?.result);
+    if (res?.ok && id != null) return { ok: true, messageId: id };
     return { ok: false, retryable: !!networkError || status === 429 || status >= 500, code: safeCode(res, status, networkError) };
   }
 
@@ -119,6 +131,20 @@ export class TelegramSender {
   async sendPhoto(chatId: string, photoUrl: string, caption: string, buttons?: TelegramButton[]): Promise<SendResult> {
     return this.toSend(await this.callWithRetry("sendPhoto", {
       chat_id: chatId, photo: photoUrl, caption, parse_mode: "HTML", ...keyboard(buttons),
+    }));
+  }
+
+  /**
+   * Альбом из нескольких фото по URL (2..MEDIA_GROUP_LIMIT штук).
+   *
+   * ВАЖНО: Telegram НЕ разрешает inline-клавиатуру у media group — кнопки остаются на основном
+   * сообщении, поэтому альбом отправляется отдельно и без них. Возвращает id ПЕРВОГО сообщения
+   * группы: по нему альбом можно найти и удалить, отредактировать состав группы Telegram не даёт.
+   */
+  async sendMediaGroup(chatId: string, photoUrls: string[]): Promise<SendResult> {
+    return this.toSend(await this.callWithRetry("sendMediaGroup", {
+      chat_id: chatId,
+      media: photoUrls.slice(0, MEDIA_GROUP_LIMIT).map((url) => ({ type: "photo", media: url })),
     }));
   }
 

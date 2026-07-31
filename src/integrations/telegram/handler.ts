@@ -19,6 +19,7 @@ import {
   type OrderSnapshot,
 } from "./templates";
 import { getOrderItemImages } from "@/modules/orders/images";
+import type { TelegramAudience } from "./config";
 import type { TelegramNotifyPayload } from "./events";
 
 /**
@@ -138,7 +139,79 @@ export function buildTelegramNotifyHandler(prisma: PrismaClient): OutboxHandler 
       },
       update: { chatId: bot.chatId, messageId: sent.messageId, botId: bot.id, lastText: text, eventType: p.type, isPhoto },
     });
+
+    // Фото остальных позиций заказа — альбомом под основным сообщением. Только если основное
+    // реально ушло с фото: если первая картинка недоступна, остальные почти наверняка тоже.
+    if (isPhoto && order.extraImageUrls.length > 0) {
+      await sendExtraPhotos(prisma, sender, {
+        dedupeKey,
+        chatId: bot.chatId,
+        botId: bot.id,
+        audience: def.audience,
+        orderId: order.id,
+        eventType: p.type,
+        photos: order.extraImageUrls,
+      });
+    }
   };
+}
+
+/**
+ * Альбом с фото ОСТАЛЬНЫХ позиций заказа — отдельным сообщением следом за основным.
+ *
+ * Почему отдельно, а не одним альбомом целиком: Telegram не разрешает inline-клавиатуру у
+ * media group, а у сообщения флористу есть «Open Order» и «Google Maps». Поэтому основное
+ * сообщение остаётся прежним (фото первой позиции + подпись + кнопки, редактируемое при передаче
+ * заказа), а остальные фото уходят альбомом под ним.
+ *
+ * Отправляется РОВНО ОДИН РАЗ на заказ и флориста: факт фиксируется отдельной строкой
+ * TelegramMessage со своим dedupeKey (схема не менялась — модель позволяет любой ключ).
+ * Состав альбома Telegram править не даёт, поэтому при изменении позиций заказа он не
+ * пересобирается — осознанный компромисс ради сохранения кнопок на основном сообщении.
+ *
+ * Сбой альбома НЕ роняет обработчик: основное уведомление уже доставлено, а повтор всего
+ * события привёл бы только к лишним правкам. Временные сбои гасит retry внутри TelegramSender.
+ */
+async function sendExtraPhotos(
+  prisma: PrismaClient,
+  sender: TelegramSender,
+  args: {
+    dedupeKey: string;
+    chatId: string;
+    botId: string;
+    audience: TelegramAudience;
+    orderId: string;
+    eventType: string;
+    photos: string[];
+  }
+): Promise<void> {
+  const albumKey = `${args.dedupeKey}:album`;
+  const already = await prisma.telegramMessage.findUnique({ where: { dedupeKey: albumKey }, select: { id: true } });
+  if (already) return;
+
+  const sent = await sender.sendMediaGroup(args.chatId, args.photos);
+  if (!sent.ok) {
+    console.warn(`[telegram] альбом позиций заказа ${args.orderId} не отправлен: ${sent.code}`);
+    return;
+  }
+
+  try {
+    await prisma.telegramMessage.create({
+      data: {
+        dedupeKey: albumKey,
+        audience: args.audience,
+        chatId: args.chatId,
+        messageId: sent.messageId, // id первого сообщения группы
+        botId: args.botId,
+        orderId: args.orderId,
+        eventType: args.eventType,
+        isPhoto: true,
+      },
+    });
+  } catch (err) {
+    // Гонка двух событий по одному заказу: альбом уже зафиксирован другим проходом.
+    if (!(err && typeof err === "object" && "code" in err && (err as { code?: string }).code === "P2002")) throw err;
+  }
 }
 
 function renderFor(type: TelegramNotifyPayload["type"], order: OrderSnapshot, ctx: Record<string, string | null>): string {
@@ -174,9 +247,10 @@ async function loadOrderSnapshot(prisma: PrismaClient, orderId: string): Promise
     },
   });
   if (!o) return null;
-  // Фото для сообщения флориста — основное (родительское) фото первой позиции.
-  const first = o.items[0];
-  const imageUrl = first ? getOrderItemImages(first).primary : null;
+  // По одному фото на позицию заказа, в порядке позиций и без повторов (две одинаковые позиции
+  // не должны давать две одинаковые картинки). Первое идёт основным сообщением с подписью и
+  // кнопками, остальные — альбомом следом.
+  const photos = [...new Set(o.items.map((i) => getOrderItemImages(i).primary).filter((u): u is string => !!u))];
   return {
     id: o.id,
     orderNumber: o.orderNumber,
@@ -190,7 +264,8 @@ async function loadOrderSnapshot(prisma: PrismaClient, orderId: string): Promise
     zip: o.zip,
     cardMessage: o.cardMessage,
     deliveryInstructions: o.deliveryInstructions,
-    imageUrl,
+    imageUrl: photos[0] ?? null,
+    extraImageUrls: photos.slice(1),
     items: o.items.map((i) => ({ name: i.name, variantName: i.variantName, quantity: i.quantity, composition: i.floristCompositionSnapshot })),
   };
 }

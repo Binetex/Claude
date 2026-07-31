@@ -22,6 +22,8 @@ vi.stubGlobal("fetch", fetchMock);
 const reply = (body: unknown, status = 200) => ({ ok: status < 400, status, json: async () => body });
 const okSend = (id = 111) => reply({ ok: true, result: { message_id: id } });
 const okEdit = () => reply({ ok: true, result: {} });
+/** sendMediaGroup отвечает МАССИВОМ сообщений — по одному на фото альбома. */
+const okAlbum = (ids: number[]) => reply({ ok: true, result: ids.map((id) => ({ message_id: id })) });
 
 // Реальный secretBox требует ключ; для теста задаём детерминированный.
 process.env.CREDENTIALS_ENCRYPTION_KEY ||= Buffer.alloc(32, 7).toString("base64");
@@ -84,7 +86,15 @@ async function makeOwnerBot() {
   });
 }
 
-async function makeOrder(siteId: string) {
+/** `photos` задаёт позиции заказа (по одной на фото); без него — прежняя одна позиция. */
+async function makeOrder(siteId: string, photos?: (string | null)[]) {
+  const items = photos
+    ? photos.map((url, i) => ({
+        name: `Item ${i + 1}`, variantName: null, quantity: 1,
+        externalPrice: new Prisma.Decimal(10), floristCompositionSnapshot: null, parentImageUrl: url,
+      }))
+    : [{ name: "Roses", variantName: "Standard", quantity: 1, externalPrice: new Prisma.Decimal(100), floristCompositionSnapshot: "24 roses", parentImageUrl: "https://cdn.example/roses.jpg" }];
+
   const order = await prisma.order.create({
     data: {
       orderNumber: `TG-${createdOrderIds.length}-${suffix}`,
@@ -95,12 +105,15 @@ async function makeOrder(siteId: string) {
       recipientName: "Ann Recipient", recipientPhone: "+13105550001",
       addressLine: "1 Main St", city: "LA", zip: "90001",
       itemsTotal: new Prisma.Decimal(100), customerTotal: new Prisma.Decimal(100),
-      items: { create: [{ name: "Roses", variantName: "Standard", quantity: 1, externalPrice: new Prisma.Decimal(100), floristCompositionSnapshot: "24 roses", parentImageUrl: "https://cdn.example/roses.jpg" }] },
+      items: { create: items },
     },
   });
   createdOrderIds.push(order.id);
   return order;
 }
+
+/** Тело запроса к Telegram по номеру вызова. */
+const bodyOfCall = (i: number) => JSON.parse(fetchMock.mock.calls[i][1].body);
 
 const tgMessages = (orderId: string) => prisma.telegramMessage.findMany({ where: { orderId }, orderBy: { createdAt: "asc" } });
 /** Токен, которым реально сходили в Telegram — вытаскиваем из URL вызова. */
@@ -249,6 +262,120 @@ describe("персональные боты флористов", () => {
     const rows = await tgMessages(order.id);
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ messageId: "1301", isPhoto: false });
+  });
+});
+
+describe("фото всех позиций заказа", () => {
+  it("три позиции → основное сообщение с первым фото и альбом из остальных двух", async () => {
+    const site = await makeSite();
+    const f = await makeFlorist("Мультифото", { chatId: "1400" });
+    const order = await makeOrder(site.id, ["https://cdn/a.jpg", "https://cdn/b.jpg", "https://cdn/c.jpg"]);
+    fetchMock.mockResolvedValueOnce(okSend(1401)).mockResolvedValueOnce(okAlbum([1402, 1403]));
+
+    await handler(rec({ type: "order.assigned", orderId: order.id, floristId: f.id, context: { floristName: "Мультифото" } }));
+
+    // Первое фото — в основном сообщении: только у него могут быть подпись и кнопки.
+    expect(String(fetchMock.mock.calls[0][0])).toContain("/sendPhoto");
+    expect(bodyOfCall(0).photo).toBe("https://cdn/a.jpg");
+    expect(bodyOfCall(0).reply_markup).toBeDefined();
+
+    // Остальные — альбомом следом, без клавиатуры (Telegram её у media group не принимает).
+    expect(String(fetchMock.mock.calls[1][0])).toContain("/sendMediaGroup");
+    expect(bodyOfCall(1).media).toEqual([
+      { type: "photo", media: "https://cdn/b.jpg" },
+      { type: "photo", media: "https://cdn/c.jpg" },
+    ]);
+    expect(bodyOfCall(1).reply_markup).toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    // Альбом учтён отдельной строкой — основное сообщение по-прежнему одно и редактируемое.
+    const rows = await tgMessages(order.id);
+    expect(rows).toHaveLength(2);
+    expect(rows.map((r) => r.messageId).sort()).toEqual(["1401", "1402"]);
+  });
+
+  it("одна позиция → альбома нет, поведение прежнее", async () => {
+    const site = await makeSite();
+    const f = await makeFlorist("Однофото", { chatId: "1410" });
+    const order = await makeOrder(site.id);
+    fetchMock.mockResolvedValueOnce(okSend(1411));
+
+    await handler(rec({ type: "order.assigned", orderId: order.id, floristId: f.id, context: { floristName: "Однофото" } }));
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(await tgMessages(order.id)).toHaveLength(1);
+  });
+
+  it("одинаковые фото у позиций не дублируются в альбоме", async () => {
+    const site = await makeSite();
+    const f = await makeFlorist("Дубли", { chatId: "1420" });
+    // Две одинаковые позиции + одна другая: альбом должен содержать ровно одно фото.
+    const order = await makeOrder(site.id, ["https://cdn/same.jpg", "https://cdn/same.jpg", "https://cdn/other.jpg"]);
+    fetchMock.mockResolvedValueOnce(okSend(1421)).mockResolvedValueOnce(okAlbum([1422]));
+
+    await handler(rec({ type: "order.assigned", orderId: order.id, floristId: f.id, context: { floristName: "Дубли" } }));
+
+    expect(bodyOfCall(1).media).toEqual([{ type: "photo", media: "https://cdn/other.jpg" }]);
+  });
+
+  it("позиции без фото пропускаются", async () => {
+    const site = await makeSite();
+    const f = await makeFlorist("Без-фото", { chatId: "1430" });
+    const order = await makeOrder(site.id, ["https://cdn/a.jpg", null, "https://cdn/c.jpg"]);
+    fetchMock.mockResolvedValueOnce(okSend(1431)).mockResolvedValueOnce(okAlbum([1432]));
+
+    await handler(rec({ type: "order.assigned", orderId: order.id, floristId: f.id, context: { floristName: "Без-фото" } }));
+
+    expect(bodyOfCall(1).media).toEqual([{ type: "photo", media: "https://cdn/c.jpg" }]);
+  });
+
+  it("повторное событие не шлёт альбом второй раз", async () => {
+    const site = await makeSite();
+    const f = await makeFlorist("Повтор-альбома", { chatId: "1440" });
+    const order = await makeOrder(site.id, ["https://cdn/a.jpg", "https://cdn/b.jpg"]);
+    fetchMock
+      .mockResolvedValueOnce(okSend(1441))       // основное
+      .mockResolvedValueOnce(okAlbum([1442]))    // альбом
+      .mockResolvedValueOnce(okEdit());          // правка подписи при передаче
+
+    await handler(rec({ type: "order.assigned", orderId: order.id, floristId: f.id, context: { floristName: "Повтор-альбома" } }));
+    await handler(rec({ type: "order.handed_over", orderId: order.id, floristId: f.id, context: { toFloristName: "Другой" } }));
+
+    const calls = fetchMock.mock.calls.map((c) => String(c[0]));
+    expect(calls.filter((u) => u.includes("/sendMediaGroup"))).toHaveLength(1);
+    expect(calls[2]).toContain("editMessageCaption");
+  });
+
+  it("битое основное фото → альбом не отправляем", async () => {
+    const site = await makeSite();
+    const f = await makeFlorist("Битое-и-альбом", { chatId: "1450" });
+    const order = await makeOrder(site.id, ["https://cdn/broken.jpg", "https://cdn/b.jpg"]);
+    fetchMock
+      .mockResolvedValueOnce(reply({ ok: false, error_code: 400, description: "wrong file identifier/HTTP URL specified" }, 400))
+      .mockResolvedValueOnce(okSend(1451)); // откат на текст
+
+    await handler(rec({ type: "order.assigned", orderId: order.id, floristId: f.id, context: { floristName: "Битое-и-альбом" } }));
+
+    // Если первая картинка недоступна, остальные почти наверняка тоже — альбомом не спамим.
+    expect(fetchMock.mock.calls.map((c) => String(c[0])).some((u) => u.includes("/sendMediaGroup"))).toBe(false);
+    expect(await tgMessages(order.id)).toHaveLength(1);
+  });
+
+  it("сбой альбома не ломает уведомление: основное сообщение сохранено", async () => {
+    const site = await makeSite();
+    const f = await makeFlorist("Сбой-альбома", { chatId: "1460" });
+    const order = await makeOrder(site.id, ["https://cdn/a.jpg", "https://cdn/b.jpg"]);
+    fetchMock
+      .mockResolvedValueOnce(okSend(1461))
+      .mockResolvedValueOnce(reply({ ok: false, error_code: 400, description: "wrong file identifier" }, 400));
+
+    await expect(
+      handler(rec({ type: "order.assigned", orderId: order.id, floristId: f.id, context: { floristName: "Сбой-альбома" } }))
+    ).resolves.toBeUndefined();
+
+    const rows = await tgMessages(order.id);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ messageId: "1461", isPhoto: true });
   });
 });
 
