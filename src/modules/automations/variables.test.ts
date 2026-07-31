@@ -3,7 +3,7 @@
  * клиенту SMS с датой на сутки раньше настоящей (заказ на 31-е, в сообщении 30-е).
  */
 import { describe, it, expect } from "vitest";
-import { buildOrderVariables, type OrderVariableSource } from "./variables";
+import { buildOrderVariables, resolveSupportEmail, type OrderVariableSource } from "./variables";
 
 const src = (over: Partial<OrderVariableSource> = {}): OrderVariableSource => ({
   orderNumber: "TF-20328",
@@ -24,6 +24,7 @@ const src = (over: Partial<OrderVariableSource> = {}): OrderVariableSource => ({
   storePhone: "+15550001111",
   reviewUrl: null,
   timezone: "America/Los_Angeles",
+  supportEmail: "support@theflow.la",
   ...over,
 });
 
@@ -50,6 +51,48 @@ describe("delivery_date", () => {
 
   it("нет даты — пустая строка, а не «undefined»", () => {
     expect(buildOrderVariables(src({ deliveryDate: null })).delivery_date).toBe("");
+  });
+});
+
+describe("псевдонимы под Brevo-шаблоны", () => {
+  it("customer_name и site_name — те же данные, что sender_name и store_name", () => {
+    const v = buildOrderVariables(src());
+    expect(v.customer_name).toBe("Anna");
+    expect(v.site_name).toBe("The Flow");
+    // Существующие имена обязаны остаться: на них завязаны SMS-шаблоны в проде.
+    expect(v.sender_name).toBe("Anna");
+    expect(v.store_name).toBe("The Flow");
+    expect(v.customer_name).toBe(v.sender_name);
+    expect(v.site_name).toBe(v.store_name);
+  });
+
+  it("support_email отдаётся в шаблон", () => {
+    expect(buildOrderVariables(src()).support_email).toBe("support@theflow.la");
+  });
+
+  it("пустые значения дают '', а не «undefined»", () => {
+    const v = buildOrderVariables(src({ senderName: null, storeName: null, supportEmail: null }));
+    expect(v.customer_name).toBe("");
+    expect(v.site_name).toBe("");
+    expect(v.support_email).toBe("");
+  });
+});
+
+describe("resolveSupportEmail: reply-to → адрес отправителя", () => {
+  it("берёт reply-to, когда он задан", () => {
+    expect(resolveSupportEmail({ replyTo: "help@shop.com", senderEmail: "admin@shop.com" })).toBe("help@shop.com");
+  });
+
+  it("падает на адрес отправителя, когда reply-to не заполнен", () => {
+    // Ровно случай Julie's Flowers: reply-to пуст, отправитель admin@juliesflowers.net.
+    expect(resolveSupportEmail({ replyTo: null, senderEmail: "admin@juliesflowers.net" })).toBe("admin@juliesflowers.net");
+    expect(resolveSupportEmail({ replyTo: "   ", senderEmail: "admin@juliesflowers.net" })).toBe("admin@juliesflowers.net");
+  });
+
+  it("нет настроек Email у магазина — null, а не падение", () => {
+    expect(resolveSupportEmail(null)).toBeNull();
+    expect(resolveSupportEmail(undefined)).toBeNull();
+    expect(resolveSupportEmail({ replyTo: null, senderEmail: null })).toBeNull();
   });
 });
 

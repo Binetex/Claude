@@ -46,7 +46,19 @@ export type OrderVariableSource = {
   storePhone: string | null;
   reviewUrl: string | null;
   timezone: string | null;
+  /** Адрес для ответов клиента (см. resolveSupportEmail). Отдаётся как {{support_email}}. */
+  supportEmail: string | null;
 };
+
+/**
+ * Адрес поддержки магазина: reply-to, а если он не заполнен — адрес отправителя.
+ * Отдельная чистая функция, потому что fallback нужен и в рантайме, и в тестах.
+ */
+export function resolveSupportEmail(
+  emailSettings: { replyTo?: string | null; senderEmail?: string | null } | null | undefined
+): string | null {
+  return emailSettings?.replyTo?.trim() || emailSettings?.senderEmail?.trim() || null;
+}
 
 function s(v: string | null | undefined): string {
   return v == null ? "" : String(v);
@@ -93,5 +105,13 @@ export function buildOrderVariables(src: OrderVariableSource): Record<string, st
     card_message: s(src.cardMessage),
     delivery_instructions: s(src.deliveryInstructions),
     review_url: s(src.reviewUrl),
+
+    // Псевдонимы под именование Brevo-шаблонов. Указывают на те же данные, что и ключи выше;
+    // существующие sender_name/store_name НЕ трогаем — на них уже завязаны SMS-шаблоны.
+    // В список SMS_VARIABLES (кнопки вставки в редакторе SMS) намеренно не добавлены, чтобы
+    // не показывать владельцу два имени одного и того же поля.
+    customer_name: s(src.senderName),
+    site_name: s(src.storeName),
+    support_email: s(src.supportEmail),
   };
 }

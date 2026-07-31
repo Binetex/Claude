@@ -32,6 +32,9 @@ export function buildTestMessage(template: string, site: TestSendSite): string {
     storePhone: site.quoPhoneNumber,
     reviewUrl: site.reviewUrl,
     timezone: null,
+    // Тестовая отправка — только SMS, Email-настроек магазина здесь нет; {{support_email}}
+    // в SMS-шаблонах не используется, поэтому в примере он пуст.
+    supportEmail: null,
   });
   const { text } = renderTemplate(template, vars);
   return `[ТЕСТ] ${text || "Test message"}`;

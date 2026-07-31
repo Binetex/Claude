@@ -1,9 +1,12 @@
 import "server-only";
 /** Общий маппер Prisma-заказа (+Site) в срез переменных шаблона. Используют handler и preview. */
 import type { Prisma } from "@/generated/prisma/client";
-import type { OrderVariableSource } from "./variables";
+import { resolveSupportEmail, type OrderVariableSource } from "./variables";
 
-export const SMS_ORDER_INCLUDE = { site: true } as const;
+// emailSettings нужны ради {{support_email}} (reply-to магазина, иначе адрес отправителя).
+// Включаем здесь, а не в каждом вызове: источник переменных должен быть один на всех
+// потребителей — движок правил, движок цепочек и preview.
+export const SMS_ORDER_INCLUDE = { site: { include: { emailSettings: true } } } as const;
 export type OrderWithSite = Prisma.OrderGetPayload<{ include: typeof SMS_ORDER_INCLUDE }>;
 
 export function orderToVariableSource(order: OrderWithSite): OrderVariableSource {
@@ -26,5 +29,6 @@ export function orderToVariableSource(order: OrderWithSite): OrderVariableSource
     storePhone: order.site.quoPhoneNumber,
     reviewUrl: order.site.reviewUrl,
     timezone: order.site.timezone,
+    supportEmail: resolveSupportEmail(order.site.emailSettings),
   };
 }

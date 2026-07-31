@@ -40,7 +40,7 @@ describe("variables.buildOrderVariables", () => {
       deliveryDate: new Date("2026-07-25T12:00:00Z"), deliveryWindow: "14:00 – 18:00",
       trackingUrl: null, cardMessage: "", deliveryInstructions: "Leave at door",
       customerTotal: 115, storeName: "Floremart", storePhone: "+15550000000",
-      reviewUrl: "https://rev", timezone: "UTC",
+      reviewUrl: "https://rev", timezone: "UTC", supportEmail: "help@shop.com",
     });
     expect(v.order_number).toBe("#1001");
     expect(v.delivery_address).toBe("1 Main St, 4, Portland");
