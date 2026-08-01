@@ -302,8 +302,9 @@ model User {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  florist     Florist?
-  orderAudits OrderAudit[]
+  florist       Florist?
+  orderAudits   OrderAudit[]
+  financeAudits FinanceAudit[]
 
   @@index([role])
 }
@@ -378,7 +379,7 @@ model Site {
   // ── Burq автосоздание черновиков доставки ──
   burqDraftAutoCreateEnabled     Boolean @default(false)
   burqDraftCreationLocalTime     String  @default("04:00") // локальное время (HH:mm) утреннего создания черновиков
-  automationDailyLocalTime      String   @default("09:00") // "HH:mm" локального времени ежедневных триггеров автоматизаций (напр. «Доставка сегодня»)
+  automationDailyLocalTime       String  @default("09:00") // "HH:mm" локального времени ежедневных триггеров автоматизаций (напр. «Доставка сегодня»)
   // Единый текст dropoff-инструкций магазина, автоматически добавляемый во все новые Burq draft.
   // Пусто/NULL → стандартная инструкция выключена (отдельный boolean не нужен).
   burqDefaultDropoffInstructions String?
@@ -391,7 +392,7 @@ model Site {
   quoConnectionError String? // безопасный текст ошибки последней проверки (без секретов)
 
   // ── SMS-маркетинг ──
-  reviewUrl   String? // ссылка на отзыв для {{review_url}}; пусто → review-правила не отправляются
+  reviewUrl       String? // ссылка на отзыв для {{review_url}}; пусто → review-правила не отправляются
   automationSites AutomationSite[]
 
   // ── Automation Flows (цепочки шагов) ──
@@ -448,66 +449,157 @@ model SiteFloristPriority {
 // Карточка товара (агрегат). Точные цены сайта живут в ProductVariant;
 // здесь только агрегаты minPrice/maxPrice по активным неудалённым вариантам.
 model Product {
-  id                        String        @id @default(cuid())
+  id                        String             @id @default(cuid())
   name                      String
   image                     String?
   defaultFloristComposition String? // шаблон состава букета; НЕ используется в заказе напрямую (только для заполнения вариантов)
   siteId                    String
-  site                      Site          @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  site                      Site               @relation(fields: [siteId], references: [id], onDelete: Cascade)
   externalId                String // Shopify product id
-  status                    ProductStatus @default(ACTIVE) // источник истины — Shopify
+  status                    ProductStatus      @default(ACTIVE) // источник истины — Shopify
   productType               String?
   adminUrl                  String? // ссылка на товар в Shopify Admin (у Woo сюда пишется permalink витрины)
   onlineUrl                 String? // публичная ссылка на товар в витрине магазина (Woo: permalink, Shopify: /products/{handle})
-  floristPrice              Decimal?      @db.Decimal(10, 2) // базовая себестоимость; NULL = не задана → флорист получает полную стоимость заказа
-  minPrice                  Decimal?      @db.Decimal(10, 2) // агрегат по активным вариантам
-  maxPrice                  Decimal?      @db.Decimal(10, 2)
-  remoteDeleted             Boolean       @default(false) // пропал из внешнего API
+  floristPrice              Decimal?           @db.Decimal(10, 2) // базовая себестоимость; NULL = не задана → флорист получает полную стоимость заказа
+  minPrice                  Decimal?           @db.Decimal(10, 2) // агрегат по активным вариантам
+  maxPrice                  Decimal?           @db.Decimal(10, 2)
+  // ── Финансовая классификация. Задаёт ТОЛЬКО владелец; синхронизация не трогает. ──
+  // productType (simple/variable) финансовым типом НЕ является и здесь не участвует.
+  financialType             FinancialItemType? // значение по умолчанию для вариантов; NULL = не задано
+  defaultIncludesVase       Boolean? // NULL = не задано; варианты наследуют это значение
+  remoteDeleted             Boolean            @default(false) // пропал из внешнего API
   deletedAt                 DateTime?
   lastSyncedAt              DateTime?
   lastSeenSyncRunId         String? // id последнего sync-прогона, где товар встретился (для безопасной пометки remoteDeleted только после DONE)
-  createdAt                 DateTime      @default(now())
-  updatedAt                 DateTime      @updatedAt
+  createdAt                 DateTime           @default(now())
+  updatedAt                 DateTime           @updatedAt
 
   variants      ProductVariant[]
   floristPrices FloristProductPrice[]
+  vaseCosts     VasePurchaseCost[]
 
   @@unique([siteId, externalId])
   @@index([siteId])
+  @@index([financialType])
 }
 
 // Конкретная вариация товара (Shopify variant). Хранится отдельно от Product
 // для единой модели даже при единственном варианте "Default Title".
 model ProductVariant {
-  id                 String    @id @default(cuid())
+  id                 String             @id @default(cuid())
   productId          String
-  product            Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+  product            Product            @relation(fields: [productId], references: [id], onDelete: Cascade)
   externalId         String // Shopify variant id
   title              String // напр. "Small / Red" или "Default Title"
   sku                String?
-  listPrice          Decimal   @db.Decimal(10, 2) // цена сайта
-  compareAtPrice     Decimal?  @db.Decimal(10, 2)
+  listPrice          Decimal            @db.Decimal(10, 2) // цена сайта
+  compareAtPrice     Decimal?           @db.Decimal(10, 2)
   image              String?
   option1            String?
   option2            String?
   option3            String?
   inventoryQty       Int? // если доступно текущими scopes
-  available          Boolean   @default(true) // статус доступности
+  available          Boolean            @default(true) // статус доступности
   floristComposition String? // локальный состав букета для флориста (многострочный текст) — Shopify не трогает
-  floristPrice       Decimal?  @db.Decimal(10, 2) // необязательная цена флориста для варианта
+  floristPrice       Decimal?           @db.Decimal(10, 2) // необязательная цена флориста для варианта
+  // ── Финансовая классификация варианта. Приоритетнее товара; синхронизация не трогает. ──
+  financialType      FinancialItemType? // NULL = наследовать Product.financialType
+  // ТРИ состояния, поэтому Boolean? и БЕЗ @default:
+  //   NULL  — наследовать Product.defaultIncludesVase (или неизвестно, если и там NULL)
+  //   true  — букет с включённой вазой
+  //   false — подтверждённо БЕЗ вазы (не то же самое, что «не знаем»)
+  includesVase       Boolean?
+  financialTypeSetBy String? // User.id последнего изменения классификации
+  financialTypeSetAt DateTime?
   position           Int?
   adminUrl           String? // ссылка на вариант в Admin, если доступна
   lastSyncedAt       DateTime?
   lastSeenSyncRunId  String? // см. Product.lastSeenSyncRunId
-  remoteDeleted      Boolean   @default(false)
+  remoteDeleted      Boolean            @default(false)
   deletedAt          DateTime?
-  createdAt          DateTime  @default(now())
-  updatedAt          DateTime  @updatedAt
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
 
   floristPrices FloristProductPrice[]
+  vaseCosts     VasePurchaseCost[]
 
   @@unique([productId, externalId])
   @@index([productId])
+  @@index([financialType])
+  @@index([includesVase])
+}
+
+// Финансовый тип позиции. Единый на весь проект: каталог и будущий финансовый модуль
+// используют ОДИН enum, чтобы классификация товара и классификация строки заказа не разъехались.
+enum FinancialItemType {
+  FLOWER_PRODUCT
+  VASE
+  TIP
+  DELIVERY
+  TAX
+  SERVICE_FEE
+  DISCOUNT
+  CARD
+  GIFT
+  OTHER
+}
+
+enum VaseCostType {
+  STANDALONE_VASE // товар/вариант САМ является вазой (financialType = VASE)
+  INCLUDED_VASE // ваза внутри букета (FLOWER_PRODUCT + includesVase = true)
+}
+
+/// Закупочная себестоимость вазы с датами действия — ЕДИНСТВЕННЫЙ источник стоимости.
+/// Кэширующей колонки на варианте нет специально: вторая точка правды рано или поздно разъедется.
+///
+/// Цель ровно одна: заполнен либо productId, либо productVariantId (CHECK в миграции).
+/// Пересечение периодов по одной цели и costType запрещено exclusion-constraint'ом.
+/// Отсутствие подходящей записи = «стоимость неизвестна» (VASE_COST_MISSING),
+/// а purchaseCostCents = 0 — подтверждённая нулевая себестоимость.
+model VasePurchaseCost {
+  id                String       @id @default(cuid())
+  productId         String?
+  productVariantId  String?
+  costType          VaseCostType
+  purchaseCostCents Int // >= 0, проверяется CHECK
+  currency          String       @default("USD")
+  effectiveFrom     DateTime
+  effectiveTo       DateTime? // NULL = действует сейчас; если задан — строго > effectiveFrom (CHECK)
+  comment           String?
+  createdBy         String // User.id
+  createdAt         DateTime     @default(now())
+
+  product Product?        @relation(fields: [productId], references: [id], onDelete: Restrict)
+  variant ProductVariant? @relation(fields: [productVariantId], references: [id], onDelete: Restrict)
+
+  @@index([productVariantId, costType, effectiveFrom])
+  @@index([productId, costType, effectiveFrom])
+  @@index([effectiveTo])
+}
+
+/// Общий финансовый аудит. Заводится этой миграцией для каталога и переиспользуется
+/// финансовым модулем. История не удаляется и не переписывается.
+model FinanceAudit {
+  id                    String   @id @default(cuid())
+  entity                String // "Product" | "ProductVariant" | "VasePurchaseCost"
+  entityId              String
+  action                String // SET_TYPE | SET_INCLUDES_VASE | SET_COST | RESET_TO_INHERIT | BULK_CLASSIFY
+  beforeJson            Json?
+  afterJson             Json?
+  reason                String? // обязателен для bulk-операций (проверяется сервисом)
+  batchId               String? // одна bulk-операция = один batchId на все строки
+  // Снимки названий: отчёт остаётся читаемым, даже если товар пропал с платформы.
+  entityNameSnapshot    String?
+  siteShortNameSnapshot String?
+  userId                String
+  role                  Role
+  createdAt             DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@index([entity, entityId, createdAt])
+  @@index([batchId])
+  @@index([userId, createdAt])
 }
 
 // Индивидуальный override цены флориста. variantId = null → override на весь товар;
@@ -629,18 +721,18 @@ model Order {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  items          OrderItem[]
-  assignments    OrderAssignment[]
-  messages       Message[]
-  communications OrderCommunication[]
-  deliveryIntent DeliveryIntent?
-  deliveries     Delivery[]
-  telegramMessages TelegramMessage[]
-  audits         OrderAudit[]
-  automationJobs AutomationJob[]
+  items              OrderItem[]
+  assignments        OrderAssignment[]
+  messages           Message[]
+  communications     OrderCommunication[]
+  deliveryIntent     DeliveryIntent?
+  deliveries         Delivery[]
+  telegramMessages   TelegramMessage[]
+  audits             OrderAudit[]
+  automationJobs     AutomationJob[]
   automationFlowRuns AutomationFlowRun[]
-  airwallexPayment AirwallexPayment?
-  airwallexChecks  AirwallexCheck[]
+  airwallexPayment   AirwallexPayment?
+  airwallexChecks    AirwallexCheck[]
 
   // NULL допустим много раз (Postgres: NULL != NULL) — не мешает заказам без внешнего источника.
   // Источник истины для идемпотентности вебхуков (см. ingestShopifyOrder) — не полагаемся
@@ -1052,11 +1144,9 @@ model ProcessedOperation {
 /**
  * Отправленное внутреннее Telegram-уведомление. Хранит message_id, чтобы обновлять
  * существующее сообщение (editMessage) вместо создания дубля.
- *
  * `dedupeKey` включает роль/аудиторию, поэтому у одного заказа независимо живут основное
  * сообщение флористам ("order:{id}:florist") и владельцу ("order:{id}:owner"), а срочные
  * уведомления владельцу получают собственные ключи и НЕ затирают основное.
- *
  * chatId/messageId — строки: id супергрупп у Telegram — большие отрицательные числа, и хранение
  * строкой исключает потерю точности; над этими значениями арифметика не нужна.
  */
@@ -1086,7 +1176,6 @@ model TelegramMessage {
  * Бот Telegram. У каждого флориста СВОЙ бот и свой личный чат: бот не может редактировать
  * сообщение, отправленное другим ботом, поэтому «одно сообщение на заказ» существует в
  * пределах одного бота, а не всей системы.
- *
  * Токен — только зашифрованным (secretBox). Включение возможно лишь после успешной проверки:
  * любое изменение токена или чата сбрасывает verifiedAt и enabled.
  */
@@ -1113,10 +1202,8 @@ model TelegramBot {
 /**
  * Настройки внутренних Telegram-уведомлений (singleton, id="singleton").
  * Заменяют конфигурацию через .env: владелец задаёт всё из дашборда.
- *
  * Секрет хранится ТОЛЬКО зашифрованным (AES-256-GCM, lib/crypto/secretBox) — в UI токен
  * обратно никогда не отдаётся, показывается лишь факт «настроен».
- *
  * `enabled` можно включить лишь после успешной проверки: verifiedAt заполняется при удачном
  * getMe + тестовых сообщениях. Любое изменение токена или чата сбрасывает verifiedAt и enabled,
  * иначе можно было бы оставить включённым заведомо нерабочий конфиг.
@@ -1167,7 +1254,9 @@ model AirwallexPayment {
   @@index([siteId, monitoringActive, nextCheckAt])
 }
 
-/** Компактный журнал сверок Airwallex (без полного raw payload). */
+/**
+ * Компактный журнал сверок Airwallex (без полного raw payload).
+ */
 model AirwallexCheck {
   id               String                     @id @default(cuid())
   orderId          String
@@ -1341,7 +1430,9 @@ model Automation {
   // это ровно то поведение, что было до появления Email (SMS вкл, Email и fallback выкл).
   smsEnabled           Boolean @default(true)
   emailEnabled         Boolean @default(false)
-  /** «Email, если SMS недоступно» — имеет смысл только при smsEnabled=true (проверяется при сохранении). */
+  /**
+   * «Email, если SMS недоступно» — имеет смысл только при smsEnabled=true (проверяется при сохранении).
+   */
   emailFallbackEnabled Boolean @default(false)
   /**
    * Override Brevo Template ID именно ЭТОГО правила (Stage 2.1). null (по умолчанию) → берём
@@ -1350,16 +1441,16 @@ model Automation {
    * так два правила на одно событие (сегменты, разные тексты) не заставляют держать два
    * SiteEmailTemplate под одну и ту же пару siteId+triggerType (там unique-ограничение).
    */
-  brevoTemplateId Int?
+  brevoTemplateId      Int?
 
   triggerType    String // валидируется app-registry; строкой — для расширяемости без миграции
   audience       SmsAudience
-  delayAmount    Int               @default(0)
-  delayUnit      SmsDelayUnit      @default(IMMEDIATE)
+  delayAmount    Int          @default(0)
+  delayUnit      SmsDelayUnit @default(IMMEDIATE)
   template       String // текст шаблона inline (отдельная Template-сущность — фаза 2)
   conditionsJson Json? // расширяемые условия (нормализованные AutomationCondition — фаза 2)
-  createdAt      DateTime          @default(now())
-  updatedAt      DateTime          @updatedAt
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
   deletedAt      DateTime? // soft-delete при наличии истории
 
   jobs  AutomationJob[]
@@ -1392,18 +1483,18 @@ model AutomationJob {
   orderId      String
   order        Order      @relation(fields: [orderId], references: [id], onDelete: Cascade)
 
-  recipientType SmsRecipientType // только CUSTOMER | RECIPIENT
+  recipientType   SmsRecipientType // только CUSTOMER | RECIPIENT
   // Stage 2: канал ЭТОГО job'а (routing в handlers.ts: deps.channels[job.channel], а не
   // automation.channel — одно правило может породить и SMS-job, и EMAIL-job одновременно).
-  channel       String  @default("SMS") // "SMS" | "EMAIL"
+  channel         String           @default("SMS") // "SMS" | "EMAIL"
   // Для SMS обязателен, для EMAIL — null. Для EMAIL адресат — emailNormalized.
   phoneNormalized String? // E.164 адресата (для дедупа BOTH и истории)
   emailNormalized String? // нормализованный email адресата (только для channel="EMAIL", всегда CUSTOMER)
   // Дублирует часть idempotencyKey отдельной колонкой, чтобы SEND-обработчик мог создать
   // fallback-EMAIL-job (при финальном провале SMS), не разбирая строку idempotencyKey.
-  occurrenceKey String?
-  scheduledAt   DateTime // когда worker должен отправить (delay применён)
-  status        SmsJobStatus @default(SCHEDULED)
+  occurrenceKey   String?
+  scheduledAt     DateTime // когда worker должен отправить (delay применён)
+  status          SmsJobStatus     @default(SCHEDULED)
 
   renderedTextSnapshot String? // фиксируется в момент фактической отправки (рендер по свежим данным)
   idempotencyKey       String              @unique // automationId:orderId:recipientType:triggerOccurrence:channel
@@ -1570,9 +1661,9 @@ model AutomationFlowRun {
 }
 
 model AutomationFlowRunStep {
-  id     String            @id @default(cuid())
+  id     String             @id @default(cuid())
   runId  String
-  run    AutomationFlowRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  run    AutomationFlowRun  @relation(fields: [runId], references: [id], onDelete: Cascade)
   stepId String
   // Restrict: пока есть история выполнения, шаг живёт (удаление шага — soft-delete).
   step   AutomationFlowStep @relation(fields: [stepId], references: [id], onDelete: Restrict)
@@ -1614,7 +1705,6 @@ model AutomationFlowRunStep {
 /**
  * Email-настройки ОДНОГО магазина. Отдельная модель (а не поля на Site) по образцу
  * WooCommerceConnection: набор полей растёт, и держать его рядом с Site неудобно.
- *
  * Секретов здесь нет: API-ключ Brevo — общий на аккаунт и живёт только в переменных
  * окружения. Здесь лежит лишь то, чем магазины отличаются друг от друга: отправитель,
  * reply-to и состояние проверки. Всё выключено по умолчанию (enabled = false), поэтому
@@ -1625,14 +1715,18 @@ model SiteEmailSettings {
   siteId String @unique
   site   Site   @relation(fields: [siteId], references: [id], onDelete: Cascade)
 
-  enabled     Boolean @default(false) // главный выключатель Email для магазина
-  senderEmail String? // напр. orders@theflow.la — домен должен быть подтверждён в Brevo
-  senderName  String? // «The Flow» — видимое имя отправителя
-  replyTo     String? // куда попадут ответы клиентов (может отличаться от отправителя)
-  /** Числовой sender id в Brevo. Необязателен: Brevo принимает и пару name+email. */
+  enabled       Boolean @default(false) // главный выключатель Email для магазина
+  senderEmail   String? // напр. orders@theflow.la — домен должен быть подтверждён в Brevo
+  senderName    String? // «The Flow» — видимое имя отправителя
+  replyTo       String? // куда попадут ответы клиентов (может отличаться от отправителя)
+  /**
+   * Числовой sender id в Brevo. Необязателен: Brevo принимает и пару name+email.
+   */
   brevoSenderId String?
 
-  /** Отметка владельца, что домен отправителя подтверждён в Brevo через DNS. */
+  /**
+   * Отметка владельца, что домен отправителя подтверждён в Brevo через DNS.
+   */
   domainVerifiedAt DateTime?
 
   // Результат последнего тестового письма — как у QUO/Airwallex: статус + безопасная ошибка.
@@ -1647,7 +1741,6 @@ model SiteEmailSettings {
 /**
  * Brevo Template ID для пары «магазин + событие». HTML-шаблоны живут в Brevo (свой логотип,
  * цвета и footer у каждого магазина) — здесь только идентификатор.
- *
  * triggerType хранится строкой и валидируется реестром триггеров (как в Automation), поэтому
  * новое событие не требует миграции.
  */

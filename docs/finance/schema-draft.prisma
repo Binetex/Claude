@@ -1,0 +1,696 @@
+// ЧЕРНОВИК схемы финансового модуля (Stage 1). НЕ применён: это документ для согласования,
+// в prisma/schema.prisma ничего из этого пока не добавлено и миграции нет.
+//
+// Соглашения, действующие на весь файл:
+//  * Деньги — целые ЦЕНТЫ (Int). Float запрещён. Существующие Order.* остаются Decimal(10,2),
+//    конвертация — в одной точке (сборка CalcInput).
+//  * null ≠ 0. null означает «неизвестно» и обязан сопровождаться reason-кодом;
+//    0 означает подтверждённый ноль. Неизвестное НЕ подставляется нулём в итог:
+//    если обязательный компонент отсутствует и допустимой оценки нет, итоговый
+//    ownerActualProfitCents тоже null (INCOMPLETE), а не число, посчитанное через ноль.
+//    Отдельно считается preliminary-оценка, и она всегда называется оценкой.
+//  * Финансовые сущности НИКОГДА не удаляются каскадом: onDelete: Restrict / SetNull,
+//    плюс денормализованные снимки имён и внешних ссылок.
+//  * Валюта первой версии — USD; поле currency есть везде, где оно понадобится позже.
+
+// ─────────────────────────── Классификация позиций ───────────────────────────
+
+enum FinancialItemType {
+  FLOWER_PRODUCT
+  VASE
+  TIP
+  DELIVERY
+  TAX
+  SERVICE_FEE
+  DISCOUNT
+  CARD
+  GIFT
+  OTHER
+}
+
+enum ClassificationSource {
+  PLATFORM_METADATA // приоритет 1: metadata/line item properties платформы
+  SKU
+  PRODUCT_TYPE // приоритет 2: сохранённый тип товара
+  OWNER_RULE // приоритет 3: правило владельца
+  NAME_FALLBACK // приоритет 4: только в крайнем случае, всегда помечается
+  MANUAL
+}
+
+// Новые поля существующих моделей (перечислены отдельно, чтобы было видно, что меняется):
+//
+// OrderItem += financialType FinancialItemType?
+//           += classificationSource ClassificationSource?
+//           += classifiedAt DateTime?
+//           += classificationRuleId String?
+//
+// Product        += financialType FinancialItemType?
+// ProductVariant += financialType FinancialItemType?
+//                += includesVase Boolean @default(false)   // ваза входит в состав букета
+//                += vaseCostCents Int?                     // null = неизвестно → VASE_COST_MISSING
+//
+// Order += financeEligibility FinanceEligibility @default(INCLUDED)
+//       += financeEligibilityReason String?
+//       += financeEligibilitySetBy String?
+//       += financeEligibilitySetAt DateTime?
+//       += currentFinancialSnapshotId String? @unique   // указатель на текущую ревизию
+
+model ItemClassificationRule {
+  id            String            @id @default(cuid())
+  siteId        String? // null = правило для всех магазинов
+  matchField    String // "name" | "sku" | "productType" | "platformProperty"
+  matchOp       String // "equals" | "startsWith" | "contains" | "regex"
+  matchValue    String
+  financialType FinancialItemType
+  priority      Int               @default(100)
+  active        Boolean           @default(true)
+  createdBy     String
+  createdAt     DateTime          @default(now())
+
+  @@index([siteId, active, priority])
+}
+
+enum FinanceEligibility {
+  INCLUDED
+  TEST_ORDER
+  INTERNAL
+  COMPLIMENTARY
+  REPLACEMENT
+  EXCLUDED_MANUALLY
+}
+
+// ─────────────────────────── Снимок заказа: ревизии ───────────────────────────
+
+enum SnapshotStatus {
+  DRAFT
+  PRELIMINARY
+  FINAL
+  LOCKED
+}
+
+enum RecalcReason {
+  INITIAL
+  ORDER_DELIVERED
+  ORDER_CHANGED
+  DAILY_FLOWER_EXPENSE_CHANGED
+  SETTING_CHANGED
+  MANUAL_OVERRIDE
+  REFUND
+  CLASSIFICATION_CHANGED
+  BACKFILL
+}
+
+enum FinanceReviewReason {
+  DELIVERY_COST_MISSING
+  PAYMENT_PROVIDER_MISSING
+  PAYMENT_FEE_MISSING
+  REFUND_AMOUNT_MISSING
+  FLORIST_MISSING
+  ITEM_UNCLASSIFIED
+  FLORIST_PRICE_MISSING
+  VASE_COST_MISSING
+  MANUAL_REVIEW_REQUIRED
+}
+
+enum ResultCompleteness {
+  COMPLETE // все обязательные фактические компоненты известны
+  INCOMPLETE // чего-то не хватает → точный результат НЕ рассчитан (null)
+}
+
+/// Ревизия финансового снимка заказа.
+///
+/// РАСЧЁТНАЯ ЧАСТЬ НЕИЗМЕНЯЕМА НАВСЕГДА: calcInputJson, lines, amounts, классификация,
+/// применённые настройки, calcVersion, revision, результаты. После публикации (publishedAt)
+/// ревизия и её строки не подлежат UPDATE и DELETE — запрещено триггером Postgres.
+///
+/// ИЗМЕНЯЕМЫ РОВНО ЧЕТЫРЕ поля жизненного цикла: status, finalizedAt, lockedAt, supersededAt.
+/// Триггер пропускает UPDATE, только если изменены исключительно они; каждое такое изменение
+/// пишется в FinanceAudit. Пересчёт = новая ревизия, исправление = новая ревизия.
+///
+/// Удалить можно только DRAFT (publishedAt = null), на который никто не ссылается:
+/// ни Order.currentFinancialSnapshotId, ни LedgerEntry.sourceId, ни отчёт.
+model OrderFinancialSnapshot {
+  id       String @id @default(cuid())
+  orderId  String
+  revision Int // номер пересчёта этого заказа: 1, 2, 3…
+
+  calcVersion String // версия АЛГОРИТМА, напр. "finance-v1" — не путать с revision
+  status      SnapshotStatus @default(DRAFT)
+  reason      RecalcReason
+
+  /// Полный неизменяемый вход расчёта: суммы заказа, классификация позиций, применённые
+  /// настройки с их id и effectiveFrom, ставки, платежи, доставка, id распределений расходов.
+  /// Хранится целиком, а не только хэш: хэш доказывает изменение, но не объясняет старый расчёт.
+  calcInputJson Json
+  inputHash     String
+
+  needsReview   Boolean               @default(false)
+  reviewReasons FinanceReviewReason[]
+
+  // Денормализованные ссылки: финансовая история остаётся читаемой, даже если
+  // заказ/магазин/флорист изменились или были деактивированы.
+  orderNumberSnapshot   String
+  siteShortNameSnapshot String
+  floristNameSnapshot   String?
+
+  periodId String?
+
+  // ── Результаты. Все суммы nullable: null = «не рассчитано, потому что нет данных». ──
+  distributableProfitCents  Int?
+  distributableCompleteness ResultCompleteness @default(INCOMPLETE)
+  ownerActualProfitCents    Int? // null, пока неизвестен хоть один обязательный фактический расход
+  ownerActualCompleteness   ResultCompleteness @default(INCOMPLETE)
+  /// Явно помеченная ОЦЕНКА: считается всегда, никогда не выдаётся за фактическую прибыль.
+  ownerProfitEstimateCents  Int?
+  secondaryAccrualCents     Int?
+  ownerOnlyIncomeCents      Int?
+
+  createdAt DateTime @default(now())
+  createdBy String? // null = пересчёт системой
+
+  // ── Единственные изменяемые поля (см. комментарий к модели) ──
+  publishedAt  DateTime? // null = DRAFT, можно удалить; не null = ревизия опубликована
+  finalizedAt  DateTime?
+  lockedAt     DateTime?
+  supersededAt DateTime?
+
+  order  Order                @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  period FinancePeriod?       @relation(fields: [periodId], references: [id], onDelete: Restrict)
+  lines  OrderFinancialLine[]
+
+  @@unique([orderId, revision])
+  @@index([orderId, createdAt])
+  @@index([status, needsReview])
+  @@index([periodId])
+}
+
+enum FinanceLineKind {
+  REVENUE
+  ACTUAL_EXPENSE
+  ALLOCATION
+  RESERVE
+  OWNER_COMPENSATION
+  ADJUSTMENT
+}
+
+enum FinanceVisibility {
+  OWNER_ONLY
+  PRIMARY_FLORIST // основной флорист + владелец
+  ALL_FLORISTS // оба типа флористов + владелец
+}
+
+enum FinanceDataSource {
+  API_ACTUAL
+  PLATFORM_REPORTED
+  MANUAL
+  ESTIMATED
+  ALLOCATED
+  DERIVED
+  IMPORTED_LEGACY
+  MISSING
+}
+
+enum VerificationStatus {
+  VERIFIED
+  ESTIMATED
+  NEEDS_REVIEW
+  MISSING
+}
+
+/// Строка снимка. Расчётная и фактическая суммы живут раздельно и обе допускают null.
+model OrderFinancialLine {
+  id         String @id @default(cuid())
+  snapshotId String
+  code       String // "TAX_RESERVE" | "PAYMENT_FEE" | "FLOWER_COST_ALLOCATED" | …
+
+  kind       FinanceLineKind
+  visibility FinanceVisibility
+
+  calculatedCents Int? // null = неизвестно
+  actualCents     Int? // null = неизвестно; 0 = подтверждённый ноль
+  currency        String @default("USD")
+
+  source             FinanceDataSource
+  verificationStatus VerificationStatus
+
+  categoryId    String?
+  includedInDistributableBase Boolean @default(false)
+
+  manualOverride  Boolean   @default(false)
+  overrideReason  String?
+  overrideBy      String?
+  overrideAt      DateTime?
+
+  sortOrder Int @default(100)
+
+  snapshot OrderFinancialSnapshot @relation(fields: [snapshotId], references: [id], onDelete: Cascade)
+  category ExpenseCategory?       @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+
+  @@unique([snapshotId, code])
+  @@index([code])
+  @@index([categoryId])
+}
+
+// Cascade на строках работает ТОЛЬКО для неопубликованного DRAFT: триггер запрещает
+// UPDATE и DELETE строк, чья ревизия имеет publishedAt != null. Опубликованная ревизия
+// не удаляется никогда — ни сама, ни каскадом от заказа (там Restrict).
+
+// ─────────────────────────── Настройки с датами действия ───────────────────────────
+
+model FinanceSetting {
+  id            String    @id @default(cuid())
+  key           String // PRIMARY_SHARE_PERCENT | TAX_OWNER_SHARE_PERCENT | SUPPLIES_PER_ORDER_CENTS | NEGATIVE_PROFIT_POLICY
+  valueJson     Json
+  effectiveFrom DateTime
+  effectiveTo   DateTime?
+  comment       String?
+  createdBy     String
+  createdAt     DateTime  @default(now())
+
+  @@index([key, effectiveFrom])
+}
+
+enum PaymentProvider {
+  STRIPE
+  SHOPIFY_PAYMENTS
+  AIRWALLEX
+  PAYPAL
+  OTHER
+}
+
+/// Тариф провайдера. Один провайдер может иметь разные ставки по магазинам, аккаунтам и датам.
+/// scopeKey = coalesce(siteId,'*') || ':' || coalesce(providerAccountId,'*') — иначе уникальность
+/// c NULL-полями в Postgres не работает (NULL != NULL).
+model PaymentProviderFee {
+  id                String          @id @default(cuid())
+  provider          PaymentProvider
+  siteId            String?
+  providerAccountId String?
+  scopeKey          String
+  percent           Decimal         @db.Decimal(7, 4) // 2.9000 = 2.9%
+  fixedCents        Int             @default(0)
+  currency          String          @default("USD")
+  effectiveFrom     DateTime
+  effectiveTo       DateTime?
+  description       String?
+  createdBy         String
+  createdAt         DateTime        @default(now())
+
+  site Site? @relation(fields: [siteId], references: [id], onDelete: Restrict)
+
+  @@unique([provider, scopeKey, effectiveFrom])
+  @@index([provider, effectiveFrom])
+}
+
+enum AllocationLevel {
+  ORDER
+  SITE
+  PERIOD
+  OWNER_ONLY
+}
+
+enum AllocationScope {
+  ALL_SITES
+  SELECTED_SITES
+  SELECTED_FLORISTS
+}
+
+enum ExpenseCalcMethod {
+  FIXED_PER_ORDER
+  FIXED_PER_DAY
+  FIXED_PER_MONTH
+  PERCENT_OF_REVENUE
+  PERCENT_OF_FLOWER_REVENUE
+  ONE_TIME
+  MANUAL
+}
+
+model ExpenseCategory {
+  id                 String  @id @default(cuid())
+  internalName       String // как называет владелец
+  publicName         String // как видит флорист
+  floristDescription String // текст тултипа для флориста
+
+  kind       FinanceLineKind
+  visibility FinanceVisibility @default(OWNER_ONLY)
+
+  calcMethod ExpenseCalcMethod
+  calcValue  Decimal           @db.Decimal(14, 4) // трактуется по calcMethod: центы или проценты
+
+  allocationLevel AllocationLevel
+  allocationScope AllocationScope @default(ALL_SITES)
+
+  includedInDistributableBase Boolean @default(false)
+
+  effectiveFrom DateTime
+  effectiveTo   DateTime?
+  sortOrder     Int       @default(100)
+  active        Boolean   @default(true)
+
+  createdBy String
+  createdAt DateTime @default(now())
+  updatedBy String?
+  updatedAt DateTime @updatedAt
+
+  sites    ExpenseCategorySite[]
+  florists ExpenseCategoryFlorist[]
+  lines    OrderFinancialLine[]
+
+  @@index([active, effectiveFrom])
+}
+
+model ExpenseCategorySite {
+  categoryId String
+  siteId     String
+  category   ExpenseCategory @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  site       Site            @relation(fields: [siteId], references: [id], onDelete: Restrict)
+
+  @@id([categoryId, siteId])
+}
+
+model ExpenseCategoryFlorist {
+  categoryId String
+  floristId  String
+  category   ExpenseCategory @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  florist    Florist         @relation(fields: [floristId], references: [id], onDelete: Restrict)
+
+  @@id([categoryId, floristId])
+}
+
+// ─────────────────────────── Модель оплаты флориста ───────────────────────────
+
+enum FloristFinanceModel {
+  PRIMARY
+  SECONDARY
+}
+
+enum FinanceProfileScope {
+  ALL_SITES
+  SELECTED_SITES
+}
+
+/// История договорённостей. Одновременно активный PRIMARY-профиль ограничивается СЕРВИСОМ,
+/// а не схемой: в будущем возможны несколько параллельных договорённостей.
+model FloristFinanceProfile {
+  id            String              @id @default(cuid())
+  floristId     String
+  model         FloristFinanceModel
+  sharePercent  Decimal?            @db.Decimal(7, 4) // только для PRIMARY, напр. 66.6000
+  scope         FinanceProfileScope @default(ALL_SITES)
+  effectiveFrom DateTime
+  effectiveTo   DateTime?
+  active        Boolean             @default(true)
+  comment       String?
+  createdBy     String
+  createdAt     DateTime            @default(now())
+
+  florist            Florist              @relation(fields: [floristId], references: [id], onDelete: Restrict)
+  sites              FinanceProfileSite[]
+  dailyFlowerExpense DailyFlowerExpense[]
+
+  @@index([floristId, effectiveFrom])
+  @@index([model, active])
+}
+
+model FinanceProfileSite {
+  profileId String
+  siteId    String
+  profile   FloristFinanceProfile @relation(fields: [profileId], references: [id], onDelete: Restrict)
+  site      Site                  @relation(fields: [siteId], references: [id], onDelete: Restrict)
+
+  @@id([profileId, siteId])
+}
+
+// ─────────────────────────── Ledger ───────────────────────────
+
+enum LedgerType {
+  ORDER_ACCRUAL
+  PRIMARY_FLORIST_SHARE
+  BONUS
+  DEDUCTION
+  PAYMENT
+  PAYMENT_REVERSAL
+  MANUAL_ADJUSTMENT
+  REFUND_ADJUSTMENT
+  EXPENSE_ALLOCATION
+  CORRECTION
+  CARRY_FORWARD
+}
+
+enum LedgerDirection {
+  CREDIT // увеличивает долг перед флористом
+  DEBIT // уменьшает (выплата, удержание)
+}
+
+/// APPEND-ONLY. UPDATE и DELETE запрещены триггером Postgres (raw SQL в миграции) и сервисом.
+/// Исправление — только reversal или correction новой записью.
+model LedgerEntry {
+  id        String  @id @default(cuid())
+  floristId String
+  orderId   String?
+  periodId  String?
+
+  type       LedgerType
+  direction  LedgerDirection
+  amountCents Int // всегда положительное; знак задаёт direction
+  currency   String          @default("USD")
+
+  description   String
+  effectiveDate DateTime
+  createdBy     String
+  createdAt     DateTime @default(now())
+
+  reversedEntryId String? // ссылка на отменяемую запись
+  reversedEntry   LedgerEntry?  @relation("Reversal", fields: [reversedEntryId], references: [id], onDelete: Restrict)
+  reversals       LedgerEntry[] @relation("Reversal")
+
+  // Идемпотентность: один и тот же вебхук/пересчёт не создаёт вторую операцию.
+  sourceType     String // "ORDER_SNAPSHOT" | "MANUAL" | "PERIOD_SETTLEMENT" | …
+  sourceId       String
+  sourceVersion  String
+  idempotencyKey String @unique
+
+  metadata Json?
+
+  // Денормализация на случай деактивации флориста.
+  floristNameSnapshot String
+
+  florist Florist        @relation(fields: [floristId], references: [id], onDelete: Restrict)
+  order   Order?         @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  period  FinancePeriod? @relation(fields: [periodId], references: [id], onDelete: Restrict)
+
+  @@index([floristId, effectiveDate])
+  @@index([orderId])
+  @@index([periodId])
+}
+
+// ─────────────────────────── Периоды ───────────────────────────
+
+enum PeriodType {
+  DAY
+  WEEK
+  MONTH
+  CUSTOM
+}
+
+enum PeriodStatus {
+  OPEN
+  CLOSED
+}
+
+/// Границы периода фиксируются и в локальном дне бизнеса, и в UTC: неделя и месяц не должны
+/// зависеть от таймзоны сервера. timezone сохраняется снимком — смена настройки магазина
+/// не переопределяет уже закрытые периоды.
+model FinancePeriod {
+  id             String       @id @default(cuid())
+  type           PeriodType
+  timezone       String // снимок, напр. "America/Los_Angeles"
+  localStartDate String // "2026-09-01"
+  localEndDate   String // "2026-09-30"
+  startsAtUtc    DateTime
+  endsAtUtc      DateTime
+  status         PeriodStatus @default(OPEN)
+
+  closedBy   String?
+  closedAt   DateTime?
+  reopenedBy String?
+  reopenedAt DateTime?
+  reopenNote String?
+
+  createdAt DateTime @default(now())
+
+  snapshots OrderFinancialSnapshot[]
+  ledger    LedgerEntry[]
+
+  @@unique([type, timezone, localStartDate, localEndDate])
+  @@index([status, startsAtUtc])
+}
+
+// ─────────────────────────── Расходы ───────────────────────────
+
+enum DailyExpenseStatus {
+  DRAFT
+  ACTIVE
+  VOID
+}
+
+/// Дневной расход на цветы. Scope — профиль финансовой модели, а не глобальная дата:
+/// смена основного флориста или вторая договорённость не упрутся в миграционный тупик.
+model DailyFlowerExpense {
+  id               String             @id @default(cuid())
+  expenseDate      DateTime           @db.Date
+  financeProfileId String
+  amountCents      Int
+  currency         String             @default("USD")
+  status           DailyExpenseStatus @default(ACTIVE)
+  comment          String?
+
+  createdBy String
+  createdAt DateTime @default(now())
+  updatedBy String?
+  updatedAt DateTime @updatedAt
+
+  profile FloristFinanceProfile @relation(fields: [financeProfileId], references: [id], onDelete: Restrict)
+
+  @@unique([expenseDate, financeProfileId])
+  @@index([expenseDate])
+}
+
+enum PaymentTxnType {
+  PAYMENT
+  REFUND
+  CHARGEBACK
+  CHARGEBACK_REVERSAL
+  ADJUSTMENT
+  COMPENSATION
+}
+
+enum FeeStatus {
+  ESTIMATED
+  ACTUAL
+  MANUAL
+}
+
+/// У одного заказа может быть несколько платежей, возвратов и chargeback'ов.
+/// Суммы всегда положительные, смысл задаёт type. payoutId — задел под reconciliation выплат
+/// провайдера (в первой версии не заполняется и не используется).
+model PaymentTransaction {
+  id                    String          @id @default(cuid())
+  orderId               String
+  type                  PaymentTxnType
+  provider              PaymentProvider
+  providerAccountId     String?
+  providerTransactionId String?
+  payoutId              String?
+
+  grossCents        Int
+  feeEstimatedCents Int?
+  feeActualCents    Int?
+  feeStatus         FeeStatus @default(ESTIMATED)
+  netCents          Int?
+  currency          String    @default("USD")
+
+  source             FinanceDataSource
+  verificationStatus VerificationStatus
+
+  occurredAt DateTime
+  createdAt  DateTime @default(now())
+  createdBy  String?
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Restrict)
+
+  @@unique([provider, providerTransactionId])
+  @@index([orderId, occurredAt])
+  @@index([payoutId])
+}
+
+// ─────────────────────────── Возвраты ───────────────────────────
+
+enum RefundStage {
+  BEFORE_PRODUCTION
+  AFTER_PRODUCTION
+}
+
+enum SecondaryFloristRefundDecision {
+  PAY_FULL
+  PAY_PARTIAL
+  PAY_ZERO
+  CUSTOM_AMOUNT
+}
+
+enum CompensationTreatment {
+  DISTRIBUTABLE_PROFIT
+  OWNER_ONLY
+  REDUCES_DELIVERY_EXPENSE
+  OTHER
+}
+
+model RefundCase {
+  id       String      @id @default(cuid())
+  orderId  String
+  stage    RefundStage
+  reason   String
+  refundedAt DateTime
+  refundCents Int
+  isPartial  Boolean    @default(false)
+
+  producedItems String? // что успели изготовить
+
+  secondaryDecision     SecondaryFloristRefundDecision?
+  secondaryAmountCents  Int?
+
+  flowerLossCents      Int?
+  vaseLossCents        Int?
+  suppliesLossCents    Int?
+  deliveryLossCents    Int?
+  paymentFeeCents      Int?
+  ownerAdjustmentCents Int?
+
+  comment   String?
+  createdBy String
+  createdAt DateTime @default(now())
+
+  order          Order                  @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  compensations  DeliveryCompensation[]
+
+  @@index([orderId])
+}
+
+model DeliveryCompensation {
+  id            String                @id @default(cuid())
+  orderId       String
+  refundCaseId  String?
+  provider      String
+  expectedCents Int?
+  receivedCents Int?
+  receivedAt    DateTime?
+  treatment     CompensationTreatment
+  comment       String?
+  createdBy     String
+  createdAt     DateTime              @default(now())
+
+  order      Order       @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  refundCase RefundCase? @relation(fields: [refundCaseId], references: [id], onDelete: Restrict)
+
+  @@index([orderId])
+}
+
+// ─────────────────────────── Аудит ───────────────────────────
+
+model FinanceAudit {
+  id         String   @id @default(cuid())
+  entity     String // "FinanceSetting" | "ExpenseCategory" | "OrderFinancialLine" | …
+  entityId   String
+  action     String // "CREATE" | "UPDATE" | "CLOSE_PERIOD" | "REOPEN_PERIOD" | "OVERRIDE" | …
+  beforeJson Json?
+  afterJson  Json?
+  userId     String
+  role       Role
+  comment    String?
+  createdAt  DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@index([entity, entityId, createdAt])
+  @@index([userId, createdAt])
+}
