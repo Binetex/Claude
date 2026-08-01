@@ -10,7 +10,7 @@ import { prisma } from "@/lib/db";
 import { Prisma } from "@/generated/prisma/client";
 import type { OrderStatus, FloristFinanceVisibility, Role, FinancialItemType, VaseCostType } from "@/generated/prisma/enums";
 import { setProductClassification, setVariantClassification } from "@/modules/catalog/finance/classification";
-import { setVasePurchaseCost } from "@/modules/catalog/finance/setVasePurchaseCost";
+import { setVasePurchaseCost, updateVasePurchaseCost, deleteVasePurchaseCost } from "@/modules/catalog/finance/setVasePurchaseCost";
 import { setVariantVase, setProductDefaultVase, type VaseSelection } from "@/modules/catalog/finance/vaseLink";
 import { usdToCents } from "@/lib/cents";
 import {
@@ -288,6 +288,58 @@ export async function ownerAddVaseCost(args: {
       : (await prisma.productVariant.findUnique({ where: { id: args.target.productVariantId }, select: { productId: true } }))
           ?.productId;
   if (productId) revalidatePath(`/dashboard/products/${productId}`);
+  revalidatePath("/dashboard/products");
+  return { ok: true };
+}
+
+/**
+ * Исправление ошибочно введённой стоимости. Именно правка, а не новый интервал: подорожание
+ * оформляется через ownerAddVaseCost, а опечатка — здесь. Правка пишется в аудит.
+ */
+export async function ownerUpdateVaseCost(args: {
+  costId: string;
+  amountUsd: string;
+  effectiveFrom: string;
+  productId: string;
+}): Promise<{ ok: true } | { ok: false; error: string }> {
+  const user = await requireRole("OWNER");
+
+  let cents: number | null;
+  try {
+    cents = usdToCents(args.amountUsd);
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : "некорректная сумма" };
+  }
+  if (cents == null) return { ok: false, error: "укажите закупочную стоимость" };
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(args.effectiveFrom)) return { ok: false, error: "укажите дату начала действия" };
+
+  try {
+    await updateVasePurchaseCost({
+      costId: args.costId,
+      purchaseCostCents: cents,
+      effectiveFrom: new Date(`${args.effectiveFrom}T00:00:00.000Z`),
+      actor: { userId: user.id, role: user.role },
+    });
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : "не удалось сохранить" };
+  }
+  revalidatePath(`/dashboard/products/${args.productId}`);
+  revalidatePath("/dashboard/products");
+  return { ok: true };
+}
+
+/** Удаление ошибочного интервала стоимости. Предыдущий интервал снова становится действующим. */
+export async function ownerDeleteVaseCost(args: {
+  costId: string;
+  productId: string;
+}): Promise<{ ok: true } | { ok: false; error: string }> {
+  const user = await requireRole("OWNER");
+  try {
+    await deleteVasePurchaseCost({ costId: args.costId, actor: { userId: user.id, role: user.role } });
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : "не удалось удалить" };
+  }
+  revalidatePath(`/dashboard/products/${args.productId}`);
   revalidatePath("/dashboard/products");
   return { ok: true };
 }

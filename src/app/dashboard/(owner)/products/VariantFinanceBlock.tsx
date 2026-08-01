@@ -101,6 +101,7 @@ export function VariantFinanceBlock({ vm, vaseOptions }: { vm: VariantFinanceVM;
           history={vm.ownCostHistory}
           effectiveCostCents={vm.ownCostCents}
           effectiveSource={vm.ownCostCents == null ? "UNKNOWN" : "VARIANT"}
+          productId={vm.productId}
         />
       )}
     </div>

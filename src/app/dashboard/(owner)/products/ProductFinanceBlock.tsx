@@ -90,6 +90,7 @@ export function ProductFinanceBlock({
             history={costHistory}
             effectiveCostCents={effectiveCostCents}
             effectiveSource={effectiveCostCents == null ? "UNKNOWN" : "PRODUCT"}
+            productId={productId}
           />
           {variantOwnCosts.length > 0 && (
             <p className="text-[11px] text-slate-500">

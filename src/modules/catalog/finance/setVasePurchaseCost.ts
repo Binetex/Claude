@@ -136,3 +136,132 @@ async function runOnce(args: SetVasePurchaseCostArgs): Promise<SetVasePurchaseCo
     return { closedId, createdId: created.id };
   });
 }
+
+/**
+ * Исправление уже сохранённого интервала — для опечаток, а не для истории цен.
+ *
+ * Разница принципиальная: подорожание оформляется НОВЫМ интервалом (setVasePurchaseCost),
+ * а неверно введённая сумма правится здесь. Иначе ошибку невозможно убрать: она продолжает
+ * действовать на свой период, а новый интервал с той же датой начала создать нельзя.
+ *
+ * Сама правка не теряется — before/after уходит в FinanceAudit. Когда появятся финансовые
+ * снимки заказов, ссылающиеся на конкретную запись стоимости, здесь добавится запрет на
+ * правку уже использованных интервалов: пересчитывать закрытый период нельзя.
+ */
+export async function updateVasePurchaseCost(args: {
+  costId: string;
+  purchaseCostCents?: number;
+  effectiveFrom?: Date;
+  comment?: string | null;
+  actor: { userId: string; role: Role };
+  reason?: string;
+}): Promise<void> {
+  if (args.actor.role !== "OWNER") throw new Error("стоимость правит только владелец");
+  if (args.purchaseCostCents != null && (!Number.isInteger(args.purchaseCostCents) || args.purchaseCostCents < 0)) {
+    throw new Error("сумма должна быть целым неотрицательным числом центов");
+  }
+
+  await prisma.$transaction(async (tx) => {
+    const current = await tx.vasePurchaseCost.findUnique({ where: { id: args.costId } });
+    if (!current) throw new Error("запись стоимости не найдена");
+
+    // Если сдвигаем начало, двигаем и конец предыдущего интервала — иначе в истории
+    // появится дыра, в которой стоимость «неизвестна».
+    if (args.effectiveFrom && args.effectiveFrom.getTime() !== current.effectiveFrom.getTime()) {
+      if (current.effectiveTo && args.effectiveFrom >= current.effectiveTo) {
+        throw new Error("начало интервала должно быть раньше его окончания");
+      }
+      const previous = await tx.vasePurchaseCost.findFirst({
+        where: {
+          costType: current.costType,
+          productId: current.productId,
+          productVariantId: current.productVariantId,
+          effectiveTo: current.effectiveFrom,
+        },
+      });
+      if (previous) {
+        await tx.vasePurchaseCost.update({ where: { id: previous.id }, data: { effectiveTo: args.effectiveFrom } });
+      }
+    }
+
+    const updated = await tx.vasePurchaseCost.update({
+      where: { id: args.costId },
+      data: {
+        ...(args.purchaseCostCents != null ? { purchaseCostCents: args.purchaseCostCents } : {}),
+        ...(args.effectiveFrom ? { effectiveFrom: args.effectiveFrom } : {}),
+        ...(args.comment !== undefined ? { comment: args.comment } : {}),
+      },
+    });
+
+    await tx.financeAudit.create({
+      data: {
+        entity: current.productVariantId ? "ProductVariant" : "Product",
+        entityId: current.productVariantId ?? current.productId!,
+        action: "CORRECT_COST",
+        beforeJson: {
+          costRecordId: current.id,
+          purchaseCostCents: current.purchaseCostCents,
+          effectiveFrom: current.effectiveFrom.toISOString(),
+        },
+        afterJson: {
+          costRecordId: updated.id,
+          purchaseCostCents: updated.purchaseCostCents,
+          effectiveFrom: updated.effectiveFrom.toISOString(),
+        },
+        reason: args.reason ?? null,
+        userId: args.actor.userId,
+        role: args.actor.role,
+      },
+    });
+  });
+}
+
+/**
+ * Удаление ошибочного интервала. Предыдущий интервал при этом снова «дотягивается» до конца
+ * удаляемого, чтобы в истории не осталось периода без стоимости.
+ */
+export async function deleteVasePurchaseCost(args: {
+  costId: string;
+  actor: { userId: string; role: Role };
+  reason?: string;
+}): Promise<void> {
+  if (args.actor.role !== "OWNER") throw new Error("стоимость правит только владелец");
+
+  await prisma.$transaction(async (tx) => {
+    const current = await tx.vasePurchaseCost.findUnique({ where: { id: args.costId } });
+    if (!current) throw new Error("запись стоимости не найдена");
+
+    const previous = await tx.vasePurchaseCost.findFirst({
+      where: {
+        costType: current.costType,
+        productId: current.productId,
+        productVariantId: current.productVariantId,
+        effectiveTo: current.effectiveFrom,
+      },
+    });
+
+    await tx.vasePurchaseCost.delete({ where: { id: args.costId } });
+    if (previous) {
+      await tx.vasePurchaseCost.update({ where: { id: previous.id }, data: { effectiveTo: current.effectiveTo } });
+    }
+
+    await tx.financeAudit.create({
+      data: {
+        entity: current.productVariantId ? "ProductVariant" : "Product",
+        entityId: current.productVariantId ?? current.productId!,
+        action: "DELETE_COST",
+        // Удалённая строка целиком остаётся в аудите — сама операция не теряется.
+        beforeJson: {
+          costRecordId: current.id,
+          purchaseCostCents: current.purchaseCostCents,
+          effectiveFrom: current.effectiveFrom.toISOString(),
+          effectiveTo: current.effectiveTo ? current.effectiveTo.toISOString() : null,
+        },
+        afterJson: Prisma.JsonNull,
+        reason: args.reason ?? null,
+        userId: args.actor.userId,
+        role: args.actor.role,
+      },
+    });
+  });
+}

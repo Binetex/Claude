@@ -8,7 +8,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import crypto from "crypto";
 import { prisma } from "@/lib/db";
-import { setVasePurchaseCost } from "./setVasePurchaseCost";
+import { setVasePurchaseCost, updateVasePurchaseCost, deleteVasePurchaseCost } from "./setVasePurchaseCost";
 
 const RUN = `vase${crypto.randomBytes(3).toString("hex")}`;
 let siteId = "";
@@ -145,6 +145,47 @@ describe("setVasePurchaseCost", () => {
         batchId: "batch-1",
       })
     ).rejects.toThrow(/причин/);
+  });
+
+  it("опечатку можно исправить прямо в текущем интервале", async () => {
+    const open = await prisma.vasePurchaseCost.findFirstOrThrow({
+      where: { productVariantId: variantId, costType: "INCLUDED_VASE", effectiveTo: null },
+    });
+    await updateVasePurchaseCost({ costId: open.id, purchaseCostCents: 111, actor: actor() });
+    const after = await prisma.vasePurchaseCost.findUniqueOrThrow({ where: { id: open.id } });
+    expect(after.purchaseCostCents).toBe(111);
+
+    const audit = await prisma.financeAudit.findFirst({ where: { userId, action: "CORRECT_COST" }, orderBy: { createdAt: "desc" } });
+    expect((audit?.beforeJson as { purchaseCostCents?: number })?.purchaseCostCents).toBe(open.purchaseCostCents);
+    expect((audit?.afterJson as { purchaseCostCents?: number })?.purchaseCostCents).toBe(111);
+  });
+
+  it("ошибочный интервал удаляется, предыдущий снова становится действующим", async () => {
+    const before = await prisma.vasePurchaseCost.findMany({
+      where: { productVariantId: variantId, costType: "INCLUDED_VASE" },
+      orderBy: { effectiveFrom: "asc" },
+    });
+    const last = before[before.length - 1];
+    const prev = before[before.length - 2];
+
+    await deleteVasePurchaseCost({ costId: last.id, actor: actor() });
+
+    expect(await prisma.vasePurchaseCost.findUnique({ where: { id: last.id } })).toBeNull();
+    const reopened = await prisma.vasePurchaseCost.findUniqueOrThrow({ where: { id: prev.id } });
+    // Предыдущий «дотянулся» до конца удалённого — дыры в истории не осталось.
+    expect(reopened.effectiveTo).toEqual(last.effectiveTo);
+
+    const audit = await prisma.financeAudit.findFirst({ where: { userId, action: "DELETE_COST" }, orderBy: { createdAt: "desc" } });
+    expect((audit?.beforeJson as { costRecordId?: string })?.costRecordId).toBe(last.id);
+  });
+
+  it("править стоимость может только владелец", async () => {
+    const open = await prisma.vasePurchaseCost.findFirstOrThrow({
+      where: { productVariantId: variantId, costType: "INCLUDED_VASE", effectiveTo: null },
+    });
+    await expect(
+      updateVasePurchaseCost({ costId: open.id, purchaseCostCents: 1, actor: { userId, role: "FLORIST" } })
+    ).rejects.toThrow(/владелец/);
   });
 
   it("нельзя открыть интервал раньше действующего", async () => {
