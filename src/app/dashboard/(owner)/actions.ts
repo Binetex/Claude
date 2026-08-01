@@ -8,7 +8,10 @@ import { CARD_MESSAGE_MAX } from "@/lib/print/cardText";
 import { hashPassword } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { Prisma } from "@/generated/prisma/client";
-import type { OrderStatus, FloristFinanceVisibility, Role } from "@/generated/prisma/enums";
+import type { OrderStatus, FloristFinanceVisibility, Role, FinancialItemType, VaseCostType } from "@/generated/prisma/enums";
+import { setProductClassification, setVariantClassification } from "@/modules/catalog/finance/classification";
+import { setVasePurchaseCost } from "@/modules/catalog/finance/setVasePurchaseCost";
+import { usdToCents } from "@/lib/cents";
 import {
   reassignManual,
   setManualFloristPrice,
@@ -194,6 +197,98 @@ export async function ownerSetVariantComposition(variantId: string, text: string
   });
   revalidatePath(`/dashboard/products/${v.productId}`);
   revalidatePath("/dashboard/products");
+}
+
+// ─────────── Финансовая классификация каталога и закупочная стоимость ваз ───────────
+// Все действия ниже — тонкие обёртки над сервисом modules/catalog/finance: тот же путь
+// записи, та же валидация и тот же аудит будут у экрана bulk-review. Второй формулы нет.
+
+/** Тип позиции и дефолт «содержит вазу» на уровне ТОВАРА. null = очистить значение. */
+export async function ownerSetProductFinance(
+  productId: string,
+  patch: { financialType?: FinancialItemType | null; defaultIncludesVase?: boolean | null }
+) {
+  const user = await requireRole("OWNER");
+  await setProductClassification({ productId, patch, actor: { userId: user.id, role: user.role } });
+  revalidatePath(`/dashboard/products/${productId}`);
+  revalidatePath("/dashboard/products");
+}
+
+/** Тип позиции и признак вазы на уровне ВАРИАНТА. null = вернуть наследование от товара. */
+export async function ownerSetVariantFinance(
+  variantId: string,
+  patch: { financialType?: FinancialItemType | null; includesVase?: boolean | null }
+) {
+  const user = await requireRole("OWNER");
+  await setVariantClassification({ variantId, patch, actor: { userId: user.id, role: user.role } });
+  const v = await prisma.productVariant.findUnique({ where: { id: variantId }, select: { productId: true } });
+  if (v) revalidatePath(`/dashboard/products/${v.productId}`);
+  revalidatePath("/dashboard/products");
+}
+
+/**
+ * Новый интервал закупочной стоимости вазы. Прямого update таблицы нет: запись идёт только
+ * через setVasePurchaseCost, который закрывает предыдущий интервал и пишет аудит.
+ * Дата начала действия обязательна; дата в будущем допустима.
+ */
+export async function ownerAddVaseCost(args: {
+  target: { productId: string } | { productVariantId: string };
+  costType: VaseCostType;
+  amountUsd: string;
+  effectiveFrom: string; // YYYY-MM-DD
+  comment?: string;
+}): Promise<{ ok: true } | { ok: false; error: string }> {
+  const user = await requireRole("OWNER");
+
+  let cents: number | null;
+  try {
+    cents = usdToCents(args.amountUsd);
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : "некорректная сумма" };
+  }
+  if (cents == null) return { ok: false, error: "укажите закупочную стоимость" };
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(args.effectiveFrom)) return { ok: false, error: "укажите дату начала действия" };
+
+  const effectiveFrom = new Date(`${args.effectiveFrom}T00:00:00.000Z`);
+  if (Number.isNaN(effectiveFrom.getTime())) return { ok: false, error: "некорректная дата начала действия" };
+
+  // Снимки названий для аудита: отчёт должен читаться и после исчезновения товара с платформы.
+  const named =
+    "productId" in args.target
+      ? await prisma.product.findUnique({
+          where: { id: args.target.productId },
+          select: { name: true, site: { select: { shortName: true } } },
+        })
+      : await prisma.productVariant
+          .findUnique({
+            where: { id: args.target.productVariantId },
+            select: { title: true, product: { select: { name: true, site: { select: { shortName: true } } } } },
+          })
+          .then((v) => (v ? { name: `${v.product.name} / ${v.title}`, site: v.product.site } : null));
+
+  try {
+    await setVasePurchaseCost({
+      target: args.target,
+      costType: args.costType,
+      purchaseCostCents: cents,
+      effectiveFrom,
+      actor: { userId: user.id, role: user.role },
+      comment: args.comment?.trim() || undefined,
+      entityNameSnapshot: named?.name,
+      siteShortNameSnapshot: named?.site.shortName,
+    });
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : "не удалось сохранить стоимость" };
+  }
+
+  const productId =
+    "productId" in args.target
+      ? args.target.productId
+      : (await prisma.productVariant.findUnique({ where: { id: args.target.productVariantId }, select: { productId: true } }))
+          ?.productId;
+  if (productId) revalidatePath(`/dashboard/products/${productId}`);
+  revalidatePath("/dashboard/products");
+  return { ok: true };
 }
 
 /** Шаблон состава товара (defaultFloristComposition) — только для заполнения вариантов, не для заказа. */

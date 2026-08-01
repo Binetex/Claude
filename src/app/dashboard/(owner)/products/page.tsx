@@ -2,14 +2,16 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/db";
 import { Prisma } from "@/generated/prisma/client";
-import type { ProductStatus } from "@/generated/prisma/enums";
+import type { ProductStatus, FinancialItemType } from "@/generated/prisma/enums";
+import { resolveVariantFinance } from "@/modules/catalog/finance/resolveVariantFinance";
+import { FINANCIAL_TYPE_ORDER, FINANCIAL_TYPE_LABELS } from "@/modules/catalog/finance/display";
 import { Card } from "@/components/ui/Card";
 import { PageHeader } from "@/components/ui/misc";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { formatMoney, toNumber } from "@/lib/money";
-import { ProductRow, type ProductVM, type VariantVM } from "./ProductRow";
+import { ProductRow, type ProductVM, type ProductFinanceVM, type VariantVM } from "./ProductRow";
 import { SyncProductsBar } from "./SyncProductsBar";
 import { ownerGetProductsSyncSummary } from "@/app/dashboard/(owner)/actions";
 // Пейджер и разбор page/perPage переиспользуются из списка заказов — тот же вид и то же
@@ -53,6 +55,12 @@ export default async function ProductsPage({ searchParams }: { searchParams: Pro
   const dir: "asc" | "desc" = str(sp.dir) === "desc" ? "desc" : "asc";
   const showInactive = str(sp.inactive) === "1";
   const comp = str(sp.comp); // "" | "full" | "partial" | "empty" — фильтр по составам
+  // Финансовые фильтры. Считаются в памяти по эффективным значениям: наследование
+  // Product → ProductVariant в SQL не выразить, а второй логики резолва быть не должно.
+  const ftype = str(sp.ftype); // "" | FinancialItemType | "none"
+  const fvase = str(sp.fvase); // "" | "yes" | "no" | "unknown"
+  const fcost = str(sp.fcost) === "1"; // нет закупочной стоимости, хотя ваза нужна
+  const foverride = str(sp.foverride) === "1"; // есть override у вариантов
 
   const where: Prisma.ProductWhereInput = {};
   if (!showInactive) {
@@ -74,11 +82,17 @@ export default async function ProductsPage({ searchParams }: { searchParams: Pro
   // Фильтр по составам считается в памяти (см. ниже) — под него страницу нарезать в БД нельзя,
   // иначе в выдаче окажется меньше строк, чем размер страницы, а счётчик страниц наврёт.
   // Поэтому при активном фильтре берём всё и режем после фильтрации, иначе — обычные skip/take.
-  const compFilterActive = comp === "full" || comp === "partial" || comp === "empty";
+  const financeFilterActive = !!ftype || !!fvase || fcost || foverride;
+  const compFilterActive = comp === "full" || comp === "partial" || comp === "empty" || financeFilterActive;
 
   const include = {
     site: { select: { name: true, shortName: true, colorTag: true, platform: true } },
-    variants: { where: { remoteDeleted: false }, orderBy: [{ position: "asc" as const }, { title: "asc" as const }] },
+    variants: {
+      where: { remoteDeleted: false },
+      orderBy: [{ position: "asc" as const }, { title: "asc" as const }],
+      include: { vaseCosts: true },
+    },
+    vaseCosts: true,
   };
 
   const [products, dbTotal, sites, summary] = await Promise.all([
@@ -93,6 +107,9 @@ export default async function ProductsPage({ searchParams }: { searchParams: Pro
     ownerGetProductsSyncSummary(),
   ]);
 
+  // Резолв «на сейчас»: список — экран настройки каталога, а не расчёт заказа.
+  const now = new Date();
+
   const rows: ProductVM[] = products.map((p) => {
     const variants: VariantVM[] = p.variants.map((v) => ({
       id: v.id,
@@ -105,6 +122,43 @@ export default async function ProductsPage({ searchParams }: { searchParams: Pro
       adminUrl: v.adminUrl,
     }));
     const showVariants = variants.length > 1 || (variants.length === 1 && p.variants[0].title !== "Default Title");
+
+    // Финансовая сводка — через ОБЩИЙ резолвер, никакой отдельной логики наследования здесь.
+    const allCosts = [
+      ...p.vaseCosts,
+      ...p.variants.flatMap((v) => v.vaseCosts),
+    ].map((c) => ({
+      id: c.id,
+      productId: c.productId,
+      productVariantId: c.productVariantId,
+      costType: c.costType,
+      purchaseCostCents: c.purchaseCostCents,
+      effectiveFrom: c.effectiveFrom,
+      effectiveTo: c.effectiveTo,
+    }));
+    const finance: ProductFinanceVM = {
+      vaseCount: 0,
+      bouquetWithVaseCount: 0,
+      bouquetNoVaseCount: 0,
+      unclassifiedCount: 0,
+      missingCostCount: 0,
+      overrideCount: 0,
+    };
+    const resolvedVariants = p.variants.map((v) => {
+      const r = resolveVariantFinance({
+        variant: { id: v.id, financialType: v.financialType, includesVase: v.includesVase },
+        product: { id: p.id, financialType: p.financialType, defaultIncludesVase: p.defaultIncludesVase },
+        costs: allCosts,
+        at: now,
+      });
+      if (r.financialType === "VASE") finance.vaseCount += 1;
+      if (r.financialType === "FLOWER_PRODUCT" && r.includesVase === true) finance.bouquetWithVaseCount += 1;
+      if (r.financialType === "FLOWER_PRODUCT" && r.includesVase === false) finance.bouquetNoVaseCount += 1;
+      if (r.financialType === null) finance.unclassifiedCount += 1;
+      if (r.reviewReasons.includes("VASE_COST_MISSING")) finance.missingCostCount += 1;
+      if (v.financialType != null || v.includesVase != null) finance.overrideCount += 1;
+      return r;
+    });
     // Индикатор составов: заполненные / всего (по неудалённым вариантам из выборки).
     const compTotal = p.variants.length;
     const compFilled = p.variants.filter((v) => v.floristComposition && v.floristComposition.trim()).length;
@@ -125,6 +179,9 @@ export default async function ProductsPage({ searchParams }: { searchParams: Pro
       showVariants,
       compFilled,
       compTotal,
+      finance,
+      resolvedTypes: resolvedVariants.map((r) => r.financialType),
+      resolvedVase: resolvedVariants.map((r) => r.includesVase),
       variants,
     };
   });
@@ -132,9 +189,18 @@ export default async function ProductsPage({ searchParams }: { searchParams: Pro
   // Фильтр по заполненности составов (in-memory — в БД «сколько вариантов заполнено» не выразить
   // без обхода whitespace-only значений, которые здесь считаются незаполненными).
   const matched = rows.filter((r) => {
-    if (comp === "full") return r.compTotal > 0 && r.compFilled === r.compTotal;
-    if (comp === "partial") return r.compFilled > 0 && r.compFilled < r.compTotal;
-    if (comp === "empty") return r.compFilled === 0;
+    if (comp === "full" && !(r.compTotal > 0 && r.compFilled === r.compTotal)) return false;
+    if (comp === "partial" && !(r.compFilled > 0 && r.compFilled < r.compTotal)) return false;
+    if (comp === "empty" && r.compFilled !== 0) return false;
+
+    // Финансовые фильтры — по ЭФФЕКТИВНЫМ значениям вариантов (с учётом наследования).
+    if (ftype === "none" && r.finance.unclassifiedCount === 0) return false;
+    if (ftype && ftype !== "none" && !r.resolvedTypes.includes(ftype as FinancialItemType)) return false;
+    if (fvase === "yes" && r.finance.bouquetWithVaseCount === 0) return false;
+    if (fvase === "no" && r.finance.bouquetNoVaseCount === 0) return false;
+    if (fvase === "unknown" && !r.resolvedVase.includes(null)) return false;
+    if (fcost && r.finance.missingCostCount === 0) return false;
+    if (foverride && r.finance.overrideCount === 0) return false;
     return true;
   });
 
@@ -211,6 +277,35 @@ export default async function ProductsPage({ searchParams }: { searchParams: Pro
             </Select>
           </label>
           <label className="flex flex-col gap-1">
+            <span className={fieldLabel}>Фин. тип</span>
+            <Select name="ftype" defaultValue={ftype} wrapperClassName="w-44">
+              <option value="">Все</option>
+              <option value="none">Без классификации</option>
+              {FINANCIAL_TYPE_ORDER.map((t) => (
+                <option key={t} value={t}>
+                  {FINANCIAL_TYPE_LABELS[t]}
+                </option>
+              ))}
+            </Select>
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className={fieldLabel}>Ваза</span>
+            <Select name="fvase" defaultValue={fvase} wrapperClassName="w-40">
+              <option value="">Все</option>
+              <option value="yes">Букет с вазой</option>
+              <option value="no">Без вазы</option>
+              <option value="unknown">Не настроено</option>
+            </Select>
+          </label>
+          <label className="flex h-9 items-center gap-1.5 text-sm text-slate-600">
+            <input type="checkbox" name="fcost" value="1" defaultChecked={fcost} className="rounded border-slate-300" />
+            Нет закуп. стоимости
+          </label>
+          <label className="flex h-9 items-center gap-1.5 text-sm text-slate-600">
+            <input type="checkbox" name="foverride" value="1" defaultChecked={foverride} className="rounded border-slate-300" />
+            Есть override
+          </label>
+          <label className="flex flex-col gap-1">
             <span className={fieldLabel}>Сортировка</span>
             <Select name="sort" defaultValue={sort} wrapperClassName="w-40">
               <option value="name">Название</option>
@@ -250,6 +345,7 @@ export default async function ProductsPage({ searchParams }: { searchParams: Pro
                     <th className="px-3 py-2 text-right font-medium">Цена сайта</th>
                     <th className="px-3 py-2 text-right font-medium">Цена флориста</th>
                     <th className="px-3 py-2 font-medium">Составы</th>
+                    <th className="px-3 py-2 font-medium">Финансы</th>
                     <th className="px-3 py-2 font-medium">Статус</th>
                     <th className="px-3 py-2 font-medium">Действия</th>
                   </tr>

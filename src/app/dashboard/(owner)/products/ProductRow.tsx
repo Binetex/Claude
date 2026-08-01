@@ -5,7 +5,7 @@ import { ZoomableImage } from "@/components/ImageLightbox";
 import { Badge } from "@/components/ui/Badge";
 import { InlinePrice } from "./InlinePrice";
 import { ownerSetProductFloristPrice, ownerSetVariantFloristPrice } from "@/app/dashboard/(owner)/actions";
-import type { ProductStatus } from "@/generated/prisma/enums";
+import type { ProductStatus, FinancialItemType } from "@/generated/prisma/enums";
 
 export type VariantVM = {
   id: string;
@@ -35,8 +35,48 @@ export type ProductVM = {
   showVariants: boolean; // прятать раскрытие для одиночного "Default Title"
   compFilled: number;
   compTotal: number;
+  finance: ProductFinanceVM;
+  /** Эффективные типы и признак вазы по вариантам — только для фильтрации списка. */
+  resolvedTypes: (FinancialItemType | null)[];
+  resolvedVase: (boolean | null)[];
   variants: VariantVM[];
 };
+
+/** Сводка финансовой классификации по вариантам товара — считает страница общим резолвером. */
+export type ProductFinanceVM = {
+  vaseCount: number; // вариантов с типом VASE
+  bouquetWithVaseCount: number; // букетов с вазой
+  bouquetNoVaseCount: number; // букетов с подтверждённым «без вазы»
+  unclassifiedCount: number; // тип не задан ни на варианте, ни на товаре
+  missingCostCount: number; // ваза нужна, а стоимость неизвестна
+  overrideCount: number; // вариантов со своим значением поверх товара
+};
+
+function FinanceBadges({ f }: { f: ProductFinanceVM }) {
+  const items: { key: string; label: string; cls: string }[] = [];
+  if (f.vaseCount > 0) items.push({ key: "vase", label: "Ваза", cls: "border-sky-200 bg-sky-50 text-sky-700" });
+  if (f.bouquetWithVaseCount > 0)
+    items.push({ key: "withVase", label: "Букет с вазой", cls: "border-violet-200 bg-violet-50 text-violet-700" });
+  if (f.bouquetNoVaseCount > 0)
+    items.push({ key: "noVase", label: "Без вазы", cls: "border-slate-200 bg-slate-50 text-slate-600" });
+  if (f.unclassifiedCount > 0)
+    items.push({ key: "unclassified", label: "Без классификации", cls: "border-slate-200 bg-white text-slate-500" });
+  if (f.missingCostCount > 0)
+    items.push({ key: "noCost", label: "Нет закуп. стоимости", cls: "border-amber-200 bg-amber-50 text-amber-700" });
+  if (f.overrideCount > 0)
+    items.push({ key: "override", label: "Есть override", cls: "border-indigo-200 bg-indigo-50 text-indigo-700" });
+
+  if (items.length === 0) return <span className="text-xs text-slate-400">—</span>;
+  return (
+    <span className="flex flex-wrap gap-1">
+      {items.map((i) => (
+        <Badge key={i.key} className={i.cls}>
+          {i.label}
+        </Badge>
+      ))}
+    </span>
+  );
+}
 
 function StatusBadge({ status, remoteDeleted }: { status: ProductStatus; remoteDeleted: boolean }) {
   if (remoteDeleted) return <Badge className="border-red-200 bg-red-50 text-red-700">Удалён</Badge>;
@@ -110,6 +150,9 @@ export function ProductRow({ p, backQuery }: { p: ProductVM; backQuery?: string 
           <CompositionIndicator filled={p.compFilled} total={p.compTotal} />
         </td>
         <td className="px-3 py-2">
+          <FinanceBadges f={p.finance} />
+        </td>
+        <td className="px-3 py-2">
           <StatusBadge status={p.status} remoteDeleted={p.remoteDeleted} />
         </td>
         <td className="px-3 py-2">
@@ -128,7 +171,7 @@ export function ProductRow({ p, backQuery }: { p: ProductVM; backQuery?: string 
 
       {p.showVariants && open && (
         <tr className="border-b border-slate-100 bg-slate-50/50">
-          <td colSpan={9} className="px-3 py-2">
+          <td colSpan={10} className="px-3 py-2">
             <table className="w-full text-xs">
               <thead>
                 <tr className="text-left text-slate-400">

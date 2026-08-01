@@ -10,6 +10,10 @@ import { fmtDateTime } from "@/lib/format";
 import type { ProductStatus } from "@/generated/prisma/enums";
 import { ProductFloristPriceInput } from "../PriceInputs";
 import { VariantEditDialog } from "../VariantEditDialog";
+import { ProductFinanceBlock } from "../ProductFinanceBlock";
+import type { VariantFinanceVM } from "../VariantFinanceBlock";
+import { resolveVariantFinance, type VaseCostRow } from "@/modules/catalog/finance/resolveVariantFinance";
+import { financialTypeLabel, includesVaseLabel } from "@/modules/catalog/finance/display";
 
 export const dynamic = "force-dynamic";
 
@@ -56,6 +60,8 @@ export default async function ProductDetailPage({
     include: {
       site: { select: { name: true, shortName: true, colorTag: true, platform: true } },
       variants: { orderBy: [{ remoteDeleted: "asc" }, { position: "asc" }, { title: "asc" }] },
+      // Стоимость вазы уровня товара: и действующая, и история — владельцу видно всё.
+      vaseCosts: { orderBy: { effectiveFrom: "desc" } },
     },
   });
   if (!product) notFound();
@@ -68,6 +74,64 @@ export default async function ProductDetailPage({
       : priceMin === (priceMax ?? priceMin)
         ? formatMoney(priceMin)
         : `${formatMoney(priceMin)}–${formatMoney(priceMax)}`;
+
+  // ── Финансовая классификация: эффективные значения считает общий резолвер, а не страница ──
+  const variantCosts = await prisma.vasePurchaseCost.findMany({
+    where: { productVariantId: { in: product.variants.map((v) => v.id) } },
+    orderBy: { effectiveFrom: "desc" },
+  });
+  const allCosts: VaseCostRow[] = [...variantCosts, ...product.vaseCosts].map((c) => ({
+    id: c.id,
+    productId: c.productId,
+    productVariantId: c.productVariantId,
+    costType: c.costType,
+    purchaseCostCents: c.purchaseCostCents,
+    effectiveFrom: c.effectiveFrom,
+    effectiveTo: c.effectiveTo,
+  }));
+  // Резолв «на сейчас»: это карточка настройки, а не расчёт заказа (там дата доставки).
+  const now = new Date();
+
+  const toRowVM = (c: (typeof allCosts)[number]) => ({
+    id: c.id,
+    purchaseCostCents: c.purchaseCostCents,
+    effectiveFrom: c.effectiveFrom.toISOString(),
+    effectiveTo: c.effectiveTo ? c.effectiveTo.toISOString() : null,
+    level: (c.productVariantId ? "VARIANT" : "PRODUCT") as "VARIANT" | "PRODUCT",
+    comment: null as string | null,
+  });
+
+  const productCostRows = product.vaseCosts.map(toRowVM);
+  const productActiveCost =
+    product.vaseCosts.find((c) => c.effectiveFrom <= now && (c.effectiveTo === null || c.effectiveTo > now)) ?? null;
+
+  const financeByVariant = new Map<string, VariantFinanceVM>();
+  for (const v of product.variants) {
+    const resolved = resolveVariantFinance({
+      variant: { id: v.id, financialType: v.financialType, includesVase: v.includesVase },
+      product: { id: product.id, financialType: product.financialType, defaultIncludesVase: product.defaultIncludesVase },
+      costs: allCosts,
+      at: now,
+    });
+    financeByVariant.set(v.id, {
+      variantId: v.id,
+      productId: product.id,
+      ownType: v.financialType,
+      ownIncludesVase: v.includesVase,
+      effectiveType: resolved.financialType,
+      typeSource: resolved.financialTypeSource,
+      effectiveIncludesVase: resolved.includesVase,
+      includesVaseSource: resolved.includesVaseSource,
+      productTypeLabel: financialTypeLabel(product.financialType),
+      productIncludesVaseLabel: includesVaseLabel(product.defaultIncludesVase),
+      effectiveCostCents: resolved.vaseCostCents,
+      costSource: resolved.vaseCostSource,
+      costHistory: [
+        ...allCosts.filter((c) => c.productVariantId === v.id).map(toRowVM),
+        ...productCostRows,
+      ],
+    });
+  }
 
   return (
     <div className="space-y-4">
@@ -131,6 +195,20 @@ export default async function ProductDetailPage({
         </CardBody>
       </Card>
 
+      {/* Финансовая классификация товара */}
+      <Card>
+        <CardHeader><CardTitle>Финансовая классификация</CardTitle></CardHeader>
+        <CardBody>
+          <ProductFinanceBlock
+            productId={product.id}
+            financialType={product.financialType}
+            defaultIncludesVase={product.defaultIncludesVase}
+            costHistory={productCostRows}
+            effectiveCostCents={productActiveCost?.purchaseCostCents ?? null}
+          />
+        </CardBody>
+      </Card>
+
       {/* Варианты */}
       <Card className="overflow-x-auto">
         <CardHeader><CardTitle>Варианты · {product.variants.length}</CardTitle></CardHeader>
@@ -177,6 +255,7 @@ export default async function ProductDetailPage({
                   <td className="px-3 py-2 text-right">
                     <VariantEditDialog
                       variantId={v.id}
+                      finance={financeByVariant.get(v.id)!}
                       title={variantOptions(v)}
                       initialPrice={v.floristPrice != null ? toNumber(v.floristPrice) : null}
                       initialComposition={v.floristComposition}

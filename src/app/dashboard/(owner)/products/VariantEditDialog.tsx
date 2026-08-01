@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { ownerSetVariantFloristPrice, ownerSetVariantComposition } from "@/app/dashboard/(owner)/actions";
+import { VariantFinanceBlock, type VariantFinanceVM } from "./VariantFinanceBlock";
 
 type Sibling = { id: string; label: string; composition: string | null };
 
@@ -20,6 +21,7 @@ export function VariantEditDialog({
   siblings,
   adminUrl,
   onlineUrl,
+  finance,
 }: {
   variantId: string;
   title: string;
@@ -28,6 +30,7 @@ export function VariantEditDialog({
   siblings: Sibling[];
   adminUrl: string | null;  // ссылка в админку Shopify; для Woo — null
   onlineUrl: string | null; // публичная ссылка на товар в витрине
+  finance: VariantFinanceVM;
 }) {
   const [open, setOpen] = useState(false);
   const [price, setPrice] = useState(initialPrice != null ? String(initialPrice) : "");
@@ -93,6 +96,10 @@ export function VariantEditDialog({
             </div>
             <Textarea value={comp} onChange={(e) => setComp(e.target.value)} rows={5} placeholder={"24 white roses\n5 eucalyptus stems\n1 vase"} />
           </div>
+
+          {/* Классификация сохраняется сразу при выборе: смена типа и стоимость — отдельные
+              операции с аудитом, их нельзя молча смешивать с кнопкой «Сохранить» выше. */}
+          <VariantFinanceBlock vm={finance} />
         </div>
         <div className="mt-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
