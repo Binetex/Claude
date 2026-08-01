@@ -69,7 +69,16 @@ afterAll(async () => {
   await prisma.financeAudit.deleteMany({ where: { userId } });
   await prisma.productVariant.updateMany({ where: { product: { siteId: { in: [siteA, siteB] } } }, data: { includedVaseVariantId: null } });
   await prisma.product.updateMany({ where: { siteId: { in: [siteA, siteB] } }, data: { defaultIncludedVaseVariantId: null } });
-  await prisma.vasePurchaseCost.deleteMany({ where: { variant: { product: { siteId: { in: [siteA, siteB] } } } } });
+  // Стоимость бывает и на варианте, и на товаре: чистим оба уровня, иначе Restrict не даст
+  // удалить товар — что и правильно, финансовая история просто так не исчезает.
+  await prisma.vasePurchaseCost.deleteMany({
+    where: {
+      OR: [
+        { variant: { product: { siteId: { in: [siteA, siteB] } } } },
+        { product: { siteId: { in: [siteA, siteB] } } },
+      ],
+    },
+  });
   await prisma.productVariant.deleteMany({ where: { product: { siteId: { in: [siteA, siteB] } } } });
   await prisma.product.deleteMany({ where: { siteId: { in: [siteA, siteB] } } });
   await prisma.site.deleteMany({ where: { id: { in: [siteA, siteB] } } });
@@ -156,6 +165,33 @@ describe("селектор ваз", () => {
     expect(ids).not.toContain(vaseVariantArchived);
     expect(ids).not.toContain(vaseVariantB);
     expect(ids).not.toContain(giftVariant);
+  });
+
+  it("показывает стоимость, заданную на карточке ТОВАРА, а не только у варианта", async () => {
+    const vp = await prisma.productVariant.findUniqueOrThrow({
+      where: { id: vaseVariantA },
+      select: { productId: true },
+    });
+    await prisma.vasePurchaseCost.create({
+      data: {
+        productId: vp.productId,
+        costType: "STANDALONE_VASE",
+        purchaseCostCents: 900,
+        effectiveFrom: new Date("2026-01-01T00:00:00Z"),
+        createdBy: userId,
+      },
+    });
+    const option = (await listVaseOptions(siteA)).find((o) => o.id === vaseVariantA);
+    expect(option?.costCents).toBe(900);
+  });
+
+  it("черновик магазина остаётся вазой и помечается", async () => {
+    const vp = await prisma.productVariant.findUniqueOrThrow({ where: { id: vaseVariantA }, select: { productId: true } });
+    await prisma.product.update({ where: { id: vp.productId }, data: { status: "DRAFT" } });
+    const option = (await listVaseOptions(siteA)).find((o) => o.id === vaseVariantA);
+    expect(option).toBeDefined();
+    expect(option?.isDraft).toBe(true);
+    await prisma.product.update({ where: { id: vp.productId }, data: { status: "ACTIVE" } });
   });
 });
 

@@ -217,7 +217,7 @@ export async function setProductDefaultVase(
 
 /** Активные вазы магазина для селектора: эффективный тип VASE, не архив. */
 export async function listVaseOptions(siteId: string): Promise<
-  { id: string; label: string; productId: string; costCents: number | null }[]
+  { id: string; label: string; productId: string; costCents: number | null; isDraft: boolean }[]
 > {
   const variants = await prisma.productVariant.findMany({
     where: {
@@ -229,20 +229,36 @@ export async function listVaseOptions(siteId: string): Promise<
     select: {
       id: true,
       title: true,
-      product: { select: { id: true, name: true } },
+      product: {
+        select: {
+          id: true,
+          name: true,
+          status: true,
+          // Стоимость вазы чаще всего задают на карточке ТОВАРА, а не варианта. Без этой
+          // выборки список показывал «закуп не указан» у вазы, которой цена уже задана.
+          vaseCosts: { where: { costType: "STANDALONE_VASE" }, orderBy: { effectiveFrom: "desc" } },
+        },
+      },
       vaseCosts: { where: { costType: "STANDALONE_VASE" }, orderBy: { effectiveFrom: "desc" } },
     },
     orderBy: [{ product: { name: "asc" } }, { title: "asc" }],
   });
 
   const now = new Date();
+  const activeAt = (rows: { effectiveFrom: Date; effectiveTo: Date | null; purchaseCostCents: number }[]) =>
+    rows.find((c) => c.effectiveFrom <= now && (c.effectiveTo === null || c.effectiveTo > now)) ?? null;
+
   return variants.map((v) => {
-    const active = v.vaseCosts.find((c) => c.effectiveFrom <= now && (c.effectiveTo === null || c.effectiveTo > now));
+    // Тот же приоритет, что и в расчёте заказа: своя цена варианта, иначе цена товара.
+    const active = activeAt(v.vaseCosts) ?? activeAt(v.product.vaseCosts);
     return {
       id: v.id,
       productId: v.product.id,
       label: `${v.product.name}${v.title !== "Default Title" ? ` / ${v.title}` : ""}`,
       costCents: active?.purchaseCostCents ?? null,
+      // Черновик магазина остаётся полноценной вазой для учёта — но владельцу стоит видеть,
+      // что товар не опубликован.
+      isDraft: v.product.status === "DRAFT",
     };
   });
 }

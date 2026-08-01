@@ -13,7 +13,7 @@ import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { formatCents } from "@/lib/cents";
 
-export type VaseOption = { id: string; label: string; productId: string; costCents: number | null };
+export type VaseOption = { id: string; label: string; productId: string; costCents: number | null; isDraft?: boolean };
 
 export type VaseSelectState = {
   /** Собственное состояние сущности: null = наследовать (для товара — «не настроено»). */
@@ -94,6 +94,7 @@ export function VaseSelect({
             {options.map((o) => (
               <option key={o.id} value={o.id}>
                 {o.label}
+                {o.isDraft ? " (черновик)" : ""}
                 {o.costCents != null ? ` — закуп ${formatCents(o.costCents)}` : " — закуп не указан"}
               </option>
             ))}
