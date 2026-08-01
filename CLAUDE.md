@@ -1,44 +1,173 @@
-## Fast diagnostics
+# Floremart — дашборд управления цветочными заказами
 
-- Do not query production database for UI or data-mapping investigations unless explicitly requested.
-- Do not read `.env` or execute ad-hoc database scripts without explicit approval.
-- If a diagnostic command is blocked or fails once, do not retry it through alternative wrappers, temporary files, SSH, SCP, or different shells.
-- After the first blocked diagnostic command, stop and explain what could not be verified.
-- Prefer static code inspection, existing logs, API responses, and already available data.
-- Do not create temporary diagnostic scripts unless explicitly requested.
-- For small investigations, spend no more than 2 minutes on diagnostics before reporting the likely cause and proposed fix.
+Стек: Next.js, TypeScript, Prisma, PostgreSQL. Несколько магазинов (Site) на Shopify и
+WooCommerce, общий дашборд заказов, назначение флористов, доставка через Burq, SMS через QUO,
+Email через Brevo, служебные уведомления в Telegram.
 
-# Project rules
+Этот файл описывает ТЕКУЩЕЕ состояние и действующие договорённости. Историю изменений сюда
+не добавлять — она в git.
 
-- Stack: Next.js, TypeScript, Prisma.
-- Production deployment only after explicit user approval.
-- Never commit secrets, tokens, credentials, private keys, or .env files.
-- Do not modify deploy.sh, ecosystem.config.js, authentication, Prisma schema, migrations, production configuration, or infrastructure without explicit approval.
-- For small UI tasks, inspect only directly relevant files.
-- Do not scan or analyze the entire repository unless required.
-- Do not refactor unrelated code.
-- Do not fix unrelated issues without approval.
-- Run targeted checks first.
-- Run full build only before deployment, before a major merge, or after architecture, dependency, routing, database, or configuration changes.
-- One task per commit.
-- Do not push, merge, deploy, restart production services, or modify production data automatically.
-- Read detailed documentation only when the current task requires it.
+---
 
-## Быстрый деплой (solo-dev)
+## Архитектурные решения (окончательные)
 
-- Для быстрых UI и обычных кодовых задач НЕ использовать GitHub в процессе деплоя.
-- «Быстрый деплой» = запуск ./deploy-fast.sh (локальная рабочая папка → production напрямую).
-- Не выполнять commit, push или обычный ./deploy.sh без отдельного запроса.
-- Не запускать полный build после каждой мелкой правки — build выполняется один раз внутри быстрого деплоя.
-- Для локальных UI-задач не читать docs/HANDOFF.md / docs/ARCHITECTURE.md, если задача этого не требует.
-- Для простой задачи менять только напрямую связанные файлы, без несвязанного рефакторинга.
-- Миграции Prisma на проде не применять автоматически: deploy-fast.sh при неприменённых миграциях останавливается и спрашивает подтверждение.
+Это не «пока так», а принятые решения. Менять — только по явному запросу владельца.
 
-## Detailed documentation
+- **Настройка автоматизаций и Email — только владелец.** Все server actions разделов
+  Automations/Sites идут через `requireRole("OWNER")`. Флорист и колл-центр видят только заказы.
+- **Один worker на всё.** `floremart-worker` (PM2, отдельный процесс от Next.js,
+  `scripts/outbox-worker.ts`). Новая асинхронная задача = новый `eventType` в этом воркере.
+  Второй воркер и вторая очередь не заводятся.
+- **Outbox — единственный механизм отложенной и фоновой работы.** Durable, at-least-once,
+  дедуп по `idempotencyKey`, отложенность через `availableAt`, backoff и dead-letter.
+  Отдельных планировщиков и cron нет: опрос outbox и есть расписание.
+- **Один движок каналов.** `ChannelSender` (`modules/automations/channels`) обслуживает и
+  одиночные правила, и цепочки. Движок решает «кому и что», канал — «как отправить».
+  Реестр каналов создаётся один раз в воркере и переиспользуется обоими.
+- **Automation Rules и Automation Flows — разные сущности.** Правило = одно событие → одно
+  сообщение. Цепочка = событие → последовательность шагов. Разные модели, разные eventType,
+  разные экраны. Не объединять и не переносить одно в другое.
+- **Маркетинг остаётся в Brevo.** Floremart отвечает ТОЛЬКО за автоматические транзакционные
+  письма по событиям заказа. Рассылки, сегменты и кампании — на стороне Brevo.
+- **Шаблоны писем живут в Brevo.** В нашей БД хранится только Template ID. HTML-вёрстка в код
+  не переносится (исходники шаблонов лежат в `docs/email-templates/` как справочные).
 
-- docs/HANDOFF.md — current project state and remaining work.
-- docs/ARCHITECTURE.md — overall architecture.
-- docs/integrations/shopify.md — Shopify integration.
-- TODO.md — task backlog.
+---
+
+## Что реализовано
+
+**Email (Brevo)**
+- Общий API-ключ на аккаунт: зашифрован в БД (приоритет) либо `BREVO_API_KEY` в env.
+- Настройки уровня Site (`SiteEmailSettings`): включение, отправитель, reply-to, отметка о
+  подтверждённом домене. Письмо уходит только со своего подтверждённого домена магазина;
+  незавершённая настройка даёт понятный skip-код, а не ошибку.
+- Общий шаблон магазина под событие (`SiteEmailTemplate`) и **override Template ID на уровне
+  правила** (`Automation.brevoTemplateId`) — приоритет у override.
+
+**Каналы**
+- SMS (QUO, номер магазина, запись в `OrderCommunication`) и Email (Brevo) как независимые
+  флаги правила, плюс «Email, если SMS недоступно».
+
+**Automation Flows** — линейные цепочки шагов `WAIT / EMAIL / SMS` по событию заказа.
+Отдельный run на заказ, последовательное выполнение, идемпотентность на трёх уровнях,
+retry с backoff. Шаг, исчерпавший попытки, получает FAILED — цепочка идёт дальше.
+Редактор — вертикальный список со стрелками вверх/вниз.
+
+**Lifecycle-триггеры (Stage 0)** — `ORDER_PAID`, `ORDER_CANCELLED` и платформенный
+`ORDER_DELIVERED` (Shopify `fulfilled` / Woo `completed`). Публикуются строго на реальном
+переходе состояния и только из «живых» путей приёма; resync и bulk-backfill молчат.
+Триггеры — строковый app-registry (`modules/automations/triggers.ts`): новый добавляется
+записью в реестр, без миграции.
+
+**Разделы Automations** — четыре вкладки:
+`Order Notifications` (одиночные правила) · `Marketing Flows` (цепочки) ·
+`Templates` (справка по Brevo Template ID) · `History` (запуски цепочек).
+
+---
+
+## Что сознательно НЕ реализовано
+
+Это решения «не делаем», а не незакрытый бэклог. **Не возвращать в roadmap и не предлагать
+самостоятельно.**
+
+- Маркетинговые кампании и рассылки.
+- Согласие на маркетинг (consent) и unsubscribe.
+- A/B-тестирование писем.
+- Drag & drop конструктор цепочек и визуальный canvas.
+- Сущность Customer: «тот же клиент» нигде не выводится.
+- `stopOnNewOrder` — остановка цепочки при новом заказе клиента.
+- Reorder reminder (повторное письмо через 28 дней).
+
+---
+
+## Данные: соглашения, о которые легко споткнуться
+
+- **`Order.deliveryDate` — это UTC-полночь ЛОКАЛЬНОГО дня доставки, а не момент времени.**
+  Форматировать и сравнивать её через таймзону магазина НЕЛЬЗЯ: день съедет на сутки.
+  Локальный день = UTC-календарная дата поля.
+- **Telegram: у media group нет клавиатуры.** Сообщение с несколькими фото И кнопками
+  собрать невозможно — фото уходят альбомом, карточка с кнопками отдельным сообщением.
+- Переменные шаблонов (общие для SMS и Email-params) — `modules/automations/variables.ts`.
+  Для Brevo есть алиасы `customer_name`, `site_name`, `support_email`.
+
+---
+
+## Состояние продакшена
+
+- **Flow engine задеплоен**, миграция применена. Цепочки работают.
+- **Stage 0 задеплоен.**
+- **Backfill Shopify выполнен**: исторический хвост выполненных заказов приведён к `DELIVERED`
+  без публикации событий, поэтому старых SMS «доставлен» не будет.
+- **Аудит SMS выполнен.** Рост объёма со Stage 0 не связан: платформенный источник
+  `ORDER_DELIVERED` не сработал ни разу (курьер отмечает доставку раньше магазина).
+  Больше половины дневного объёма — живая переписка сотрудников из QUO, не автоматика.
+- **Все тесты зелёные: 1186 / 1186.** Любое падение теперь — настоящий сигнал.
+- **Julie's Flowers (JF) — единственный магазин с полностью настроенным Email**
+  (домен подтверждён, отправитель задан, гейт проходит). У остальных четырёх Email выключен,
+  и Email-шаг там штатно даёт `site_email_disabled`.
+- На `ORDER_DELIVERED` висят **два включённых SMS-правила** (заказчику и получателю, без
+  задержки) — то есть две SMS на каждый доставленный заказ. Учитывать перед правками триггера.
+- `Site.name` у JF — «JF», поэтому `site_name` в письмах не используется.
+
+---
+
+## Ближайшие задачи
+
+Строго по порядку. Ничего сверх этого списка не начинать.
+
+1. Протестировать первый production Flow на реальном заказе JF.
+2. Подключить Email остальным магазинам (домен в Brevo + настройки Site).
+3. Сделать нормальные Brevo-шаблоны писем.
+
+Дальнейшее развитие — только после завершения Email rollout.
+
+---
+
+## Рабочие правила
+
+- Production-деплой — только после явного одобрения владельца.
+- Не коммитить секреты, токены, ключи, `.env`.
+- Не менять `deploy.sh`, `ecosystem*.config.js`, аутентификацию, Prisma-схему, миграции и
+  инфраструктуру без явного одобрения.
+- Не пушить, не мержить, не деплоить, не перезапускать прод и не менять production-данные
+  автоматически.
+- Один смысловой блок работы — один коммит.
+- Не рефакторить несвязанный код и не чинить попутные проблемы без запроса.
+- Для мелких UI-задач читать только напрямую связанные файлы, не сканировать репозиторий.
+- Полный build — перед деплоем и после изменений архитектуры, зависимостей, роутинга, БД или
+  конфигурации; не после каждой правки.
+
+### Диагностика
+
+- Не обращаться к боевой БД для разбора UI и маппинга данных без явного запроса.
+- Не читать `.env` и не выполнять ad-hoc скрипты по БД без одобрения.
+- Если диагностическая команда заблокирована или упала — не обходить её другими обёртками,
+  временными файлами, SSH или другим шеллом. Остановиться и сказать, что проверить не удалось.
+- Предпочитать чтение кода, существующие логи и уже доступные данные.
+- На мелкий разбор — не больше пары минут, затем назвать вероятную причину и предложение.
+
+### Деплой
+
+`./deploy.sh` на сервере — единственный способ. Поток: `git fetch` → `reset --hard origin/main`
+→ `npm ci` → `prisma generate` → **`prisma migrate deploy`** → build с откатом на `.next.previous`
+→ `pm2 reload` приложения И воркера → health-check.
+
+- Прод — чистый git-чекаут `main`, поэтому деплою обязательно предшествует push.
+- **Миграции применяются автоматически** внутри деплоя. Если миграция нежелательна — не
+  доводить её до `main`.
+- `DEPRECATED-DO-NOT-USE-deploy-fast.sh` не использовать: старый rsync-путь мимо git.
+- Правки только в тестах деплоить не нужно — уедут со следующим обычным деплоем.
+
+---
+
+## Документация
+
+- `docs/OUTBOX_AND_WORKER.md` — устройство очереди и воркера.
+- `docs/INTEGRATION_ARCHITECTURE.md` — интеграции (Shopify, Woo, QUO, Burq, Brevo).
+- `docs/integrations/shopify.md` — Shopify.
+- `docs/email-templates/` — исходники писем (справочно; рабочая копия — в Brevo).
+
+`docs/HANDOFF.md`, `docs/ARCHITECTURE.md` и `TODO.md` отстают от кода — источник правды по
+текущему состоянию именно этот файл.
 
 @AGENTS.md
