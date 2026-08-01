@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { DEFAULT_STORE_TZ, utcDayRangeForLocalToday } from "@/lib/tz";
 import { toNumber } from "@/lib/money";
 import { computeEstimatedProfit } from "@/modules/pricing/profit";
+import { effectiveFloristTotal } from "@/modules/pricing/serviceItems";
 import { TERMINAL_ORDER_STATUSES, IN_WORK_ORDER_STATUSES } from "@/lib/statuses";
 import type { OrderStatus } from "@/generated/prisma/enums";
 
@@ -32,6 +33,7 @@ export async function getOwnerDashboard() {
     inTransit,
     deliveredToday,
     financeToday,
+    ordersWithTipInPriceToday,
   ] = await Promise.all([
     prisma.order.count({ where: { deliveryDate: { gte: today.gte, lt: today.lt } } }),
     prisma.order.count({ where: { deliveryDate: { gte: tomorrow.gte, lt: tomorrow.lt } } }),
@@ -51,7 +53,30 @@ export async function getOwnerDashboard() {
         itemsTotal: true, tax: true, tip: true, deliveryCustomerCost: true,
       },
     }),
+    // Заказы этого дня, где чаевые попали в снимок цены флориста. Сумма floristTotal выше
+    // берётся одним агрегатом, поэтому поправку считаем отдельно и вычитаем — так
+    // исторические заказы не завышают расходы на флористов и не занижают прибыль.
+    // Правило поправки то же, что в карточке заказа (effectiveFloristTotal), поэтому берём
+    // заказ целиком: по одной позиции решить нельзя. Кандидатов мало — только заказы дня.
+    prisma.order.findMany({
+      where: {
+        deliveryDate: { gte: today.gte, lt: today.lt },
+        paymentStatus: "PAID",
+        items: { some: { productId: null, variantId: null, floristItemPrice: { gt: 0 } } },
+      },
+      select: {
+        floristTotal: true,
+        items: { select: { name: true, productId: true, variantId: true, floristItemPrice: true } },
+      },
+    }),
   ]);
+
+  const tipFloristCostToday = ordersWithTipInPriceToday.reduce((acc, o) => {
+    const stored = toNumber(o.floristTotal);
+    const items = o.items.map((i) => ({ ...i, floristItemPrice: toNumber(i.floristItemPrice) }));
+    return acc + (stored - effectiveFloristTotal(stored, items));
+  }, 0);
+  const floristCostToday = Math.round((toNumber(financeToday._sum.floristTotal) - tipFloristCostToday) * 100) / 100;
 
   const attention = await prisma.order.findMany({
     where: { OR: [{ assignmentStatus: "UNASSIGNED", orderStatus: { notIn: NOT_NEEDING_ASSIGNMENT } }, { orderStatus: "PROBLEM" }] },
@@ -77,14 +102,14 @@ export async function getOwnerDashboard() {
       inTransit,
       deliveredToday,
       revenueToday: toNumber(financeToday._sum.customerTotal),
-      floristCostToday: toNumber(financeToday._sum.floristTotal),
+      floristCostToday,
       deliveryCostToday: toNumber(financeToday._sum.deliveryActualCost),
       profitToday: computeEstimatedProfit({
         itemsTotal: toNumber(financeToday._sum.itemsTotal),
         tax: toNumber(financeToday._sum.tax),
         tip: toNumber(financeToday._sum.tip),
         deliveryCustomerCost: toNumber(financeToday._sum.deliveryCustomerCost),
-        floristTotal: toNumber(financeToday._sum.floristTotal),
+        floristTotal: floristCostToday,
         deliveryActualCost: toNumber(financeToday._sum.deliveryActualCost),
       }),
     },

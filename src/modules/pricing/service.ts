@@ -3,14 +3,20 @@ import { prisma } from "@/lib/db";
 import { Prisma } from "@/generated/prisma/client";
 import { toNumber } from "@/lib/money";
 import { computeEstimatedProfit } from "./profit";
+import { compensableItems, effectiveFloristTotal, isTipItem } from "./serviceItems";
 
 type ItemForPricing = {
   id: string;
+  name: string;
   productId: string | null;
   variantId: string | null;
   quantity: number;
   externalPrice: Prisma.Decimal; // цена клиента за единицу — fallback «полная стоимость»
 };
+
+// Поля, по которым позиция резолвится в цену. name нужен, чтобы отсечь служебные строки
+// (чаевые) до того, как сработает фолбэк «цена не задана → полная стоимость клиента».
+const PRICING_SELECT = { id: true, name: true, productId: true, variantId: true, quantity: true, externalPrice: true } as const;
 
 const ZERO = new Prisma.Decimal(0);
 
@@ -89,14 +95,15 @@ export async function computeAutoFloristPrice(
   orderId: string,
   floristId: string
 ): Promise<{ total: Prisma.Decimal; perItem: Map<string, Prisma.Decimal> }> {
-  const items = await prisma.orderItem.findMany({
-    where: { orderId },
-    select: { id: true, productId: true, variantId: true, quantity: true, externalPrice: true },
-  });
+  const allItems = await prisma.orderItem.findMany({ where: { orderId }, select: PRICING_SELECT });
+  // Чаевые — деньги владельца: в цену флориста не входят и в перечень цен идут нулём,
+  // иначе фолбэк «цена не задана» подставил бы им полную стоимость клиента.
+  const items = compensableItems(allItems);
   const unitById = await resolveUnitPrices(prisma, items, floristId);
 
   let total = new Prisma.Decimal(0);
   const perItem = new Map<string, Prisma.Decimal>();
+  for (const item of allItems) perItem.set(item.id, ZERO);
   for (const item of items) {
     const line = (unitById.get(item.id) ?? ZERO).mul(item.quantity);
     perItem.set(item.id, line);
@@ -114,19 +121,36 @@ export async function applyAutoPriceSnapshot(
   orderId: string,
   floristId: string
 ): Promise<Prisma.Decimal> {
-  const items = await tx.orderItem.findMany({
-    where: { orderId },
-    select: { id: true, productId: true, variantId: true, quantity: true, externalPrice: true },
-  });
+  const allItems = await tx.orderItem.findMany({ where: { orderId }, select: PRICING_SELECT });
+  const items = compensableItems(allItems);
   const unitById = await resolveUnitPrices(tx, items, floristId);
 
   let total = new Prisma.Decimal(0);
-  for (const item of items) {
-    const line = (unitById.get(item.id) ?? ZERO).mul(item.quantity);
+  for (const item of allItems) {
+    // Служебной позиции фиксируем ноль: переназначение заодно чинит старый снимок в БД.
+    const line = isTipItem(item) ? ZERO : (unitById.get(item.id) ?? ZERO).mul(item.quantity);
     total = total.add(line);
     await tx.orderItem.update({ where: { id: item.id }, data: { floristItemPrice: line } });
   }
   return total;
+}
+
+/**
+ * Обнуляет цену флориста у служебных позиций (чаевые). Нужен там, где сумма задаётся
+ * владельцем вручную и снимок позиций не пересчитывается: без этого поправка «на лету»
+ * вычла бы чаевые из уже очищенной от них суммы.
+ */
+export async function clearServiceItemFloristPrices(
+  tx: Prisma.TransactionClient,
+  orderId: string
+): Promise<void> {
+  const items = await tx.orderItem.findMany({
+    where: { orderId, floristItemPrice: { gt: 0 } },
+    select: { id: true, name: true, productId: true, variantId: true },
+  });
+  const serviceIds = items.filter(isTipItem).map((i) => i.id);
+  if (serviceIds.length === 0) return;
+  await tx.orderItem.updateMany({ where: { id: { in: serviceIds } }, data: { floristItemPrice: ZERO } });
 }
 
 /** Пересчитывает примерную прибыль владельца и записывает её. */
@@ -134,7 +158,10 @@ export async function recomputeEstimatedProfit(
   tx: Prisma.TransactionClient,
   orderId: string
 ) {
-  const order = await tx.order.findUnique({ where: { id: orderId } });
+  const order = await tx.order.findUnique({
+    where: { id: orderId },
+    include: { items: { select: { name: true, productId: true, variantId: true, floristItemPrice: true } } },
+  });
   if (!order) return;
   // Формула — одна на весь проект (см. computeEstimatedProfit): доход клиента минус наши
   // расходы. Раньше здесь не учитывалась «Доставка (заказчик)» и налог.
@@ -143,7 +170,11 @@ export async function recomputeEstimatedProfit(
     tax: toNumber(order.tax),
     tip: toNumber(order.tip),
     deliveryCustomerCost: toNumber(order.deliveryCustomerCost),
-    floristTotal: toNumber(order.floristTotal),
+    // Чаевые, попавшие в снимок цены флориста у старых заказов, расходом не считаются.
+    floristTotal: effectiveFloristTotal(
+      toNumber(order.floristTotal),
+      order.items.map((i) => ({ ...i, floristItemPrice: toNumber(i.floristItemPrice) }))
+    ),
     deliveryActualCost: toNumber(order.deliveryActualCost),
   });
   await tx.order.update({

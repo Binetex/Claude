@@ -1,7 +1,7 @@
 import "server-only";
 import { prisma } from "@/lib/db";
 import { Prisma } from "@/generated/prisma/client";
-import { applyAutoPriceSnapshot, recomputeEstimatedProfit } from "@/modules/pricing/service";
+import { applyAutoPriceSnapshot, clearServiceItemFloristPrices, recomputeEstimatedProfit } from "@/modules/pricing/service";
 import { notifyFloristAssigned } from "@/integrations/notifications/telegram";
 import { TERMINAL_ORDER_STATUSES } from "@/lib/statuses";
 import { onOrderDeliveryChangeSafe } from "@/integrations/delivery/burq/scheduleService";
@@ -309,6 +309,9 @@ export async function setManualFloristPrice(
       where: { id: orderId },
       data: { floristTotal: new Prisma.Decimal(amount), priceMode: "MANUAL" },
     });
+    // Ручная сумма задаётся уже БЕЗ чаевых, поэтому снимок служебных позиций обнуляем:
+    // иначе поправка «на лету» вычла бы чаевые второй раз из введённого владельцем числа.
+    await clearServiceItemFloristPrices(tx, orderId);
     await recomputeEstimatedProfit(tx, orderId);
   });
 }

@@ -1,7 +1,26 @@
 import { Prisma } from "@/generated/prisma/client";
 import { toNumber } from "@/lib/money";
 import { computeEstimatedProfit } from "@/modules/pricing/profit";
+import { effectiveFloristTotal, isTipItem } from "@/modules/pricing/serviceItems";
 import { getOrderItemImages } from "./images";
+
+/**
+ * Цена флориста по позиции и сумма к оплате — с исключёнными чаевыми. Считается на лету,
+ * поэтому исторические заказы, где чаевые попали в снимок, показываются правильно без
+ * правки данных. У новых заказов поправка нулевая.
+ */
+function floristMoney(o: OrderWithRelations) {
+  const items = o.items.map((i) => ({
+    name: i.name,
+    productId: i.productId,
+    variantId: i.variantId,
+    floristItemPrice: toNumber(i.floristItemPrice),
+  }));
+  return {
+    total: effectiveFloristTotal(toNumber(o.floristTotal), items),
+    itemPrice: (i: OrderWithRelations["items"][number]) => (isTipItem(i) ? 0 : toNumber(i.floristItemPrice)),
+  };
+}
 
 /** "int_uspdw9pdbhk4383b0pz" → "int_…83b0pz" — достаточно для сверки, без длинного хвоста. */
 function shortIntent(id: string): string {
@@ -66,6 +85,7 @@ function baseFields(o: OrderWithRelations) {
 
 // ─────────────── ВЛАДЕЛЕЦ: всё, включая финансы ───────────────
 export function serializeForOwner(o: OrderWithRelations) {
+  const florist = floristMoney(o);
   return {
     ...baseFields(o),
     currentFloristName: o.currentFlorist?.user.name ?? null,
@@ -113,7 +133,8 @@ export function serializeForOwner(o: OrderWithRelations) {
       quantity: i.quantity,
       options: i.options,
       externalPrice: toNumber(i.externalPrice),
-      floristItemPrice: toNumber(i.floristItemPrice),
+      // У чаевых цены флориста быть не может — строка остаётся видимой, но с нулём.
+      floristItemPrice: florist.itemPrice(i),
     })),
     finance: {
       itemsTotal: toNumber(o.itemsTotal),
@@ -122,7 +143,7 @@ export function serializeForOwner(o: OrderWithRelations) {
       discount: toNumber(o.discount),
       deliveryCustomerCost: toNumber(o.deliveryCustomerCost),
       customerTotal: toNumber(o.customerTotal),
-      floristTotal: toNumber(o.floristTotal),
+      floristTotal: florist.total,
       deliveryActualCost: toNumber(o.deliveryActualCost),
       // Считаем ЗДЕСЬ, а не берём сохранённое Order.estimatedProfit: поле обновляется только
       // при назначении флориста, поэтому устаревало при любом изменении сумм (чаевые, факт
@@ -132,7 +153,7 @@ export function serializeForOwner(o: OrderWithRelations) {
         tax: toNumber(o.tax),
         tip: toNumber(o.tip),
         deliveryCustomerCost: toNumber(o.deliveryCustomerCost),
-        floristTotal: toNumber(o.floristTotal),
+        floristTotal: florist.total,
         deliveryActualCost: toNumber(o.deliveryActualCost),
       }),
     },
@@ -187,6 +208,7 @@ export type CallCenterOrder = ReturnType<typeof serializeForCallCenter>;
 // фактическая себестоимость доставки (deliveryActualCost) и цены/заказы других флористов.
 export function serializeForFlorist(o: OrderWithRelations) {
   const isFull = o.currentFlorist?.financeVisibility === "FULL";
+  const florist = floristMoney(o);
   return {
     ...baseFields(o),
     // Данные заказчика (senderName/senderPhone) — флористу нужны, чтобы позвонить по
@@ -204,10 +226,10 @@ export function serializeForFlorist(o: OrderWithRelations) {
       floristComposition: i.floristCompositionSnapshot,
       quantity: i.quantity,
       options: i.options,
-      floristItemPrice: toNumber(i.floristItemPrice), // его цена за позицию
+      floristItemPrice: florist.itemPrice(i), // его цена за позицию (чаевые — ноль)
       // externalPrice (цена клиента) НЕ включается.
     })),
-    floristTotal: toNumber(o.floristTotal), // только его сумма
+    floristTotal: florist.total, // только его сумма, без чаевых владельца
     // Read-only признак режима видимости — чтобы интерфейс не угадывал его по наличию
     // блока finance. Прав не добавляет: что показывать, решает состав полей ниже.
     financeVisibility: isFull ? ("FULL" as const) : ("MAKER_ONLY" as const),
