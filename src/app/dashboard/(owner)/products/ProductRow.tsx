@@ -37,8 +37,8 @@ export type ProductVM = {
   compTotal: number;
   finance: ProductFinanceVM;
   /** Эффективные типы и признак вазы по вариантам — только для фильтрации списка. */
-  resolvedTypes: (FinancialItemType | null)[];
-  resolvedVase: (boolean | null)[];
+  resolvedTypes: FinancialItemType[];
+  resolvedVase: boolean[];
   variants: VariantVM[];
 };
 
@@ -46,8 +46,8 @@ export type ProductVM = {
 export type ProductFinanceVM = {
   vaseCount: number; // вариантов с типом VASE
   bouquetWithVaseCount: number; // букетов с вазой
-  bouquetNoVaseCount: number; // букетов с подтверждённым «без вазы»
-  unclassifiedCount: number; // тип не задан ни на варианте, ни на товаре
+  bouquetNoVaseCount: number; // букетов, где владелец явно снял вазу
+  explicitTypeCount: number; // тип выбран владельцем вручную (не умолчание)
   missingCostCount: number; // ваза нужна, а стоимость неизвестна
   missingVaseLinkCount: number; // букет с вазой, но ваза не выбрана
   overrideCount: number; // вариантов со своим значением поверх товара
@@ -58,10 +58,6 @@ function FinanceBadges({ f }: { f: ProductFinanceVM }) {
   if (f.vaseCount > 0) items.push({ key: "vase", label: "Ваза", cls: "border-sky-200 bg-sky-50 text-sky-700" });
   if (f.bouquetWithVaseCount > 0)
     items.push({ key: "withVase", label: "Букет с вазой", cls: "border-violet-200 bg-violet-50 text-violet-700" });
-  if (f.bouquetNoVaseCount > 0)
-    items.push({ key: "noVase", label: "Без вазы", cls: "border-slate-200 bg-slate-50 text-slate-600" });
-  if (f.unclassifiedCount > 0)
-    items.push({ key: "unclassified", label: "Без классификации", cls: "border-slate-200 bg-white text-slate-500" });
   if (f.missingVaseLinkCount > 0)
     items.push({ key: "noLink", label: "Ваза не привязана", cls: "border-amber-200 bg-amber-50 text-amber-700" });
   if (f.missingCostCount > 0)

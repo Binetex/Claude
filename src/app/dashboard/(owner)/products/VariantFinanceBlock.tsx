@@ -19,9 +19,10 @@ export type VariantFinanceVM = {
   variantId: string;
   productId: string;
   ownType: FinancialItemType | null;
-  effectiveType: FinancialItemType | null;
-  typeSource: "VARIANT" | "PRODUCT" | "UNKNOWN";
-  productTypeLabel: string;
+  effectiveType: FinancialItemType;
+  typeSource: "VARIANT" | "PRODUCT" | "DEFAULT";
+  /** Подпись пункта «ничего не выбирать»: умолчание либо тип, заданный на товаре. */
+  inheritLabel: string;
   /** Состояние вазы для селектора (собственное + эффективное). */
   vase: VaseSelectState;
   /** Своя стоимость — только когда сам вариант является вазой. */
@@ -35,8 +36,8 @@ export function VariantFinanceBlock({ vm, vaseOptions }: { vm: VariantFinanceVM;
   const [pending, start] = useTransition();
   const [type, setType] = useState<string>(vm.ownType ?? INHERIT);
 
-  const shownType: FinancialItemType | null =
-    type === INHERIT ? (vm.typeSource === "PRODUCT" ? vm.effectiveType : null) : (type as FinancialItemType);
+  // Тип определён всегда: не выбрано → значение товара → обычный букет.
+  const shownType: FinancialItemType = type === INHERIT ? vm.effectiveType : (type as FinancialItemType);
 
   function saveType(next: string) {
     setType(next);
@@ -54,7 +55,7 @@ export function VariantFinanceBlock({ vm, vaseOptions }: { vm: VariantFinanceVM;
         <Label>Финансовая классификация</Label>
         {vm.ownType != null && (
           <Button variant="ghost" size="sm" disabled={pending} onClick={() => saveType(INHERIT)}>
-            Вернуть наследование типа
+            Сбросить тип
           </Button>
         )}
       </div>
@@ -62,7 +63,7 @@ export function VariantFinanceBlock({ vm, vaseOptions }: { vm: VariantFinanceVM;
       <div>
         <span className="text-xs text-slate-500">Тип позиции</span>
         <Select value={type} disabled={pending} onChange={(e) => saveType(e.target.value)} wrapperClassName="mt-1">
-          <option value={INHERIT}>Наследовать от товара — {vm.productTypeLabel}</option>
+          <option value={INHERIT}>{vm.inheritLabel}</option>
           {FINANCIAL_TYPE_ORDER.map((t) => (
             <option key={t} value={t}>
               {FINANCIAL_TYPE_LABELS[t]}
@@ -77,14 +78,11 @@ export function VariantFinanceBlock({ vm, vaseOptions }: { vm: VariantFinanceVM;
       {/* Букет: только выбор вазы. Стоимость правится у самой вазы.
           Пока тип не задан, блок всё равно показываем — выключенным и с объяснением:
           иначе владелец просто не находит, где вообще настраивается ваза. */}
-      {(shownType === "FLOWER_PRODUCT" || shownType === null) && (
+      {shownType === "FLOWER_PRODUCT" && (
         <VaseSelect
           level="VARIANT"
           state={vm.vase}
           options={vaseOptions}
-          disabledReason={
-            shownType === null ? "Сначала укажите тип позиции «Цветочный товар» — после этого можно выбрать вазу." : undefined
-          }
           onSave={(selection) => ownerSetVariantVase(vm.variantId, selection)}
         />
       )}

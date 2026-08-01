@@ -28,19 +28,22 @@ export const FINANCIAL_TYPE_ORDER: FinancialItemType[] = [
   "OTHER",
 ];
 
+/** Подпись типа. NULL = умолчание, а не «не настроено»: обычный букет получается сам. */
 export function financialTypeLabel(t: FinancialItemType | null | undefined): string {
-  return t ? FINANCIAL_TYPE_LABELS[t] : "Без классификации";
+  return t ? FINANCIAL_TYPE_LABELS[t] : DEFAULT_TYPE_LABEL;
 }
+
+/** Как называется умолчание в интерфейсе — одинаково во всех списках. */
+export const DEFAULT_TYPE_LABEL = "Обычный букет (по умолчанию)";
 
 /** Человеческая подпись трёх состояний признака вазы. */
 export function includesVaseLabel(v: boolean | null | undefined): string {
   if (v === true) return "Содержит вазу";
-  if (v === false) return "Без вазы";
-  return "Не настроено";
+  return "Без вазы";
 }
 
-export function sourceLabel(source: "VARIANT" | "PRODUCT" | "UNKNOWN"): string {
+export function sourceLabel(source: "VARIANT" | "PRODUCT" | "DEFAULT"): string {
   if (source === "VARIANT") return "задано у варианта";
   if (source === "PRODUCT") return "унаследовано от товара";
-  return "не задано";
+  return "по умолчанию";
 }

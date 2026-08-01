@@ -116,15 +116,13 @@ describe("needs review", () => {
     expect(r.vaseCostCents).toBeNull();
   });
 
-  it("признак вазы не настроен — это не «вазы нет»", () => {
-    const r = resolveVariantFinance({
-      variant: variant(),
-      product: product({ financialType: "FLOWER_PRODUCT" }),
-      costs: [],
-      at: AT,
-    });
-    expect(r.includesVase).toBeNull();
-    expect(r.reviewReasons).toContain("VASE_LINK_MISSING");
+  it("ничего не настроено — обычный букет без вазы, проверять нечего", () => {
+    const r = resolveVariantFinance({ variant: variant(), product: product(), costs: [], at: AT });
+    expect(r.financialType).toBe("FLOWER_PRODUCT");
+    expect(r.financialTypeSource).toBe("DEFAULT");
+    expect(r.includesVase).toBe(false);
+    expect(r.includesVaseSource).toBe("DEFAULT");
+    expect(r.reviewReasons).toEqual([]);
   });
 
   it("ссылка есть, но у вазы нет стоимости на дату → VASE_COST_MISSING", () => {
@@ -231,10 +229,21 @@ describe("цена клиента", () => {
 });
 
 describe("классификация", () => {
-  it("тип не задан нигде → ITEM_UNCLASSIFIED", () => {
+  it("умолчание действует, пока владелец не выбрал тип", () => {
     const r = resolveVariantFinance({ variant: variant(), product: product(), costs: [], at: AT });
-    expect(r.financialType).toBeNull();
-    expect(r.reviewReasons).toContain("ITEM_UNCLASSIFIED");
+    expect(r.financialType).toBe("FLOWER_PRODUCT");
+    expect(r.financialTypeSource).toBe("DEFAULT");
+  });
+
+  it("тип товара перекрывает умолчание, вариант — тип товара", () => {
+    const fromProduct = resolveVariantFinance({
+      variant: variant(),
+      product: product({ financialType: "VASE" }),
+      costs: [],
+      at: AT,
+    });
+    expect(fromProduct.financialType).toBe("VASE");
+    expect(fromProduct.financialTypeSource).toBe("PRODUCT");
   });
 
   it("вариант переопределяет тип товара", () => {

@@ -57,7 +57,7 @@ export default async function ProductsPage({ searchParams }: { searchParams: Pro
   const comp = str(sp.comp); // "" | "full" | "partial" | "empty" — фильтр по составам
   // Финансовые фильтры. Считаются в памяти по эффективным значениям: наследование
   // Product → ProductVariant в SQL не выразить, а второй логики резолва быть не должно.
-  const ftype = str(sp.ftype); // "" | FinancialItemType | "none"
+  const ftype = str(sp.ftype); // "" | FinancialItemType | "auto" (ничего не настраивалось)
   const fvase = str(sp.fvase); // "" | "yes" | "no" | "unknown"
   const fcost = str(sp.fcost) === "1"; // нет закупочной стоимости, хотя ваза нужна
   const foverride = str(sp.foverride) === "1"; // есть override у вариантов
@@ -179,7 +179,7 @@ export default async function ProductsPage({ searchParams }: { searchParams: Pro
       vaseCount: 0,
       bouquetWithVaseCount: 0,
       bouquetNoVaseCount: 0,
-      unclassifiedCount: 0,
+      explicitTypeCount: 0,
       missingCostCount: 0,
       missingVaseLinkCount: 0,
       overrideCount: 0,
@@ -199,8 +199,10 @@ export default async function ProductsPage({ searchParams }: { searchParams: Pro
       });
       if (r.financialType === "VASE") finance.vaseCount += 1;
       if (r.financialType === "FLOWER_PRODUCT" && r.includesVase === true) finance.bouquetWithVaseCount += 1;
-      if (r.financialType === "FLOWER_PRODUCT" && r.includesVase === false) finance.bouquetNoVaseCount += 1;
-      if (r.financialType === null) finance.unclassifiedCount += 1;
+      // «Без вазы» показываем только когда это решение владельца, а не умолчание.
+      if (r.financialType === "FLOWER_PRODUCT" && r.includesVase === false && r.includesVaseSource !== "DEFAULT")
+        finance.bouquetNoVaseCount += 1;
+      if (r.financialTypeSource !== "DEFAULT") finance.explicitTypeCount += 1;
       if (r.reviewReasons.includes("VASE_COST_MISSING")) finance.missingCostCount += 1;
       if (r.reviewReasons.includes("VASE_LINK_MISSING") && r.financialType === "FLOWER_PRODUCT") finance.missingVaseLinkCount += 1;
       if (v.financialType != null || v.includesVase != null || v.includedVaseVariantId != null) finance.overrideCount += 1;
@@ -241,11 +243,10 @@ export default async function ProductsPage({ searchParams }: { searchParams: Pro
     if (comp === "empty" && r.compFilled !== 0) return false;
 
     // Финансовые фильтры — по ЭФФЕКТИВНЫМ значениям вариантов (с учётом наследования).
-    if (ftype === "none" && r.finance.unclassifiedCount === 0) return false;
-    if (ftype && ftype !== "none" && !r.resolvedTypes.includes(ftype as FinancialItemType)) return false;
+    if (ftype === "auto" && r.finance.explicitTypeCount > 0) return false;
+    if (ftype && ftype !== "auto" && !r.resolvedTypes.includes(ftype as FinancialItemType)) return false;
     if (fvase === "yes" && r.finance.bouquetWithVaseCount === 0) return false;
     if (fvase === "no" && r.finance.bouquetNoVaseCount === 0) return false;
-    if (fvase === "unknown" && !r.resolvedVase.includes(null)) return false;
     if (fvase === "nolink" && r.finance.missingVaseLinkCount === 0) return false;
     if (fcost && r.finance.missingCostCount === 0) return false;
     if (foverride && r.finance.overrideCount === 0) return false;
@@ -328,7 +329,7 @@ export default async function ProductsPage({ searchParams }: { searchParams: Pro
             <span className={fieldLabel}>Фин. тип</span>
             <Select name="ftype" defaultValue={ftype} wrapperClassName="w-44">
               <option value="">Все</option>
-              <option value="none">Без классификации</option>
+              <option value="auto">Только по умолчанию (не настраивались)</option>
               {FINANCIAL_TYPE_ORDER.map((t) => (
                 <option key={t} value={t}>
                   {FINANCIAL_TYPE_LABELS[t]}
@@ -342,7 +343,6 @@ export default async function ProductsPage({ searchParams }: { searchParams: Pro
               <option value="">Все</option>
               <option value="yes">Букет с вазой</option>
               <option value="no">Без вазы</option>
-              <option value="unknown">Не настроено</option>
               <option value="nolink">Ваза не привязана</option>
             </Select>
           </label>

@@ -24,7 +24,7 @@ export type VaseSelectState = {
   effectiveVaseCostCents: number | null;
   effectiveVaseProductId: string | null;
   effectiveVaseArchived: boolean;
-  effectiveSource: "VARIANT" | "PRODUCT" | "UNKNOWN";
+  effectiveSource: "VARIANT" | "PRODUCT" | "DEFAULT";
   /** Что даёт товар — показываем в пункте «Наследовать». Только для варианта. */
   productHint?: string;
 };
@@ -71,9 +71,7 @@ export function VaseSelect({
   }
 
   const inheritLabel =
-    level === "VARIANT"
-      ? `Наследовать от товара — ${state.productHint ?? "не настроено"}`
-      : "Не настроено";
+    level === "VARIANT" ? `Как у товара — ${state.productHint ?? "без вазы"}` : "Без вазы (по умолчанию)";
 
   return (
     <div>
@@ -125,12 +123,10 @@ export function VaseSelect({
           )}
           {state.effectiveVaseArchived && <span className="text-red-600">Ваза архивирована — выберите замену</span>}
         </p>
-      ) : state.ownIncludesVase === false ? (
-        <p className="mt-1 text-[11px] text-slate-500">Сейчас: без вазы (подтверждено)</p>
+      ) : state.ownIncludesVase === true ? (
+        <p className="mt-1 text-[11px] text-amber-600">Ваза заявлена, но не выбрана — заказ уйдёт в «требует проверки».</p>
       ) : (
-        <p className="mt-1 text-[11px] text-amber-600">
-          Ваза не выбрана — заказ уйдёт в «требует проверки». «Не настроено» и «без вазы» — разные состояния.
-        </p>
+        <p className="mt-1 text-[11px] text-slate-500">Сейчас: без вазы</p>
       )}
     </div>
   );

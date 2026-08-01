@@ -13,6 +13,7 @@ import "server-only";
 import { Prisma } from "@/generated/prisma/client";
 import type { Role } from "@/generated/prisma/enums";
 import { prisma } from "@/lib/db";
+import { effectiveFinancialType } from "./resolveVariantFinance";
 
 export type VaseSelection =
   | { mode: "INHERIT" }
@@ -59,9 +60,10 @@ async function assertLinkable(
   if (vase.product.siteId !== args.siteId) {
     throw new Error("ваза должна принадлежать тому же магазину");
   }
-  // Эффективный тип: собственный тип варианта, иначе тип товара. Проверять только поле
-  // варианта нельзя — тип часто унаследован от товара.
-  const effectiveType = vase.financialType ?? vase.product.financialType ?? null;
+  // Эффективный тип считает общий резолвер (вариант → товар → умолчание): проверять только
+  // поле варианта нельзя, тип часто унаследован от товара. Умолчание — обычный букет,
+  // поэтому вазой можно назначить лишь позицию, помеченную вазой явно.
+  const effectiveType = effectiveFinancialType(vase.financialType, vase.product.financialType);
   if (effectiveType !== "VASE") {
     throw new Error("привязать можно только позицию с типом «Ваза»");
   }

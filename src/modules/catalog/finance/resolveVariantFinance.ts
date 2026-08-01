@@ -9,14 +9,30 @@
  * (VasePurchaseCost, тип STANDALONE_VASE) — один источник на всю сеть букетов с этой вазой.
  * Цена клиента (listPrice) себестоимостью не становится ни в одной ветке: сюда она не приходит.
  *
- * Три состояния каждого свойства не схлопываются:
- *   inherited — своего значения нет, действует значение товара;
- *   override  — задано на варианте (в том числе false);
- *   unknown   — не задано нигде.
+ * Тип по умолчанию — FLOWER_PRODUCT. Ничего не задавать НЕ НАДО: обычный букет получается сам,
+ * владелец размечает только исключения (вазы, подарки, открытки, сервисные позиции). Поэтому
+ * состояния «без классификации» не существует, и NULL в базе означает «действует умолчание»,
+ * а не «требуется настройка» — по этому же признаку видно, где владелец выбрал тип осознанно.
+ *
+ * Источник значения различается всегда: задано у варианта · унаследовано от товара · умолчание.
  */
 import type { FinancialItemType, VaseCostType } from "@/generated/prisma/enums";
 
-export type EffectiveSource = "VARIANT" | "PRODUCT" | "UNKNOWN";
+export type EffectiveSource = "VARIANT" | "PRODUCT" | "DEFAULT";
+
+/** Тип позиции, когда владелец ничего не выбирал. Обычный букет — самый частый случай. */
+export const DEFAULT_FINANCIAL_TYPE = "FLOWER_PRODUCT" as const;
+
+/**
+ * Эффективный финансовый тип. ЕДИНСТВЕННОЕ место, где решается, чем является позиция:
+ * вариант → товар → умолчание. Ни один вызывающий не должен трактовать NULL по-своему.
+ */
+export function effectiveFinancialType(
+  variantType: FinancialItemType | null | undefined,
+  productType: FinancialItemType | null | undefined
+): FinancialItemType {
+  return variantType ?? productType ?? DEFAULT_FINANCIAL_TYPE;
+}
 
 export type VaseCostRow = {
   id: string;
@@ -58,16 +74,14 @@ export type VariantFinanceInput = {
   at: Date;
 };
 
-export type CatalogReviewReason =
-  | "ITEM_UNCLASSIFIED"
-  | "VASE_LINK_MISSING"
-  | "VASE_COST_MISSING"
-  | "VASE_ARCHIVED";
+export type CatalogReviewReason = "VASE_LINK_MISSING" | "VASE_COST_MISSING" | "VASE_ARCHIVED";
 
 export type VariantFinance = {
-  financialType: FinancialItemType | null;
+  /** Всегда определён: пустого типа больше не существует. */
+  financialType: FinancialItemType;
   financialTypeSource: EffectiveSource;
-  includesVase: boolean | null;
+  /** Всегда определён: по умолчанию вазы нет. */
+  includesVase: boolean;
   includesVaseSource: EffectiveSource;
   /** Связанная ваза, применённая в расчёте (после всех правил). */
   vase: LinkedVaseInfo | null;
@@ -92,19 +106,19 @@ export function resolveVariantFinance(input: VariantFinanceInput): VariantFinanc
   const { variant, product, costs, at } = input;
   const vases = input.vases ?? {};
 
-  const financialType = variant.financialType ?? product.financialType ?? null;
+  const financialType = effectiveFinancialType(variant.financialType, product.financialType);
   const financialTypeSource: EffectiveSource =
-    variant.financialType != null ? "VARIANT" : product.financialType != null ? "PRODUCT" : "UNKNOWN";
+    variant.financialType != null ? "VARIANT" : product.financialType != null ? "PRODUCT" : "DEFAULT";
 
-  const includesVase = variant.includesVase ?? product.defaultIncludesVase ?? null;
+  // Букет без вазы — тоже умолчание: вазу отмечают только там, где она действительно есть.
+  const includesVase = variant.includesVase ?? product.defaultIncludesVase ?? false;
   const includesVaseSource: EffectiveSource =
-    variant.includesVase != null ? "VARIANT" : product.defaultIncludesVase != null ? "PRODUCT" : "UNKNOWN";
+    variant.includesVase != null ? "VARIANT" : product.defaultIncludesVase != null ? "PRODUCT" : "DEFAULT";
 
   const reviewReasons: CatalogReviewReason[] = [];
-  if (financialType === null) reviewReasons.push("ITEM_UNCLASSIFIED");
 
   let vase: LinkedVaseInfo | null = null;
-  let vaseSource: EffectiveSource = "UNKNOWN";
+  let vaseSource: EffectiveSource = "DEFAULT";
   let row: VaseCostRow | null = null;
 
   if (financialType === "VASE") {
@@ -114,13 +128,13 @@ export function resolveVariantFinance(input: VariantFinanceInput): VariantFinanc
   } else if (financialType === "FLOWER_PRODUCT" && includesVase === true) {
     // Букет с вазой: ссылка варианта приоритетнее товарного дефолта.
     const linkId = variant.includedVaseVariantId ?? product.defaultIncludedVaseVariantId ?? null;
-    vaseSource = variant.includedVaseVariantId ? "VARIANT" : product.defaultIncludedVaseVariantId ? "PRODUCT" : "UNKNOWN";
+    vaseSource = variant.includedVaseVariantId ? "VARIANT" : product.defaultIncludedVaseVariantId ? "PRODUCT" : "DEFAULT";
     const linked = linkId ? (vases[linkId] ?? null) : null;
 
     if (!linked || linked.effectiveType !== "VASE") {
       // Ссылки нет, ваза не найдена или связана не с вазой — считать нечего.
       reviewReasons.push("VASE_LINK_MISSING");
-      vaseSource = "UNKNOWN";
+      vaseSource = "DEFAULT";
     } else {
       vase = linked;
       if (linked.archived) reviewReasons.push("VASE_ARCHIVED");
@@ -129,12 +143,9 @@ export function resolveVariantFinance(input: VariantFinanceInput): VariantFinanc
         pick(costs, at, (r) => r.productId === linked.productId);
       if (row === null) reviewReasons.push("VASE_COST_MISSING");
     }
-  } else if (financialType === "FLOWER_PRODUCT" && includesVase === null) {
-    // Тип известен, но есть ли ваза — нет. Это «не знаем», а не «вазы нет».
-    reviewReasons.push("VASE_LINK_MISSING");
   }
-  // includesVase === false — подтверждённое отсутствие вазы: ссылка не применяется даже если
-  // она есть у варианта или задана дефолтом товара. Историческую запись не удаляем.
+  // includesVase === false (заданное или по умолчанию) — вазы нет: ссылка не применяется, даже
+  // если она есть у варианта или задана дефолтом товара. Историческую запись не удаляем.
 
   return {
     financialType,

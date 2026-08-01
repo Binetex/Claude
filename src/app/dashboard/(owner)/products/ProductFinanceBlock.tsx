@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import type { FinancialItemType } from "@/generated/prisma/enums";
-import { FINANCIAL_TYPE_ORDER, FINANCIAL_TYPE_LABELS } from "@/modules/catalog/finance/display";
+import { FINANCIAL_TYPE_ORDER, FINANCIAL_TYPE_LABELS, DEFAULT_TYPE_LABEL } from "@/modules/catalog/finance/display";
 import { ownerSetProductFinance, ownerSetProductDefaultVase } from "@/app/dashboard/(owner)/actions";
 import { formatCents } from "@/lib/cents";
 import { VaseCostEditor, type VaseCostRowVM } from "./VaseCostEditor";
@@ -45,18 +45,21 @@ export function ProductFinanceBlock({
     });
   }
 
-  const shownType = type === NOT_SET ? null : (type as FinancialItemType);
+  // Не выбрано — значит обычный букет: пустого типа не существует.
+  const shownType: FinancialItemType = type === NOT_SET ? "FLOWER_PRODUCT" : (type as FinancialItemType);
 
   return (
     <div className="space-y-3">
       <p className="text-xs text-slate-500">
-        Значения по умолчанию для всех вариантов товара. Любой вариант может переопределить их у себя.
+        Ничего настраивать не нужно: по умолчанию это обычный букет. Меняйте только исключения —
+        вазы, подарки, открытки, сервисные позиции. Значения действуют на все варианты товара,
+        любой вариант может переопределить их у себя.
       </p>
 
       <div>
         <Label>Тип позиции</Label>
         <Select value={type} disabled={pending} onChange={(e) => saveType(e.target.value)} wrapperClassName="mt-1">
-          <option value={NOT_SET}>Не задан</option>
+          <option value={NOT_SET}>{DEFAULT_TYPE_LABEL}</option>
           {FINANCIAL_TYPE_ORDER.map((t) => (
             <option key={t} value={t}>
               {FINANCIAL_TYPE_LABELS[t]}
@@ -65,14 +68,11 @@ export function ProductFinanceBlock({
         </Select>
       </div>
 
-      {(shownType === "FLOWER_PRODUCT" || shownType === null) && (
+      {shownType === "FLOWER_PRODUCT" && (
         <VaseSelect
           level="PRODUCT"
           state={vase}
           options={vaseOptions}
-          disabledReason={
-            shownType === null ? "Сначала укажите тип позиции «Цветочный товар» — после этого можно выбрать вазу." : undefined
-          }
           onSave={(selection) => ownerSetProductDefaultVase(productId, selection)}
         />
       )}

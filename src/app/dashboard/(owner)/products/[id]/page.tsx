@@ -14,7 +14,7 @@ import { ProductFinanceBlock } from "../ProductFinanceBlock";
 import type { VariantFinanceVM } from "../VariantFinanceBlock";
 import { resolveVariantFinance, type VaseCostRow, type LinkedVaseInfo } from "@/modules/catalog/finance/resolveVariantFinance";
 import { listVaseOptions } from "@/modules/catalog/finance/vaseLink";
-import { financialTypeLabel } from "@/modules/catalog/finance/display";
+import { financialTypeLabel, DEFAULT_TYPE_LABEL } from "@/modules/catalog/finance/display";
 
 export const dynamic = "force-dynamic";
 
@@ -181,7 +181,7 @@ export default async function ProductDetailPage({
     effectiveVaseArchived: productResolved.vase?.archived ?? false,
     effectiveSource: "VARIANT" as const,
   };
-  const productVaseHint = productResolved.vase?.label ?? (product.defaultIncludesVase === false ? "без вазы" : "не настроено");
+  const productVaseHint = productResolved.vase?.label ?? "без вазы";
 
   const financeByVariant = new Map<string, VariantFinanceVM>();
   for (const v of product.variants) {
@@ -206,7 +206,8 @@ export default async function ProductDetailPage({
       ownType: v.financialType,
       effectiveType: resolved.financialType,
       typeSource: resolved.financialTypeSource,
-      productTypeLabel: financialTypeLabel(product.financialType),
+      // Что будет, если у варианта ничего не выбирать: тип товара либо умолчание.
+      inheritLabel: product.financialType ? `Как у товара — ${financialTypeLabel(product.financialType)}` : DEFAULT_TYPE_LABEL,
       vase: {
         ownIncludesVase: v.includesVase,
         ownVaseVariantId: v.includedVaseVariantId,
