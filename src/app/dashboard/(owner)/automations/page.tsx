@@ -13,13 +13,14 @@ import { KillSwitchToggle } from "./KillSwitchToggle";
 export const dynamic = "force-dynamic";
 
 export default async function AutomationsPage() {
-  const [automations, statRows, lastRuns, sites, settings] = await Promise.all([
+  const [automations, statRows, channelRows, lastRuns, sites, settings] = await Promise.all([
     prisma.automation.findMany({
       where: { deletedAt: null },
       include: { sites: { select: { site: { select: { name: true } } }, orderBy: { createdAt: "asc" } } },
       orderBy: [{ createdAt: "desc" }],
     }),
     prisma.automationJob.groupBy({ by: ["automationId", "status"], _count: { _all: true } }),
+    prisma.automationJob.groupBy({ by: ["channel", "status"], _count: { _all: true } }),
     prisma.automationJob.groupBy({ by: ["automationId"], _max: { sentAt: true } }),
     prisma.site.findMany({ select: { id: true, name: true, reviewUrl: true, quoEnabled: true, automationDailyLocalTime: true }, orderBy: { name: "asc" } }),
     getAutomationSettings(prisma),
@@ -36,9 +37,17 @@ export default async function AutomationsPage() {
     else if (r.status === "CANCELLED") s.cancelled += r._count._all;
     else if (r.status === "SCHEDULED" || r.status === "PROCESSING") s.scheduled += r._count._all;
   }
-  // Сводка по всем правилам: только автоматические отправки через API, без ручной переписки в QUO.
+  // Сводка считается по AutomationJob — то есть только по нашим отправкам через API (у каждой есть
+  // sendKey и связь job→OrderCommunication). Переписка сотрудников, приехавшая вебхуком QUO, живёт
+  // в OrderCommunication без sendKey и без job — в эти числа она не попадает by design.
+  // Канал разделён явно: смешивать SMS и Email в одной цифре нельзя, счёт идёт по SMS.
   const totals = { sent: 0, failed: 0, skipped: 0, scheduled: 0 };
-  for (const r of statRows) {
+  let emailSent = 0;
+  for (const r of channelRows) {
+    if (r.channel === "EMAIL") {
+      if (r.status === "SENT") emailSent += r._count._all;
+      continue;
+    }
     if (r.status === "SENT") totals.sent += r._count._all;
     else if (r.status === "FAILED") totals.failed += r._count._all;
     else if (r.status === "SKIPPED") totals.skipped += r._count._all;
@@ -68,7 +77,7 @@ export default async function AutomationsPage() {
 
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
         {[
-          { label: "Отправлено всего", value: totals.sent, accent: "text-emerald-700" },
+          { label: "SMS отправлено через API", value: totals.sent, accent: "text-emerald-700" },
           { label: "Не прошло отправку", value: totals.failed, accent: "text-red-700" },
           { label: "Пропущено по условиям", value: totals.skipped, accent: "text-slate-600" },
           { label: "В очереди", value: totals.scheduled, accent: "text-sky-700" },
@@ -80,7 +89,10 @@ export default async function AutomationsPage() {
         ))}
       </div>
       <p className="-mt-3 text-[11px] text-slate-400">
-        Считаются только автоматические отправки правил (через API): SMS и Email. Ручная переписка сотрудников сюда не входит.
+        Только SMS, отправленные правилами через API (задачи автоматизаций). Переписка сотрудников из QUO сюда не входит —
+        у неё нет нашего sendKey и связи с задачей.
+        {emailSent > 0 && ` Email-отправок правил за всё время: ${emailSent} — считаются отдельно.`}
+        {" "}SMS из Marketing Flows тоже не входят: они на вкладке History.
       </p>
 
       <div className="flex items-center justify-between">
