@@ -60,7 +60,6 @@ export default async function ProductsPage({ searchParams }: { searchParams: Pro
   const ftype = str(sp.ftype); // "" | FinancialItemType | "auto" (ничего не настраивалось)
   const fvase = str(sp.fvase); // "" | "yes" | "no" | "unknown"
   const fcost = str(sp.fcost) === "1"; // нет закупочной стоимости, хотя ваза нужна
-  const foverride = str(sp.foverride) === "1"; // есть override у вариантов
 
   const where: Prisma.ProductWhereInput = {};
   if (!showInactive) {
@@ -82,7 +81,7 @@ export default async function ProductsPage({ searchParams }: { searchParams: Pro
   // Фильтр по составам считается в памяти (см. ниже) — под него страницу нарезать в БД нельзя,
   // иначе в выдаче окажется меньше строк, чем размер страницы, а счётчик страниц наврёт.
   // Поэтому при активном фильтре берём всё и режем после фильтрации, иначе — обычные skip/take.
-  const financeFilterActive = !!ftype || !!fvase || fcost || foverride;
+  const financeFilterActive = !!ftype || !!fvase || fcost;
   const compFilterActive = comp === "full" || comp === "partial" || comp === "empty" || financeFilterActive;
 
   const include = {
@@ -182,7 +181,6 @@ export default async function ProductsPage({ searchParams }: { searchParams: Pro
       explicitTypeCount: 0,
       missingCostCount: 0,
       missingVaseLinkCount: 0,
-      overrideCount: 0,
     };
     const resolvedVariants = p.variants.map((v) => {
       const r = resolveVariantFinance({
@@ -206,7 +204,6 @@ export default async function ProductsPage({ searchParams }: { searchParams: Pro
       if (r.reviewReasons.includes("VASE_COST_MISSING") || r.reviewReasons.includes("PURCHASE_COST_MISSING"))
         finance.missingCostCount += 1;
       if (r.reviewReasons.includes("VASE_LINK_MISSING") && r.financialType === "FLOWER_PRODUCT") finance.missingVaseLinkCount += 1;
-      if (v.financialType != null || v.includesVase != null || v.includedVaseVariantId != null) finance.overrideCount += 1;
       return r;
     });
     // Индикатор составов: заполненные / всего (по неудалённым вариантам из выборки).
@@ -250,7 +247,6 @@ export default async function ProductsPage({ searchParams }: { searchParams: Pro
     if (fvase === "no" && r.finance.bouquetNoVaseCount === 0) return false;
     if (fvase === "nolink" && r.finance.missingVaseLinkCount === 0) return false;
     if (fcost && r.finance.missingCostCount === 0) return false;
-    if (foverride && r.finance.overrideCount === 0) return false;
     return true;
   });
 
@@ -351,10 +347,6 @@ export default async function ProductsPage({ searchParams }: { searchParams: Pro
           <label className="flex h-9 items-center gap-1.5 text-sm text-slate-600">
             <input type="checkbox" name="fcost" value="1" defaultChecked={fcost} className="rounded border-slate-300" />
             Нет закуп. стоимости
-          </label>
-          <label className="flex h-9 items-center gap-1.5 text-sm text-slate-600">
-            <input type="checkbox" name="foverride" value="1" defaultChecked={foverride} className="rounded border-slate-300" />
-            Есть override
           </label>
           <label className="flex flex-col gap-1">
             <span className={fieldLabel}>Сортировка</span>

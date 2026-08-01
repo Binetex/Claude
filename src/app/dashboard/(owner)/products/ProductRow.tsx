@@ -50,7 +50,6 @@ export type ProductFinanceVM = {
   explicitTypeCount: number; // тип выбран владельцем вручную (не умолчание)
   missingCostCount: number; // ваза нужна, а стоимость неизвестна
   missingVaseLinkCount: number; // букет с вазой, но ваза не выбрана
-  overrideCount: number; // вариантов со своим значением поверх товара
 };
 
 function FinanceBadges({ f }: { f: ProductFinanceVM }) {
@@ -62,8 +61,6 @@ function FinanceBadges({ f }: { f: ProductFinanceVM }) {
     items.push({ key: "noLink", label: "Ваза не привязана", cls: "border-amber-200 bg-amber-50 text-amber-700" });
   if (f.missingCostCount > 0)
     items.push({ key: "noCost", label: "Нет закуп. стоимости", cls: "border-amber-200 bg-amber-50 text-amber-700" });
-  if (f.overrideCount > 0)
-    items.push({ key: "override", label: "Есть override", cls: "border-indigo-200 bg-indigo-50 text-indigo-700" });
 
   if (items.length === 0) return <span className="text-xs text-slate-400">—</span>;
   return (
