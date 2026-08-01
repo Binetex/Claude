@@ -49,6 +49,7 @@ export type ProductFinanceVM = {
   bouquetNoVaseCount: number; // букетов с подтверждённым «без вазы»
   unclassifiedCount: number; // тип не задан ни на варианте, ни на товаре
   missingCostCount: number; // ваза нужна, а стоимость неизвестна
+  missingVaseLinkCount: number; // букет с вазой, но ваза не выбрана
   overrideCount: number; // вариантов со своим значением поверх товара
 };
 
@@ -61,6 +62,8 @@ function FinanceBadges({ f }: { f: ProductFinanceVM }) {
     items.push({ key: "noVase", label: "Без вазы", cls: "border-slate-200 bg-slate-50 text-slate-600" });
   if (f.unclassifiedCount > 0)
     items.push({ key: "unclassified", label: "Без классификации", cls: "border-slate-200 bg-white text-slate-500" });
+  if (f.missingVaseLinkCount > 0)
+    items.push({ key: "noLink", label: "Ваза не привязана", cls: "border-amber-200 bg-amber-50 text-amber-700" });
   if (f.missingCostCount > 0)
     items.push({ key: "noCost", label: "Нет закуп. стоимости", cls: "border-amber-200 bg-amber-50 text-amber-700" });
   if (f.overrideCount > 0)

@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { prisma } from "@/lib/db";
 import { Prisma } from "@/generated/prisma/client";
 import type { ProductStatus, FinancialItemType } from "@/generated/prisma/enums";
-import { resolveVariantFinance } from "@/modules/catalog/finance/resolveVariantFinance";
+import { resolveVariantFinance, type LinkedVaseInfo } from "@/modules/catalog/finance/resolveVariantFinance";
 import { FINANCIAL_TYPE_ORDER, FINANCIAL_TYPE_LABELS } from "@/modules/catalog/finance/display";
 import { Card } from "@/components/ui/Card";
 import { PageHeader } from "@/components/ui/misc";
@@ -90,9 +90,34 @@ export default async function ProductsPage({ searchParams }: { searchParams: Pro
     variants: {
       where: { remoteDeleted: false },
       orderBy: [{ position: "asc" as const }, { title: "asc" as const }],
-      include: { vaseCosts: true },
+      include: {
+        vaseCosts: true,
+        // Связанная ваза нужна, чтобы показать «ваза не привязана» и посчитать стоимость.
+        includedVaseVariant: {
+          select: {
+            id: true,
+            financialType: true,
+            remoteDeleted: true,
+            deletedAt: true,
+            // Себестоимость чаще всего лежит на самом варианте вазы, а не на её товаре —
+            // без этой выборки букет ложно помечался как «нет закупочной стоимости».
+            vaseCosts: true,
+            product: { select: { id: true, financialType: true, vaseCosts: true } },
+          },
+        },
+      },
     },
     vaseCosts: true,
+    defaultIncludedVaseVariant: {
+      select: {
+        id: true,
+        financialType: true,
+        remoteDeleted: true,
+        deletedAt: true,
+        vaseCosts: true,
+        product: { select: { id: true, financialType: true, vaseCosts: true } },
+      },
+    },
   };
 
   const [products, dbTotal, sites, summary] = await Promise.all([
@@ -124,9 +149,23 @@ export default async function ProductsPage({ searchParams }: { searchParams: Pro
     const showVariants = variants.length > 1 || (variants.length === 1 && p.variants[0].title !== "Default Title");
 
     // Финансовая сводка — через ОБЩИЙ резолвер, никакой отдельной логики наследования здесь.
+    const linked = [p.defaultIncludedVaseVariant, ...p.variants.map((v) => v.includedVaseVariant)].filter(
+      (x): x is NonNullable<typeof x> => !!x
+    );
+    const vases: Record<string, LinkedVaseInfo> = {};
+    for (const lv of linked) {
+      vases[lv.id] = {
+        id: lv.id,
+        productId: lv.product.id,
+        effectiveType: lv.financialType ?? lv.product.financialType ?? null,
+        archived: lv.remoteDeleted || lv.deletedAt != null,
+        label: "",
+      };
+    }
     const allCosts = [
       ...p.vaseCosts,
       ...p.variants.flatMap((v) => v.vaseCosts),
+      ...linked.flatMap((lv) => [...lv.vaseCosts, ...lv.product.vaseCosts]),
     ].map((c) => ({
       id: c.id,
       productId: c.productId,
@@ -142,13 +181,20 @@ export default async function ProductsPage({ searchParams }: { searchParams: Pro
       bouquetNoVaseCount: 0,
       unclassifiedCount: 0,
       missingCostCount: 0,
+      missingVaseLinkCount: 0,
       overrideCount: 0,
     };
     const resolvedVariants = p.variants.map((v) => {
       const r = resolveVariantFinance({
-        variant: { id: v.id, financialType: v.financialType, includesVase: v.includesVase },
-        product: { id: p.id, financialType: p.financialType, defaultIncludesVase: p.defaultIncludesVase },
+        variant: { id: v.id, financialType: v.financialType, includesVase: v.includesVase, includedVaseVariantId: v.includedVaseVariantId },
+        product: {
+          id: p.id,
+          financialType: p.financialType,
+          defaultIncludesVase: p.defaultIncludesVase,
+          defaultIncludedVaseVariantId: p.defaultIncludedVaseVariantId,
+        },
         costs: allCosts,
+        vases,
         at: now,
       });
       if (r.financialType === "VASE") finance.vaseCount += 1;
@@ -156,7 +202,8 @@ export default async function ProductsPage({ searchParams }: { searchParams: Pro
       if (r.financialType === "FLOWER_PRODUCT" && r.includesVase === false) finance.bouquetNoVaseCount += 1;
       if (r.financialType === null) finance.unclassifiedCount += 1;
       if (r.reviewReasons.includes("VASE_COST_MISSING")) finance.missingCostCount += 1;
-      if (v.financialType != null || v.includesVase != null) finance.overrideCount += 1;
+      if (r.reviewReasons.includes("VASE_LINK_MISSING") && r.financialType === "FLOWER_PRODUCT") finance.missingVaseLinkCount += 1;
+      if (v.financialType != null || v.includesVase != null || v.includedVaseVariantId != null) finance.overrideCount += 1;
       return r;
     });
     // Индикатор составов: заполненные / всего (по неудалённым вариантам из выборки).
@@ -199,6 +246,7 @@ export default async function ProductsPage({ searchParams }: { searchParams: Pro
     if (fvase === "yes" && r.finance.bouquetWithVaseCount === 0) return false;
     if (fvase === "no" && r.finance.bouquetNoVaseCount === 0) return false;
     if (fvase === "unknown" && !r.resolvedVase.includes(null)) return false;
+    if (fvase === "nolink" && r.finance.missingVaseLinkCount === 0) return false;
     if (fcost && r.finance.missingCostCount === 0) return false;
     if (foverride && r.finance.overrideCount === 0) return false;
     return true;
@@ -295,6 +343,7 @@ export default async function ProductsPage({ searchParams }: { searchParams: Pro
               <option value="yes">Букет с вазой</option>
               <option value="no">Без вазы</option>
               <option value="unknown">Не настроено</option>
+              <option value="nolink">Ваза не привязана</option>
             </Select>
           </label>
           <label className="flex h-9 items-center gap-1.5 text-sm text-slate-600">

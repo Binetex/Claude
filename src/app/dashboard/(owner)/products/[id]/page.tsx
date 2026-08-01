@@ -12,8 +12,9 @@ import { ProductFloristPriceInput } from "../PriceInputs";
 import { VariantEditDialog } from "../VariantEditDialog";
 import { ProductFinanceBlock } from "../ProductFinanceBlock";
 import type { VariantFinanceVM } from "../VariantFinanceBlock";
-import { resolveVariantFinance, type VaseCostRow } from "@/modules/catalog/finance/resolveVariantFinance";
-import { financialTypeLabel, includesVaseLabel } from "@/modules/catalog/finance/display";
+import { resolveVariantFinance, type VaseCostRow, type LinkedVaseInfo } from "@/modules/catalog/finance/resolveVariantFinance";
+import { listVaseOptions } from "@/modules/catalog/finance/vaseLink";
+import { financialTypeLabel } from "@/modules/catalog/finance/display";
 
 export const dynamic = "force-dynamic";
 
@@ -76,11 +77,46 @@ export default async function ProductDetailPage({
         : `${formatMoney(priceMin)}–${formatMoney(priceMax)}`;
 
   // ── Финансовая классификация: эффективные значения считает общий резолвер, а не страница ──
-  const variantCosts = await prisma.vasePurchaseCost.findMany({
-    where: { productVariantId: { in: product.variants.map((v) => v.id) } },
-    orderBy: { effectiveFrom: "desc" },
-  });
-  const allCosts: VaseCostRow[] = [...variantCosts, ...product.vaseCosts].map((c) => ({
+  // Резолв «на сейчас»: это карточка настройки, а не расчёт заказа (там дата доставки).
+  const now = new Date();
+
+  const linkedVaseIds = [
+    product.defaultIncludedVaseVariantId,
+    ...product.variants.map((v) => v.includedVaseVariantId),
+  ].filter((x): x is string => !!x);
+
+  const [variantCosts, vaseOptions, linkedVases, usedInBouquets] = await Promise.all([
+    prisma.vasePurchaseCost.findMany({
+      where: { OR: [{ productVariantId: { in: product.variants.map((v) => v.id) } }, { productVariantId: { in: linkedVaseIds } }] },
+      orderBy: { effectiveFrom: "desc" },
+    }),
+    listVaseOptions(product.siteId),
+    linkedVaseIds.length
+      ? prisma.productVariant.findMany({
+          where: { id: { in: linkedVaseIds } },
+          select: {
+            id: true,
+            title: true,
+            financialType: true,
+            remoteDeleted: true,
+            deletedAt: true,
+            product: { select: { id: true, name: true, financialType: true, vaseCosts: true } },
+          },
+        })
+      : Promise.resolve([]),
+    // Сколько букетов ссылается на вазы этого товара — считаем ОБА вида ссылок:
+    // собственную ссылку варианта и дефолт товара, иначе счётчик врёт.
+    Promise.all([
+      prisma.productVariant.count({ where: { includedVaseVariantId: { in: product.variants.map((v) => v.id) } } }),
+      prisma.product.count({ where: { defaultIncludedVaseVariantId: { in: product.variants.map((v) => v.id) } } }),
+    ]).then(([byVariant, byProduct]) => byVariant + byProduct),
+  ]);
+
+  const allCosts: VaseCostRow[] = [
+    ...variantCosts,
+    ...product.vaseCosts,
+    ...linkedVases.flatMap((v) => v.product.vaseCosts),
+  ].map((c) => ({
     id: c.id,
     productId: c.productId,
     productVariantId: c.productVariantId,
@@ -89,8 +125,17 @@ export default async function ProductDetailPage({
     effectiveFrom: c.effectiveFrom,
     effectiveTo: c.effectiveTo,
   }));
-  // Резолв «на сейчас»: это карточка настройки, а не расчёт заказа (там дата доставки).
-  const now = new Date();
+
+  const vases: Record<string, LinkedVaseInfo> = {};
+  for (const v of linkedVases) {
+    vases[v.id] = {
+      id: v.id,
+      productId: v.product.id,
+      effectiveType: v.financialType ?? v.product.financialType ?? null,
+      archived: v.remoteDeleted || v.deletedAt != null,
+      label: `${v.product.name}${v.title !== "Default Title" ? ` / ${v.title}` : ""}`,
+    };
+  }
 
   const toRowVM = (c: (typeof allCosts)[number]) => ({
     id: c.id,
@@ -102,34 +147,78 @@ export default async function ProductDetailPage({
   });
 
   const productCostRows = product.vaseCosts.map(toRowVM);
+  // Стоимость вазы почти всегда задана на её варианте, а не на товаре. Показываем это на
+  // карточке, иначе блок товара говорит «не указана», хотя у варианта значение есть.
+  const variantOwnCosts = product.variants
+    .map((v) => {
+      const active = allCosts.find(
+        (c) =>
+          c.productVariantId === v.id &&
+          c.costType === "STANDALONE_VASE" &&
+          c.effectiveFrom <= now &&
+          (c.effectiveTo === null || c.effectiveTo > now)
+      );
+      return active ? { title: v.title, cents: active.purchaseCostCents } : null;
+    })
+    .filter((x): x is { title: string; cents: number } => !!x);
   const productActiveCost =
     product.vaseCosts.find((c) => c.effectiveFrom <= now && (c.effectiveTo === null || c.effectiveTo > now)) ?? null;
+
+  // Ваза по умолчанию у товара — то же состояние, что и у варианта, но без наследования.
+  const productResolved = resolveVariantFinance({
+    variant: { id: "__product__", financialType: product.financialType, includesVase: product.defaultIncludesVase, includedVaseVariantId: product.defaultIncludedVaseVariantId },
+    product: { id: product.id, financialType: product.financialType, defaultIncludesVase: null, defaultIncludedVaseVariantId: null },
+    costs: allCosts,
+    vases,
+    at: now,
+  });
+  const productVaseState = {
+    ownIncludesVase: product.defaultIncludesVase,
+    ownVaseVariantId: product.defaultIncludedVaseVariantId,
+    effectiveVaseLabel: productResolved.vase?.label ?? null,
+    effectiveVaseCostCents: productResolved.vaseCostCents,
+    effectiveVaseProductId: productResolved.vase?.productId ?? null,
+    effectiveVaseArchived: productResolved.vase?.archived ?? false,
+    effectiveSource: "VARIANT" as const,
+  };
+  const productVaseHint = productResolved.vase?.label ?? (product.defaultIncludesVase === false ? "без вазы" : "не настроено");
 
   const financeByVariant = new Map<string, VariantFinanceVM>();
   for (const v of product.variants) {
     const resolved = resolveVariantFinance({
-      variant: { id: v.id, financialType: v.financialType, includesVase: v.includesVase },
-      product: { id: product.id, financialType: product.financialType, defaultIncludesVase: product.defaultIncludesVase },
+      variant: { id: v.id, financialType: v.financialType, includesVase: v.includesVase, includedVaseVariantId: v.includedVaseVariantId },
+      product: {
+        id: product.id,
+        financialType: product.financialType,
+        defaultIncludesVase: product.defaultIncludesVase,
+        defaultIncludedVaseVariantId: product.defaultIncludedVaseVariantId,
+      },
       costs: allCosts,
+      vases,
       at: now,
     });
+    const ownCost = allCosts.find(
+      (c) => c.productVariantId === v.id && c.costType === "STANDALONE_VASE" && c.effectiveFrom <= now && (c.effectiveTo === null || c.effectiveTo > now)
+    );
     financeByVariant.set(v.id, {
       variantId: v.id,
       productId: product.id,
       ownType: v.financialType,
-      ownIncludesVase: v.includesVase,
       effectiveType: resolved.financialType,
       typeSource: resolved.financialTypeSource,
-      effectiveIncludesVase: resolved.includesVase,
-      includesVaseSource: resolved.includesVaseSource,
       productTypeLabel: financialTypeLabel(product.financialType),
-      productIncludesVaseLabel: includesVaseLabel(product.defaultIncludesVase),
-      effectiveCostCents: resolved.vaseCostCents,
-      costSource: resolved.vaseCostSource,
-      costHistory: [
-        ...allCosts.filter((c) => c.productVariantId === v.id).map(toRowVM),
-        ...productCostRows,
-      ],
+      vase: {
+        ownIncludesVase: v.includesVase,
+        ownVaseVariantId: v.includedVaseVariantId,
+        effectiveVaseLabel: resolved.vase?.label ?? null,
+        effectiveVaseCostCents: resolved.vaseCostCents,
+        effectiveVaseProductId: resolved.vase?.productId ?? null,
+        effectiveVaseArchived: resolved.vase?.archived ?? false,
+        effectiveSource: resolved.vaseSource,
+        productHint: productVaseHint,
+      },
+      ownCostCents: ownCost?.purchaseCostCents ?? null,
+      ownCostHistory: allCosts.filter((c) => c.productVariantId === v.id).map(toRowVM),
     });
   }
 
@@ -202,9 +291,12 @@ export default async function ProductDetailPage({
           <ProductFinanceBlock
             productId={product.id}
             financialType={product.financialType}
-            defaultIncludesVase={product.defaultIncludesVase}
+            vase={productVaseState}
+            vaseOptions={vaseOptions}
             costHistory={productCostRows}
             effectiveCostCents={productActiveCost?.purchaseCostCents ?? null}
+            usedInBouquets={usedInBouquets}
+            variantOwnCosts={variantOwnCosts}
           />
         </CardBody>
       </Card>
@@ -256,6 +348,7 @@ export default async function ProductDetailPage({
                     <VariantEditDialog
                       variantId={v.id}
                       finance={financeByVariant.get(v.id)!}
+                      vaseOptions={vaseOptions}
                       title={variantOptions(v)}
                       initialPrice={v.floristPrice != null ? toNumber(v.floristPrice) : null}
                       initialComposition={v.floristComposition}

@@ -449,30 +449,34 @@ model SiteFloristPriority {
 // Карточка товара (агрегат). Точные цены сайта живут в ProductVariant;
 // здесь только агрегаты minPrice/maxPrice по активным неудалённым вариантам.
 model Product {
-  id                        String             @id @default(cuid())
-  name                      String
-  image                     String?
-  defaultFloristComposition String? // шаблон состава букета; НЕ используется в заказе напрямую (только для заполнения вариантов)
-  siteId                    String
-  site                      Site               @relation(fields: [siteId], references: [id], onDelete: Cascade)
-  externalId                String // Shopify product id
-  status                    ProductStatus      @default(ACTIVE) // источник истины — Shopify
-  productType               String?
-  adminUrl                  String? // ссылка на товар в Shopify Admin (у Woo сюда пишется permalink витрины)
-  onlineUrl                 String? // публичная ссылка на товар в витрине магазина (Woo: permalink, Shopify: /products/{handle})
-  floristPrice              Decimal?           @db.Decimal(10, 2) // базовая себестоимость; NULL = не задана → флорист получает полную стоимость заказа
-  minPrice                  Decimal?           @db.Decimal(10, 2) // агрегат по активным вариантам
-  maxPrice                  Decimal?           @db.Decimal(10, 2)
+  id                           String             @id @default(cuid())
+  name                         String
+  image                        String?
+  defaultFloristComposition    String? // шаблон состава букета; НЕ используется в заказе напрямую (только для заполнения вариантов)
+  siteId                       String
+  site                         Site               @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  externalId                   String // Shopify product id
+  status                       ProductStatus      @default(ACTIVE) // источник истины — Shopify
+  productType                  String?
+  adminUrl                     String? // ссылка на товар в Shopify Admin (у Woo сюда пишется permalink витрины)
+  onlineUrl                    String? // публичная ссылка на товар в витрине магазина (Woo: permalink, Shopify: /products/{handle})
+  floristPrice                 Decimal?           @db.Decimal(10, 2) // базовая себестоимость; NULL = не задана → флорист получает полную стоимость заказа
+  minPrice                     Decimal?           @db.Decimal(10, 2) // агрегат по активным вариантам
+  maxPrice                     Decimal?           @db.Decimal(10, 2)
   // ── Финансовая классификация. Задаёт ТОЛЬКО владелец; синхронизация не трогает. ──
   // productType (simple/variable) финансовым типом НЕ является и здесь не участвует.
-  financialType             FinancialItemType? // значение по умолчанию для вариантов; NULL = не задано
-  defaultIncludesVase       Boolean? // NULL = не задано; варианты наследуют это значение
-  remoteDeleted             Boolean            @default(false) // пропал из внешнего API
-  deletedAt                 DateTime?
-  lastSyncedAt              DateTime?
-  lastSeenSyncRunId         String? // id последнего sync-прогона, где товар встретился (для безопасной пометки remoteDeleted только после DONE)
-  createdAt                 DateTime           @default(now())
-  updatedAt                 DateTime           @updatedAt
+  financialType                FinancialItemType? // значение по умолчанию для вариантов; NULL = не задано
+  defaultIncludesVase          Boolean? // NULL = не задано; варианты наследуют это значение
+  // Ваза по умолчанию для вариантов — ССЫЛКА на вариант настоящего товара-вазы.
+  // Закупочная стоимость здесь не хранится: она живёт у самой вазы (VasePurchaseCost).
+  defaultIncludedVaseVariantId String?
+  defaultIncludedVaseVariant   ProductVariant?    @relation("ProductDefaultVase", fields: [defaultIncludedVaseVariantId], references: [id], onDelete: SetNull)
+  remoteDeleted                Boolean            @default(false) // пропал из внешнего API
+  deletedAt                    DateTime?
+  lastSyncedAt                 DateTime?
+  lastSeenSyncRunId            String? // id последнего sync-прогона, где товар встретился (для безопасной пометки remoteDeleted только после DONE)
+  createdAt                    DateTime           @default(now())
+  updatedAt                    DateTime           @updatedAt
 
   variants      ProductVariant[]
   floristPrices FloristProductPrice[]
@@ -481,52 +485,61 @@ model Product {
   @@unique([siteId, externalId])
   @@index([siteId])
   @@index([financialType])
+  @@index([defaultIncludedVaseVariantId])
 }
 
 // Конкретная вариация товара (Shopify variant). Хранится отдельно от Product
 // для единой модели даже при единственном варианте "Default Title".
 model ProductVariant {
-  id                 String             @id @default(cuid())
-  productId          String
-  product            Product            @relation(fields: [productId], references: [id], onDelete: Cascade)
-  externalId         String // Shopify variant id
-  title              String // напр. "Small / Red" или "Default Title"
-  sku                String?
-  listPrice          Decimal            @db.Decimal(10, 2) // цена сайта
-  compareAtPrice     Decimal?           @db.Decimal(10, 2)
-  image              String?
-  option1            String?
-  option2            String?
-  option3            String?
-  inventoryQty       Int? // если доступно текущими scopes
-  available          Boolean            @default(true) // статус доступности
-  floristComposition String? // локальный состав букета для флориста (многострочный текст) — Shopify не трогает
-  floristPrice       Decimal?           @db.Decimal(10, 2) // необязательная цена флориста для варианта
+  id                    String             @id @default(cuid())
+  productId             String
+  product               Product            @relation(fields: [productId], references: [id], onDelete: Cascade)
+  externalId            String // Shopify variant id
+  title                 String // напр. "Small / Red" или "Default Title"
+  sku                   String?
+  listPrice             Decimal            @db.Decimal(10, 2) // цена сайта
+  compareAtPrice        Decimal?           @db.Decimal(10, 2)
+  image                 String?
+  option1               String?
+  option2               String?
+  option3               String?
+  inventoryQty          Int? // если доступно текущими scopes
+  available             Boolean            @default(true) // статус доступности
+  floristComposition    String? // локальный состав букета для флориста (многострочный текст) — Shopify не трогает
+  floristPrice          Decimal?           @db.Decimal(10, 2) // необязательная цена флориста для варианта
   // ── Финансовая классификация варианта. Приоритетнее товара; синхронизация не трогает. ──
-  financialType      FinancialItemType? // NULL = наследовать Product.financialType
+  financialType         FinancialItemType? // NULL = наследовать Product.financialType
   // ТРИ состояния, поэтому Boolean? и БЕЗ @default:
   //   NULL  — наследовать Product.defaultIncludesVase (или неизвестно, если и там NULL)
   //   true  — букет с включённой вазой
   //   false — подтверждённо БЕЗ вазы (не то же самое, что «не знаем»)
-  includesVase       Boolean?
-  financialTypeSetBy String? // User.id последнего изменения классификации
-  financialTypeSetAt DateTime?
-  position           Int?
-  adminUrl           String? // ссылка на вариант в Admin, если доступна
-  lastSyncedAt       DateTime?
-  lastSeenSyncRunId  String? // см. Product.lastSeenSyncRunId
-  remoteDeleted      Boolean            @default(false)
-  deletedAt          DateTime?
-  createdAt          DateTime           @default(now())
-  updatedAt          DateTime           @updatedAt
+  includesVase          Boolean?
+  // Конкретная ваза внутри букета. Приоритетнее товарного дефолта. Стоимость не дублируется:
+  // расчёт берёт VasePurchaseCost связанной вазы на дату доставки.
+  includedVaseVariantId String?
+  includedVaseVariant   ProductVariant?    @relation("VariantIncludedVase", fields: [includedVaseVariantId], references: [id], onDelete: SetNull)
+  financialTypeSetBy    String? // User.id последнего изменения классификации
+  financialTypeSetAt    DateTime?
+  position              Int?
+  adminUrl              String? // ссылка на вариант в Admin, если доступна
+  lastSyncedAt          DateTime?
+  lastSeenSyncRunId     String? // см. Product.lastSeenSyncRunId
+  remoteDeleted         Boolean            @default(false)
+  deletedAt             DateTime?
+  createdAt             DateTime           @default(now())
+  updatedAt             DateTime           @updatedAt
 
-  floristPrices FloristProductPrice[]
-  vaseCosts     VasePurchaseCost[]
+  floristPrices          FloristProductPrice[]
+  vaseCosts              VasePurchaseCost[]
+  // Обратные связи: на карточке вазы видно, где она используется.
+  usedAsIncludedVaseBy   ProductVariant[]      @relation("VariantIncludedVase")
+  usedAsProductDefaultBy Product[]             @relation("ProductDefaultVase")
 
   @@unique([productId, externalId])
   @@index([productId])
   @@index([financialType])
   @@index([includesVase])
+  @@index([includedVaseVariantId])
 }
 
 // Финансовый тип позиции. Единый на весь проект: каталог и будущий финансовый модуль

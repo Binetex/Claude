@@ -6,31 +6,41 @@ import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import type { FinancialItemType } from "@/generated/prisma/enums";
 import { FINANCIAL_TYPE_ORDER, FINANCIAL_TYPE_LABELS } from "@/modules/catalog/finance/display";
-import { ownerSetProductFinance } from "@/app/dashboard/(owner)/actions";
+import { ownerSetProductFinance, ownerSetProductDefaultVase } from "@/app/dashboard/(owner)/actions";
+import { formatCents } from "@/lib/cents";
 import { VaseCostEditor, type VaseCostRowVM } from "./VaseCostEditor";
+import { VaseSelect, type VaseOption, type VaseSelectState } from "./VaseSelect";
 
 const NOT_SET = "__none__";
 
 export function ProductFinanceBlock({
   productId,
   financialType,
-  defaultIncludesVase,
+  vase,
+  vaseOptions,
   costHistory,
   effectiveCostCents,
+  usedInBouquets,
+  variantOwnCosts,
 }: {
   productId: string;
   financialType: FinancialItemType | null;
-  defaultIncludesVase: boolean | null;
+  vase: VaseSelectState;
+  vaseOptions: VaseOption[];
   costHistory: VaseCostRowVM[];
   effectiveCostCents: number | null;
+  /** Сколько букетов ссылается на эту вазу — показываем на карточке вазы. */
+  usedInBouquets: number;
+  /** Стоимости, заданные на вариантах этой вазы: они приоритетнее товарной. */
+  variantOwnCosts: { title: string; cents: number }[];
 }) {
   const [pending, start] = useTransition();
   const [type, setType] = useState<string>(financialType ?? NOT_SET);
-  const [vase, setVase] = useState<string>(defaultIncludesVase == null ? NOT_SET : String(defaultIncludesVase));
 
-  function save(patch: { financialType?: FinancialItemType | null; defaultIncludesVase?: boolean | null }) {
+  function saveType(next: string) {
+    setType(next);
     start(async () => {
-      await ownerSetProductFinance(productId, patch);
+      await ownerSetProductFinance(productId, { financialType: next === NOT_SET ? null : (next as FinancialItemType) });
       toast.success("Сохранено");
     });
   }
@@ -45,15 +55,7 @@ export function ProductFinanceBlock({
 
       <div>
         <Label>Тип позиции</Label>
-        <Select
-          value={type}
-          disabled={pending}
-          onChange={(e) => {
-            setType(e.target.value);
-            save({ financialType: e.target.value === NOT_SET ? null : (e.target.value as FinancialItemType) });
-          }}
-          wrapperClassName="mt-1"
-        >
+        <Select value={type} disabled={pending} onChange={(e) => saveType(e.target.value)} wrapperClassName="mt-1">
           <option value={NOT_SET}>Не задан</option>
           {FINANCIAL_TYPE_ORDER.map((t) => (
             <option key={t} value={t}>
@@ -64,44 +66,36 @@ export function ProductFinanceBlock({
       </div>
 
       {shownType === "FLOWER_PRODUCT" && (
-        <div>
-          <Label>Содержит вазу по умолчанию</Label>
-          <Select
-            value={vase}
-            disabled={pending}
-            onChange={(e) => {
-              setVase(e.target.value);
-              save({ defaultIncludesVase: e.target.value === NOT_SET ? null : e.target.value === "true" });
-            }}
-            wrapperClassName="mt-1"
-          >
-            <option value={NOT_SET}>Не задано</option>
-            <option value="true">Да, ваза входит в букет</option>
-            <option value="false">Нет, без вазы</option>
-          </Select>
-        </div>
-      )}
-
-      {shownType === "FLOWER_PRODUCT" && vase === "true" && (
-        <VaseCostEditor
-          target={{ productId }}
-          costType="INCLUDED_VASE"
-          title="Закупочная стоимость включённой вазы (по умолчанию)"
-          history={costHistory}
-          effectiveCostCents={effectiveCostCents}
-          effectiveSource={effectiveCostCents == null ? "UNKNOWN" : "PRODUCT"}
+        <VaseSelect
+          level="PRODUCT"
+          state={vase}
+          options={vaseOptions}
+          onSave={(selection) => ownerSetProductDefaultVase(productId, selection)}
         />
       )}
 
       {shownType === "VASE" && (
-        <VaseCostEditor
-          target={{ productId }}
-          costType="STANDALONE_VASE"
-          title="Закупочная стоимость вазы (по умолчанию)"
-          history={costHistory}
-          effectiveCostCents={effectiveCostCents}
-          effectiveSource={effectiveCostCents == null ? "UNKNOWN" : "PRODUCT"}
-        />
+        <>
+          <VaseCostEditor
+            target={{ productId }}
+            costType="STANDALONE_VASE"
+            title="Закупочная стоимость вазы"
+            history={costHistory}
+            effectiveCostCents={effectiveCostCents}
+            effectiveSource={effectiveCostCents == null ? "UNKNOWN" : "PRODUCT"}
+          />
+          {variantOwnCosts.length > 0 && (
+            <p className="text-[11px] text-slate-500">
+              Задано на вариантах (приоритетнее товарной):{" "}
+              {variantOwnCosts.map((v) => `${v.title} — ${formatCents(v.cents)}`).join(" · ")}
+            </p>
+          )}
+          <p className="text-[11px] text-slate-500">
+            {usedInBouquets > 0
+              ? `Используется в букетах: ${usedInBouquets}. Изменение закупочной стоимости повлияет на все будущие расчёты по ним.`
+              : "Пока не привязана ни к одному букету."}
+          </p>
+        </>
       )}
     </div>
   );

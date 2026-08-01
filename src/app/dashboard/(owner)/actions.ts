@@ -11,6 +11,7 @@ import { Prisma } from "@/generated/prisma/client";
 import type { OrderStatus, FloristFinanceVisibility, Role, FinancialItemType, VaseCostType } from "@/generated/prisma/enums";
 import { setProductClassification, setVariantClassification } from "@/modules/catalog/finance/classification";
 import { setVasePurchaseCost } from "@/modules/catalog/finance/setVasePurchaseCost";
+import { setVariantVase, setProductDefaultVase, type VaseSelection } from "@/modules/catalog/finance/vaseLink";
 import { usdToCents } from "@/lib/cents";
 import {
   reassignManual,
@@ -287,6 +288,43 @@ export async function ownerAddVaseCost(args: {
       : (await prisma.productVariant.findUnique({ where: { id: args.target.productVariantId }, select: { productId: true } }))
           ?.productId;
   if (productId) revalidatePath(`/dashboard/products/${productId}`);
+  revalidatePath("/dashboard/products");
+  return { ok: true };
+}
+
+/**
+ * Ваза внутри букета — ССЫЛКА на вариант товара-вазы. Закупочная стоимость у букета не
+ * хранится: она берётся у самой вазы. Валидация (тот же магазин, эффективный тип VASE,
+ * не архив, не сама позиция) — в сервисе, здесь только прокси и понятная ошибка в UI.
+ */
+export async function ownerSetVariantVase(
+  variantId: string,
+  selection: VaseSelection
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const user = await requireRole("OWNER");
+  try {
+    await setVariantVase({ variantId, selection, actor: { userId: user.id, role: user.role } });
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : "не удалось сохранить" };
+  }
+  const v = await prisma.productVariant.findUnique({ where: { id: variantId }, select: { productId: true } });
+  if (v) revalidatePath(`/dashboard/products/${v.productId}`);
+  revalidatePath("/dashboard/products");
+  return { ok: true };
+}
+
+/** Ваза по умолчанию на уровне товара. Варианты наследуют её, пока не переопределят. */
+export async function ownerSetProductDefaultVase(
+  productId: string,
+  selection: VaseSelection
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const user = await requireRole("OWNER");
+  try {
+    await setProductDefaultVase({ productId, selection, actor: { userId: user.id, role: user.role } });
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : "не удалось сохранить" };
+  }
+  revalidatePath(`/dashboard/products/${productId}`);
   revalidatePath("/dashboard/products");
   return { ok: true };
 }
