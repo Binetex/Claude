@@ -36,6 +36,15 @@ export default async function AutomationsPage() {
     else if (r.status === "CANCELLED") s.cancelled += r._count._all;
     else if (r.status === "SCHEDULED" || r.status === "PROCESSING") s.scheduled += r._count._all;
   }
+  // Сводка по всем правилам: только автоматические отправки через API, без ручной переписки в QUO.
+  const totals = { sent: 0, failed: 0, skipped: 0, scheduled: 0 };
+  for (const r of statRows) {
+    if (r.status === "SENT") totals.sent += r._count._all;
+    else if (r.status === "FAILED") totals.failed += r._count._all;
+    else if (r.status === "SKIPPED") totals.skipped += r._count._all;
+    else if (r.status === "SCHEDULED" || r.status === "PROCESSING") totals.scheduled += r._count._all;
+  }
+
   const lastRunByAuto = new Map<string, Date | null>();
   for (const r of lastRuns) lastRunByAuto.set(r.automationId, r._max.sentAt);
 
@@ -56,6 +65,23 @@ export default async function AutomationsPage() {
       </div>
 
       <AutomationsTabs />
+
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+        {[
+          { label: "Отправлено всего", value: totals.sent, accent: "text-emerald-700" },
+          { label: "Не прошло отправку", value: totals.failed, accent: "text-red-700" },
+          { label: "Пропущено по условиям", value: totals.skipped, accent: "text-slate-600" },
+          { label: "В очереди", value: totals.scheduled, accent: "text-sky-700" },
+        ].map((s) => (
+          <div key={s.label} className="rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm">
+            <div className={`text-lg font-semibold tabular-nums ${s.accent}`}>{s.value}</div>
+            <div className="text-[11px] text-slate-500">{s.label}</div>
+          </div>
+        ))}
+      </div>
+      <p className="-mt-3 text-[11px] text-slate-400">
+        Считаются только автоматические отправки правил (через API): SMS и Email. Ручная переписка сотрудников сюда не входит.
+      </p>
 
       <div className="flex items-center justify-between">
         <p className="text-sm text-slate-500">Одно событие — одно сообщение. Для последовательности шагов используйте Marketing Flows.</p>

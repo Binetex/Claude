@@ -54,12 +54,15 @@ export function AutomationForm({
   recentOrders,
   triggers,
   variables,
+  // На странице правила заголовок и «назад» уже есть над подвкладками — второй был бы дублем.
+  showHeader = true,
 }: {
   initial: AutomationFormInitial | null;
   sites: SiteOpt[];
   recentOrders: OrderOpt[];
   triggers: TriggerOpt[];
   variables: VarDef[];
+  showHeader?: boolean;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -190,10 +193,12 @@ export function AutomationForm({
 
   return (
     <div className="mx-auto max-w-3xl space-y-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-xl font-bold text-slate-800">{initial ? "Редактирование автоматизации" : "Новая автоматизация"}</h1>
-        <Button variant="ghost" size="sm" onClick={() => router.push("/dashboard/automations")}>← К списку</Button>
-      </div>
+      {showHeader && (
+        <div className="flex items-center justify-between">
+          <h1 className="text-xl font-bold text-slate-800">{initial ? "Редактирование автоматизации" : "Новая автоматизация"}</h1>
+          <Button variant="ghost" size="sm" onClick={() => router.push("/dashboard/automations")}>← К списку</Button>
+        </div>
+      )}
 
       <Card>
         <CardBody className="space-y-4">
