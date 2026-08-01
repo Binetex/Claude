@@ -4,7 +4,7 @@ import { prisma } from "@/lib/db";
 import { Prisma } from "@/generated/prisma/client";
 import type { ProductStatus, FinancialItemType } from "@/generated/prisma/enums";
 import { resolveVariantFinance, type LinkedVaseInfo } from "@/modules/catalog/finance/resolveVariantFinance";
-import { FINANCIAL_TYPE_ORDER, FINANCIAL_TYPE_LABELS } from "@/modules/catalog/finance/display";
+import { CATALOG_TYPE_ORDER, FINANCIAL_TYPE_LABELS } from "@/modules/catalog/finance/display";
 import { Card } from "@/components/ui/Card";
 import { PageHeader } from "@/components/ui/misc";
 import { Input } from "@/components/ui/input";
@@ -330,7 +330,8 @@ export default async function ProductsPage({ searchParams }: { searchParams: Pro
             <Select name="ftype" defaultValue={ftype} wrapperClassName="w-44">
               <option value="">Все</option>
               <option value="auto">Только по умолчанию (не настраивались)</option>
-              {FINANCIAL_TYPE_ORDER.map((t) => (
+              <option value="FLOWER_PRODUCT">{FINANCIAL_TYPE_LABELS.FLOWER_PRODUCT}</option>
+              {CATALOG_TYPE_ORDER.map((t) => (
                 <option key={t} value={t}>
                   {FINANCIAL_TYPE_LABELS[t]}
                 </option>

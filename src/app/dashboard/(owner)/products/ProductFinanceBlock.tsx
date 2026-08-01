@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import type { FinancialItemType } from "@/generated/prisma/enums";
-import { FINANCIAL_TYPE_ORDER, FINANCIAL_TYPE_LABELS, DEFAULT_TYPE_LABEL } from "@/modules/catalog/finance/display";
+import { CATALOG_TYPE_ORDER, FINANCIAL_TYPE_LABELS, DEFAULT_TYPE_LABEL } from "@/modules/catalog/finance/display";
 import { ownerSetProductFinance, ownerSetProductDefaultVase } from "@/app/dashboard/(owner)/actions";
 import { formatCents } from "@/lib/cents";
 import { VaseCostEditor, type VaseCostRowVM } from "./VaseCostEditor";
@@ -47,6 +47,10 @@ export function ProductFinanceBlock({
 
   // Не выбрано — значит обычный букет: пустого типа не существует.
   const shownType: FinancialItemType = type === NOT_SET ? "FLOWER_PRODUCT" : (type as FinancialItemType);
+  const typeOptions =
+    financialType && !CATALOG_TYPE_ORDER.includes(financialType)
+      ? [...CATALOG_TYPE_ORDER, financialType]
+      : CATALOG_TYPE_ORDER;
 
   return (
     <div className="space-y-3">
@@ -60,7 +64,7 @@ export function ProductFinanceBlock({
         <Label>Тип позиции</Label>
         <Select value={type} disabled={pending} onChange={(e) => saveType(e.target.value)} wrapperClassName="mt-1">
           <option value={NOT_SET}>{DEFAULT_TYPE_LABEL}</option>
-          {FINANCIAL_TYPE_ORDER.map((t) => (
+          {typeOptions.map((t) => (
             <option key={t} value={t}>
               {FINANCIAL_TYPE_LABELS[t]}
             </option>

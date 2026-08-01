@@ -78,7 +78,9 @@ export function VaseSelect({
       <Label>{level === "VARIANT" ? "Ваза в букете" : "Ваза по умолчанию"}</Label>
       <Select value={value} disabled={pending || !!disabledReason} onChange={(e) => apply(e.target.value)} wrapperClassName="mt-1">
         <option value={INHERIT}>{inheritLabel}</option>
-        <option value={NO_VASE}>Без вазы</option>
+        {/* У товара «не настроено» и «без вазы» дают одно и то же — второй пункт был бы
+            дублем. У варианта разница есть: наследовать вазу товара либо снять её здесь. */}
+        {level === "VARIANT" && <option value={NO_VASE}>Без вазы</option>}
         {/* Текущая ссылка может указывать на вазу, которой уже нет в списке доступных
             (архивирована). Её нужно показать в самом селекторе, иначе он врёт: выглядит как
             «наследовать», хотя у варианта своя ссылка. Выбрать её заново нельзя. */}

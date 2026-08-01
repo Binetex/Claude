@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import type { FinancialItemType } from "@/generated/prisma/enums";
-import { FINANCIAL_TYPE_ORDER, FINANCIAL_TYPE_LABELS, financialTypeLabel, sourceLabel } from "@/modules/catalog/finance/display";
+import { CATALOG_TYPE_ORDER, FINANCIAL_TYPE_LABELS, financialTypeLabel, sourceLabel } from "@/modules/catalog/finance/display";
 import { ownerSetVariantFinance, ownerSetVariantVase } from "@/app/dashboard/(owner)/actions";
 import { VaseCostEditor, type VaseCostRowVM } from "./VaseCostEditor";
 import { VaseSelect, type VaseOption, type VaseSelectState } from "./VaseSelect";
@@ -38,6 +38,11 @@ export function VariantFinanceBlock({ vm, vaseOptions }: { vm: VariantFinanceVM;
 
   // Тип определён всегда: не выбрано → значение товара → обычный букет.
   const shownType: FinancialItemType = type === INHERIT ? vm.effectiveType : (type as FinancialItemType);
+  // В каталоге нужны только вазы, подарки и «другое». Но если в базе уже стоит иной тип
+  // (например строка заказа классифицирована финансовым модулем), не прячем его — иначе
+  // сохранение молча заменило бы значение.
+  const typeOptions =
+    vm.ownType && !CATALOG_TYPE_ORDER.includes(vm.ownType) ? [...CATALOG_TYPE_ORDER, vm.ownType] : CATALOG_TYPE_ORDER;
 
   function saveType(next: string) {
     setType(next);
@@ -64,7 +69,7 @@ export function VariantFinanceBlock({ vm, vaseOptions }: { vm: VariantFinanceVM;
         <span className="text-xs text-slate-500">Тип позиции</span>
         <Select value={type} disabled={pending} onChange={(e) => saveType(e.target.value)} wrapperClassName="mt-1">
           <option value={INHERIT}>{vm.inheritLabel}</option>
-          {FINANCIAL_TYPE_ORDER.map((t) => (
+          {typeOptions.map((t) => (
             <option key={t} value={t}>
               {FINANCIAL_TYPE_LABELS[t]}
             </option>

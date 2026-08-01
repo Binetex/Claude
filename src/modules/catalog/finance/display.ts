@@ -2,7 +2,7 @@
 import type { FinancialItemType } from "@/generated/prisma/enums";
 
 export const FINANCIAL_TYPE_LABELS: Record<FinancialItemType, string> = {
-  FLOWER_PRODUCT: "Цветочный товар",
+  FLOWER_PRODUCT: "Обычный букет",
   VASE: "Ваза",
   TIP: "Чаевые",
   DELIVERY: "Доставка",
@@ -11,22 +11,18 @@ export const FINANCIAL_TYPE_LABELS: Record<FinancialItemType, string> = {
   DISCOUNT: "Скидка",
   CARD: "Открытка",
   GIFT: "Подарок",
-  OTHER: "Прочее",
+  OTHER: "Другое",
 };
 
-/** Порядок в выпадающих списках: сначала то, что реально встречается в каталоге. */
-export const FINANCIAL_TYPE_ORDER: FinancialItemType[] = [
-  "FLOWER_PRODUCT",
-  "VASE",
-  "GIFT",
-  "CARD",
-  "SERVICE_FEE",
-  "DELIVERY",
-  "TIP",
-  "TAX",
-  "DISCOUNT",
-  "OTHER",
-];
+/**
+ * Что владелец выбирает в КАТАЛОГЕ. Обычный букет — умолчание, поэтому в списке его нет:
+ * он и есть пункт «ничего не выбирать».
+ *
+ * Остальные значения enum (TIP, TAX, DELIVERY, SERVICE_FEE, DISCOUNT, CARD) в каталоге не
+ * встречаются: это строки заказа, которые приходят от Shopify и Woo и классифицируются
+ * финансовым модулем, а не товары. Поэтому enum не трогаем, а список сокращаем.
+ */
+export const CATALOG_TYPE_ORDER: FinancialItemType[] = ["VASE", "GIFT", "OTHER"];
 
 /** Подпись типа. NULL = умолчание, а не «не настроено»: обычный букет получается сам. */
 export function financialTypeLabel(t: FinancialItemType | null | undefined): string {
