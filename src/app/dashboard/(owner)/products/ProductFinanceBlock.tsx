@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import type { FinancialItemType } from "@/generated/prisma/enums";
-import { CATALOG_TYPE_ORDER, FINANCIAL_TYPE_LABELS, DEFAULT_TYPE_LABEL } from "@/modules/catalog/finance/display";
+import { CATALOG_TYPE_ORDER, FINANCIAL_TYPE_LABELS, DEFAULT_TYPE_LABEL, purchaseCostTitle } from "@/modules/catalog/finance/display";
 import { ownerSetProductFinance, ownerSetProductDefaultVase } from "@/app/dashboard/(owner)/actions";
 import { formatCents } from "@/lib/cents";
 import { VaseCostEditor, type VaseCostRowVM } from "./VaseCostEditor";
@@ -81,12 +81,12 @@ export function ProductFinanceBlock({
         />
       )}
 
-      {shownType === "VASE" && (
+      {shownType !== "FLOWER_PRODUCT" && (
         <>
           <VaseCostEditor
             target={{ productId }}
             costType="STANDALONE_VASE"
-            title="Закупочная стоимость вазы"
+            title={purchaseCostTitle(shownType)}
             history={costHistory}
             effectiveCostCents={effectiveCostCents}
             effectiveSource={effectiveCostCents == null ? "UNKNOWN" : "PRODUCT"}
@@ -99,9 +99,11 @@ export function ProductFinanceBlock({
             </p>
           )}
           <p className="text-[11px] text-slate-500">
-            {usedInBouquets > 0
-              ? `Используется в букетах: ${usedInBouquets}. Изменение закупочной стоимости повлияет на все будущие расчёты по ним.`
-              : "Пока не привязана ни к одному букету."}
+            {shownType !== "VASE"
+              ? "Закупочная себестоимость позиции: она вычитается из прибыли, когда позиция попадает в заказ."
+              : usedInBouquets > 0
+                ? `Используется в букетах: ${usedInBouquets}. Изменение закупочной стоимости повлияет на все будущие расчёты по ним.`
+                : "Пока не привязана ни к одному букету."}
           </p>
         </>
       )}

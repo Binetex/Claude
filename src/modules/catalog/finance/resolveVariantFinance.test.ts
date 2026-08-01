@@ -55,7 +55,7 @@ describe("букет наследует вазу от товара", () => {
     expect(r.includesVase).toBe(true);
     expect(r.vase?.label).toBe("Clear Glass Vase 8 in");
     expect(r.vaseSource).toBe("PRODUCT");
-    expect(r.vaseCostCents).toBe(1200);
+    expect(r.purchaseCostCents).toBe(1200);
     expect(r.reviewReasons).toEqual([]);
   });
 });
@@ -72,7 +72,7 @@ describe("вариант переопределяет вазу", () => {
     });
     expect(r.vase?.id).toBe("vase2");
     expect(r.vaseSource).toBe("VARIANT");
-    expect(r.vaseCostCents).toBe(2600);
+    expect(r.purchaseCostCents).toBe(2600);
   });
 
   it("стоимость берётся с товара вазы, если у её варианта своей нет", () => {
@@ -83,7 +83,7 @@ describe("вариант переопределяет вазу", () => {
       vases: { vase1: VASE },
       at: AT,
     });
-    expect(r.vaseCostCents).toBe(900);
+    expect(r.purchaseCostCents).toBe(900);
   });
 });
 
@@ -99,7 +99,7 @@ describe("вариант «без вазы» отключает дефолт т�
     expect(r.includesVase).toBe(false);
     expect(r.includesVaseSource).toBe("VARIANT");
     expect(r.vase).toBeNull();
-    expect(r.vaseCostCents).toBeNull();
+    expect(r.purchaseCostCents).toBeNull();
     expect(r.reviewReasons).toEqual([]);
   });
 });
@@ -113,7 +113,7 @@ describe("needs review", () => {
       at: AT,
     });
     expect(r.reviewReasons).toContain("VASE_LINK_MISSING");
-    expect(r.vaseCostCents).toBeNull();
+    expect(r.purchaseCostCents).toBeNull();
   });
 
   it("ничего не настроено — обычный букет без вазы, проверять нечего", () => {
@@ -147,7 +147,7 @@ describe("needs review", () => {
       at: AT,
     });
     expect(r.vase).toBeNull();
-    expect(r.vaseCostCents).toBeNull();
+    expect(r.purchaseCostCents).toBeNull();
     expect(r.reviewReasons).toContain("VASE_LINK_MISSING");
   });
 
@@ -159,7 +159,7 @@ describe("needs review", () => {
       vases: { vase1: { ...VASE, archived: true } },
       at: AT,
     });
-    expect(r.vaseCostCents).toBe(1200);
+    expect(r.purchaseCostCents).toBe(1200);
     expect(r.reviewReasons).toContain("VASE_ARCHIVED");
   });
 });
@@ -172,14 +172,42 @@ describe("сама ваза", () => {
       costs: [cost({ id: "own", productVariantId: "v1", purchaseCostCents: 4500 })],
       at: AT,
     });
-    expect(r.vaseCostCents).toBe(4500);
+    expect(r.purchaseCostCents).toBe(4500);
     expect(r.reviewReasons).toEqual([]);
   });
 
-  it("без записи стоимости → VASE_COST_MISSING", () => {
+  it("без записи стоимости → PURCHASE_COST_MISSING", () => {
     const r = resolveVariantFinance({ variant: variant({ financialType: "VASE" }), product: product(), costs: [], at: AT });
-    expect(r.vaseCostCents).toBeNull();
-    expect(r.reviewReasons).toContain("VASE_COST_MISSING");
+    expect(r.purchaseCostCents).toBeNull();
+    expect(r.reviewReasons).toContain("PURCHASE_COST_MISSING");
+  });
+
+  it("у подарка и «другого» тоже есть своя закупка", () => {
+    for (const type of ["GIFT", "OTHER"] as const) {
+      const withCost = resolveVariantFinance({
+        variant: variant({ financialType: type }),
+        product: product(),
+        costs: [cost({ id: "own", productVariantId: "v1", purchaseCostCents: 350 })],
+        at: AT,
+      });
+      expect(withCost.purchaseCostCents).toBe(350);
+      expect(withCost.reviewReasons).toEqual([]);
+
+      const without = resolveVariantFinance({ variant: variant({ financialType: type }), product: product(), costs: [], at: AT });
+      expect(without.purchaseCostCents).toBeNull();
+      expect(without.reviewReasons).toContain("PURCHASE_COST_MISSING");
+    }
+  });
+
+  it("обычный букет своей закупки не имеет — её роль играет цена флориста", () => {
+    const r = resolveVariantFinance({
+      variant: variant(),
+      product: product(),
+      costs: [cost({ id: "own", productVariantId: "v1", purchaseCostCents: 999 })],
+      at: AT,
+    });
+    expect(r.purchaseCostCents).toBeNull();
+    expect(r.reviewReasons).toEqual([]);
   });
 });
 
@@ -199,19 +227,19 @@ describe("цена на дату доставки", () => {
     });
 
   it("подорожание вазы не меняет расчёт заказа с прошлой датой доставки", () => {
-    expect(at("2026-07-15").vaseCostCents).toBe(1000);
-    expect(at("2026-10-15").vaseCostCents).toBe(1200);
-    expect(at("2026-11-20").vaseCostCents).toBe(1500);
+    expect(at("2026-07-15").purchaseCostCents).toBe(1000);
+    expect(at("2026-10-15").purchaseCostCents).toBe(1200);
+    expect(at("2026-11-20").purchaseCostCents).toBe(1500);
   });
 
   it("до первого интервала стоимость неизвестна", () => {
-    expect(at("2026-06-15").vaseCostCents).toBeNull();
+    expect(at("2026-06-15").purchaseCostCents).toBeNull();
     expect(at("2026-06-15").reviewReasons).toContain("VASE_COST_MISSING");
   });
 
   it("граница полуоткрытая: день начала берёт новый интервал", () => {
-    expect(at("2026-08-01").vaseCostCents).toBe(1200);
-    expect(at("2026-11-01").vaseCostCents).toBe(1500);
+    expect(at("2026-08-01").purchaseCostCents).toBe(1200);
+    expect(at("2026-11-01").purchaseCostCents).toBe(1500);
   });
 });
 
@@ -224,7 +252,7 @@ describe("цена клиента", () => {
       vases: { vase1: VASE },
       at: AT,
     });
-    expect(r.vaseCostCents).toBeNull();
+    expect(r.purchaseCostCents).toBeNull();
   });
 });
 

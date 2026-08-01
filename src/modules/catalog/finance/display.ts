@@ -43,3 +43,10 @@ export function sourceLabel(source: "VARIANT" | "PRODUCT" | "DEFAULT"): string {
   if (source === "PRODUCT") return "унаследовано от товара";
   return "по умолчанию";
 }
+
+/** Заголовок блока закупочной стоимости — зависит от типа позиции. */
+export function purchaseCostTitle(t: FinancialItemType): string {
+  if (t === "VASE") return "Закупочная стоимость вазы";
+  if (t === "GIFT") return "Закупочная стоимость подарка";
+  return "Закупочная стоимость позиции";
+}

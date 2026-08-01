@@ -74,7 +74,14 @@ export type VariantFinanceInput = {
   at: Date;
 };
 
-export type CatalogReviewReason = "VASE_LINK_MISSING" | "VASE_COST_MISSING" | "VASE_ARCHIVED";
+export type CatalogReviewReason =
+  /** Букет заявлен с вазой, но ваза не выбрана. */
+  | "VASE_LINK_MISSING"
+  /** У связанной вазы нет закупочной стоимости на дату. */
+  | "VASE_COST_MISSING"
+  /** У самой позиции (ваза, подарок, прочее) нет закупочной стоимости на дату. */
+  | "PURCHASE_COST_MISSING"
+  | "VASE_ARCHIVED";
 
 export type VariantFinance = {
   /** Всегда определён: пустого типа больше не существует. */
@@ -86,8 +93,13 @@ export type VariantFinance = {
   /** Связанная ваза, применённая в расчёте (после всех правил). */
   vase: LinkedVaseInfo | null;
   vaseSource: EffectiveSource;
-  vaseCostCents: number | null;
-  vaseCostRecordId: string | null;
+  /**
+   * Закупочная себестоимость, применимая к позиции на дату:
+   * для вазы/подарка/прочего — её собственная, для букета с вазой — стоимость связанной вазы.
+   * Обычный букет своей закупки не имеет: его себестоимость — это цена флориста.
+   */
+  purchaseCostCents: number | null;
+  purchaseCostRecordId: string | null;
   reviewReasons: CatalogReviewReason[];
 };
 
@@ -98,7 +110,10 @@ function isActiveAt(row: VaseCostRow, at: Date): boolean {
 }
 
 function pick(costs: VaseCostRow[], at: Date, match: (row: VaseCostRow) => boolean): VaseCostRow | null {
-  // Тип всегда STANDALONE_VASE: себестоимость лежит у самой вазы. INCLUDED_VASE — legacy.
+  // STANDALONE_VASE здесь означает «закупочная себестоимость самой позиции»: она нужна не
+  // только вазам, но и подаркам и прочим непветочным позициям. Имя значения осталось от
+  // первой версии; заводить второе с тем же смыслом хуже, чем пояснить это здесь.
+  // INCLUDED_VASE не используется: стоимость вазы внутри букета берётся у связанной вазы.
   return costs.find((r) => r.costType === "STANDALONE_VASE" && match(r) && isActiveAt(r, at)) ?? null;
 }
 
@@ -121,11 +136,11 @@ export function resolveVariantFinance(input: VariantFinanceInput): VariantFinanc
   let vaseSource: EffectiveSource = "DEFAULT";
   let row: VaseCostRow | null = null;
 
-  if (financialType === "VASE") {
-    // Позиция и есть ваза: берём её собственную себестоимость. includesVase не участвует.
+  if (financialType !== "FLOWER_PRODUCT") {
+    // Ваза, подарок, прочее — у позиции есть собственная закупка. Признак вазы не участвует.
     row = pick(costs, at, (r) => r.productVariantId === variant.id) ?? pick(costs, at, (r) => r.productId === product.id);
-    if (row === null) reviewReasons.push("VASE_COST_MISSING");
-  } else if (financialType === "FLOWER_PRODUCT" && includesVase === true) {
+    if (row === null) reviewReasons.push("PURCHASE_COST_MISSING");
+  } else if (includesVase === true) {
     // Букет с вазой: ссылка варианта приоритетнее товарного дефолта.
     const linkId = variant.includedVaseVariantId ?? product.defaultIncludedVaseVariantId ?? null;
     vaseSource = variant.includedVaseVariantId ? "VARIANT" : product.defaultIncludedVaseVariantId ? "PRODUCT" : "DEFAULT";
@@ -154,8 +169,8 @@ export function resolveVariantFinance(input: VariantFinanceInput): VariantFinanc
     includesVaseSource,
     vase,
     vaseSource,
-    vaseCostCents: row ? row.purchaseCostCents : null,
-    vaseCostRecordId: row?.id ?? null,
+    purchaseCostCents: row ? row.purchaseCostCents : null,
+    purchaseCostRecordId: row?.id ?? null,
     reviewReasons,
   };
 }

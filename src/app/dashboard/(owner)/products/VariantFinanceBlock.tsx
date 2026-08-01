@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import type { FinancialItemType } from "@/generated/prisma/enums";
-import { CATALOG_TYPE_ORDER, FINANCIAL_TYPE_LABELS, financialTypeLabel, sourceLabel } from "@/modules/catalog/finance/display";
+import { CATALOG_TYPE_ORDER, FINANCIAL_TYPE_LABELS, financialTypeLabel, sourceLabel, purchaseCostTitle } from "@/modules/catalog/finance/display";
 import { ownerSetVariantFinance, ownerSetVariantVase } from "@/app/dashboard/(owner)/actions";
 import { VaseCostEditor, type VaseCostRowVM } from "./VaseCostEditor";
 import { VaseSelect, type VaseOption, type VaseSelectState } from "./VaseSelect";
@@ -92,12 +92,13 @@ export function VariantFinanceBlock({ vm, vaseOptions }: { vm: VariantFinanceVM;
         />
       )}
 
-      {/* Сама ваза: единственное место, где задаётся закупочная стоимость. */}
-      {shownType === "VASE" && (
+      {/* Любая непветочная позиция — ваза, подарок, прочее — имеет свою закупку.
+          У обычного букета её нет: там себестоимость это цена флориста. */}
+      {shownType !== "FLOWER_PRODUCT" && (
         <VaseCostEditor
           target={{ productVariantId: vm.variantId }}
           costType="STANDALONE_VASE"
-          title="Закупочная стоимость вазы"
+          title={purchaseCostTitle(shownType)}
           history={vm.ownCostHistory}
           effectiveCostCents={vm.ownCostCents}
           effectiveSource={vm.ownCostCents == null ? "UNKNOWN" : "VARIANT"}

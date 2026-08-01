@@ -203,7 +203,8 @@ export default async function ProductsPage({ searchParams }: { searchParams: Pro
       if (r.financialType === "FLOWER_PRODUCT" && r.includesVase === false && r.includesVaseSource !== "DEFAULT")
         finance.bouquetNoVaseCount += 1;
       if (r.financialTypeSource !== "DEFAULT") finance.explicitTypeCount += 1;
-      if (r.reviewReasons.includes("VASE_COST_MISSING")) finance.missingCostCount += 1;
+      if (r.reviewReasons.includes("VASE_COST_MISSING") || r.reviewReasons.includes("PURCHASE_COST_MISSING"))
+        finance.missingCostCount += 1;
       if (r.reviewReasons.includes("VASE_LINK_MISSING") && r.financialType === "FLOWER_PRODUCT") finance.missingVaseLinkCount += 1;
       if (v.financialType != null || v.includesVase != null || v.includedVaseVariantId != null) finance.overrideCount += 1;
       return r;
