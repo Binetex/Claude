@@ -5,6 +5,7 @@ import { listSmsTriggers } from "@/modules/automations/triggers";
 import { SMS_VARIABLES } from "@/modules/automations/variables";
 import { AutomationsTabs } from "../../AutomationsTabs";
 import { FlowForm } from "../FlowForm";
+import { FlowStats } from "../FlowStats";
 
 export const dynamic = "force-dynamic";
 
@@ -29,18 +30,18 @@ export default async function EditFlowPage({ params }: { params: Promise<{ id: s
   return (
     <div className="mx-auto max-w-4xl space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <h1 className="text-xl font-bold text-slate-800">{flow.name}</h1>
-          <p className="text-sm text-slate-500">
-            {flow.active ? "Цепочка включена — изменения повлияют на новые запуски." : "Цепочка выключена."}
-          </p>
-        </div>
+        <h1 className="text-xl font-bold text-slate-800">
+          {flow.name}
+          {!flow.active && <span className="ml-2 text-sm font-normal text-slate-500">выключена</span>}
+        </h1>
         <Link href="/dashboard/automations/history" className="text-sm text-sky-600 hover:underline">
           История запусков →
         </Link>
       </div>
 
       <AutomationsTabs />
+
+      <FlowStats flowId={flow.id} />
 
       <FlowForm
         initial={{

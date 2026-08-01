@@ -8,6 +8,7 @@ import {
   FLOW_STEP_TYPE_LABELS,
 } from "@/modules/automations/flows/display";
 import { AutomationsTabs } from "../AutomationsTabs";
+import { FlowStats } from "../flows/FlowStats";
 
 export const dynamic = "force-dynamic";
 
@@ -39,12 +40,11 @@ export default async function FlowHistoryPage() {
 
   return (
     <div className="mx-auto max-w-6xl space-y-5">
-      <div>
-        <h1 className="text-xl font-bold text-slate-800">Автоматизации</h1>
-        <p className="text-sm text-slate-500">История запусков цепочек: где сейчас находится каждый заказ и что уже отправлено.</p>
-      </div>
+      <h1 className="text-xl font-bold text-slate-800">Автоматизации</h1>
 
       <AutomationsTabs />
+
+      <FlowStats />
 
       {runs.length === 0 && (
         <Card>
@@ -155,7 +155,7 @@ export default async function FlowHistoryPage() {
       </div>
 
       <p className="text-[11px] text-slate-500">
-        История одиночных уведомлений — на странице конкретного правила в разделе{" "}
+        История одиночных уведомлений — во вкладке «Статистика» конкретного правила в{" "}
         <Link href="/dashboard/automations" className="text-sky-600 hover:underline">
           Order Notifications
         </Link>

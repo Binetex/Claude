@@ -6,6 +6,7 @@ import { getSmsTrigger } from "@/modules/automations/triggers";
 import { flowStepSummary, FLOW_STEP_TYPE_LABELS } from "@/modules/automations/flows/display";
 import { AutomationsTabs } from "../AutomationsTabs";
 import { FlowRowActions } from "./FlowRowActions";
+import { FlowStats } from "./FlowStats";
 
 export const dynamic = "force-dynamic";
 
@@ -33,17 +34,13 @@ export default async function FlowsPage() {
 
   return (
     <div className="mx-auto max-w-6xl space-y-5">
-      <div>
-        <h1 className="text-xl font-bold text-slate-800">Автоматизации</h1>
-        <p className="text-sm text-slate-500">
-          Marketing Flows — цепочки шагов по событию заказа. На каждый заказ создаётся отдельный запуск.
-        </p>
-      </div>
+      <h1 className="text-xl font-bold text-slate-800">Автоматизации</h1>
 
       <AutomationsTabs />
 
-      <div className="flex items-center justify-between">
-        <p className="text-sm text-slate-500">Шаги выполняются последовательно: ожидание, письмо или SMS.</p>
+      <FlowStats />
+
+      <div className="flex justify-end">
         <Link href="/dashboard/automations/flows/new">
           <Button size="sm">Создать цепочку</Button>
         </Link>

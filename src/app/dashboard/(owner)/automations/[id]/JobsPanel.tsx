@@ -2,6 +2,7 @@ import Link from "next/link";
 import { prisma } from "@/lib/db";
 import { Card, CardBody } from "@/components/ui/Card";
 import { buttonVariants } from "@/components/ui/button";
+import { StatTiles } from "../StatTiles";
 import type { SmsJobStatus } from "@/generated/prisma/enums";
 import {
   audienceLabel,
@@ -108,36 +109,24 @@ export async function JobsPanel({
 
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
-        {FILTERS.map((f) => {
-          const isActive = f.key === filter;
-          return (
-            <Link
-              key={f.key}
-              href={buildHref(automationId, f.key, 1)}
-              className={
-                isActive
-                  ? "rounded-xl border border-slate-800 bg-white px-3 py-2 shadow-sm"
-                  : "rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm hover:border-slate-300 hover:bg-slate-50"
-              }
-            >
-              <div className={`text-lg font-semibold tabular-nums ${f.accent}`}>{countOf(f.statuses)}</div>
-              <div className="text-[11px] text-slate-500">{f.label}</div>
-            </Link>
-          );
-        })}
-      </div>
+      <StatTiles
+        tiles={FILTERS.map((f) => ({
+          key: f.key,
+          label: f.label,
+          value: countOf(f.statuses),
+          accent: f.accent,
+          href: buildHref(automationId, f.key, 1),
+          active: f.key === filter,
+        }))}
+      />
 
       <Card>
         <CardBody className="space-y-2 p-0">
           <div className="flex flex-wrap items-center justify-between gap-2 px-4 pt-3">
-            <div>
-              <h2 className="text-sm font-semibold text-slate-800">
-                История задач
-                {filter !== "all" && <span className="ml-2 text-xs font-normal text-slate-500">фильтр: {active.label}</span>}
-              </h2>
-              <p className="text-xs text-slate-500">Телефоны и email маскированы. Полный payload/секреты не показываем.</p>
-            </div>
+            <h2 className="text-sm font-semibold text-slate-800">
+              История задач
+              {filter !== "all" && <span className="ml-2 text-xs font-normal text-slate-500">фильтр: {active.label}</span>}
+            </h2>
             {filter !== "all" && (
               <Link href={buildHref(automationId, "all", 1)} className="text-xs text-sky-600 hover:underline">
                 Сбросить фильтр

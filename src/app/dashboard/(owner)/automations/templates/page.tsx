@@ -40,10 +40,7 @@ export default async function TemplatesPage() {
 
   return (
     <div className="mx-auto max-w-6xl space-y-5">
-      <div>
-        <h1 className="text-xl font-bold text-slate-800">Автоматизации</h1>
-        <p className="text-sm text-slate-500">Templates — какие Brevo-шаблоны используются и откуда берутся.</p>
-      </div>
+      <h1 className="text-xl font-bold text-slate-800">Автоматизации</h1>
 
       <AutomationsTabs />
 

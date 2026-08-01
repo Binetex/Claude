@@ -6,6 +6,7 @@ import { getSmsTrigger } from "@/modules/automations/triggers";
 import { audienceLabel, delayLabel } from "@/modules/automations/display";
 import { getAutomationSettings } from "@/modules/automations/settings";
 import { AutomationsTabs } from "./AutomationsTabs";
+import { StatTiles, type StatTile } from "./StatTiles";
 import { AutomationRowActions } from "./AutomationRowActions";
 import { SiteReviewUrlPanel } from "./SiteReviewUrlPanel";
 import { KillSwitchToggle } from "./KillSwitchToggle";
@@ -40,19 +41,25 @@ export default async function AutomationsPage() {
   // Сводка считается по AutomationJob — то есть только по нашим отправкам через API (у каждой есть
   // sendKey и связь job→OrderCommunication). Переписка сотрудников, приехавшая вебхуком QUO, живёт
   // в OrderCommunication без sendKey и без job — в эти числа она не попадает by design.
-  // Канал разделён явно: смешивать SMS и Email в одной цифре нельзя, счёт идёт по SMS.
-  const totals = { sent: 0, failed: 0, skipped: 0, scheduled: 0 };
-  let emailSent = 0;
+  // SMS и Email считаются раздельно: смешивать каналы в одной цифре нельзя.
+  const byChannel = {
+    SMS: { sent: 0, failed: 0, skipped: 0, scheduled: 0 },
+    EMAIL: { sent: 0, failed: 0, skipped: 0, scheduled: 0 },
+  };
   for (const r of channelRows) {
-    if (r.channel === "EMAIL") {
-      if (r.status === "SENT") emailSent += r._count._all;
-      continue;
-    }
-    if (r.status === "SENT") totals.sent += r._count._all;
-    else if (r.status === "FAILED") totals.failed += r._count._all;
-    else if (r.status === "SKIPPED") totals.skipped += r._count._all;
-    else if (r.status === "SCHEDULED" || r.status === "PROCESSING") totals.scheduled += r._count._all;
+    const t = r.channel === "EMAIL" ? byChannel.EMAIL : byChannel.SMS;
+    if (r.status === "SENT") t.sent += r._count._all;
+    else if (r.status === "FAILED") t.failed += r._count._all;
+    else if (r.status === "SKIPPED") t.skipped += r._count._all;
+    else if (r.status === "SCHEDULED" || r.status === "PROCESSING") t.scheduled += r._count._all;
   }
+
+  const channelTiles = (t: { sent: number; failed: number; skipped: number; scheduled: number }, prefix: string): StatTile[] => [
+    { key: `${prefix}-sent`, label: "Отправлено", value: t.sent, accent: "text-emerald-700" },
+    { key: `${prefix}-failed`, label: "Не прошло отправку", value: t.failed, accent: "text-red-700" },
+    { key: `${prefix}-skipped`, label: "Пропущено по условиям", value: t.skipped, accent: "text-slate-600" },
+    { key: `${prefix}-queued`, label: "В очереди", value: t.scheduled, accent: "text-sky-700" },
+  ];
 
   const lastRunByAuto = new Map<string, Date | null>();
   for (const r of lastRuns) lastRunByAuto.set(r.automationId, r._max.sentAt);
@@ -66,37 +73,19 @@ export default async function AutomationsPage() {
 
   return (
     <div className="mx-auto max-w-6xl space-y-5">
-      <div>
-        <h1 className="text-xl font-bold text-slate-800">Автоматизации</h1>
-        <p className="text-sm text-slate-500">
-          Order Notifications — одиночные уведомления по событию заказа: SMS и/или Email. Новые правила создаются выключенными.
-        </p>
-      </div>
+      <h1 className="text-xl font-bold text-slate-800">Автоматизации</h1>
 
       <AutomationsTabs />
 
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-        {[
-          { label: "SMS отправлено через API", value: totals.sent, accent: "text-emerald-700" },
-          { label: "Не прошло отправку", value: totals.failed, accent: "text-red-700" },
-          { label: "Пропущено по условиям", value: totals.skipped, accent: "text-slate-600" },
-          { label: "В очереди", value: totals.scheduled, accent: "text-sky-700" },
-        ].map((s) => (
-          <div key={s.label} className="rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm">
-            <div className={`text-lg font-semibold tabular-nums ${s.accent}`}>{s.value}</div>
-            <div className="text-[11px] text-slate-500">{s.label}</div>
-          </div>
-        ))}
+      <div className="space-y-3">
+        <StatTiles tiles={channelTiles(byChannel.SMS, "sms")} caption="SMS через API" />
+        <StatTiles tiles={channelTiles(byChannel.EMAIL, "email")} caption="Email через API" />
+        <p className="text-[11px] text-slate-400">
+          Только отправки правил. Переписка сотрудников из QUO и шаги Marketing Flows сюда не входят.
+        </p>
       </div>
-      <p className="-mt-3 text-[11px] text-slate-400">
-        Только SMS, отправленные правилами через API (задачи автоматизаций). Переписка сотрудников из QUO сюда не входит —
-        у неё нет нашего sendKey и связи с задачей.
-        {emailSent > 0 && ` Email-отправок правил за всё время: ${emailSent} — считаются отдельно.`}
-        {" "}SMS из Marketing Flows тоже не входят: они на вкладке History.
-      </p>
 
-      <div className="flex items-center justify-between">
-        <p className="text-sm text-slate-500">Одно событие — одно сообщение. Для последовательности шагов используйте Marketing Flows.</p>
+      <div className="flex justify-end">
         <Link href="/dashboard/automations/new">
           <Button size="sm">Создать автоматизацию</Button>
         </Link>
