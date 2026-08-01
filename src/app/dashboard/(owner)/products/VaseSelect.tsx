@@ -37,10 +37,13 @@ export function VaseSelect({
   state,
   options,
   onSave,
+  disabledReason,
 }: {
   level: "VARIANT" | "PRODUCT";
   state: VaseSelectState;
   options: VaseOption[];
+  /** Почему выбор недоступен. Блок при этом всё равно виден — иначе его невозможно найти. */
+  disabledReason?: string;
   onSave: (selection: { mode: "INHERIT" } | { mode: "NO_VASE" } | { mode: "LINKED_VASE"; vaseVariantId: string }) => Promise<{ ok: true } | { ok: false; error: string }>;
 }) {
   const [pending, start] = useTransition();
@@ -75,7 +78,7 @@ export function VaseSelect({
   return (
     <div>
       <Label>{level === "VARIANT" ? "Ваза в букете" : "Ваза по умолчанию"}</Label>
-      <Select value={value} disabled={pending} onChange={(e) => apply(e.target.value)} wrapperClassName="mt-1">
+      <Select value={value} disabled={pending || !!disabledReason} onChange={(e) => apply(e.target.value)} wrapperClassName="mt-1">
         <option value={INHERIT}>{inheritLabel}</option>
         <option value={NO_VASE}>Без вазы</option>
         {/* Текущая ссылка может указывать на вазу, которой уже нет в списке доступных
@@ -98,14 +101,16 @@ export function VaseSelect({
         )}
       </Select>
 
-      {options.length === 0 && (
+      {disabledReason && <p className="mt-1 text-[11px] text-slate-500">{disabledReason}</p>}
+
+      {!disabledReason && options.length === 0 && (
         <p className="mt-1 text-[11px] text-amber-600">
           В этом магазине ещё нет позиций с типом «Ваза» — сначала пометьте вазу как вазу в её карточке.
         </p>
       )}
 
       {/* Что реально применится в расчёте, после наследования */}
-      {state.effectiveVaseLabel ? (
+      {disabledReason ? null : state.effectiveVaseLabel ? (
         <p className="mt-1 flex flex-wrap items-center gap-x-2 text-[11px] text-slate-500">
           <span>
             Сейчас: {state.effectiveVaseLabel} · закуп{" "}

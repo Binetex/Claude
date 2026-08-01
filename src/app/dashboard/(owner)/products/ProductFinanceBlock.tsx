@@ -65,11 +65,14 @@ export function ProductFinanceBlock({
         </Select>
       </div>
 
-      {shownType === "FLOWER_PRODUCT" && (
+      {(shownType === "FLOWER_PRODUCT" || shownType === null) && (
         <VaseSelect
           level="PRODUCT"
           state={vase}
           options={vaseOptions}
+          disabledReason={
+            shownType === null ? "Сначала укажите тип позиции «Цветочный товар» — после этого можно выбрать вазу." : undefined
+          }
           onSave={(selection) => ownerSetProductDefaultVase(productId, selection)}
         />
       )}

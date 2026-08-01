@@ -74,12 +74,17 @@ export function VariantFinanceBlock({ vm, vaseOptions }: { vm: VariantFinanceVM;
         </p>
       </div>
 
-      {/* Букет: только выбор вазы. Стоимость правится у самой вазы. */}
-      {shownType === "FLOWER_PRODUCT" && (
+      {/* Букет: только выбор вазы. Стоимость правится у самой вазы.
+          Пока тип не задан, блок всё равно показываем — выключенным и с объяснением:
+          иначе владелец просто не находит, где вообще настраивается ваза. */}
+      {(shownType === "FLOWER_PRODUCT" || shownType === null) && (
         <VaseSelect
           level="VARIANT"
           state={vm.vase}
           options={vaseOptions}
+          disabledReason={
+            shownType === null ? "Сначала укажите тип позиции «Цветочный товар» — после этого можно выбрать вазу." : undefined
+          }
           onSave={(selection) => ownerSetVariantVase(vm.variantId, selection)}
         />
       )}
