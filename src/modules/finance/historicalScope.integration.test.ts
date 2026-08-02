@@ -181,7 +181,7 @@ describe("исторический период", () => {
     expect(open.every((i) => i.resolvedAt == null)).toBe(true);
   });
 
-  it("разобранное владельцем вручную не переоткрывается", async () => {
+  it("сознательно закрытое владельцем (DISMISSED) не переоткрывается", async () => {
     process.env.FINANCE_PRIMARY_SHARE_START_DATE = START;
     await detectFinanceIssues(NOW);
     const target = await prisma.financeIssue.findFirstOrThrow({ where: { status: "OPEN" } });
@@ -194,6 +194,26 @@ describe("исторический период", () => {
     await detectFinanceIssues(NOW);
     const after = await prisma.financeIssue.findUniqueOrThrow({ where: { id: target.id } });
     expect(after.status).toBe("DISMISSED");
+  });
+
+  it("RESOLVED переоткрывается, если проблема всё ещё находится", async () => {
+    // Реальный случай: владелец внёс настройку, но с датой начала позже дня заказа.
+    // Значение записано, галочка стоит — а расчёт по-прежнему заблокирован. Прятать
+    // такое нельзя: владелец уверен, что дело сделано.
+    process.env.FINANCE_PRIMARY_SHARE_START_DATE = START;
+    await detectFinanceIssues(NOW);
+    const target = await prisma.financeIssue.findFirstOrThrow({ where: { status: "OPEN" } });
+
+    await prisma.financeIssue.update({
+      where: { id: target.id },
+      data: { status: "RESOLVED", resolvedAt: new Date(), resolvedBy: OWNER.userId, resolutionComment: "исправлено" },
+    });
+
+    await detectFinanceIssues(NOW);
+    const after = await prisma.financeIssue.findUniqueOrThrow({ where: { id: target.id } });
+    expect(after.status).toBe("OPEN");
+    expect(after.resolvedAt).toBeNull();
+    expect(after.resolvedBy).toBeNull();
   });
 
   it("без даты запуска проверок нет вовсе и очередь пуста", async () => {
