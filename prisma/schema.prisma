@@ -331,6 +331,7 @@ model Florist {
   // ── Финансы (Stage 2) ──
   ledgerEntries   LedgerEntry[]
   financeProfiles FloristFinanceProfile[]
+  financeIssues   FinanceIssue[]
 }
 
 // ─────────────────────────────  САЙТЫ  ─────────────────────────────
@@ -410,6 +411,12 @@ model Site {
 
   // ── Финансы: магазины, на которые распространяется профиль флориста ──
   financeProfileSites FloristFinanceProfileSite[]
+
+  // ── Финансы: настройки расчёта доли основного флориста (Stage 3a) ──
+  consumablesRates   ConsumablesRate[]
+  acquiringFeeModels SiteAcquiringFeeModel[]
+  ownerTaxPolicies   OwnerTaxPolicy[]
+  financeIssues      FinanceIssue[]
 
   // Запрет двух активных Site одного платформенного домена (двойное подключение).
   @@unique([platform, normalizedShopDomain])
@@ -753,8 +760,9 @@ model FloristFinanceProfile {
   /// Только для PRIMARY; у SECONDARY обязан быть NULL (CHECK в миграции).
   sharePercentBp Int?
 
-  scope FinanceScope                @default(ALL_SITES)
-  sites FloristFinanceProfileSite[]
+  scope         FinanceScope                @default(ALL_SITES)
+  sites         FloristFinanceProfileSite[]
+  flowerExpense DailyFlowerExpense[]
 
   effectiveFrom DateTime
   effectiveTo   DateTime? // NULL = действует сейчас; если задан — строго > effectiveFrom (CHECK)
@@ -777,6 +785,284 @@ model FloristFinanceProfileSite {
   site      Site                  @relation(fields: [siteId], references: [id], onDelete: Restrict)
 
   @@unique([profileId, siteId])
+}
+
+// ───────────  ФИНАНСЫ: ВХОДНЫЕ ДАННЫЕ РАСЧЁТА ДОЛИ (Stage 3a)  ───────────
+//
+// Всё, из чего складывается распределяемая прибыль заказа основного флориста.
+// Отсутствие строки везде означает «неизвестно», а не ноль: подставлять ноль в
+// расход — значит завысить прибыль и переплатить долю.
+
+/// Дневная закупка цветов. Распределяется ТОЛЬКО между доставленными заказами
+/// основного флориста этого дня, пропорционально цветочной части заказа.
+///
+/// Ключ — профиль, а не глобальный день: основной флорист сейчас один, но при смене
+/// PRIMARY или появлении второго профиля глобальный unique стал бы миграционным тупиком.
+/// Профиль дня резолвится по expenseDay, поэтому пара (профиль, день) однозначна.
+model DailyFlowerExpense {
+  id               String                @id @default(cuid())
+  financeProfileId String
+  financeProfile   FloristFinanceProfile @relation(fields: [financeProfileId], references: [id], onDelete: Restrict)
+  /// UTC-полночь ЛОКАЛЬНОГО дня — та же конвенция, что у Order.deliveryDate.
+  expenseDay       DateTime
+  amountCents      Int // >= 0, CHECK
+  currency         String                @default("USD")
+  comment          String?
+  createdBy        String
+  createdAt        DateTime              @default(now())
+
+  @@unique([financeProfileId, expenseDay])
+  @@index([expenseDay])
+}
+
+/// Ставка расходников на один доставленный заказ, с датами действия.
+model ConsumablesRate {
+  id            String    @id @default(cuid())
+  /// NULL = глобальная ставка; заданный siteId переопределяет её для магазина.
+  siteId        String?
+  site          Site?     @relation(fields: [siteId], references: [id], onDelete: Restrict)
+  amountCents   Int // >= 0
+  effectiveFrom DateTime
+  effectiveTo   DateTime?
+  comment       String?
+  createdBy     String
+  createdAt     DateTime  @default(now())
+
+  @@index([siteId, effectiveFrom])
+  @@index([effectiveTo])
+}
+
+/// Ручная поправка расходников по конкретному заказу — перебивает ставку.
+model OrderConsumablesOverride {
+  id          String   @id @default(cuid())
+  orderId     String   @unique
+  order       Order    @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  amountCents Int // >= 0
+  comment     String?
+  createdBy   String
+  createdAt   DateTime @default(now())
+}
+
+enum AcquiringFeeSource {
+  ACTUAL // фактическая комиссия провайдера
+  ESTIMATED // расчёт по модели магазина
+}
+
+/// Модель комиссии эквайринга магазина: процент + фиксированная часть.
+/// Применяется, когда фактической комиссии по заказу нет.
+model SiteAcquiringFeeModel {
+  id            String    @id @default(cuid())
+  siteId        String
+  site          Site      @relation(fields: [siteId], references: [id], onDelete: Restrict)
+  /// Базисные пункты: 2.9% = 290. Float в деньгах не заводим.
+  percentBp     Int
+  fixedCents    Int
+  effectiveFrom DateTime
+  effectiveTo   DateTime?
+  comment       String?
+  createdBy     String
+  createdAt     DateTime  @default(now())
+
+  @@index([siteId, effectiveFrom])
+  @@index([effectiveTo])
+}
+
+/// Фактическая комиссия по заказу. Отсутствие строки = «неизвестна», тогда
+/// применяется модель магазина и расчёт помечается ESTIMATED.
+model OrderAcquiringFee {
+  id         String   @id @default(cuid())
+  orderId    String   @unique
+  order      Order    @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  feeCents   Int // >= 0
+  provider   String // "AIRWALLEX" | "SHOPIFY_PAYMENTS" | ...
+  externalId String?
+  createdBy  String // "system:airwallex" либо User.id
+  createdAt  DateTime @default(now())
+}
+
+/// Доля Order.tax, являющаяся РЕАЛЬНЫМ расходом владельца.
+/// Флористам не отдаётся никогда: в их базе налог вычитается на 100%.
+model OwnerTaxPolicy {
+  id            String    @id @default(cuid())
+  siteId        String? // NULL = глобальная политика
+  site          Site?     @relation(fields: [siteId], references: [id], onDelete: Restrict)
+  /// Базисные пункты от Order.tax: 20% = 2000.
+  actualShareBp Int
+  effectiveFrom DateTime
+  effectiveTo   DateTime?
+  comment       String?
+  createdBy     String
+  createdAt     DateTime  @default(now())
+
+  @@index([siteId, effectiveFrom])
+  @@index([effectiveTo])
+}
+
+enum SnapshotStatus {
+  DRAFT // черновик пересчёта: изменяем и удаляем, начислением не используется
+  PUBLISHED // действующая ревизия: неизменяема и неудаляема
+  SUPERSEDED // вытеснена более новой; остаётся неизменяемой навсегда
+}
+
+/// Заморожённый расчёт по заказу. Ревизии НЕ переписываются: исправление входных
+/// данных публикует следующую, а прежняя продолжает объяснять уже созданное начисление.
+/// Действующая ревизия — единственная в статусе PUBLISHED.
+///
+/// Жизненный цикл: DRAFT → PUBLISHED → SUPERSEDED. Триггер в БД разрешает ровно один
+/// переход у неизменяемых статусов — PUBLISHED → SUPERSEDED без изменения остальных
+/// полей; всё прочее отклоняется. Удалять можно только DRAFT: он по определению нигде
+/// не использован, потому что начисление ссылается только на PUBLISHED.
+///
+/// Stage 3b свяжет `PRIMARY_FLORIST_SHARE` со снимками. Связь будет МНОГИЕ-КО-МНОГИМ
+/// (дневное начисление собирается из снимков всех заказов дня), поэтому колонки
+/// `ledgerEntryId` здесь сознательно НЕТ — она навязала бы связь один-к-одному.
+/// Stage 3b добавит отдельную таблицу связи; сами снимки при этом не меняются:
+/// их id стабильны, а PUBLISHED-строки неизменяемы.
+model OrderFinancialSnapshot {
+  id       String         @id @default(cuid())
+  orderId  String
+  order    Order          @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  revision Int
+  status   SnapshotStatus @default(DRAFT)
+
+  /// Участвует ли заказ в начислении. false — расчёт невозможен (нет доставки,
+  /// комиссии, стоимости вазы…); причины лежат в calcInputJson.needsReview.
+  isCalculable Boolean
+
+  // ── Заморожённые суммы, целые центы ──
+  grossRevenueCents    Int // itemsTotal + tax + deliveryCustomerCost; чаевые НЕ входят
+  /// Цветочная часть — база распределения дневной закупки.
+  flowerRevenueCents   Int
+  taxCents             Int
+  deliveryActualCents  Int
+  acquiringFeeCents    Int
+  acquiringFeeSource   AcquiringFeeSource
+  vaseGiftCostCents    Int
+  consumablesCents     Int
+  /// ЗАРЕЗЕРВИРОВАННАЯ доля дневной закупки. Считается по ПОЛНОМУ знаменателю дня —
+  /// включая заказы, которые в начисление не попали. Иначе их доля расходов легла бы
+  /// на исправные заказы и занизила бы начисление. У isCalculable = false эта сумма
+  /// и есть «нераспределённый остаток» дня.
+  allocatedFlowerCents Int
+  otherExpenseCents    Int                @default(0)
+  /// База доли: выручка минус ПОЛНЫЙ налог и остальные расходы. У isCalculable = false
+  /// смысла не имеет и равна нулю.
+  distributableCents   Int
+
+  /// ПОЛНЫЙ вход расчёта: суммы заказа, позиции с классификацией, связанные вазы и их
+  /// закупочные стоимости, применённая ставка расходников, модель комиссии и её id,
+  /// источник комиссии, доставка, налоговая политика, дневная закупка и знаменатель
+  /// распределения, id и даты действия ВСЕХ использованных настроек, причины needsReview.
+  ///
+  /// Смысл: старый расчёт должен объясняться целиком по этому полю, без обращения к
+  /// текущему каталогу и текущим настройкам — они к тому времени уже изменятся.
+  calcInputJson Json
+
+  createdAt DateTime @default(now())
+  createdBy String
+
+  @@unique([orderId, revision])
+  @@index([orderId, revision])
+  @@index([orderId, status])
+}
+
+// ───────────────  FINANCE SETUP ASSISTANT (Stage 3a)  ───────────────
+
+enum FinanceIssueSeverity {
+  BLOCKING // расчёт невозможен: заказ либо весь день не участвует
+  WARNING // расчёт возможен, но приблизителен
+  INFO // к сведению, на деньги не влияет
+}
+
+enum FinanceIssueStatus {
+  OPEN
+  RESOLVED // владелец исправил из очереди
+  AUTO_RESOLVED // проблема исчезла сама при изменении данных
+  DISMISSED // владелец сознательно закрыл без исправления
+}
+
+enum FinanceIssueType {
+  DELIVERY_ACTUAL_COST_MISSING
+  ACQUIRING_FEE_MODEL_MISSING
+  DAILY_FLOWER_EXPENSE_MISSING
+  VASE_COST_MISSING
+  GIFT_COST_MISSING
+  VASE_LINK_MISSING
+  CONSUMABLES_RATE_MISSING
+  OWNER_TAX_POLICY_MISSING
+  /// Цветочную выручку хотя бы одного заказа дня определить нельзя, поэтому
+  /// знаменатель распределения недостоверен. Блокирует ВЕСЬ день: посчитать по
+  /// заведомо неверному знаменателю хуже, чем не считать вовсе.
+  FLOWER_REVENUE_UNDETERMINED
+}
+
+enum FinanceActionType {
+  SET_DELIVERY_ACTUAL_COST
+  CREATE_SITE_FEE_MODEL
+  SET_DAILY_FLOWER_EXPENSE
+  SET_VASE_PURCHASE_COST
+  LINK_VASE_VARIANT
+  SET_CONSUMABLES_RATE
+  SET_OWNER_TAX_POLICY
+  /// Быстрого исправления нет: нужно разметить позиции в каталоге вручную.
+  CLASSIFY_ORDER_ITEMS
+}
+
+/// Проблема, мешающая расчёту доли.
+///
+/// ИЗМЕНЯЕМАЯ — в отличие от LedgerEntry: это рабочая очередь, а не деньги, и повторный
+/// прогон детектора обязан обновлять строку, а не плодить новые. Факт наличия проблемы
+/// определяет ДЕТЕКТОР при каждом прогоне; таблица хранит личность, предложение и разбор.
+/// Всё, что перестало находиться, закрывается как AUTO_RESOLVED.
+///
+/// Область блокировки выводится из type (заказ / день / все заказы) и отдельной колонкой
+/// не дублируется — иначе получилось бы два ответа на один вопрос.
+model FinanceIssue {
+  id       String               @id @default(cuid())
+  type     FinanceIssueType
+  severity FinanceIssueSeverity
+  status   FinanceIssueStatus   @default(OPEN)
+
+  /// Личность проблемы: повторное обнаружение обновляет строку.
+  deduplicationKey String @unique
+
+  /// Дата, к которой относится проблема (доставка заказа либо день закупки) —
+  /// по ней работает группировка «Сегодня / 7 дней / Старое».
+  scopeDate DateTime?
+
+  siteId    String?
+  site      Site?    @relation(fields: [siteId], references: [id], onDelete: Restrict)
+  orderId   String?
+  order     Order?   @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  floristId String?
+  florist   Florist? @relation(fields: [floristId], references: [id], onDelete: Restrict)
+
+  /// На что указывает проблема: "Order" | "ProductVariant" | "Site" | "Day" | "Global".
+  sourceEntity   String
+  sourceEntityId String
+
+  suggestedActionType  FinanceActionType
+  /// Предложенное значение, если его можно вычислить (напр. оценка Burq). NULL — нельзя.
+  suggestedValueJson   Json?
+  /// Контекст карточки: чего не хватает, сколько заказов затронуто, цветочная выручка дня.
+  detailJson           Json?
+  /// Прогноз влияния на расчёт. NULL означает «неизвестно» и показывается именно так:
+  /// без кандидатского значения посчитать эффект нельзя, а ноль соврал бы.
+  estimatedImpactCents Int?
+
+  firstDetectedAt   DateTime  @default(now())
+  lastDetectedAt    DateTime  @default(now())
+  resolvedAt        DateTime?
+  resolvedBy        String? // User.id
+  resolutionComment String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status, severity, scopeDate])
+  @@index([status, siteId])
+  @@index([status, type])
+  @@index([orderId])
 }
 
 // ─────────────────────────────  ЗАКАЗЫ  ─────────────────────────────
@@ -827,15 +1113,20 @@ model Order {
   originalCustomerNote String @default("")
 
   // Финансы (раздельно) — доступны только владельцу
-  itemsTotal           Decimal @db.Decimal(10, 2)
-  tax                  Decimal @default(0) @db.Decimal(10, 2)
-  tip                  Decimal @default(0) @db.Decimal(10, 2)
-  discount             Decimal @default(0) @db.Decimal(10, 2)
-  deliveryCustomerCost Decimal @default(0) @db.Decimal(10, 2)
-  customerTotal        Decimal @db.Decimal(10, 2)
-  floristTotal         Decimal @default(0) @db.Decimal(10, 2) // снимок суммы флористу
-  deliveryActualCost   Decimal @default(0) @db.Decimal(10, 2)
-  estimatedProfit      Decimal @default(0) @db.Decimal(10, 2)
+  itemsTotal                    Decimal   @db.Decimal(10, 2)
+  tax                           Decimal   @default(0) @db.Decimal(10, 2)
+  tip                           Decimal   @default(0) @db.Decimal(10, 2)
+  discount                      Decimal   @default(0) @db.Decimal(10, 2)
+  deliveryCustomerCost          Decimal   @default(0) @db.Decimal(10, 2)
+  customerTotal                 Decimal   @db.Decimal(10, 2)
+  floristTotal                  Decimal   @default(0) @db.Decimal(10, 2) // снимок суммы флористу
+  deliveryActualCost            Decimal   @default(0) @db.Decimal(10, 2)
+  /// Владелец подтвердил фактическую стоимость доставки (в т.ч. нулевую — самовывоз).
+  /// Нужно потому, что у deliveryActualCost есть default 0, и без этой отметки
+  /// «доставка бесплатна» неотличимо от «стоимость неизвестна»: заказ с реально нулевой
+  /// доставкой навсегда остался бы в очереди разбора.
+  deliveryActualCostConfirmedAt DateTime?
+  estimatedProfit               Decimal   @default(0) @db.Decimal(10, 2)
 
   // Пять раздельных статусов
   paymentStatus    PaymentStatus    @default(UNPAID)
@@ -893,6 +1184,12 @@ model Order {
   airwallexPayment   AirwallexPayment?
   airwallexChecks    AirwallexCheck[]
   ledgerEntries      LedgerEntry[]
+
+  // ── Финансы Stage 3a ──
+  financialSnapshots  OrderFinancialSnapshot[]
+  consumablesOverride OrderConsumablesOverride?
+  acquiringFee        OrderAcquiringFee?
+  financeIssues       FinanceIssue[]
 
   // NULL допустим много раз (Postgres: NULL != NULL) — не мешает заказам без внешнего источника.
   // Источник истины для идемпотентности вебхуков (см. ingestShopifyOrder) — не полагаемся

@@ -36,10 +36,17 @@ describe("граница server/client в разделе «Финансы»", ()
 
   it.each(pages)("%s импортирует из клиентских модулей только компоненты", (page) => {
     const source = fs.readFileSync(page, "utf8");
-    const importRe = /import\s+\{([^}]+)\}\s+from\s+["'](\.[^"']+)["']/g;
+    // `import type {...}` целиком пропускаем: он не оставляет следа в рантайме.
+    const importRe = /import\s+(?!type\s)\{([^}]+)\}\s+from\s+["'](\.[^"']+)["']/g;
 
     for (const m of source.matchAll(importRe)) {
-      const names = m[1].split(",").map((s) => s.trim().split(/\s+as\s+/)[0].trim()).filter(Boolean);
+      const names = m[1]
+        .split(",")
+        .map((s) => s.trim())
+        // Типы стираются компилятором и через границу RSC не проходят вовсе,
+        // поэтому прокси-объектом стать не могут. Проверяем только значения.
+        .filter((s) => s && !s.startsWith("type "))
+        .map((s) => s.split(/\s+as\s+/)[0].trim());
       const resolved = ["tsx", "ts"]
         .map((ext) => path.join(path.dirname(page), `${m[2]}.${ext}`))
         .find((p) => fs.existsSync(p));
