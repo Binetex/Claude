@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { requireRole } from "@/lib/rbac";
 import { prisma } from "@/lib/db";
 import { PageHeader } from "@/components/ui/misc";
@@ -14,7 +15,7 @@ const period = (from: Date, to: Date | null) => `${dayKey(from)} — ${to ? dayK
 export default async function FinanceSettingsPage() {
   await requireRole("OWNER");
 
-  const [sites, rates, feeModels, taxPolicies, expenses, profile] = await Promise.all([
+  const [sites, rates, feeModels, taxPolicies, profile] = await Promise.all([
     prisma.site.findMany({ select: { id: true, shortName: true }, orderBy: { shortName: "asc" } }),
     prisma.consumablesRate.findMany({
       orderBy: [{ siteId: "asc" }, { effectiveFrom: "desc" }],
@@ -28,7 +29,6 @@ export default async function FinanceSettingsPage() {
       orderBy: [{ siteId: "asc" }, { effectiveFrom: "desc" }],
       include: { site: { select: { shortName: true } } },
     }),
-    prisma.dailyFlowerExpense.findMany({ orderBy: { expenseDay: "desc" }, take: 30 }),
     prisma.floristFinanceProfile.findFirst({
       where: { model: "PRIMARY", active: true, effectiveTo: null },
       include: { florist: { select: { user: { select: { name: true } } } } },
@@ -154,34 +154,19 @@ export default async function FinanceSettingsPage() {
 
       <Card>
         <CardHeader className="flex items-center justify-between gap-2">
-          <CardTitle>Дневные расходы на цветы · последние 30</CardTitle>
+          <CardTitle>Дневные расходы на цветы</CardTitle>
           {profile && <FlowerExpenseForm />}
         </CardHeader>
-        <CardBody className="p-0">
-          {expenses.length === 0 ? (
-            <EmptyState title="Расходы не внесены" description="Без закупки день не считается целиком." />
-          ) : (
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-slate-100">
-                  <th className={th}>День</th>
-                  <th className={th}>Сумма</th>
-                  <th className={th}>Комментарий</th>
-                </tr>
-              </thead>
-              <tbody>
-                {expenses.map((e) => (
-                  <tr key={e.id} className="border-b border-slate-50 last:border-0">
-                    <td className={`${td} tabular-nums`}>{dayKey(e.expenseDay)}</td>
-                    <td className={`${td} tabular-nums`}>{formatCents(e.amountCents)}</td>
-                    <td className={`${td} text-slate-500`}>{e.comment ?? "—"}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
+        <CardBody className="text-sm text-slate-600">
+          Дневная закупка живёт в собственном разделе — там вся история без ограничения по давности, поиск
+          пропущенных дней, исправление и удаление с историей изменений.{" "}
+          <Link href="/dashboard/finance/flower-expenses" className="text-blue-600 hover:underline">
+            Открыть «Расходы на цветы»
+          </Link>
+          .
         </CardBody>
       </Card>
+
     </div>
   );
 }

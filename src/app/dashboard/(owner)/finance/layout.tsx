@@ -20,6 +20,7 @@ export default async function FinanceLayout({ children }: { children: React.Reac
   const tabs: FinanceTab[] = [
     { href: "/dashboard/finance/florists", label: "Флористы" },
     { href: "/dashboard/finance/share", label: "Доля основного флориста" },
+    { href: "/dashboard/finance/flower-expenses", label: "Расходы на цветы" },
     {
       href: "/dashboard/finance/setup",
       label: "Требует заполнения",

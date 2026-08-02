@@ -814,9 +814,16 @@ model DailyFlowerExpense {
   comment          String?
   createdBy        String
   createdAt        DateTime              @default(now())
+  /// Кто правил последним. NULL — с момента создания не менялась.
+  /// Автор создания хранится отдельно и правкой не затирается: у строки, из-за которой
+  /// изменилась чужая выплата, должно быть видно обоих.
+  updatedBy        String?
+  updatedAt        DateTime              @updatedAt
 
   @@unique([financeProfileId, expenseDay])
   @@index([expenseDay])
+  /// Постраничный вывод всей истории профиля по убыванию дня.
+  @@index([financeProfileId, expenseDay])
 }
 
 /// Ставка расходников на один доставленный заказ, с датами действия.
