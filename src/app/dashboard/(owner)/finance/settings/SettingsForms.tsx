@@ -83,11 +83,32 @@ function SettingDialog({
   );
 }
 
+/**
+ * Выбор магазина.
+ *
+ * `allowGlobal` меняет не только список, но и подпись: у настройки с общим значением это
+ * действительно «область действия», а у комиссии общего значения не бывает — там нужно
+ * просто выбрать магазин, и называть это иначе значит путать.
+ *
+ * Когда общего значения нет, ничего не выбрано заранее: подставленный первым магазин
+ * слишком легко сохранить не глядя и записать ставку не туда.
+ */
 function SiteSelect({ sites, allowGlobal }: { sites: { id: string; shortName: string }[]; allowGlobal: boolean }) {
   return (
-    <Field label="Область действия">
-      <select name="siteId" defaultValue="" className="h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm shadow-xs">
-        {allowGlobal && <option value="">Все магазины</option>}
+    <Field label={allowGlobal ? "Область действия" : "Магазин"}>
+      <select
+        name="siteId"
+        defaultValue=""
+        required={!allowGlobal}
+        className="h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm shadow-xs"
+      >
+        {allowGlobal ? (
+          <option value="">Все магазины</option>
+        ) : (
+          <option value="" disabled>
+            Выберите магазин…
+          </option>
+        )}
         {sites.map((s) => (
           <option key={s.id} value={s.id}>
             {s.shortName}
@@ -115,10 +136,24 @@ export function ConsumablesForm({ sites }: { sites: { id: string; shortName: str
   );
 }
 
-export function FeeModelForm({ sites }: { sites: { id: string; shortName: string }[] }) {
+export function FeeModelForm({
+  sites,
+  configuredSiteIds = [],
+}: {
+  sites: { id: string; shortName: string }[];
+  /** У каких магазинов модель уже есть — чтобы видеть, что осталось завести. */
+  configuredSiteIds?: string[];
+}) {
+  const missing = sites.filter((s) => !configuredSiteIds.includes(s.id));
   return (
     <SettingDialog trigger="Добавить модель" title="Модель комиссии магазина" action={applyFeeModel}>
       <SiteSelect sites={sites} allowGlobal={false} />
+      {missing.length > 0 && (
+        <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">
+          Комиссия задаётся отдельно каждому магазину — общей ставки не бывает. Ещё без модели:{" "}
+          {missing.map((s) => s.shortName).join(", ")}.
+        </p>
+      )}
       <Field label="Процент, %">
         <Input name="percent" inputMode="decimal" placeholder="2.90" required />
       </Field>

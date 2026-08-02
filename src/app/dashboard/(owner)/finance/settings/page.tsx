@@ -93,7 +93,7 @@ export default async function FinanceSettingsPage() {
       <Card>
         <CardHeader className="flex items-center justify-between gap-2">
           <CardTitle>Комиссии эквайринга по магазинам</CardTitle>
-          <FeeModelForm sites={sites} />
+          <FeeModelForm sites={sites} configuredSiteIds={[...new Set(feeModels.map((m) => m.siteId))]} />
         </CardHeader>
         <CardBody className="p-0">
           {feeModels.length === 0 ? (
