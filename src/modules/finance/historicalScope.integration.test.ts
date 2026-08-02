@@ -162,6 +162,40 @@ describe("исторический период", () => {
     expect(closed.every((c) => /историч/i.test(c.resolutionComment ?? ""))).toBe(true);
   });
 
+  it("закрытая системой проблема переоткрывается, когда снова находится", async () => {
+    // Гасим очередь, убрав дату запуска, — как это было при выключенном расчёте.
+    delete process.env.FINANCE_PRIMARY_SHARE_START_DATE;
+    await detectFinanceIssues(NOW);
+    expect(await listOpenIssues()).toHaveLength(0);
+    const closed = await prisma.financeIssue.count({ where: { status: "AUTO_RESOLVED" } });
+    expect(closed).toBeGreaterThan(0);
+
+    // Возвращаем дату: проблемы снова реальны и обязаны стать видимыми. Иначе блокер
+    // остаётся невидимым — владелец не может его ни увидеть, ни исправить.
+    process.env.FINANCE_PRIMARY_SHARE_START_DATE = START;
+    const r = await detectFinanceIssues(NOW);
+    expect(r.reopened).toBeGreaterThan(0);
+
+    const open = await listOpenIssues();
+    expect(open.length).toBeGreaterThan(0);
+    expect(open.every((i) => i.resolvedAt == null)).toBe(true);
+  });
+
+  it("разобранное владельцем вручную не переоткрывается", async () => {
+    process.env.FINANCE_PRIMARY_SHARE_START_DATE = START;
+    await detectFinanceIssues(NOW);
+    const target = await prisma.financeIssue.findFirstOrThrow({ where: { status: "OPEN" } });
+
+    await prisma.financeIssue.update({
+      where: { id: target.id },
+      data: { status: "DISMISSED", resolvedAt: new Date(), resolvedBy: OWNER.userId, resolutionComment: "решение владельца" },
+    });
+
+    await detectFinanceIssues(NOW);
+    const after = await prisma.financeIssue.findUniqueOrThrow({ where: { id: target.id } });
+    expect(after.status).toBe("DISMISSED");
+  });
+
   it("без даты запуска проверок нет вовсе и очередь пуста", async () => {
     delete process.env.FINANCE_PRIMARY_SHARE_START_DATE;
     const r = await detectFinanceIssues(NOW);

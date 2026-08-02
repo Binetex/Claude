@@ -46,7 +46,7 @@ export type FixResult = {
   /** Сколько дней пересчитано. */
   days: number;
   /** Итог прогона детектора. */
-  detector: { opened: number; updated: number; autoResolved: number };
+  detector: { opened: number; updated: number; reopened: number; autoResolved: number };
   /** Что стало с начислением доли по затронутым дням. */
   share: { created: number; corrected: number; unchanged: number; skipped: number };
 };
@@ -116,7 +116,7 @@ async function republishAndDetect(
   return {
     republished,
     days: days.length,
-    detector: { opened: detector.opened, updated: detector.updated, autoResolved: detector.autoResolved },
+    detector: { opened: detector.opened, updated: detector.updated, reopened: detector.reopened, autoResolved: detector.autoResolved },
     share,
   };
 }

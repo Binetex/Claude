@@ -394,7 +394,7 @@ export async function rescanFinanceIssues(): Promise<SetupResult> {
     revalidateSetup();
     return {
       ok: true,
-      message: `Найдено новых: ${r.opened} · обновлено: ${r.updated} · закрыто автоматически: ${r.autoResolved}`,
+      message: `Новых: ${r.opened} · переоткрыто: ${r.reopened} · обновлено: ${r.updated} · закрыто: ${r.autoResolved}`,
     };
   } catch (err) {
     return toError(err);

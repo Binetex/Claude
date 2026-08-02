@@ -36,7 +36,7 @@ type Draft = {
   estimatedImpactCents?: number | null;
 };
 
-export type DetectResult = { opened: number; updated: number; autoResolved: number; scannedDays: number };
+export type DetectResult = { opened: number; updated: number; reopened: number; autoResolved: number; scannedDays: number };
 
 /**
  * Прогоняет детектор по окну дней и приводит таблицу проблем в соответствие с реальностью.
@@ -52,7 +52,7 @@ export async function detectFinanceIssues(now: Date = new Date()): Promise<Detec
     where: { model: "PRIMARY", active: true, effectiveTo: null },
     select: { id: true, floristId: true, effectiveFrom: true, florist: { select: { user: { select: { name: true } } } } },
   });
-  if (!profile) return { opened: 0, updated: 0, autoResolved: 0, scannedDays: 0 };
+  if (!profile) return { opened: 0, updated: 0, reopened: 0, autoResolved: 0, scannedDays: 0 };
 
   const windowStart = new Date(now.getTime() - DETECTOR_WINDOW_DAYS * 86400_000);
   // Нижняя граница — САМАЯ ПОЗДНЯЯ из трёх: окно детектора, начало профиля и дата
@@ -87,7 +87,7 @@ export async function detectFinanceIssues(now: Date = new Date()): Promise<Detec
  */
 async function closeOutOfScope(now: Date, startDate: Date | null): Promise<DetectResult> {
   const open = await prisma.financeIssue.findMany({ where: { status: "OPEN" }, select: { id: true } });
-  if (open.length === 0) return { opened: 0, updated: 0, autoResolved: 0, scannedDays: 0 };
+  if (open.length === 0) return { opened: 0, updated: 0, reopened: 0, autoResolved: 0, scannedDays: 0 };
   await prisma.financeIssue.updateMany({
     where: { id: { in: open.map((o) => o.id) } },
     data: {
@@ -98,7 +98,7 @@ async function closeOutOfScope(now: Date, startDate: Date | null): Promise<Detec
         : "Расчёт доли не запущен: FINANCE_PRIMARY_SHARE_START_DATE не задана.",
     },
   });
-  return { opened: 0, updated: 0, autoResolved: open.length, scannedDays: 0 };
+  return { opened: 0, updated: 0, reopened: 0, autoResolved: open.length, scannedDays: 0 };
 }
 
 /** Проблемы одного дня: сначала блокеры дня, затем поштучные по заказам. */
@@ -338,6 +338,7 @@ async function reconcile(rawDrafts: Draft[], startDate: Date): Promise<DetectRes
 
   let opened = 0;
   let updated = 0;
+  let reopened = 0;
 
   for (const draft of drafts) {
     const found = byKey.get(draft.deduplicationKey);
@@ -363,6 +364,12 @@ async function reconcile(rawDrafts: Draft[], startDate: Date): Promise<DetectRes
       continue;
     }
 
+    // Закрытое САМОЙ системой и снова найденное — переоткрываем. Иначе реальный блокер
+    // остаётся невидимым: владелец не может ни увидеть его, ни исправить, а расчёт стоит.
+    // Разобранное ВЛАДЕЛЬЦЕМ (RESOLVED/DISMISSED) не трогаем: это его решение, и молча
+    // отменять его нельзя — такие видны отдельным фильтром.
+    const reopen = found.status === "AUTO_RESOLVED";
+
     await prisma.financeIssue.update({
       where: { id: found.id },
       data: {
@@ -371,9 +378,11 @@ async function reconcile(rawDrafts: Draft[], startDate: Date): Promise<DetectRes
         suggestedValueJson: draft.suggestedValueJson,
         detailJson: draft.detailJson,
         estimatedImpactCents: draft.estimatedImpactCents ?? null,
+        ...(reopen ? { status: "OPEN", resolvedAt: null, resolvedBy: null, resolutionComment: null } : {}),
       },
     });
-    updated++;
+    if (reopen) reopened++;
+    else updated++;
   }
 
   // Открытые проблемы, которых детектор больше не находит, закрываются сами.
@@ -403,7 +412,7 @@ async function reconcile(rawDrafts: Draft[], startDate: Date): Promise<DetectRes
     }
   }
 
-  return { opened, updated, autoResolved: gone.length, scannedDays: 0 };
+  return { opened, updated, reopened, autoResolved: gone.length, scannedDays: 0 };
 }
 
 /** Сколько заказов затронуто проблемой — хранится внутри detailJson. */
