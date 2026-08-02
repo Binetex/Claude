@@ -20,6 +20,7 @@ import { detectFinanceIssues, DETECTOR_WINDOW_DAYS } from "./issues";
 import { publishDaySnapshots } from "./snapshot";
 import { setConsumablesRate, setDailyFlowerExpense, setFeeModel, setOwnerTaxPolicy } from "./settings";
 import { primaryShareStartDate } from "./config";
+import { accrueDays } from "./primaryShare";
 
 export type FixActor = { userId: string; role: Role };
 
@@ -46,6 +47,8 @@ export type FixResult = {
   days: number;
   /** Итог прогона детектора. */
   detector: { opened: number; updated: number; autoResolved: number };
+  /** Что стало с начислением доли по затронутым дням. */
+  share: { created: number; corrected: number; unchanged: number; skipped: number };
 };
 
 /** Действующий профиль основного флориста. Без него считать нечего. */
@@ -107,7 +110,15 @@ async function republishAndDetect(
     republished += published;
   }
   const detector = await detectFinanceIssues(now);
-  return { republished, days: days.length, detector: { opened: detector.opened, updated: detector.updated, autoResolved: detector.autoResolved } };
+  // Пересчёт доли — последним шагом: он опирается на уже опубликованные снимки.
+  // Опубликованную запись не редактирует: при изменении суммы создаёт сторно и новую.
+  const share = await accrueDays(profileId, days, actor);
+  return {
+    republished,
+    days: days.length,
+    detector: { opened: detector.opened, updated: detector.updated, autoResolved: detector.autoResolved },
+    share,
+  };
 }
 
 /** Помечает проблему разобранной. Детектор её потом не переоткроет. */

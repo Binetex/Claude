@@ -46,12 +46,15 @@ export function LedgerTable({
   rows,
   orderHrefBase,
   actions,
+  shareDayHrefBase,
 }: {
   rows: LedgerRow[];
   /** База ссылки на заказ: у владельца /dashboard/orders, у флориста /dashboard/f. */
   orderHrefBase: string;
   /** Слот действий владельца (отмена). У флориста не передаётся — колонки не будет. */
   actions?: (row: LedgerRow) => React.ReactNode;
+  /** База ссылки на разбор дня для строк дневной доли. Не передана — ссылки нет. */
+  shareDayHrefBase?: string;
 }) {
   if (rows.length === 0) {
     return <EmptyState title="Операций нет" description="Здесь появятся начисления, бонусы и выплаты." />;
@@ -91,7 +94,16 @@ export function LedgerTable({
                   </Badge>
                 </td>
                 <td className="py-2.5 pr-3">
-                  <div className="text-slate-700">{r.description}</div>
+                  {shareDayHrefBase && r.type === "PRIMARY_FLORIST_SHARE" ? (
+                    <Link
+                      href={`${shareDayHrefBase}/${formatDate(r.effectiveDate)}`}
+                      className="text-blue-600 hover:underline"
+                    >
+                      {r.description}
+                    </Link>
+                  ) : (
+                    <div className="text-slate-700">{r.description}</div>
+                  )}
                   {r.comment && <div className="mt-0.5 text-xs text-slate-400">{r.comment}</div>}
                 </td>
                 <td className="py-2.5 pr-3 whitespace-nowrap">

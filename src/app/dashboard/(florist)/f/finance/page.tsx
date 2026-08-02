@@ -68,7 +68,7 @@ export default async function FloristFinancePage({
         </CardHeader>
         <CardBody className="p-0 px-4">
           {/* actions не передаём: изменить или отменить операцию флорист не может. */}
-          <LedgerTable rows={list.entries} orderHrefBase="/dashboard/f" />
+          <LedgerTable rows={list.entries} orderHrefBase="/dashboard/f" shareDayHrefBase="/dashboard/f/finance/day" />
         </CardBody>
         {totalPages > 1 && (
           <div className="flex items-center justify-between border-t border-slate-100 px-4 py-3 text-sm">

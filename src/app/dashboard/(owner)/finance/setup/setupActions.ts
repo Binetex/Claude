@@ -25,6 +25,8 @@ import {
 } from "@/modules/finance/fix";
 import { FinanceSettingsError } from "@/modules/finance/settings";
 import { detectFinanceIssues } from "@/modules/finance/issues";
+import { setFinanceProfile } from "@/modules/finance/profile";
+import { accrueDays, primaryShareDays } from "@/modules/finance/primaryShare";
 import { previewDay, suggestDailyExpenseCents, suggestDeliveryCostCents } from "@/modules/finance/preview";
 import type { DayPreview } from "@/modules/finance/preview";
 
@@ -313,6 +315,57 @@ export async function applyBurqDelivery(orderIds: string[], comment?: string): P
     });
     revalidatePath("/dashboard/finance/setup/delivery");
     return done(`Подтверждено заказов: ${r.confirmed}.`, r);
+  } catch (err) {
+    return toError(err);
+  }
+}
+
+/**
+ * Задаёт долю основного флориста новым периодом профиля с указанной даты.
+ *
+ * Отдельного механизма для процента нет специально: доля — часть финансового профиля, а он
+ * effective-dated. Прежний период остаётся и продолжает объяснять то, что по нему посчитано.
+ */
+export async function applyPrimarySharePercent(formData: FormData): Promise<SetupResult> {
+  const user = await requireRole("OWNER");
+  try {
+    const floristId = String(formData.get("floristId") ?? "");
+    if (!floristId) return { error: "Не выбран флорист." };
+
+    await setFinanceProfile({
+      floristId,
+      model: "PRIMARY",
+      sharePercentBp: percentToBp(formData.get("percent"), "Доля основного флориста"),
+      effectiveFrom: parseDay(String(formData.get("effectiveFrom") ?? "")),
+      comment: String(formData.get("comment") ?? "").trim() || null,
+      actor: { userId: user.id, role: user.role },
+    });
+
+    revalidateSetup();
+    revalidatePath("/dashboard/finance/share");
+    return { ok: true, message: "Доля основного флориста сохранена." };
+  } catch (err) {
+    return toError(err);
+  }
+}
+
+/**
+ * Ручной пересчёт доли по всем дням с даты запуска. Начисление показывает рассчитанный
+ * долг и денег не переводит — реальная выплата остаётся ручной операцией PAYMENT.
+ */
+export async function recomputePrimaryShare(): Promise<SetupResult> {
+  const user = await requireRole("OWNER");
+  try {
+    const plan = await primaryShareDays();
+    if (!plan) return { error: "Не задана дата запуска расчёта, профиль или доля основного флориста." };
+
+    const r = await accrueDays(plan.profileId, plan.days, { userId: user.id, role: user.role });
+    revalidatePath("/dashboard/finance/share");
+    revalidatePath("/dashboard/finance/florists");
+    return {
+      ok: true,
+      message: `Дней: ${plan.days.length} · начислено: ${r.created} · уточнено: ${r.corrected} · без изменений: ${r.unchanged} · пропущено: ${r.skipped}`,
+    };
   } catch (err) {
     return toError(err);
   }

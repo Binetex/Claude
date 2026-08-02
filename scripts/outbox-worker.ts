@@ -40,7 +40,8 @@ import { dispatchAirwallexChecks } from "@/integrations/airwallex/dispatcher";
 import { buildFinanceAccrualHandler } from "@/modules/finance/handler";
 import { FINANCE_ACCRUAL_EVENT } from "@/modules/finance/events";
 import { dispatchFinanceAccruals } from "@/modules/finance/dispatcher";
-import { accrualGate } from "@/modules/finance/config";
+import { accrualGate, primaryShareGate } from "@/modules/finance/config";
+import { dispatchPrimaryShare } from "@/modules/finance/shareDispatcher";
 import { createSmsChannelSender } from "@/modules/automations/channels/sms";
 import { createEmailChannelSender } from "@/modules/automations/channels/email";
 import { getQuoConfig } from "@/integrations/quo/config";
@@ -186,6 +187,23 @@ async function main() {
   if (finTimer) log("finance.dispatch.enabled", { intervalMs: finMs });
   else log("finance.dispatch.disabled", { reason: finGate.enabled ? "unknown" : finGate.reason });
 
+  // Доля основного флориста: пересчёт дней начиная с даты запуска. Начисление показывает
+  // рассчитанный долг и денег не переводит — реальная выплата только вручную от владельца,
+  // поэтому автоматический пересчёт ничего не может «заплатить» по ошибке.
+  const shareGate = primaryShareGate();
+  const shareMs = Number(process.env.FINANCE_SHARE_DISPATCH_MS ?? 900_000); // 15 мин
+  const shareTimer = shareGate.enabled
+    ? setInterval(() => {
+        if (shuttingDown) return;
+        dispatchPrimaryShare(prisma)
+          .then((r) => { if (r.created > 0 || r.corrected > 0) log("finance.share.tick", r); })
+          .catch((err) => log("finance.share.error", { error: err instanceof Error ? err.message : String(err) }));
+      }, shareMs)
+    : null;
+  shareTimer?.unref?.();
+  if (shareTimer) log("finance.share.enabled", { intervalMs: shareMs });
+  else log("finance.share.disabled", { reason: shareGate.enabled ? "unknown" : shareGate.reason });
+
   log("worker.started", { workerId: worker.id });
   try {
     await worker.start(); // блокирует до stop()
@@ -193,6 +211,7 @@ async function main() {
     if (reconcileTimer) clearInterval(reconcileTimer);
     if (awTimer) clearInterval(awTimer);
     if (finTimer) clearInterval(finTimer);
+    if (shareTimer) clearInterval(shareTimer);
     await prisma.$disconnect();
     log("worker.stopped", { workerId: worker.id });
   }

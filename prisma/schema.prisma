@@ -738,6 +738,10 @@ model LedgerEntry {
   floristNameSnapshot String
   orderNumberSnapshot String?
 
+  /// Ревизии снимков, из которых собрано начисление. У дневной доли основного флориста
+  /// их много (по снимку на каждый заказ дня), поэтому связь многие-ко-многим.
+  snapshots LedgerEntrySnapshot[]
+
   @@index([floristId, effectiveDate])
   @@index([floristId, type, effectiveDate])
   @@index([orderId])
@@ -898,6 +902,22 @@ model OwnerTaxPolicy {
   @@index([effectiveTo])
 }
 
+/// Из каких ревизий снимков собрано начисление.
+///
+/// Нужна ровно для одного вопроса: «почему за этот день начислено столько». Ответ должен
+/// оставаться верным и через год, поэтому ссылка идёт на КОНКРЕТНУЮ ревизию, а не на заказ:
+/// ревизия неизменяема, а действующий снимок заказа к тому времени может быть уже другим.
+model LedgerEntrySnapshot {
+  id            String                 @id @default(cuid())
+  ledgerEntryId String
+  ledgerEntry   LedgerEntry            @relation(fields: [ledgerEntryId], references: [id], onDelete: Restrict)
+  snapshotId    String
+  snapshot      OrderFinancialSnapshot @relation(fields: [snapshotId], references: [id], onDelete: Restrict)
+
+  @@unique([ledgerEntryId, snapshotId])
+  @@index([snapshotId])
+}
+
 enum SnapshotStatus {
   DRAFT // черновик пересчёта: изменяем и удаляем, начислением не используется
   PUBLISHED // действующая ревизия: неизменяема и неудаляема
@@ -960,6 +980,8 @@ model OrderFinancialSnapshot {
 
   createdAt DateTime @default(now())
   createdBy String
+
+  ledgerEntries LedgerEntrySnapshot[]
 
   @@unique([orderId, revision])
   @@index([orderId, revision])
