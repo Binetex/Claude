@@ -35,6 +35,7 @@ import { TERMINAL_ORDER_STATUSES } from "@/lib/statuses";
 import { normalizePhone } from "@/lib/phone";
 import { onOrderDeliveryChangeSafe } from "@/integrations/delivery/burq/scheduleService";
 import { scheduleDeliveryTodayTrigger } from "@/modules/automations/lifecycle";
+import { onOrderDeliveredSafe, onFloristPriceChangedSafe } from "@/modules/finance/hooks";
 
 async function ownerOnly() {
   await requireRole("OWNER");
@@ -56,7 +57,13 @@ export async function ownerUpdateCardMessage(orderId: string, cardMessage: strin
 
 export async function ownerSetOrderStatus(orderId: string, status: OrderStatus) {
   await ownerOnly();
+  const before = await prisma.order.findUnique({ where: { id: orderId }, select: { orderStatus: true } });
   await prisma.order.update({ where: { id: orderId }, data: { orderStatus: status } });
+  // Финансы: ручная отметка «доставлен» — такой же повод начислить, как курьер и платформа.
+  // Публикуем только на ПЕРЕХОДЕ: повторное сохранение того же статуса ничего не запускает.
+  if (status === "DELIVERED" && before?.orderStatus !== "DELIVERED") {
+    await onOrderDeliveredSafe(prisma, orderId);
+  }
   revalidatePath(`/dashboard/orders/${orderId}`);
   revalidatePath("/dashboard/orders");
   revalidatePath("/dashboard");
@@ -141,9 +148,16 @@ export async function ownerUpdateCardAndNote(
 }
 
 export async function ownerSetManualPrice(orderId: string, amount: number) {
-  await ownerOnly();
+  const user = await requireRole("OWNER");
   await setManualFloristPrice(orderId, amount);
+  // Если по заказу уже есть начисление — оно сторнируется и создаётся новое.
+  // Опубликованную запись не правим никогда: история должна объяснять любую сумму.
+  await onFloristPriceChangedSafe(orderId, "Владелец изменил цену флориста по заказу", {
+    userId: user.id,
+    role: user.role,
+  });
   revalidatePath(`/dashboard/orders/${orderId}`);
+  revalidatePath("/dashboard/finance/florists");
 }
 
 export async function ownerReassign(
@@ -151,11 +165,18 @@ export async function ownerReassign(
   floristId: string,
   keepManualPrice: boolean
 ) {
-  await ownerOnly();
+  const user = await requireRole("OWNER");
   await reassignManual(orderId, floristId, keepManualPrice);
+  // Переназначение УЖЕ доставленного заказа переносит деньги: начисление прежнего
+  // флориста сторнируется, новому создаётся своё.
+  await onFloristPriceChangedSafe(orderId, "Владелец переназначил флориста", {
+    userId: user.id,
+    role: user.role,
+  });
   revalidatePath(`/dashboard/orders/${orderId}`);
   revalidatePath("/dashboard/orders");
   revalidatePath("/dashboard");
+  revalidatePath("/dashboard/finance/florists");
 }
 
 /**

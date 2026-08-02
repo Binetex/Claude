@@ -302,9 +302,10 @@ model User {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  florist       Florist?
-  orderAudits   OrderAudit[]
-  financeAudits FinanceAudit[]
+  florist            Florist?
+  orderAudits        OrderAudit[]
+  financeAudits      FinanceAudit[]
+  ledgerEntriesAdded LedgerEntry[]
 
   @@index([role])
 }
@@ -326,6 +327,10 @@ model Florist {
   pickupLocation FloristPickupLocation?
   telegramBot    TelegramBot?
   deliveries     Delivery[]             @relation("DeliveryFlorist")
+
+  // ── Финансы (Stage 2) ──
+  ledgerEntries   LedgerEntry[]
+  financeProfiles FloristFinanceProfile[]
 }
 
 // ─────────────────────────────  САЙТЫ  ─────────────────────────────
@@ -402,6 +407,9 @@ model Site {
   // ── Email-рассылки (Brevo) — настройки СВОИ у каждого магазина ──
   emailSettings  SiteEmailSettings?
   emailTemplates SiteEmailTemplate[]
+
+  // ── Финансы: магазины, на которые распространяется профиль флориста ──
+  financeProfileSites FloristFinanceProfileSite[]
 
   // Запрет двух активных Site одного платформенного домена (двойное подключение).
   @@unique([platform, normalizedShopDomain])
@@ -633,6 +641,144 @@ model FloristProductPrice {
   @@index([variantId])
 }
 
+// ───────────────────  ФИНАНСЫ: LEDGER И ВЫПЛАТЫ (Stage 2)  ───────────────────
+//
+// Единственный источник правды по деньгам флориста — LedgerEntry. Мутируемого поля
+// «сколько должны» не существует НИГДЕ: баланс всегда складывается из записей.
+// Все суммы здесь — целые центы (Int), Decimal в новых финансовых таблицах не появляется.
+
+enum FinanceModel {
+  PRIMARY // доля от прибыли за период (расчёт — Stage 3)
+  SECONDARY // фиксированная цена изготовления по доставленным заказам
+}
+
+enum FinanceScope {
+  ALL_SITES
+  SELECTED_SITES
+}
+
+enum LedgerEntryType {
+  ORDER_ACCRUAL // начисление за доставленный заказ
+  PRIMARY_FLORIST_SHARE // доля основного флориста за период (наполняет Stage 3)
+  BONUS
+  DEDUCTION
+  PAYMENT
+  PAYMENT_REVERSAL // отмена ошибочной выплаты
+  MANUAL_ADJUSTMENT // ручная правка владельца, не исправляющая конкретную запись
+  CORRECTION // сторно/исправление ранее опубликованной записи
+}
+
+/// CREDIT увеличивает долг перед флористом, DEBIT уменьшает.
+/// Баланс = Σ CREDIT − Σ DEBIT. Знака у amountCents нет и быть не должно:
+/// иначе одна и та же операция выражалась бы двумя способами.
+enum LedgerDirection {
+  CREDIT
+  DEBIT
+}
+
+/// Append-only книга операций по флористу.
+///
+/// UPDATE и DELETE запрещены ТРИГГЕРОМ В БД (см. миграцию), а не только договорённостью:
+/// ORM, ad-hoc скрипт и psql получают одну и ту же ошибку. Поэтому у модели намеренно нет
+/// `updatedAt` — обновлять строку физически нельзя. Исправление оформляется НОВОЙ записью
+/// с `reversedEntryId`.
+///
+/// `financePeriodId` здесь СОЗНАТЕЛЬНО отсутствует: колонка без таблицы — висячая ссылка.
+/// Stage 3 добавит FinancePeriod и нормальный FK одной миграцией.
+model LedgerEntry {
+  id        String  @id @default(cuid())
+  floristId String
+  florist   Florist @relation(fields: [floristId], references: [id], onDelete: Restrict)
+
+  // Restrict, а не Cascade: удаление заказа не имеет права стирать историю денег.
+  orderId String?
+  order   Order?  @relation(fields: [orderId], references: [id], onDelete: Restrict)
+
+  type      LedgerEntryType
+  direction LedgerDirection
+
+  /// Целые центы, всегда >= 0. Ноль — ПОДТВЕРЖДЁННОЕ решение «за этот заказ не платим»;
+  /// «не решено» выражается отсутствием записи. Тот же принцип, что у VasePurchaseCost.
+  amountCents Int
+  currency    String @default("USD")
+
+  /// Бизнес-дата операции. Для ORDER_ACCRUAL — Order.deliveryDate, то есть UTC-полночь
+  /// ЛОКАЛЬНОГО дня доставки (см. CLAUDE.md: через таймзону её пересчитывать нельзя).
+  effectiveDate DateTime
+
+  description String // короткая машинно-стабильная строка: «Заказ FLWBR-91154»
+  comment     String? // свободный комментарий владельца; флорист его ВИДИТ
+
+  createdBy     String // User.id
+  createdByUser User     @relation(fields: [createdBy], references: [id], onDelete: Restrict)
+  createdByRole Role // снимок роли на момент записи
+  createdAt     DateTime @default(now())
+
+  sourceType    String // "ORDER" | "MANUAL" | "PERIOD" | "REVERSAL"
+  sourceId      String? // orderId | reversedEntryId | periodId
+  sourceVersion Int     @default(1) // версия правила расчёта
+
+  idempotencyKey String @unique
+
+  /// Какую запись сторнирует эта. Unique — одну запись нельзя сторнировать дважды.
+  reversedEntryId String?      @unique
+  reversedEntry   LedgerEntry? @relation("Reversal", fields: [reversedEntryId], references: [id], onDelete: Restrict)
+  reversal        LedgerEntry? @relation("Reversal")
+
+  metadata Json? // служебное (провенанс суммы и т.п.); флористу НЕ отдаётся
+
+  // Снимки: отчёт остаётся читаемым, даже если заказ уедет из выборки.
+  floristNameSnapshot String
+  orderNumberSnapshot String?
+
+  @@index([floristId, effectiveDate])
+  @@index([floristId, type, effectiveDate])
+  @@index([orderId])
+  @@index([createdAt])
+}
+
+/// Effective-dated финансовый профиль флориста.
+///
+/// НЕ имеет отношения к `Florist.financeVisibility`: та настройка про то, какие суммы
+/// заказа видит флорист, и заодно используется как приоритет авто-назначения. Модель
+/// оплаты из неё не выводится и на неё не влияет.
+model FloristFinanceProfile {
+  id        String  @id @default(cuid())
+  floristId String
+  florist   Florist @relation(fields: [floristId], references: [id], onDelete: Restrict)
+
+  model FinanceModel
+
+  /// Доля в БАЗИСНЫХ ПУНКТАХ: 66.6% = 6660. Проценты дробные, а Float в деньгах не заводим.
+  /// Только для PRIMARY; у SECONDARY обязан быть NULL (CHECK в миграции).
+  sharePercentBp Int?
+
+  scope FinanceScope                @default(ALL_SITES)
+  sites FloristFinanceProfileSite[]
+
+  effectiveFrom DateTime
+  effectiveTo   DateTime? // NULL = действует сейчас; если задан — строго > effectiveFrom (CHECK)
+  active        Boolean   @default(true)
+
+  comment   String?
+  createdBy String // User.id
+  createdAt DateTime @default(now())
+
+  @@index([floristId, effectiveFrom])
+  @@index([effectiveTo])
+}
+
+/// Магазины профиля при scope = SELECTED_SITES. При ALL_SITES строк нет.
+model FloristFinanceProfileSite {
+  id        String                @id @default(cuid())
+  profileId String
+  profile   FloristFinanceProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  siteId    String
+  site      Site                  @relation(fields: [siteId], references: [id], onDelete: Restrict)
+
+  @@unique([profileId, siteId])
+}
+
 // ─────────────────────────────  ЗАКАЗЫ  ─────────────────────────────
 
 model Order {
@@ -746,6 +892,7 @@ model Order {
   automationFlowRuns AutomationFlowRun[]
   airwallexPayment   AirwallexPayment?
   airwallexChecks    AirwallexCheck[]
+  ledgerEntries      LedgerEntry[]
 
   // NULL допустим много раз (Postgres: NULL != NULL) — не мешает заказам без внешнего источника.
   // Источник истины для идемпотентности вебхуков (см. ingestShopifyOrder) — не полагаемся
