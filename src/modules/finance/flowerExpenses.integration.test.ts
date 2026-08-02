@@ -421,6 +421,27 @@ describe("удаление", () => {
     expect(history.find((h) => h.action === "DELETE_DAILY_FLOWER_EXPENSE")!.reason).toBe("внесено не в тот день");
   });
 
+  it("возвращённый расход начисляется заново, а не падает на занятом ключе", async () => {
+    // Ключ дня израсходован сторнированной записью: книга append-only, и прежняя запись
+    // вместе со своим ключом никуда не делась. Новое начисление обязано получить свой.
+    const r = await saveFlowerExpense({ actor: OWNER, expenseDay: DAY, amountCents: 9000, comment: "вернули", now: NOW });
+    expect(r.share.status).toBe("CREATED");
+
+    const computed = await computeDayShare(profileId, DAY);
+    const live = await prisma.ledgerEntry.findMany({
+      where: { floristId, type: "PRIMARY_FLORIST_SHARE", effectiveDate: DAY, reversal: null },
+    });
+    expect(live).toHaveLength(1);
+    expect(live[0].amountCents).toBe(computed!.shareCents);
+
+    const keys = (
+      await prisma.ledgerEntry.findMany({ where: { floristId }, select: { idempotencyKey: true } })
+    ).map((e) => e.idempotencyKey);
+    expect(new Set(keys).size).toBe(keys.length);
+
+    await deleteFlowerExpense({ actor: OWNER, expenseDay: DAY, reason: "убираем обратно", now: NOW });
+  });
+
   it("удалять нечего — понятная ошибка, а не молчание", async () => {
     await expect(deleteFlowerExpense({ actor: OWNER, expenseDay: DAY, reason: "ещё раз", now: NOW })).rejects.toThrow(
       /не внесён/

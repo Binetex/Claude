@@ -20,6 +20,17 @@ import {
 
 const today = () => new Date().toISOString().slice(0, 10);
 
+/**
+ * Дата по умолчанию у формы новой ставки.
+ *
+ * Первая настройка должна действовать с даты запуска расчёта, иначе дни между запуском и
+ * сегодня останутся без неё и заблокируют расчёт. Когда записи уже есть, речь идёт о
+ * настоящей смене ставки — она начинается сегодня.
+ */
+function defaultFrom(hasRecords: boolean, shareStartDate: string | null): string {
+  return hasRecords || !shareStartDate ? today() : shareStartDate;
+}
+
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="space-y-1.5">
@@ -119,15 +130,27 @@ function SiteSelect({ sites, allowGlobal }: { sites: { id: string; shortName: st
   );
 }
 
-export function ConsumablesForm({ sites }: { sites: { id: string; shortName: string }[] }) {
+export function ConsumablesForm({
+  sites,
+  hasRecords = false,
+  shareStartDate = null,
+}: {
+  sites: { id: string; shortName: string }[];
+  hasRecords?: boolean;
+  shareStartDate?: string | null;
+}) {
   return (
-    <SettingDialog trigger="Задать ставку" title="Ставка расходников" action={applyConsumablesRate}>
+    <SettingDialog
+      trigger={hasRecords ? "Новая ставка с даты" : "Задать ставку"}
+      title="Ставка расходников"
+      action={applyConsumablesRate}
+    >
       <SiteSelect sites={sites} allowGlobal />
       <Field label="Сумма на заказ, $">
         <Input name="amount" inputMode="decimal" placeholder="5.00" required />
       </Field>
       <Field label="Действует с">
-        <Input name="effectiveFrom" type="date" defaultValue={today()} />
+        <Input name="effectiveFrom" type="date" defaultValue={defaultFrom(hasRecords, shareStartDate)} />
       </Field>
       <Field label="Комментарий">
         <Input name="comment" />
@@ -139,14 +162,20 @@ export function ConsumablesForm({ sites }: { sites: { id: string; shortName: str
 export function FeeModelForm({
   sites,
   configuredSiteIds = [],
+  shareStartDate = null,
 }: {
   sites: { id: string; shortName: string }[];
   /** У каких магазинов модель уже есть — чтобы видеть, что осталось завести. */
   configuredSiteIds?: string[];
+  shareStartDate?: string | null;
 }) {
   const missing = sites.filter((s) => !configuredSiteIds.includes(s.id));
   return (
-    <SettingDialog trigger="Добавить модель" title="Модель комиссии магазина" action={applyFeeModel}>
+    <SettingDialog
+      trigger={configuredSiteIds.length > 0 ? "Новая модель с даты" : "Добавить модель"}
+      title="Модель комиссии магазина"
+      action={applyFeeModel}
+    >
       <SiteSelect sites={sites} allowGlobal={false} />
       {missing.length > 0 && (
         <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">
@@ -161,7 +190,7 @@ export function FeeModelForm({
         <Input name="fixed" inputMode="decimal" placeholder="0.30" />
       </Field>
       <Field label="Действует с">
-        <Input name="effectiveFrom" type="date" defaultValue={today()} />
+        <Input name="effectiveFrom" type="date" defaultValue={defaultFrom(configuredSiteIds.length > 0, shareStartDate)} />
       </Field>
       <Field label="Комментарий">
         <Input name="comment" />
@@ -170,15 +199,27 @@ export function FeeModelForm({
   );
 }
 
-export function TaxPolicyForm({ sites }: { sites: { id: string; shortName: string }[] }) {
+export function TaxPolicyForm({
+  sites,
+  hasRecords = false,
+  shareStartDate = null,
+}: {
+  sites: { id: string; shortName: string }[];
+  hasRecords?: boolean;
+  shareStartDate?: string | null;
+}) {
   return (
-    <SettingDialog trigger="Задать политику" title="Налоговая политика владельца" action={applyOwnerTaxPolicy}>
+    <SettingDialog
+      trigger={hasRecords ? "Новая политика с даты" : "Задать политику"}
+      title="Налоговая политика владельца"
+      action={applyOwnerTaxPolicy}
+    >
       <SiteSelect sites={sites} allowGlobal />
       <Field label="Реальный налоговый расход, % от собранного">
         <Input name="percent" inputMode="decimal" placeholder="20" required />
       </Field>
       <Field label="Действует с">
-        <Input name="effectiveFrom" type="date" defaultValue={today()} />
+        <Input name="effectiveFrom" type="date" defaultValue={defaultFrom(hasRecords, shareStartDate)} />
       </Field>
       <Field label="Комментарий">
         <Input name="comment" />

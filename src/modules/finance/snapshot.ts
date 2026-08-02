@@ -396,6 +396,14 @@ export type CalcOverrides = {
   feeModelBySite?: Record<string, { percentBp: number; fixedCents: number }>;
   consumablesCentsBySite?: Record<string, number>;
   vaseGiftCostCentsByOrder?: Record<string, number>;
+  /**
+   * Магазины, где настройки на этот день НЕТ вовсе. Отдельно от подмены значения:
+   * «ставка другая» и «ставки не существует» — разные исходы, и второй нельзя выразить
+   * числом. Нужен предпросмотру удаления, иначе он показал бы, что ничего не меняется,
+   * ровно в том случае, когда заказы выпадают из расчёта целиком.
+   */
+  feeModelMissingSites?: string[];
+  consumablesMissingSites?: string[];
 };
 
 function applyOverrides(inputs: DayInputs, o: CalcOverrides): DayInputs {
@@ -417,6 +425,15 @@ function applyOverrides(inputs: DayInputs, o: CalcOverrides): DayInputs {
     const consumables = o.consumablesCentsBySite?.[order.siteId];
     if (consumables != null && order.consumables?.source !== "OVERRIDE") {
       next.consumables = { cents: consumables, source: "RATE", rateId: null };
+    }
+
+    // Отсутствие настройки перебивает подмену значения: если её на этот день нет,
+    // подставлять нечего, и заказ обязан выпасть из расчёта.
+    if (o.feeModelMissingSites?.includes(order.siteId) && order.acquiringFee?.source !== "ACTUAL") {
+      next.acquiringFee = null;
+    }
+    if (o.consumablesMissingSites?.includes(order.siteId) && order.consumables?.source !== "OVERRIDE") {
+      next.consumables = null;
     }
 
     const vaseGift = o.vaseGiftCostCentsByOrder?.[order.orderId];

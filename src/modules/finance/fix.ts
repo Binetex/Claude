@@ -98,7 +98,7 @@ async function daysFor(
  * Публикация ревизий идёт по дням, а не по заказам: распределение закупки общее для дня,
  * и пересчитать один заказ в отрыве от остальных нельзя.
  */
-async function republishAndDetect(
+export async function republishAndDetect(
   profileId: string,
   days: Date[],
   actor: FixActor,

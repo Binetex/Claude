@@ -124,11 +124,33 @@ export async function accrueDayShare(profileId: string, day: Date, actor: Ledger
   if (computed.ordersTotal === 0) return { status: "SKIPPED", reason: "NO_ORDERS" };
   if (computed.blocked) return { status: "SKIPPED", reason: "DAY_BLOCKED" };
 
-  const key = primaryShareKey(profile.floristId, computed.day);
   const existing = await prisma.ledgerEntry.findFirst({
     where: { floristId: profile.floristId, type: "PRIMARY_FLORIST_SHARE", effectiveDate: day, reversal: null },
     orderBy: { createdAt: "desc" },
   });
+
+  /**
+   * Ключ дня одноразовый: книга append-only, и сторнированная запись из неё никуда не
+   * девается вместе со своим ключом. Поэтому день, начисление за который уже сторновали
+   * целиком (входные данные удалили, а потом вернули), нельзя начислить снова под тем же
+   * ключом — упрёмся в unique. Такое начисление привязывается к сторнированной записи,
+   * ровно как при уточнении суммы.
+   */
+  const reversedLast = existing
+    ? null
+    : await prisma.ledgerEntry.findFirst({
+        where: {
+          floristId: profile.floristId,
+          type: "PRIMARY_FLORIST_SHARE",
+          effectiveDate: day,
+          reversal: { isNot: null },
+        },
+        orderBy: { createdAt: "desc" },
+        select: { id: true },
+      });
+  const key = reversedLast
+    ? primaryReshareKey(profile.floristId, computed.day, reversedLast.id)
+    : primaryShareKey(profile.floristId, computed.day);
 
   if (existing && existing.amountCents === computed.shareCents) {
     return { status: "UNCHANGED", amountCents: computed.shareCents };
