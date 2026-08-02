@@ -102,9 +102,6 @@ export default async function FinanceSetupPage({
                 Доставка по Burq: {burqCandidates}
               </Link>
             )}
-            <Link href="/dashboard/finance/settings" className="text-sm text-slate-500 hover:text-slate-800">
-              Настройки
-            </Link>
             <RescanButton />
           </div>
         }

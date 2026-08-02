@@ -45,9 +45,6 @@ export default async function PrimarySharePage() {
         description="Ежедневный расчёт. Начисление показывает рассчитанный долг и денег не переводит — реальная выплата появляется только вручную операцией «Выплата»."
         actions={
           <div className="flex items-center gap-3">
-            <Link href="/dashboard/finance/setup" className="text-sm text-slate-500 hover:text-slate-800">
-              Требует заполнения
-            </Link>
             {profile && sharePercentBp != null && <RecomputeShareButton />}
           </div>
         }

@@ -9,7 +9,7 @@ import { FloristAvatar } from "@/components/FloristAvatar";
 import { formatCents } from "@/lib/cents";
 import { getFloristBalances } from "@/modules/finance/ledger";
 import { listCurrentProfiles } from "@/modules/finance/profile";
-import { countDeliveredByFlorist, getReviewCounts } from "@/modules/finance/review";
+import { countDeliveredByFlorist } from "@/modules/finance/review";
 import { accrualGate } from "@/modules/finance/config";
 
 export const dynamic = "force-dynamic";
@@ -28,31 +28,19 @@ export default async function FinanceFloristsPage() {
   });
   const ids = florists.map((f) => f.id);
 
-  const [balances, profiles, delivered, review] = await Promise.all([
+  const [balances, profiles, delivered] = await Promise.all([
     getFloristBalances(ids),
     listCurrentProfiles(),
     countDeliveredByFlorist(ids),
-    getReviewCounts(),
   ]);
 
   const gate = accrualGate();
-  const needsReview = review.noFlorist + review.needsPrice;
 
   return (
     <div className="space-y-4">
       <PageHeader
         title="Финансы — флористы"
         description="Начисления и выплаты. Все суммы считаются из книги операций, отдельного «сколько должны» не существует."
-        actions={
-          needsReview > 0 ? (
-            <Link
-              href="/dashboard/finance/review"
-              className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-sm font-medium text-amber-800 hover:bg-amber-100"
-            >
-              Требуют разбора: {needsReview}
-            </Link>
-          ) : null
-        }
       />
 
       {!gate.enabled && (

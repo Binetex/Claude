@@ -8,9 +8,9 @@ const nav: NavItem[] = [
   { href: "/dashboard/sites", label: "Сайты" },
   { href: "/dashboard/products", label: "Товары" },
   { href: "/dashboard/florists", label: "Флористы" },
-  { href: "/dashboard/finance/florists", label: "Финансы" },
-  { href: "/dashboard/finance/share", label: "Доля Насти" },
-  { href: "/dashboard/finance/setup", label: "Требует заполнения" },
+  // Один пункт на весь раздел: подстраницы живут во вкладках внутри (finance/layout.tsx).
+  // Пять финансовых пунктов вперемешку с заказами и товарами топят и то и другое.
+  { href: "/dashboard/finance", label: "Финансы" },
   { href: "/dashboard/burq", label: "Доставка (Burq)" },
   { href: "/dashboard/automations", label: "Автоматизации" },
   { href: "/dashboard/settings/telegram", label: "Telegram" },

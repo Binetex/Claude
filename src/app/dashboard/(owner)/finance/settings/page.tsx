@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { requireRole } from "@/lib/rbac";
 import { prisma } from "@/lib/db";
 import { PageHeader } from "@/components/ui/misc";
@@ -44,11 +43,6 @@ export default async function FinanceSettingsPage() {
       <PageHeader
         title="Финансы — настройки расчёта"
         description="Из этих значений складывается распределяемая прибыль. Периоды не пересекаются: при изменении прежний закрывается, а старые расчёты продолжают объясняться им."
-        actions={
-          <Link href="/dashboard/finance/setup" className="text-sm text-slate-500 hover:text-slate-800">
-            Требует заполнения
-          </Link>
-        }
       />
 
       {!profile && (

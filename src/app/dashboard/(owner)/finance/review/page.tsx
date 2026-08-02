@@ -66,11 +66,6 @@ export default async function FinanceReviewPage() {
       <PageHeader
         title="Разбор доставленных заказов"
         description="Заказы, доставленные без начисления. Исторический backfill Shopify сюда не попадает — у тех заказов исполнителя не было и не будет."
-        actions={
-          <Link href="/dashboard/finance/florists" className="text-sm text-slate-500 hover:text-slate-800">
-            К списку флористов
-          </Link>
-        }
       />
 
       {queue.disabledReason && (
