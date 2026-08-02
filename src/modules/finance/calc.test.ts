@@ -123,10 +123,21 @@ describe("распределение дневной закупки", () => {
 });
 
 describe("расчёт заказа", () => {
-  it("чаевые не входят в выручку", () => {
+  it("чаевые входят в выручку и тут же вычитаются отдельной строкой", () => {
     const r = computeOrderSnapshot(order("o1", { tipCents: 5000, items: [flower(15000), tip(5000)] }), 3000);
-    // 150.00 товары + 10.00 налог + 20.00 доставка = 180.00, чаевых нет
-    expect(r.grossRevenueCents).toBe(18000);
+    // 150.00 товары + 10.00 налог + 20.00 доставка + 50.00 чаевые = 230.00 — ровно столько
+    // заплатил клиент, поэтому строку можно сверить с суммой заказа на платформе.
+    expect(r.grossRevenueCents).toBe(23000);
+    expect(r.tipsCents).toBe(5000);
+  });
+
+  it("чаевые не меняют распределяемую прибыль ни на цент", () => {
+    const withTip = computeOrderSnapshot(order("o1", { tipCents: 5000, items: [flower(15000), tip(5000)] }), 3000);
+    const withoutTip = computeOrderSnapshot(order("o1"), 3000);
+    // Представление изменилось, деньги — нет: чаевые вошли в верхнюю строку и вышли
+    // расходом в том же размере.
+    expect(withTip.distributableCents).toBe(withoutTip.distributableCents);
+    expect(withTip.grossRevenueCents - withTip.tipsCents).toBe(withoutTip.grossRevenueCents);
   });
 
   it("налог входит в выручку и целиком вычитается — база флориста", () => {

@@ -522,10 +522,16 @@ async function publishOne(
     });
 
     // Ничего не изменилось — новая ревизия только замусорила бы историю.
+    // grossRevenueCents и tipsCents сравниваются наравне с итогом: они на распределяемую
+    // прибыль не влияют, но если снимок останется со старым представлением, экран расчёта
+    // и сохранённая ревизия покажут разные суммы выручки — а объяснять расчёт должна
+    // именно ревизия.
     if (
       current &&
       current.isCalculable === computed.isCalculable &&
       current.distributableCents === computed.distributableCents &&
+      current.grossRevenueCents === computed.grossRevenueCents &&
+      current.tipsCents === computed.tipsCents &&
       current.allocatedFlowerCents === computed.allocatedFlowerCents &&
       current.acquiringFeeCents === computed.acquiringFeeCents &&
       current.consumablesCents === computed.consumablesCents &&
@@ -552,6 +558,7 @@ async function publishOne(
         status: "PUBLISHED",
         isCalculable: computed.isCalculable,
         grossRevenueCents: computed.grossRevenueCents,
+        tipsCents: computed.tipsCents,
         flowerRevenueCents: computed.flowerRevenueCents,
         taxCents: computed.taxCents,
         deliveryActualCents: computed.deliveryActualCents,

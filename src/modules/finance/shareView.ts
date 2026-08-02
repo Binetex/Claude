@@ -138,7 +138,10 @@ export async function getShareDayBreakdown(
     : "Комиссия эквайринга";
 
   const lines: ShareBreakdownLine[] = [
-    { label: "Выручка заказов (товары + налог + доставка заказчика)", cents: sum((o) => o.grossRevenueCents), negative: false },
+    // Верхняя строка = сумма оплаченных клиентами заказов за день. Совпадает с тем, что
+    // видно на платформе, поэтому расчёт сверяется напрямую, без поправок в уме.
+    { label: "Получено от клиентов (товары + налог + доставка + чаевые)", cents: sum((o) => o.grossRevenueCents), negative: false },
+    { label: "Чаевые (принадлежат владельцу)", cents: sum((o) => o.tipsCents), negative: true },
     { label: "Полный Tax Reserve", cents: sum((o) => o.taxCents), negative: true },
     { label: "Фактическая доставка", cents: sum((o) => o.deliveryActualCents), negative: true },
     { label: feeLabel, cents: sum((o) => o.acquiringFeeCents), negative: true },

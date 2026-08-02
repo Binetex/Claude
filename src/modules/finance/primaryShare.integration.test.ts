@@ -156,11 +156,19 @@ describe("расчёт дня", () => {
     expect(entries[0].idempotencyKey).toBe(primaryShareKey(floristId, "2026-07-28"));
   });
 
-  it("чаевые в базу не входят", async () => {
+  it("чаевые видно в выручке и тем же расходом, база от них не зависит", async () => {
     const b = await getShareDayBreakdown(profileId, DAY, true);
-    // Выручка = (100 + 200 товары) + (10 + 10 налог) + (20 + 20 доставка) = 360.00.
-    // Чаевые 5.00 + 5.00 отсутствуют.
-    expect(b!.lines[0].cents).toBe(36000);
+    // Верхняя строка = сколько заплатили клиенты:
+    // (100 + 200 товары) + (10 + 10 налог) + (20 + 20 доставка) + (5 + 5 чаевые) = 370.00.
+    expect(b!.lines[0].cents).toBe(37000);
+    // Ровно та же сумма уходит отдельной строкой расхода, поэтому база доли прежняя.
+    expect(b!.lines[1].label).toContain("Чаевые");
+    expect(b!.lines[1].cents).toBe(1000);
+    expect(b!.lines[1].negative).toBe(true);
+
+    const computed = await computeDayShare(profileId, DAY);
+    const expenses = b!.lines.filter((l) => l.negative).reduce((a, l) => a + l.cents, 0);
+    expect(b!.lines[0].cents - expenses).toBe(computed!.distributableCents);
   });
 
   it("повторный расчёт не создаёт вторую запись", async () => {

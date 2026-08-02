@@ -94,7 +94,8 @@ export default async function OrderSnapshotPage({ params }: { params: Promise<{ 
                 <div className="mb-1.5 text-[11px] font-medium tracking-wide text-slate-400 uppercase">Строки расчёта</div>
                 <table className="w-full text-sm">
                   <tbody>
-                    <Row label="Выручка (товары + налог + доставка заказчика)" cents={current.grossRevenueCents} />
+                    <Row label="Получено от клиента (товары + налог + доставка + чаевые)" cents={current.grossRevenueCents} />
+                    <Row label="Чаевые (принадлежат владельцу)" cents={-current.tipsCents} />
                     <Row label="Полный Tax Reserve" cents={-current.taxCents} />
                     <Row label="Фактическая доставка" cents={-current.deliveryActualCents} />
                     <Row

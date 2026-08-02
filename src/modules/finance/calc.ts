@@ -143,7 +143,10 @@ export type OrderSnapshotResult = {
   orderId: string;
   isCalculable: boolean;
   missing: MissingInput[];
+  /** Сколько клиент заплатил всего, ВКЛЮЧАЯ чаевые. */
   grossRevenueCents: number;
+  /** Чаевые: входят в выручку и тут же вычитаются — они деньги владельца. */
+  tipsCents: number;
   flowerRevenueCents: number;
   taxCents: number;
   deliveryActualCents: number;
@@ -159,10 +162,16 @@ export type OrderSnapshotResult = {
 /**
  * Считает один заказ. `allocatedFlowerCents` приходит снаружи: его знает только уровень дня.
  *
- * Выручка = товары + налог + доставка заказчика. Чаевые не входят вовсе — это деньги
- * владельца. Налог входит в выручку и тут же вычитается целиком: так одна и та же формула
- * обслуживает и базу флориста (100% налога — расход), и представление владельца, где
- * расходом считается лишь его доля.
+ * Выручка = ВСЁ, что заплатил клиент: товары + налог + доставка + чаевые. Чаевые и налог
+ * тут же вычитаются отдельными строками расхода, поэтому на распределяемую прибыль они не
+ * влияют — но верхняя строка совпадает с суммой оплаченных заказов в Shopify, и расчёт
+ * можно сверить, не держа в голове, что из него молча выкинуто.
+ *
+ * Чаевые целиком принадлежат владельцу и в базу доли не входят — это не изменилось,
+ * изменилось только то, что вычитание стало видимым.
+ *
+ * Налог входит в выручку и вычитается целиком у флориста: так одна формула обслуживает и
+ * базу флориста (100% налога — расход), и представление владельца с его долей.
  *
  * У непросчитываемого заказа распределяемая прибыль равна нулю, но зарезервированная доля
  * закупки сохраняется — это и есть нераспределённый остаток дня.
@@ -183,7 +192,8 @@ export function computeOrderSnapshot(
   if (input.consumables == null) missing.push("CONSUMABLES_RATE");
   if (allocatedFlowerCents == null) missing.push("DAILY_FLOWER_EXPENSE");
 
-  const grossRevenueCents = input.itemsTotalCents + input.taxCents + input.deliveryCustomerCents;
+  const grossRevenueCents =
+    input.itemsTotalCents + input.taxCents + input.deliveryCustomerCents + input.tipCents;
   const taxExpenseCents = Math.round((input.taxCents * taxExpenseShareBp) / 10000);
 
   const deliveryActual = input.deliveryActualCents ?? 0;
@@ -195,6 +205,9 @@ export function computeOrderSnapshot(
   const isCalculable = missing.length === 0;
   const distributableCents = isCalculable
     ? grossRevenueCents -
+      // Чаевые вычитаются ровно в том размере, в каком вошли в выручку: на итог они не
+      // влияют никак, но теперь видно, что они учтены и отданы владельцу.
+      input.tipCents -
       taxExpenseCents -
       deliveryActual -
       fee -
@@ -209,6 +222,7 @@ export function computeOrderSnapshot(
     isCalculable,
     missing,
     grossRevenueCents,
+    tipsCents: input.tipCents,
     flowerRevenueCents: flower ?? 0,
     taxCents: input.taxCents,
     deliveryActualCents: deliveryActual,
