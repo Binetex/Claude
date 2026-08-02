@@ -20,10 +20,17 @@ import "server-only";
  */
 import type { PrismaClient } from "@/generated/prisma/client";
 import { PrismaOutboxRepository } from "@/outbox/prismaRepository";
-import { publishAccrualRequest } from "./events";
+import { publishAccrualRequest, financeAccrualKey } from "./events";
 import { accrualGate } from "./config";
 
+/** Сколько задач ставим за один тик. */
 export const DISPATCH_LIMIT = 100;
+
+/**
+ * Сколько кандидатов просматриваем, чтобы набрать эти задачи. Больше лимита: часть
+ * кандидатов уже имеет задачу и отсеивается, и окно должно позволять «заглянуть» за них.
+ */
+export const SCAN_LIMIT = 500;
 
 export type DispatchResult = { selected: number; enqueued: number; skipped?: string };
 
@@ -34,7 +41,7 @@ export async function dispatchFinanceAccruals(
   const gate = accrualGate();
   if (!gate.enabled) return { selected: 0, enqueued: 0, skipped: gate.reason };
 
-  const due = await prisma.order.findMany({
+  const candidates = await prisma.order.findMany({
     where: {
       orderStatus: "DELIVERED",
       deliveryDate: { gte: gate.startDate, lte: now },
@@ -49,14 +56,30 @@ export async function dispatchFinanceAccruals(
     },
     select: { id: true },
     orderBy: { deliveryDate: "asc" },
-    take: DISPATCH_LIMIT,
+    take: SCAN_LIMIT,
   });
-  if (due.length === 0) return { selected: 0, enqueued: 0 };
+  if (candidates.length === 0) return { selected: 0, enqueued: 0 };
+
+  // Отсеиваем заказы, по которым задача УЖЕ ставилась. Без этого шага диспетчер голодает:
+  // у заказа основного флориста записи в книге не появляется никогда (его доля считается
+  // за период на следующем этапе), поэтому он остаётся кандидатом вечно и занимает место
+  // в лимите. Достаточно сотни таких заказов — и остальные не будут поставлены в очередь
+  // ни разу, а не «позже». Фильтр по существующему ключу делает набор кандидатов
+  // монотонно убывающим: каждый заказ получает ровно одну задачу за свою жизнь.
+  const keys = new Map(candidates.map((o) => [financeAccrualKey(o.id), o.id]));
+  const known = await prisma.outboxEvent.findMany({
+    where: { idempotencyKey: { in: [...keys.keys()] } },
+    select: { idempotencyKey: true },
+  });
+  for (const row of known) keys.delete(row.idempotencyKey);
+
+  const due = [...keys.values()].slice(0, DISPATCH_LIMIT);
+  if (due.length === 0) return { selected: candidates.length, enqueued: 0 };
 
   const repo = new PrismaOutboxRepository(prisma);
   let enqueued = 0;
-  for (const order of due) {
-    const { created } = await publishAccrualRequest(repo, order.id);
+  for (const orderId of due) {
+    const { created } = await publishAccrualRequest(repo, orderId);
     if (created) enqueued++;
   }
   return { selected: due.length, enqueued };
