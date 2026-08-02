@@ -72,6 +72,10 @@ async function makeOrder(n: string, flowerCents: number): Promise<string> {
 let productId = "";
 
 beforeAll(async () => {
+  // Проверки относятся только к заказам с даты запуска расчёта; без неё детектор молчит
+  // намеренно, чтобы система не требовала приводить в порядок исторический период.
+  process.env.FINANCE_PRIMARY_SHARE_START_DATE = "2026-07-01";
+
   const owner = await prisma.user.create({
     data: { name: "Owner", email: `${RUN}-owner@test.local`, role: "OWNER", passwordHash: "x" },
     select: { id: true },
@@ -110,6 +114,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  delete process.env.FINANCE_PRIMARY_SHARE_START_DATE;
   await prisma.$executeRawUnsafe(`ALTER TABLE "OrderFinancialSnapshot" DISABLE TRIGGER USER`);
   await prisma.orderFinancialSnapshot.deleteMany({ where: { orderId: { in: [orderA, orderB] } } });
   await prisma.$executeRawUnsafe(`ALTER TABLE "OrderFinancialSnapshot" ENABLE TRIGGER USER`);

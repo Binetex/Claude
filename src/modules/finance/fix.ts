@@ -19,6 +19,7 @@ import { setVariantVase, type VaseSelection } from "@/modules/catalog/finance/va
 import { detectFinanceIssues, DETECTOR_WINDOW_DAYS } from "./issues";
 import { publishDaySnapshots } from "./snapshot";
 import { setConsumablesRate, setDailyFlowerExpense, setFeeModel, setOwnerTaxPolicy } from "./settings";
+import { primaryShareStartDate } from "./config";
 
 export type FixActor = { userId: string; role: Role };
 
@@ -55,8 +56,15 @@ async function primaryProfile(): Promise<{ id: string; floristId: string } | nul
   });
 }
 
+/**
+ * Нижняя граница работы: окно детектора либо дата запуска расчёта — что позже.
+ * Заказы раньше неё исторические: их не проверяют, не пересобирают автоматически и не
+ * предлагают к исправлению. Пересчитать такой день по-прежнему можно явным вызовом.
+ */
 function windowStart(now: Date): Date {
-  return new Date(now.getTime() - DETECTOR_WINDOW_DAYS * 86400_000);
+  const window = new Date(now.getTime() - DETECTOR_WINDOW_DAYS * 86400_000);
+  const start = primaryShareStartDate();
+  return start && start > window ? start : window;
 }
 
 /** Дни доставки заказов основного флориста, попадающие под фильтр. */

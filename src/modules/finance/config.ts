@@ -33,6 +33,48 @@ export function financeAccrualStartDate(): Date | null {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
+/**
+ * Дата запуска расчёта доли основного флориста (Stage 3).
+ *
+ * Заказы РАНЬШЕ неё считаются историческими: они не проверяются, не блокируют работу и не
+ * попадают в очередь разбора. Это не «пока не дошли руки», а осознанное решение — на тот
+ * период финансовая система ещё не была настроена: цены флориста заполнены не везде,
+ * каталог размечается до сих пор, а Burq заработал в полную силу лишь недавно, поэтому у
+ * большинства старых заказов фактической доставки нет и не появится.
+ *
+ * Пересчитать историю задним числом по-прежнему можно — механика для этого никуда не
+ * делась, — но она никого не заставляет и не мешает работать с текущими днями.
+ */
+export function primaryShareStartDate(): Date | null {
+  const raw = process.env.FINANCE_PRIMARY_SHARE_START_DATE?.trim();
+  if (!raw) return null;
+  // Только YYYY-MM-DD: сравнивается с Order.deliveryDate, которая тоже UTC-полночь
+  // локального дня доставки.
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) return null;
+  const date = new Date(`${raw}T00:00:00.000Z`);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+export type ShareGate = { enabled: true; startDate: Date } | { enabled: false; reason: string };
+
+/**
+ * Можно ли проверять и считать долю основного флориста. Без даты запуска гейт закрыт:
+ * очередь разбора остаётся пустой, и система не требует привести историю в порядок.
+ */
+export function primaryShareGate(): ShareGate {
+  const startDate = primaryShareStartDate();
+  if (!startDate) {
+    return { enabled: false, reason: "FINANCE_PRIMARY_SHARE_START_DATE не задана (формат YYYY-MM-DD)" };
+  }
+  return { enabled: true, startDate };
+}
+
+/** Заказ этой даты доставки — исторический и в проверки не входит. */
+export function isHistoricalDay(day: Date): boolean {
+  const start = primaryShareStartDate();
+  return start != null && day < start;
+}
+
 export type AccrualGate = { enabled: true; startDate: Date } | { enabled: false; reason: string };
 
 /** Единая точка ответа «можно ли сейчас начислять». Используют и воркер, и UI. */

@@ -69,6 +69,8 @@ async function makeOrder(n: string, opts: { finalCost?: string; quote?: string; 
 }
 
 beforeAll(async () => {
+  process.env.FINANCE_PRIMARY_SHARE_START_DATE = "2026-07-01";
+
   const owner = await prisma.user.create({
     data: { name: "Owner", email: `${RUN}-owner@test.local`, role: "OWNER", passwordHash: "x" },
     select: { id: true },
@@ -103,6 +105,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  delete process.env.FINANCE_PRIMARY_SHARE_START_DATE;
   await prisma.$executeRawUnsafe(`ALTER TABLE "OrderFinancialSnapshot" DISABLE TRIGGER USER`);
   await prisma.orderFinancialSnapshot.deleteMany({ where: { order: { siteId } } });
   await prisma.$executeRawUnsafe(`ALTER TABLE "OrderFinancialSnapshot" ENABLE TRIGGER USER`);

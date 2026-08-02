@@ -120,14 +120,35 @@ export default async function FinanceSetupPage({
         />
       </div>
 
+      {summary.disabledReason ? (
+        <Card>
+          <CardBody className="text-sm text-slate-600">
+            <div className="font-medium text-slate-800">Расчёт доли не запущен</div>
+            <div className="mt-1 text-slate-500">
+              {summary.disabledReason}. Пока дата не задана, проверки не выполняются — система намеренно не требует
+              приводить в порядок период, когда финансовые настройки ещё не существовали.
+            </div>
+          </CardBody>
+        </Card>
+      ) : (
+        <div className="text-xs text-slate-400">
+          Проверяются заказы с {dayKey(summary.startDate!)}. Более ранние считаются историческими: они не блокируют
+          работу и не попадают в очередь, но остаются доступными, если понадобится пересчитать историю.
+        </div>
+      )}
+
       <SetupFilters sites={sites} current={{ site: sp.site, type: sp.type, group: sp.group }} />
 
       {issues.length === 0 ? (
         <Card>
           <CardBody>
             <EmptyState
-              title="Всё заполнено"
-              description="Открытых проблем нет. Если данные изменятся, очередь наполнится сама при следующем прогоне детектора."
+              title={summary.disabledReason ? "Проверки выключены" : "Всё заполнено"}
+              description={
+                summary.disabledReason
+                  ? "Задайте FINANCE_PRIMARY_SHARE_START_DATE, чтобы система начала проверять заказы с этой даты."
+                  : "Открытых проблем нет. Если данные изменятся, очередь наполнится сама при следующем прогоне детектора."
+              }
             />
           </CardBody>
         </Card>

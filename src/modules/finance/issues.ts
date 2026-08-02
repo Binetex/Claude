@@ -15,6 +15,7 @@ import { prisma } from "@/lib/db";
 import { toNumber } from "@/lib/money";
 import { buildDayPlan, dayKey, type DayPlan } from "./snapshot";
 import { resolveOwnerTaxPolicy } from "./settings";
+import { primaryShareGate } from "./config";
 
 /** Сколько дней назад смотрит детектор. Дальше история разбирается вручную по дате. */
 export const DETECTOR_WINDOW_DAYS = 60;
@@ -42,6 +43,11 @@ export type DetectResult = { opened: number; updated: number; autoResolved: numb
  * Идемпотентен: повторный прогон без изменений в данных не создаёт и не закрывает ничего.
  */
 export async function detectFinanceIssues(now: Date = new Date()): Promise<DetectResult> {
+  // Без даты запуска расчёта проверять нечего: система не должна требовать привести
+  // в порядок период, когда финансовые настройки ещё не существовали.
+  const gate = primaryShareGate();
+  if (!gate.enabled) return closeOutOfScope(now, null);
+
   const profile = await prisma.floristFinanceProfile.findFirst({
     where: { model: "PRIMARY", active: true, effectiveTo: null },
     select: { id: true, floristId: true, effectiveFrom: true, florist: { select: { user: { select: { name: true } } } } },
@@ -49,7 +55,9 @@ export async function detectFinanceIssues(now: Date = new Date()): Promise<Detec
   if (!profile) return { opened: 0, updated: 0, autoResolved: 0, scannedDays: 0 };
 
   const windowStart = new Date(now.getTime() - DETECTOR_WINDOW_DAYS * 86400_000);
-  const from = profile.effectiveFrom > windowStart ? profile.effectiveFrom : windowStart;
+  // Нижняя граница — САМАЯ ПОЗДНЯЯ из трёх: окно детектора, начало профиля и дата
+  // запуска расчёта. Заказы раньше неё исторические и в проверки не входят.
+  const from = [windowStart, profile.effectiveFrom, gate.startDate].reduce((a, b) => (a > b ? a : b));
 
   // Дни, в которых у основного флориста есть доставленные заказы.
   const days = await prisma.order.findMany({
@@ -70,7 +78,27 @@ export async function detectFinanceIssues(now: Date = new Date()): Promise<Detec
   }
   drafts.push(...(await globalDrafts(profile.floristId, now)));
 
-  return reconcile(drafts);
+  return reconcile(drafts, gate.startDate);
+}
+
+/**
+ * Гейт закрыт: находить нечего, но уже открытые проблемы висеть не должны — иначе очередь
+ * продолжала бы требовать разбора того, что система больше не проверяет.
+ */
+async function closeOutOfScope(now: Date, startDate: Date | null): Promise<DetectResult> {
+  const open = await prisma.financeIssue.findMany({ where: { status: "OPEN" }, select: { id: true } });
+  if (open.length === 0) return { opened: 0, updated: 0, autoResolved: 0, scannedDays: 0 };
+  await prisma.financeIssue.updateMany({
+    where: { id: { in: open.map((o) => o.id) } },
+    data: {
+      status: "AUTO_RESOLVED",
+      resolvedAt: now,
+      resolutionComment: startDate
+        ? "Вне периода расчёта: заказ раньше даты запуска."
+        : "Расчёт доли не запущен: FINANCE_PRIMARY_SHARE_START_DATE не задана.",
+    },
+  });
+  return { opened: 0, updated: 0, autoResolved: open.length, scannedDays: 0 };
 }
 
 /** Проблемы одного дня: сначала блокеры дня, затем поштучные по заказам. */
@@ -283,7 +311,7 @@ async function globalDrafts(floristId: string, now: Date): Promise<Draft[]> {
  * проблема всё ещё находится: владелец мог сознательно её закрыть. Вместо этого
  * обновляется lastDetectedAt — в очереди такие видны отдельным фильтром.
  */
-async function reconcile(rawDrafts: Draft[]): Promise<DetectResult> {
+async function reconcile(rawDrafts: Draft[], startDate: Date): Promise<DetectResult> {
   const now = new Date();
 
   // Одна проблема магазина всплывает на КАЖДОМ его проблемном заказе, поэтому в сыром
@@ -304,7 +332,7 @@ async function reconcile(rawDrafts: Draft[]): Promise<DetectResult> {
 
   const existing = await prisma.financeIssue.findMany({
     where: { OR: [{ deduplicationKey: { in: keys } }, { status: "OPEN" }] },
-    select: { id: true, deduplicationKey: true, status: true },
+    select: { id: true, deduplicationKey: true, status: true, scopeDate: true },
   });
   const byKey = new Map(existing.map((e) => [e.deduplicationKey, e]));
 
@@ -352,10 +380,27 @@ async function reconcile(rawDrafts: Draft[]): Promise<DetectResult> {
   const stillOpenKeys = new Set(keys);
   const gone = existing.filter((e) => e.status === "OPEN" && !stillOpenKeys.has(e.deduplicationKey));
   if (gone.length > 0) {
-    await prisma.financeIssue.updateMany({
-      where: { id: { in: gone.map((g) => g.id) } },
-      data: { status: "AUTO_RESOLVED", resolvedAt: now, resolutionComment: "Проблема исчезла: данные заполнены." },
-    });
+    // Причина закрытия должна быть честной: «данные заполнены» и «период больше не
+    // проверяется» — разные вещи, и путать их в истории разбора нельзя.
+    const historical = gone.filter((g) => g.scopeDate != null && g.scopeDate < startDate);
+    const filled = gone.filter((g) => !historical.includes(g));
+
+    if (historical.length > 0) {
+      await prisma.financeIssue.updateMany({
+        where: { id: { in: historical.map((g) => g.id) } },
+        data: {
+          status: "AUTO_RESOLVED",
+          resolvedAt: now,
+          resolutionComment: "Исторический период: заказ раньше даты запуска расчёта.",
+        },
+      });
+    }
+    if (filled.length > 0) {
+      await prisma.financeIssue.updateMany({
+        where: { id: { in: filled.map((g) => g.id) } },
+        data: { status: "AUTO_RESOLVED", resolvedAt: now, resolutionComment: "Проблема исчезла: данные заполнены." },
+      });
+    }
   }
 
   return { opened, updated, autoResolved: gone.length, scannedDays: 0 };
@@ -424,12 +469,15 @@ export async function getIssueSummary(now: Date = new Date()) {
     select: { id: true, floristId: true },
   });
 
-  // «Готово к расчёту» — дни без блокирующих проблем.
+  // «Готово к расчёту» — дни без блокирующих проблем, начиная с даты запуска расчёта.
+  // Исторические дни сюда не входят: система их не проверяет и готовыми не считает.
+  const shareGate = primaryShareGate();
   let readyDays = 0;
-  if (profile) {
-    const windowStart = new Date(now.getTime() - DETECTOR_WINDOW_DAYS * 86400_000);
+  if (profile && shareGate.enabled) {
+    const window = new Date(now.getTime() - DETECTOR_WINDOW_DAYS * 86400_000);
+    const lowerBound = shareGate.startDate > window ? shareGate.startDate : window;
     const days = await prisma.order.findMany({
-      where: { currentFloristId: profile.floristId, orderStatus: "DELIVERED", deliveryDate: { gte: windowStart, lte: now } },
+      where: { currentFloristId: profile.floristId, orderStatus: "DELIVERED", deliveryDate: { gte: lowerBound, lte: now } },
       select: { deliveryDate: true },
       distinct: ["deliveryDate"],
     });
@@ -447,5 +495,8 @@ export async function getIssueSummary(now: Date = new Date()) {
     info,
     readyDays,
     estimatedImpactCents: impact._sum.estimatedImpactCents ?? null,
+    /** NULL — расчёт не запущен: очередь пуста намеренно, а не потому что всё заполнено. */
+    startDate: shareGate.enabled ? shareGate.startDate : null,
+    disabledReason: shareGate.enabled ? null : shareGate.reason,
   };
 }
