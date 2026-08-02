@@ -9,9 +9,10 @@ import { Button } from "@/components/ui/button";
 import { FloristAvatar } from "@/components/FloristAvatar";
 import { BalanceSummary, LedgerTable } from "@/components/finance/LedgerTable";
 import { getFloristBalance, listLedgerEntries } from "@/modules/finance/ledger";
+import { REVERSIBLE_TYPES } from "@/modules/finance/ledgerRules";
 import { resolveProfileAt } from "@/modules/finance/profile";
 import { AddPaymentDialog, AddAdjustmentDialog, ReverseEntryButton } from "./FinanceForms";
-import { LedgerFilters, REVERSIBLE_TYPES } from "./LedgerFilters";
+import { LedgerFilters } from "./LedgerFilters";
 import type { LedgerEntryType } from "@/generated/prisma/enums";
 
 export const dynamic = "force-dynamic";

@@ -53,6 +53,23 @@ export function reversalTypeFor(type: LedgerEntryType): LedgerEntryType {
   return type === "PAYMENT" ? "PAYMENT_REVERSAL" : "CORRECTION";
 }
 
+/**
+ * Типы, которые владелец может отменить. Сторнирующие записи (CORRECTION,
+ * PAYMENT_REVERSAL) сюда не входят: отмена отмены — это новая операция, а не откат.
+ *
+ * Живёт здесь, а не рядом с UI, СОЗНАТЕЛЬНО: из `"use client"`-модуля серверный компонент
+ * получает не значение, а client-reference прокси, и любой вызов метода на нём падает в
+ * рантайме (типы этого не видят). Константы, нужные обеим сторонам, держим в обычном модуле.
+ */
+export const REVERSIBLE_TYPES: LedgerEntryType[] = [
+  "ORDER_ACCRUAL",
+  "PRIMARY_FLORIST_SHARE",
+  "BONUS",
+  "DEDUCTION",
+  "PAYMENT",
+  "MANUAL_ADJUSTMENT",
+];
+
 export class LedgerRuleError extends Error {
   constructor(message: string) {
     super(message);

@@ -9,19 +9,6 @@ import { Button } from "@/components/ui/button";
 import { ledgerTypeMeta } from "@/components/finance/LedgerTable";
 import type { LedgerEntryType } from "@/generated/prisma/enums";
 
-/**
- * Типы, которые владелец может отменить. Сторнирующие записи (CORRECTION,
- * PAYMENT_REVERSAL) сюда не входят: отмена отмены — это новая операция, а не откат.
- */
-export const REVERSIBLE_TYPES: LedgerEntryType[] = [
-  "ORDER_ACCRUAL",
-  "PRIMARY_FLORIST_SHARE",
-  "BONUS",
-  "DEDUCTION",
-  "PAYMENT",
-  "MANUAL_ADJUSTMENT",
-];
-
 const TYPE_OPTIONS = Object.entries(ledgerTypeMeta) as [LedgerEntryType, { label: string }][];
 
 export function LedgerFilters({
