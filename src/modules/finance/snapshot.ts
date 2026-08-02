@@ -286,9 +286,14 @@ async function resolveItemsFinance(
     : [];
 
   const costTargets = [...new Set([...variantIds, ...linkedVaseIds])];
-  const costs = costTargets.length || productIds.length
+  // ТОВАРЫ связанных ваз обязаны попасть в выборку: стоимость вазы часто задана на карточке
+  // товара, а не на конкретном варианте, и резолв Stage 1 ищет её именно там
+  // (`pick(r.productId === linked.productId)`). Без них у букета с вазой стоимость выглядела
+  // бы отсутствующей, хотя она задана, и заказ молча выпадал бы из расчёта.
+  const costProductIds = [...new Set([...productIds, ...linkedVases.map((v) => v.productId)])];
+  const costs = costTargets.length || costProductIds.length
     ? await prisma.vasePurchaseCost.findMany({
-        where: { OR: [{ productVariantId: { in: costTargets } }, { productId: { in: productIds } }] },
+        where: { OR: [{ productVariantId: { in: costTargets } }, { productId: { in: costProductIds } }] },
         select: {
           id: true,
           productId: true,
