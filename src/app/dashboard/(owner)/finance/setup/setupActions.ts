@@ -10,7 +10,19 @@ import { revalidatePath } from "next/cache";
 import { requireRole } from "@/lib/rbac";
 import { usdToCents, CentsParseError } from "@/lib/cents";
 import { prisma } from "@/lib/db";
-import { FinanceFixError, dismissIssue, fixConsumablesRate, fixDailyFlowerExpense, fixDeliveryActualCost, fixOwnerTaxPolicy, fixSiteFeeModel, fixVaseLink, fixVasePurchaseCost } from "@/modules/finance/fix";
+import {
+  FinanceFixError,
+  confirmBurqDeliveryCosts,
+  dismissIssue,
+  fixConsumablesRate,
+  fixDailyFlowerExpense,
+  fixDeliveryActualCost,
+  fixOwnerTaxPolicy,
+  fixSiteFeeModel,
+  fixVaseLink,
+  fixVasePurchaseCost,
+  previewBurqDeliveryConfirmation,
+} from "@/modules/finance/fix";
 import { FinanceSettingsError } from "@/modules/finance/settings";
 import { detectFinanceIssues } from "@/modules/finance/issues";
 import { previewDay, suggestDailyExpenseCents, suggestDeliveryCostCents } from "@/modules/finance/preview";
@@ -265,6 +277,42 @@ export async function applyOwnerTaxPolicy(formData: FormData): Promise<SetupResu
       actor: { userId: user.id, role: user.role },
     });
     return done("Налоговая политика сохранена.", r);
+  } catch (err) {
+    return toError(err);
+  }
+}
+
+// ───────── Массовое подтверждение доставки по суммам Burq ─────────
+
+export type BulkDeliveryPreviewResult =
+  | { ok: true; preview: Awaited<ReturnType<typeof previewBurqDeliveryConfirmation>> }
+  | { error: string };
+
+/** Что будет применено к выбранным заказам. Ничего не пишет. */
+export async function previewBurqDelivery(orderIds: string[]): Promise<BulkDeliveryPreviewResult> {
+  await requireRole("OWNER");
+  try {
+    return { ok: true, preview: await previewBurqDeliveryConfirmation(orderIds) };
+  } catch (err) {
+    const r = toError(err);
+    return { error: r.error ?? "Не удалось посчитать." };
+  }
+}
+
+/**
+ * Применяет подтверждение. Список заказов приходит явным выбором владельца — ничего
+ * не подставляется само, и заказы без суммы Burq в кандидаты не попадают в принципе.
+ */
+export async function applyBurqDelivery(orderIds: string[], comment?: string): Promise<SetupResult> {
+  const user = await requireRole("OWNER");
+  try {
+    const r = await confirmBurqDeliveryCosts({
+      orderIds,
+      comment: comment?.trim() || null,
+      actor: { userId: user.id, role: user.role },
+    });
+    revalidatePath("/dashboard/finance/setup/delivery");
+    return done(`Подтверждено заказов: ${r.confirmed}.`, r);
   } catch (err) {
     return toError(err);
   }

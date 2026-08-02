@@ -6,6 +6,7 @@ import { Card, CardBody } from "@/components/ui/Card";
 import { EmptyState } from "@/components/ui/states";
 import { formatCents } from "@/lib/cents";
 import { listOpenIssues, type IssueGroup } from "@/modules/finance/issues";
+import { listBurqDeliveryCandidates } from "@/modules/finance/fix";
 import { getIssueSummary } from "@/modules/finance/issues";
 import { suggestDailyExpenseCents, suggestDeliveryCostCents } from "@/modules/finance/preview";
 import { listVaseOptions } from "@/modules/catalog/finance/vaseLink";
@@ -33,7 +34,7 @@ export default async function FinanceSetupPage({
   await requireRole("OWNER");
   const sp = await searchParams;
 
-  const [summary, issues, sites] = await Promise.all([
+  const [summary, issues, sites, burqList] = await Promise.all([
     getIssueSummary(),
     listOpenIssues({
       siteId: sp.site,
@@ -41,7 +42,9 @@ export default async function FinanceSetupPage({
       group: sp.group as IssueGroup | undefined,
     }),
     prisma.site.findMany({ select: { id: true, shortName: true }, orderBy: { shortName: "asc" } }),
+    listBurqDeliveryCandidates(),
   ]);
+  const burqCandidates = burqList.length;
 
   // Подсказки и списки ваз собираются на сервере: карточка не должна ходить за ними сама.
   const cards: IssueCardData[] = await Promise.all(
@@ -90,7 +93,15 @@ export default async function FinanceSetupPage({
         title="Финансы — требует заполнения"
         description="Чего не хватает, чтобы посчитать долю основного флориста. Ассистент записывает только исходные данные — начисления он не создаёт."
         actions={
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-3">
+            {burqCandidates > 0 && (
+              <Link
+                href="/dashboard/finance/setup/delivery"
+                className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              >
+                Доставка по Burq: {burqCandidates}
+              </Link>
+            )}
             <Link href="/dashboard/finance/settings" className="text-sm text-slate-500 hover:text-slate-800">
               Настройки
             </Link>

@@ -349,6 +349,177 @@ export async function fixOwnerTaxPolicy(args: {
   return republishAndDetect(profile.id, days, args.actor, now);
 }
 
+// ───────── Массовое подтверждение доставки по суммам Burq ─────────
+
+export type BurqDeliveryCandidate = {
+  orderId: string;
+  orderNumber: string;
+  siteShortName: string;
+  deliveryDay: string;
+  /** Сумма из записи доставки. */
+  burqCents: number;
+  /** Фактическая стоимость курьера либо котировка до доставки. */
+  burqSource: "FINAL" | "QUOTE";
+  /** Что сейчас стоит в заказе (может быть 0 — «неизвестно»). */
+  currentCents: number;
+};
+
+/**
+ * Заказы, у которых стоимость доставки не подтверждена, но сумма Burq уже есть.
+ *
+ * Заказы без суммы Burq сюда НЕ попадают: подставлять им общее значение значило бы
+ * придумать данные, а у каждой доставки цена своя.
+ */
+export async function listBurqDeliveryCandidates(now: Date = new Date()): Promise<BurqDeliveryCandidate[]> {
+  const profile = await primaryProfile();
+  if (!profile) return [];
+
+  const orders = await prisma.order.findMany({
+    where: {
+      currentFloristId: profile.floristId,
+      orderStatus: "DELIVERED",
+      deliveryDate: { gte: windowStart(now), lte: now },
+      deliveryActualCostConfirmedAt: null,
+      deliveryActualCost: 0,
+      deliveries: { some: { OR: [{ finalCost: { not: null } }, { quoteAmount: { not: null } }] } },
+    },
+    select: {
+      id: true,
+      orderNumber: true,
+      deliveryDate: true,
+      deliveryActualCost: true,
+      site: { select: { shortName: true } },
+      deliveries: {
+        where: { OR: [{ finalCost: { not: null } }, { quoteAmount: { not: null } }] },
+        orderBy: { createdAt: "desc" },
+        take: 1,
+        select: { finalCost: true, quoteAmount: true },
+      },
+    },
+    orderBy: { deliveryDate: "desc" },
+  });
+
+  return orders.flatMap((o) => {
+    const d = o.deliveries[0];
+    if (!d) return [];
+    // Факт приоритетнее котировки: котировка — оценка ДО доставки, и владелец должен
+    // видеть, что именно он подтверждает.
+    const final = d.finalCost != null ? Math.round(Number(d.finalCost) * 100) : null;
+    const quote = d.quoteAmount != null ? Math.round(Number(d.quoteAmount) * 100) : null;
+    const burqCents = final ?? quote;
+    if (burqCents == null) return [];
+    return [
+      {
+        orderId: o.id,
+        orderNumber: o.orderNumber,
+        siteShortName: o.site.shortName,
+        deliveryDay: o.deliveryDate.toISOString().slice(0, 10),
+        burqCents,
+        burqSource: final != null ? ("FINAL" as const) : ("QUOTE" as const),
+        currentCents: Math.round(Number(o.deliveryActualCost) * 100),
+      },
+    ];
+  });
+}
+
+export type BulkDeliveryPreview = {
+  orders: number;
+  totalCents: number;
+  days: string[];
+  finalCount: number;
+  quoteCount: number;
+};
+
+/** Что будет применено. Ничего не пишет. */
+export async function previewBurqDeliveryConfirmation(orderIds: string[]): Promise<BulkDeliveryPreview> {
+  const all = await listBurqDeliveryCandidates();
+  const chosen = all.filter((c) => orderIds.includes(c.orderId));
+  return {
+    orders: chosen.length,
+    totalCents: chosen.reduce((a, c) => a + c.burqCents, 0),
+    days: [...new Set(chosen.map((c) => c.deliveryDay))].sort(),
+    finalCount: chosen.filter((c) => c.burqSource === "FINAL").length,
+    quoteCount: chosen.filter((c) => c.burqSource === "QUOTE").length,
+  };
+}
+
+/**
+ * Подтверждает стоимость доставки выбранным заказам.
+ *
+ * Каждому заказу — СВОЯ запись и СВОЙ FinanceAudit: массовость здесь только в том, что
+ * владелец нажал одну кнопку, а не в том, что операция общая. Снимки пересобираются по
+ * затронутым дням один раз, детектор — тоже один раз: гонять их на каждый из десятков
+ * заказов бессмысленно и долго.
+ *
+ * Суммы берутся ТОЛЬКО из записи Burq выбранного заказа — никаких общих значений.
+ */
+export async function confirmBurqDeliveryCosts(args: {
+  orderIds: string[];
+  actor: FixActor;
+  comment?: string | null;
+  now?: Date;
+}): Promise<FixResult & { confirmed: number }> {
+  assertOwner(args.actor);
+  if (args.orderIds.length === 0) throw new FinanceFixError("nothing_selected", "Выберите хотя бы один заказ.");
+
+  const profile = await primaryProfile();
+  if (!profile) throw new FinanceFixError("no_profile", "Не задан профиль основного флориста.");
+
+  const now = args.now ?? new Date();
+  const candidates = (await listBurqDeliveryCandidates(now)).filter((c) => args.orderIds.includes(c.orderId));
+  if (candidates.length === 0) {
+    throw new FinanceFixError("nothing_applicable", "Ни у одного из выбранных заказов нет суммы Burq.");
+  }
+
+  const batchId = `burq-delivery-${now.toISOString()}`;
+  for (const c of candidates) {
+    await prisma.$transaction(async (tx) => {
+      await tx.order.update({
+        where: { id: c.orderId },
+        data: {
+          deliveryActualCost: (c.burqCents / 100).toFixed(2),
+          deliveryActualCostConfirmedAt: now,
+        },
+      });
+      await tx.financeAudit.create({
+        data: {
+          entity: "Order",
+          entityId: c.orderId,
+          action: "SET_DELIVERY_ACTUAL_COST",
+          beforeJson: { deliveryActualCostCents: c.currentCents, confirmed: false },
+          afterJson: {
+            deliveryActualCostCents: c.burqCents,
+            source: c.burqSource === "FINAL" ? "BURQ_FINAL" : "BURQ_QUOTE",
+            confirmedAt: now.toISOString(),
+          },
+          reason: args.comment ?? "Массовое подтверждение сумм Burq",
+          batchId,
+          entityNameSnapshot: c.orderNumber,
+          siteShortNameSnapshot: c.siteShortName,
+          userId: args.actor.userId,
+          role: args.actor.role,
+        },
+      });
+    });
+  }
+
+  // Закрываем связанные проблемы: детектор закрыл бы их и сам, но так владелец видит
+  // именно «разобрано вручную», а не «исчезло само».
+  await prisma.financeIssue.updateMany({
+    where: { status: "OPEN", type: "DELIVERY_ACTUAL_COST_MISSING", orderId: { in: candidates.map((c) => c.orderId) } },
+    data: {
+      status: "RESOLVED",
+      resolvedAt: now,
+      resolvedBy: args.actor.userId,
+      resolutionComment: args.comment ?? "Массовое подтверждение сумм Burq",
+    },
+  });
+
+  const days = [...new Map(candidates.map((c) => [c.deliveryDay, new Date(`${c.deliveryDay}T00:00:00.000Z`)])).values()];
+  const result = await republishAndDetect(profile.id, days, args.actor, now);
+  return { ...result, confirmed: candidates.length };
+}
+
 /** Закрыть проблему без исправления — владелец решил, что она не требует действий. */
 export async function dismissIssue(args: { issueId: string; comment: string; actor: FixActor }): Promise<void> {
   assertOwner(args.actor);
