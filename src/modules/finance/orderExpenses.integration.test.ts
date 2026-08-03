@@ -13,12 +13,10 @@ import crypto from "crypto";
 import { prisma } from "@/lib/db";
 import { setFinanceProfile } from "./profile";
 import { computeDayShare } from "./primaryShare";
-import { getFloristBalance } from "./ledger";
-import { accrueOrder } from "./accrual";
+import { floristBalance } from "./balance";
 import { fixConsumablesRate, fixDailyFlowerExpense, fixDeliveryActualCost, fixSiteFeeModel } from "./fix";
 import {
   addOrderExpense,
-  expenseDeductionKey,
   listOrderExpenses,
   removeOrderExpense,
   updateOrderExpense,
@@ -136,8 +134,6 @@ beforeAll(async () => {
   await fixDeliveryActualCost({ orderId: orderB, amountCents: 1000, actor: OWNER, now: NOW });
   await fixDailyFlowerExpense({ expenseDay: DAY, amountCents: 6000, actor: OWNER, now: NOW });
 
-  // Начисление второстепенному флористу за его заказ: $118.00.
-  await accrueOrder(secondOrder, OWNER);
 });
 
 afterAll(async () => {
@@ -300,13 +296,6 @@ describe("PRIMARY: расход уменьшает распределяемую 
     expect(live[0].amountCents).toBe((await computeDayShare(primaryProfileId, DAY))!.shareCents);
   });
 
-  it("у PRIMARY удержания не создаётся — иначе расход учёлся бы дважды", async () => {
-    const deduction = await prisma.ledgerEntry.findFirst({
-      where: { idempotencyKey: expenseDeductionKey(expenseId) },
-    });
-    expect(deduction).toBeNull();
-  });
-
   it("повторный пересчёт не создаёт дубля", async () => {
     const before = await prisma.ledgerEntry.count({ where: { floristId: primaryFloristId } });
     await addOrderExpense({
@@ -351,15 +340,15 @@ describe("PRIMARY: расход уменьшает распределяемую 
 describe("SECONDARY: удержание доллар в доллар", () => {
   let expenseId = "";
 
-  it("начисление за заказ есть и равно фиксированной цене", async () => {
-    const accrual = await prisma.ledgerEntry.findFirst({
-      where: { floristId: secondFloristId, type: "ORDER_ACCRUAL", reversal: null },
-    });
-    expect(accrual!.amountCents).toBe(11800);
-    expect((await getFloristBalance(secondFloristId)).outstandingCents).toBe(11800);
+  it("заработок равен фиксированной цене заказа и выводится, а не хранится", async () => {
+    const b = await floristBalance(secondFloristId);
+    expect(b.earnedCents).toBe(11800);
+    expect(b.outstandingCents).toBe(11800);
+    // Отдельной записи начисления в книге нет вовсе.
+    expect(await prisma.ledgerEntry.count({ where: { floristId: secondFloristId } })).toBe(0);
   });
 
-  it("расход создаёт DEDUCTION на полную сумму, начисление не трогается", async () => {
+  it("расход уменьшает долг доллар в доллар, ничего не записывая в книгу", async () => {
     const r = await addOrderExpense({
       orderId: secondOrder,
       amountCents: 3000,
@@ -370,20 +359,10 @@ describe("SECONDARY: удержание доллар в доллар", () => {
     });
     expenseId = r.expenseId;
 
-    const deduction = await prisma.ledgerEntry.findFirst({
-      where: { idempotencyKey: expenseDeductionKey(expenseId) },
-    });
-    expect(deduction!.amountCents).toBe(3000);
-    expect(deduction!.direction).toBe("DEBIT");
-
-    // Начисление осталось прежним: оно снимок цены и неизменяемо.
-    const accrual = await prisma.ledgerEntry.findFirst({
-      where: { floristId: secondFloristId, type: "ORDER_ACCRUAL", reversal: null },
-    });
-    expect(accrual!.amountCents).toBe(11800);
+    expect((await floristBalance(secondFloristId)).deductionCents).toBe(3000);
 
     // 118.00 − 30.00 = 88.00, ровно как в примере ТЗ.
-    expect((await getFloristBalance(secondFloristId)).outstandingCents).toBe(8800);
+    expect((await floristBalance(secondFloristId)).outstandingCents).toBe(8800);
   });
 
   it("расход больше начисления уводит баланс в минус и не обнуляется", async () => {
@@ -397,14 +376,14 @@ describe("SECONDARY: удержание доллар в доллар", () => {
     });
 
     // 118.00 − 30.00 − 120.00 = −32.00.
-    expect((await getFloristBalance(secondFloristId)).outstandingCents).toBe(-3200);
+    expect((await floristBalance(secondFloristId)).outstandingCents).toBe(-3200);
 
     await removeOrderExpense({ expenseId: big.expenseId, reason: "вернули как было", actor: OWNER, now: NOW });
-    expect((await getFloristBalance(secondFloristId)).outstandingCents).toBe(8800);
+    expect((await floristBalance(secondFloristId)).outstandingCents).toBe(8800);
   });
 
-  it("повторное проведение того же расхода не создаёт второго удержания", async () => {
-    const before = await prisma.ledgerEntry.count({ where: { floristId: secondFloristId } });
+  it("повторное проведение того же расхода не удваивает вычет", async () => {
+    const before = (await floristBalance(secondFloristId)).deductionCents;
     await addOrderExpense({
       orderId: secondOrder,
       amountCents: 100,
@@ -414,26 +393,16 @@ describe("SECONDARY: удержание доллар в доллар", () => {
       now: NOW,
     }).then((r) => removeOrderExpense({ expenseId: r.expenseId, reason: "откат", actor: OWNER, now: NOW }));
 
-    const keys = (
-      await prisma.ledgerEntry.findMany({ where: { floristId: secondFloristId }, select: { idempotencyKey: true } })
-    ).map((e) => e.idempotencyKey);
-    expect(new Set(keys).size).toBe(keys.length);
-    expect(await prisma.ledgerEntry.count({ where: { floristId: secondFloristId } })).toBeGreaterThan(before);
+    expect((await floristBalance(secondFloristId)).deductionCents).toBe(before);
   });
 
-  it("отмена расхода снимает удержание отдельной записью, а не правкой", async () => {
+  it("отмена расхода возвращает долг сама — без записей в книге", async () => {
     await removeOrderExpense({ expenseId, reason: "расход не подтвердился", actor: OWNER, now: NOW });
 
-    const deduction = await prisma.ledgerEntry.findFirst({
-      where: { idempotencyKey: expenseDeductionKey(expenseId) },
-      select: { id: true, amountCents: true, reversal: { select: { id: true, type: true, direction: true } } },
-    });
-    // Само удержание не изменилось и не удалено.
-    expect(deduction!.amountCents).toBe(3000);
-    expect(deduction!.reversal).not.toBeNull();
-    expect(deduction!.reversal!.direction).toBe("CREDIT");
-
-    expect((await getFloristBalance(secondFloristId)).outstandingCents).toBe(11800);
+    const b = await floristBalance(secondFloristId);
+    expect(b.deductionCents).toBe(0);
+    expect(b.outstandingCents).toBe(11800);
+    expect(await prisma.ledgerEntry.count({ where: { floristId: secondFloristId } })).toBe(0);
   });
 });
 
@@ -475,8 +444,8 @@ describe("исправление опубликованного расхода",
     expect(old!.reversedAt).not.toBeNull();
     expect(old!.amountCents).toBe(2000);
 
-    // В балансе осталось ровно одно действующее удержание — новое.
-    expect((await getFloristBalance(secondFloristId)).outstandingCents).toBe(11800 - 2500);
+    // В долге учтён только новый расход: отменённый не считается.
+    expect((await floristBalance(secondFloristId)).deductionCents).toBe(2500);
 
     await removeOrderExpense({ expenseId: updated.expenseId, reason: "уборка", actor: OWNER, now: NOW });
   });
@@ -566,12 +535,6 @@ describe("аудит и привязка к флористу", () => {
     const row = await prisma.orderAdditionalExpense.findUnique({ where: { id: created.expenseId } });
     expect(row!.floristIdSnapshot).toBe(secondFloristId);
 
-    // Удержание тоже осталось у прежнего исполнителя.
-    const deduction = await prisma.ledgerEntry.findFirst({
-      where: { idempotencyKey: expenseDeductionKey(created.expenseId) },
-      select: { floristId: true },
-    });
-    expect(deduction!.floristId).toBe(secondFloristId);
 
     await prisma.order.update({ where: { id: secondOrder }, data: { currentFloristId: secondFloristId } });
     await removeOrderExpense({ expenseId: created.expenseId, reason: "уборка", actor: OWNER, now: NOW });

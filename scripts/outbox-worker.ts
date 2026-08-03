@@ -37,9 +37,7 @@ import { TELEGRAM_NOTIFY_EVENT } from "@/integrations/telegram/events";
 import { buildAirwallexVerifyHandler } from "@/integrations/airwallex/handler";
 import { AIRWALLEX_VERIFY_EVENT } from "@/integrations/airwallex/events";
 import { dispatchAirwallexChecks } from "@/integrations/airwallex/dispatcher";
-import { buildFinanceAccrualHandler } from "@/modules/finance/handler";
 import { FINANCE_ACCRUAL_EVENT } from "@/modules/finance/events";
-import { dispatchFinanceAccruals } from "@/modules/finance/dispatcher";
 import { accrualGate, primaryShareGate } from "@/modules/finance/config";
 import { dispatchPrimaryShare } from "@/modules/finance/shareDispatcher";
 import { createSmsChannelSender } from "@/modules/automations/channels/sms";
@@ -107,15 +105,6 @@ async function main() {
     [TELEGRAM_NOTIFY_EVENT]: buildTelegramNotifyHandler(prisma),
     // Сверка платежа с Airwallex (режим наблюдения: business status заказа не меняется).
     [AIRWALLEX_VERIFY_EVENT]: buildAirwallexVerifyHandler(prisma),
-    // Финансы: начисление флористу за доставленный заказ (идемпотентно по ключу записи).
-    [FINANCE_ACCRUAL_EVENT]: buildFinanceAccrualHandler(),
-    [AUTOMATION_TRIGGER_EVENT]: buildAutomationTriggerHandler(prisma),
-    // Automation Engine: отправка одного due job через ChannelSender (SMS — поверх QUO-номера Site,
-    // EMAIL — поверх Brevo с ключом и настройками магазина из БД, см. integrations/email).
-    [AUTOMATION_SEND_EVENT]: buildAutomationSendHandler(prisma, { channels: automationChannels }),
-    // Automation Flows: выполнение ОДНОГО шага цепочки (WAIT/EMAIL/SMS) и продвижение дальше.
-    // Тот же worker, тот же outbox, те же каналы — отдельной очереди у цепочек нет.
-    [FLOW_STEP_EVENT]: buildFlowStepHandler(prisma, { channels: automationChannels }),
   };
 
   const worker = new OutboxWorker({
@@ -173,19 +162,6 @@ async function main() {
   // Диспетчер начислений флористам: один индексированный SELECT раз в 10 минут, LIMIT 100,
   // задачи — в тот же outbox. Гейт двойной (флаг + дата старта), при закрытом гейте интервал
   // не запускается вовсе — деплой сам по себе не начисляет ничего.
-  const finGate = accrualGate();
-  const finMs = Number(process.env.FINANCE_DISPATCH_MS ?? 600_000); // 10 мин
-  const finTimer = finGate.enabled
-    ? setInterval(() => {
-        if (shuttingDown) return;
-        dispatchFinanceAccruals(prisma)
-          .then((r) => { if (r.selected > 0) log("finance.dispatch.tick", r); })
-          .catch((err) => log("finance.dispatch.error", { error: err instanceof Error ? err.message : String(err) }));
-      }, finMs)
-    : null;
-  finTimer?.unref?.();
-  if (finTimer) log("finance.dispatch.enabled", { intervalMs: finMs });
-  else log("finance.dispatch.disabled", { reason: finGate.enabled ? "unknown" : finGate.reason });
 
   // Доля основного флориста: пересчёт дней начиная с даты запуска. Начисление показывает
   // рассчитанный долг и денег не переводит — реальная выплата только вручную от владельца,
@@ -210,7 +186,6 @@ async function main() {
   } finally {
     if (reconcileTimer) clearInterval(reconcileTimer);
     if (awTimer) clearInterval(awTimer);
-    if (finTimer) clearInterval(finTimer);
     if (shareTimer) clearInterval(shareTimer);
     await prisma.$disconnect();
     log("worker.stopped", { workerId: worker.id });

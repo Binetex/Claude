@@ -13,7 +13,6 @@ import "server-only";
 import { prisma } from "@/lib/db";
 import { toNumber } from "@/lib/money";
 import { accrualGate } from "./config";
-import { assessAccrual } from "./accrualRules";
 import { listCurrentProfiles } from "./profile";
 
 export type ReviewOrder = {
@@ -105,12 +104,9 @@ export async function getReviewQueue(): Promise<ReviewQueue> {
     // Основной флорист получает долю за период на следующем этапе — это не «нет цены».
     if (profile.model === "PRIMARY") continue;
 
-    const assessment = assessAccrual({
-      priceMode: o.priceMode,
-      floristTotal: toNumber(o.floristTotal),
-      items: o.items.map((i) => ({ ...i, floristItemPrice: toNumber(i.floristItemPrice) })),
-    });
-    if (assessment.status !== "OK") needsPrice.push({ ...base, reason: "FLORIST_PRICE_MISSING" });
+    // Ноль означает «цена не задана»: заработок по такому заказу не считается, и он
+    // уходит в разбор. Отдельных правил начисления больше нет — долг выводится напрямую.
+    if (toNumber(o.floristTotal) <= 0) needsPrice.push({ ...base, reason: "FLORIST_PRICE_MISSING" });
   }
 
   return { disabledReason: null, noFlorist, needsPrice };

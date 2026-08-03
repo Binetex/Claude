@@ -11,7 +11,6 @@ import "server-only";
  * безопасен — он не может ничего «заплатить» по ошибке.
  */
 import type { PrismaClient } from "@/generated/prisma/client";
-import { backgroundActor } from "./accrual";
 import { accrueDays, primaryShareDays } from "./primaryShare";
 import { recomputeDay } from "./dayFinance";
 import { primaryShareGate } from "./config";
@@ -40,11 +39,11 @@ export async function dispatchPrimaryShare(
   }
   if (plan.days.length === 0) return { days: 0, created: 0, corrected: 0, unchanged: 0, skipped: 0 };
 
-  const actor = await backgroundActor();
-  if (!actor) {
-    // Автора записи не существует — это поломка конфигурации, а не бизнес-случай.
-    throw new Error("[finance] не найден активный OWNER — некому приписать начисление доли");
-  }
+  // Пересчёт дня подписывается владельцем: аноним в финансовых данных недопустим —
+  // у каждой строки должен быть тот, кого можно спросить.
+  const owner = await prisma.user.findFirst({ where: { role: "OWNER", active: true }, select: { id: true } });
+  if (!owner) throw new Error("[finance] не найден активный OWNER — некому приписать пересчёт");
+  const actor = { userId: owner.id, role: "OWNER" as const };
 
   // Итог дня пересчитывается всегда: из него считается долг. Начисления в книге пока
   // создаются параллельно старым путём — они уйдут вместе с ним.

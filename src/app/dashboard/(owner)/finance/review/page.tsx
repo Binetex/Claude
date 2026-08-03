@@ -5,7 +5,6 @@ import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/Card";
 import { EmptyState } from "@/components/ui/states";
 import { formatMoney } from "@/lib/money";
 import { getReviewQueue, type ReviewOrder } from "@/modules/finance/review";
-import { AccrueOrderButton } from "./AccrueOrderButton";
 
 export const dynamic = "force-dynamic";
 
@@ -47,7 +46,6 @@ function OrdersTable({ orders, emptyText }: { orders: ReviewOrder[]; emptyText: 
               <td className="py-2.5 pr-3 text-right tabular-nums text-slate-600">{formatMoney(o.customerTotal)}</td>
               <td className="py-2.5 pr-3 text-xs text-amber-700">{reasonText[o.reason]}</td>
               <td className="py-2.5 text-right">
-                {o.reason !== "NO_FLORIST" && <AccrueOrderButton orderId={o.id} />}
               </td>
             </tr>
           ))}

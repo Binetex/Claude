@@ -200,33 +200,23 @@ export async function expenseCalcState(orderId: string, activeCount?: number): P
 }
 
 /**
- * Поучаствовал ли расход в расчёте.
+ * Поучаствовал ли расход в деньгах.
  *
- * Два признака, и достаточно любого: по нему создано удержание (SECONDARY) либо после его
- * появления вышла новая опубликованная ревизия снимка заказа (PRIMARY). Ошибаться здесь
- * безопаснее в сторону «поучаствовал»: лишняя отмена сохранит историю, а лишнее удаление
- * её сотрёт.
+ * Признак теперь один: заказ доставлен. Долг флориста выводится из данных, поэтому
+ * действующий расход по доставленному заказу уменьшает его сразу — без всяких записей и
+ * публикаций. Прежняя проверка искала удержание в книге и опубликованную ревизию снимка;
+ * ни того, ни другого больше не существует.
  */
 async function usedFlags(rows: { id: string; orderId: string; createdAt: Date }[]): Promise<Map<string, boolean>> {
   const out = new Map<string, boolean>();
   if (rows.length === 0) return out;
 
-  const keys = rows.map((r) => expenseDeductionKey(r.id));
-  const deductions = await prisma.ledgerEntry.findMany({
-    where: { idempotencyKey: { in: keys } },
-    select: { idempotencyKey: true },
+  const delivered = await prisma.order.findMany({
+    where: { id: { in: [...new Set(rows.map((r) => r.orderId))] }, orderStatus: "DELIVERED" },
+    select: { id: true },
   });
-  const withDeduction = new Set(deductions.map((d) => d.idempotencyKey));
-
-  const snapshots = await prisma.orderFinancialSnapshot.findMany({
-    where: { orderId: { in: [...new Set(rows.map((r) => r.orderId))] }, status: "PUBLISHED" },
-    select: { orderId: true, createdAt: true },
-  });
-
-  for (const r of rows) {
-    const published = snapshots.some((s) => s.orderId === r.orderId && s.createdAt >= r.createdAt);
-    out.set(r.id, withDeduction.has(expenseDeductionKey(r.id)) || published);
-  }
+  const deliveredIds = new Set(delivered.map((o) => o.id));
+  for (const r of rows) out.set(r.id, deliveredIds.has(r.orderId));
   return out;
 }
 
@@ -457,7 +447,14 @@ async function settle(order: OrderContext, expenseId: string, actor: ExpenseActo
   const profile = await resolveProfileAt(order.floristId, order.deliveryDate);
   if (!profile) return { kind: "NONE", reason: "У флориста нет финансового профиля на дату доставки." };
 
-  if (profile.model === "PRIMARY") {
+  if (profile.model === "SECONDARY") {
+    // Удержание больше не записывается: у второстепенного флориста расходы по его заказам
+    // вычитаются из заработка прямо при подсчёте долга (см. balance.ts). Отдельная строка
+    // в книге дублировала бы этот вычет.
+    return { kind: "SECONDARY_DEDUCTION", deductionEntryId: null, reversedEntryId: null };
+  }
+
+  {
     if (!order.delivered) {
       // Снимки строятся только по доставленным заказам, поэтому пересчитывать нечего.
       // Расход не потерян: он попадёт в расчёт сам, когда заказ станет доставленным.
@@ -465,7 +462,6 @@ async function settle(order: OrderContext, expenseId: string, actor: ExpenseActo
     }
     return recomputePrimaryDay(order, actor, now);
   }
-  return applySecondaryDeduction(order, expenseId, actor);
 }
 
 /** Обратная операция: снять удержание либо пересчитать день заново. */
@@ -473,11 +469,11 @@ async function settleReversal(order: OrderContext, expenseId: string, actor: Exp
   const profile = await resolveProfileAt(order.floristId, order.deliveryDate);
   if (!profile) return { kind: "NONE", reason: "У флориста нет финансового профиля на дату доставки." };
 
-  if (profile.model === "PRIMARY") {
-    if (!order.delivered) return { kind: "NONE", reason: "Заказ ещё не доставлен — пересчитывать нечего." };
-    return recomputePrimaryDay(order, actor, now);
+  if (profile.model === "SECONDARY") {
+    return { kind: "SECONDARY_DEDUCTION", deductionEntryId: null, reversedEntryId: null };
   }
-  return reverseSecondaryDeduction(order, expenseId, actor);
+  if (!order.delivered) return { kind: "NONE", reason: "Заказ ещё не доставлен — пересчитывать нечего." };
+  return recomputePrimaryDay(order, actor, now);
 }
 
 async function recomputePrimaryDay(order: OrderContext, actor: ExpenseActor, now: Date): Promise<ExpenseEffect> {
@@ -506,66 +502,7 @@ async function recomputePrimaryDay(order: OrderContext, actor: ExpenseActor, now
   };
 }
 
-/**
- * Удержание на полную сумму расхода.
- *
- * Начисление за заказ НЕ трогается: оно снимок цены, зафиксированный при назначении.
- * Идемпотентность по ключу расхода — повторный проход не создаст второе удержание.
- */
-async function applySecondaryDeduction(order: OrderContext, expenseId: string, actor: ExpenseActor): Promise<ExpenseEffect> {
-  const expense = await prisma.orderAdditionalExpense.findUnique({ where: { id: expenseId } });
-  if (!expense || expense.reversedAt) return { kind: "NONE", reason: "Расход отменён или удалён." };
 
-  const key = expenseDeductionKey(expenseId);
-  const already = await prisma.ledgerEntry.findFirst({ where: { idempotencyKey: key }, select: { id: true } });
-  if (already) return { kind: "SECONDARY_DEDUCTION", deductionEntryId: already.id, reversedEntryId: null };
-
-  const entry = await appendEntry({
-    // Удержание идёт тому, кто выполнял заказ в момент создания расхода.
-    floristId: expense.floristIdSnapshot,
-    type: "DEDUCTION",
-    amountCents: expense.amountCents,
-    effectiveDate: expense.expenseDate,
-    description: `Доп. расход по заказу: ${expense.description}`,
-    orderId: order.orderId,
-    sourceType: "ORDER",
-    sourceId: order.orderId,
-    idempotencyKey: key,
-    metadata: { expenseId, amountCents: expense.amountCents },
-    actor: { userId: actor.userId, role: "OWNER" },
-  });
-
-  return { kind: "SECONDARY_DEDUCTION", deductionEntryId: entry.id, reversedEntryId: null };
-}
-
-async function reverseSecondaryDeduction(order: OrderContext, expenseId: string, actor: ExpenseActor): Promise<ExpenseEffect> {
-  const key = expenseDeductionKey(expenseId);
-  const deduction = await prisma.ledgerEntry.findFirst({
-    where: { idempotencyKey: key },
-    select: { id: true, amountCents: true, effectiveDate: true, reversal: { select: { id: true } } },
-  });
-  if (!deduction) return { kind: "NONE", reason: "Удержания по этому расходу не было." };
-  if (deduction.reversal) return { kind: "SECONDARY_DEDUCTION", deductionEntryId: deduction.id, reversedEntryId: deduction.reversal.id };
-
-  // Удержание не редактируется и не удаляется: снимается отдельной записью.
-  const entry = await appendEntry({
-    floristId: (await prisma.orderAdditionalExpense.findUniqueOrThrow({ where: { id: expenseId }, select: { floristIdSnapshot: true } })).floristIdSnapshot,
-    type: "CORRECTION",
-    direction: "CREDIT",
-    amountCents: deduction.amountCents,
-    effectiveDate: deduction.effectiveDate,
-    description: "Снятие удержания за дополнительный расход",
-    comment: "Расход по заказу отменён",
-    orderId: order.orderId,
-    sourceType: "REVERSAL",
-    sourceId: deduction.id,
-    idempotencyKey: reversalKey(deduction.id),
-    reversedEntryId: deduction.id,
-    actor: { userId: actor.userId, role: "OWNER" },
-  });
-
-  return { kind: "SECONDARY_DEDUCTION", deductionEntryId: deduction.id, reversedEntryId: entry.id };
-}
 
 async function audit(
   tx: Prisma.TransactionClient,

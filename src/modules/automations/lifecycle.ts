@@ -12,7 +12,6 @@ import { publishAutomationTrigger, automationTriggerKey } from "./events";
 import { computeDailyTriggerAt, deliveryLocalDay } from "./dailySchedule";
 import { orderLifecycleTriggers, type OrderLifecycleSnapshot } from "./orderLifecycle";
 import { TERMINAL_ORDER_STATUSES } from "@/lib/statuses";
-import { onOrderDeliveredSafe } from "@/modules/finance/hooks";
 
 export async function publishOrderCreatedTrigger(prisma: PrismaClient, args: { orderId: string; siteId: string }): Promise<void> {
   try {
@@ -79,7 +78,6 @@ export async function publishPlatformOrderDeliveredTrigger(prisma: PrismaClient,
   try {
     // Финансы про дедуп SMS ничего не знают: начисление нужно и тогда, когда «доставлено»
     // уже отправил курьерский источник, а платформа подтвердила это позже.
-    await onOrderDeliveredSafe(prisma, args.orderId);
     if (await deliveredTriggerAlreadyPublished(prisma, args.orderId)) return;
     const repo = new PrismaOutboxRepository(prisma);
     await publishAutomationTrigger(repo, {

@@ -13,7 +13,6 @@ import { isBurqRuntimeEnabled } from "@/lib/featureFlags";
 import { applyDeliveryStatusUpdate } from "./statusIngest";
 import { refetchPodForDelivery, BURQ_POD_REFETCH_EVENT, BURQ_POD_REFETCH_DELAY_MS } from "./podService";
 import { publishOrderDeliveredTrigger } from "@/modules/automations/lifecycle";
-import { onOrderDeliveredSafe } from "@/modules/finance/hooks";
 import type { BurqWebhookEvent } from "./types";
 
 export const BURQ_WEBHOOK_EVENT = "burq.webhook.received";
@@ -30,7 +29,6 @@ export function makeCompletedPublisher(prisma: PrismaClient) {
     // Авто-SMS: ORDER_DELIVERED — ровно один раз на доставленную попытку (тот же дедуп по deliveryId).
     await publishOrderDeliveredTrigger(prisma, { orderId, deliveryId });
     // Финансы: заказ доставлен курьером → задача на начисление флористу.
-    await onOrderDeliveredSafe(prisma, orderId);
   };
 }
 

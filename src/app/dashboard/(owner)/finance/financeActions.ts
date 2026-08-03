@@ -11,7 +11,6 @@ import { requireRole } from "@/lib/rbac";
 import { usdToCents, CentsParseError } from "@/lib/cents";
 import { LedgerError, LedgerRuleError, reverseEntry } from "@/modules/finance/ledger";
 import { recordPayment, recordAdjustment, previewPayment, type AdjustmentKind } from "@/modules/finance/payouts";
-import { accrueOrder } from "@/modules/finance/accrual";
 import type { LedgerDirection } from "@/generated/prisma/enums";
 
 export type ActionResult = { ok?: true; message?: string; error?: string; needsConfirmation?: boolean };
@@ -148,44 +147,3 @@ export async function ownerReverseEntry(formData: FormData): Promise<ActionResul
  * Ручной запуск начисления по заказу из очереди разбора — после того, как владелец
  * назначил флориста или задал цену. Идемпотентно: повтор вернёт «уже начислено».
  */
-export async function ownerAccrueOrder(orderId: string): Promise<ActionResult> {
-  const user = await requireRole("OWNER");
-  try {
-    const outcome = await accrueOrder(orderId, { userId: user.id, role: user.role });
-    revalidatePath("/dashboard/finance/review");
-    revalidatePath("/dashboard/finance/florists");
-    switch (outcome.status) {
-      case "CREATED":
-        return { ok: true, message: `Начислено ${(outcome.amountCents / 100).toFixed(2)}.` };
-      case "ALREADY_EXISTS":
-        return { ok: true, message: "По этому заказу уже начислено." };
-      default:
-        return { error: skipMessage(outcome.reason) };
-    }
-  } catch (err) {
-    return toError(err);
-  }
-}
-
-function skipMessage(reason: string): string {
-  switch (reason) {
-    case "ACCRUAL_DISABLED":
-      return "Начисления выключены (FINANCE_ACCRUAL_ENABLED / FINANCE_ACCRUAL_START_DATE).";
-    case "BEFORE_START_DATE":
-      return "Заказ доставлен раньше даты старта начислений.";
-    case "NOT_DELIVERED":
-      return "Заказ ещё не доставлен.";
-    case "NO_FLORIST":
-      return "У заказа нет флориста — назначьте исполнителя.";
-    case "NO_FINANCE_PROFILE":
-      return "У флориста не задан финансовый профиль.";
-    case "PRIMARY_MODEL_STAGE3":
-      return "Основной флорист получает долю за период — это следующий этап.";
-    case "PROFILE_SITE_MISMATCH":
-      return "Профиль флориста не распространяется на магазин заказа.";
-    case "FLORIST_PRICE_MISSING":
-      return "Цена флориста не задана — укажите сумму вручную в карточке заказа.";
-    default:
-      return "Начисление не создано.";
-  }
-}
