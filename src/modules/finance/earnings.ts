@@ -19,6 +19,7 @@ import { toNumber } from "@/lib/money";
 import { DEFAULT_STORE_TZ, localDateStr } from "@/lib/tz";
 import { dayShareCents } from "./dayCalc";
 import { accrualGate, primaryShareGate } from "./config";
+import { formatDayLong } from "./earningsFormat";
 
 export type EarningDay = { day: string; cents: number; orders: number };
 export type EarningOrder = { orderId: string; orderNumber: string; cents: number; adjusted: boolean };
@@ -77,7 +78,10 @@ export function resolvePeriod(
       const from = dayFromKey(custom.from);
       const to = dayFromKey(custom.to);
       const [a, b] = from <= to ? [from, to] : [to, from];
-      return { key: "custom", from: a, to: b, label: `${keyFromDay(a)} — ${keyFromDay(b)}`, singleDay: +a === +b };
+      const single = +a === +b;
+      // Подпись человеческая и в том же виде, что у строк дней ниже: «1 августа — 2 августа».
+      const label = single ? formatDayLong(keyFromDay(a)) : `${formatDayLong(keyFromDay(a))} — ${formatDayLong(keyFromDay(b))}`;
+      return { key: "custom", from: a, to: b, label, singleDay: single };
     }
   }
 

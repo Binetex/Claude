@@ -46,11 +46,12 @@ describe("resolvePeriod", () => {
   it("custom — свои даты; перевёрнутый диапазон разворачивается", () => {
     const p = resolvePeriod("custom", { from: "2026-08-05", to: "2026-08-01" }, now);
     expect([keyFromDay(p.from), keyFromDay(p.to)]).toEqual(["2026-08-01", "2026-08-05"]);
+    expect(p.label).toBe("1 августа — 5 августа");
   });
 
-  it("custom из одного дня показывается как однодневный период", () => {
+  it("custom из одного дня показывается как однодневный период с одной датой в подписи", () => {
     const p = resolvePeriod("custom", { from: "2026-08-02", to: "2026-08-02" }, now);
-    expect(p.singleDay).toBe(true);
+    expect([p.singleDay, p.label]).toEqual([true, "2 августа"]);
   });
 
   it("custom с мусорными датами не ломает страницу — откат на месяц", () => {

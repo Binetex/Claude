@@ -6,9 +6,10 @@ import { EmptyState } from "@/components/ui/states";
 import { formatCents } from "@/lib/cents";
 import { cn } from "@/lib/cn";
 import { floristBalance } from "@/modules/finance/balance";
-import { floristEarningTotals, floristEarningsRange, floristDayOrders, resolvePeriod, keyFromDay } from "@/modules/finance/earnings";
+import { floristEarningTotals, floristEarningsRange, floristDayOrders, resolvePeriod } from "@/modules/finance/earnings";
 import { formatDayLong, pluralOrders } from "@/modules/finance/earningsFormat";
 import { resolveProfileAt } from "@/modules/finance/profile";
+import { EarningsPeriodBar } from "./EarningsPeriodBar";
 
 export const dynamic = "force-dynamic";
 
@@ -22,13 +23,6 @@ export const dynamic = "force-dynamic";
  * заказами. «К выплате» приходит из balance.ts — единственного источника долга; второй способ
  * посчитать остаток уже приводил к тому, что два экрана показывали разные числа.
  */
-
-const PERIODS = [
-  { key: "today", label: "Сегодня" },
-  { key: "yesterday", label: "Вчера" },
-  { key: "week", label: "Неделя" },
-  { key: "month", label: "Месяц" },
-] as const;
 
 /** Крупная карточка суммы. Первая — акцентная: это ответ на главный вопрос экрана. */
 function MoneyCard({
@@ -83,15 +77,6 @@ export default async function FloristEarningsPage({
   const isSecondary = profile?.model === "SECONDARY";
   const dayOrders = period.singleDay && isSecondary ? await floristDayOrders(user.floristId, period.from) : null;
 
-  const href = (patch: Record<string, string | undefined>) => {
-    const p = new URLSearchParams();
-    for (const [k, v] of Object.entries({ period: sp.period, from: sp.from, to: sp.to, ...patch })) {
-      if (v) p.set(k, v);
-    }
-    const s = p.toString();
-    return `/dashboard/f/finance${s ? `?${s}` : ""}`;
-  };
-
   const todayHint =
     profile?.model === "PRIMARY" && totals.today.cents === 0 ? "день ещё считается" : pluralOrders(totals.today.orders);
 
@@ -111,66 +96,7 @@ export default async function FloristEarningsPage({
         <MoneyCard label="Заработок за всё время" cents={totals.allTime.cents} hint={pluralOrders(totals.allTime.orders)} />
       </div>
 
-      <div className="flex flex-wrap items-center gap-1.5">
-        {PERIODS.map((p) => {
-          const active = period.key === p.key;
-          return (
-            <Link
-              key={p.key}
-              href={href({ period: p.key, from: undefined, to: undefined })}
-              className={cn(
-                "rounded-full border px-3 py-1.5 text-sm font-medium transition-colors",
-                active
-                  ? "border-slate-900 bg-slate-900 text-white"
-                  : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:text-slate-900"
-              )}
-            >
-              {p.label}
-            </Link>
-          );
-        })}
-
-        {/* Произвольный диапазон — обычная GET-форма: состояние живёт в URL, клиентский код не нужен. */}
-        <details className="relative">
-          <summary
-            className={cn(
-              "cursor-pointer list-none rounded-full border px-3 py-1.5 text-sm font-medium transition-colors",
-              period.key === "custom"
-                ? "border-slate-900 bg-slate-900 text-white"
-                : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:text-slate-900"
-            )}
-          >
-            Выбрать даты
-          </summary>
-          <form
-            method="get"
-            className="absolute z-10 mt-2 flex flex-wrap items-end gap-2 rounded-xl border border-slate-200 bg-white p-3 shadow-lg"
-          >
-            <input type="hidden" name="period" value="custom" />
-            <label className="text-xs text-slate-500">
-              С
-              <input
-                type="date"
-                name="from"
-                defaultValue={sp.from ?? keyFromDay(period.from)}
-                className="mt-0.5 block rounded-md border border-slate-300 px-2 py-1 text-sm"
-              />
-            </label>
-            <label className="text-xs text-slate-500">
-              По
-              <input
-                type="date"
-                name="to"
-                defaultValue={sp.to ?? keyFromDay(period.to)}
-                className="mt-0.5 block rounded-md border border-slate-300 px-2 py-1 text-sm"
-              />
-            </label>
-            <button type="submit" className="rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white">
-              Показать
-            </button>
-          </form>
-        </details>
-      </div>
+      <EarningsPeriodBar activeKey={period.key} />
 
       <Card>
         <CardBody className="p-0">
