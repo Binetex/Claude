@@ -17,6 +17,7 @@ import { addOrderExpense } from "./orderExpenses";
 import { recomputeDay } from "./dayFinance";
 import { dayShareCents } from "./dayCalc";
 import { floristBalance } from "./balance";
+import { previewPayment } from "./payouts";
 import { appendEntry } from "./ledger";
 import { manualKey } from "./ledgerRules";
 
@@ -291,5 +292,41 @@ describe("записанные решения владельца", () => {
     const after = await floristBalance(secondaryId, NOW);
     expect(after.bonusCents).toBe(2000);
     expect(after.outstandingCents).toBe(before.outstandingCents + 2000);
+  });
+});
+
+describe("один источник долга на весь модуль", () => {
+  /**
+   * Регрессия. Экраны флористов и проверка выплаты когда-то считали остаток по книге
+   * (foldBalance), а страница доли — по дневным итогам. Пока в книге лежали начисления,
+   * числа совпадали; когда начисления исчезли, экраны стали показывать устаревшую сумму,
+   * а страница доли — настоящую. Разойтись они не должны нигде.
+   */
+  it("предпросмотр выплаты считает остаток тем же способом, что и экраны", async () => {
+    const balance = await floristBalance(primaryId, NOW);
+    const preview = await previewPayment(primaryId, 1000);
+
+    expect(preview.outstandingBeforeCents).toBe(balance.outstandingCents);
+    expect(preview.outstandingAfterCents).toBe(balance.outstandingCents - 1000);
+  });
+
+  it("старые записи начислений в книге на остаток не влияют", async () => {
+    const before = await floristBalance(primaryId, NOW);
+
+    // Ровно та ситуация, что осталась на проде: начисления прошлой модели лежат в книге.
+    await appendEntry({
+      floristId: primaryId,
+      type: "PRIMARY_FLORIST_SHARE",
+      amountCents: 99999,
+      effectiveDate: NOW,
+      description: "Начисление прошлой модели",
+      sourceType: "MANUAL",
+      idempotencyKey: manualKey("LEGACY", primaryId, "t1"),
+      actor: OWNER,
+    });
+
+    const after = await floristBalance(primaryId, NOW);
+    expect(after.outstandingCents).toBe(before.outstandingCents);
+    expect((await previewPayment(primaryId, 0)).outstandingBeforeCents).toBe(before.outstandingCents);
   });
 });

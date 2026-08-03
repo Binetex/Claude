@@ -9,12 +9,12 @@ import type { LedgerDirection } from "@/generated/prisma/enums";
 import {
   appendEntry,
   findByIdempotencyKey,
-  getFloristBalance,
   LedgerError,
   type AppendEntryResult,
   type LedgerActor,
 } from "./ledger";
 import { manualKey } from "./ledgerRules";
+import { floristBalance } from "./balance";
 
 /** Владелец — единственный, кто пишет в книгу вручную. Проверяем и здесь, не только в action. */
 function assertOwner(actor: LedgerActor): void {
@@ -52,7 +52,7 @@ export type PaymentPreview = {
 
 /** Что будет с балансом после выплаты. Нужен форме до отправки — она показывает предупреждение. */
 export async function previewPayment(floristId: string, amountCents: number): Promise<PaymentPreview> {
-  const balance = await getFloristBalance(floristId);
+  const balance = await floristBalance(floristId);
   const after = balance.outstandingCents - amountCents;
   return {
     outstandingBeforeCents: balance.outstandingCents,

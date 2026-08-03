@@ -136,13 +136,13 @@ export function LedgerTable({
 
 /** Сводка баланса. Остаток — единственная цифра, которая что-то значит для выплаты. */
 export function BalanceSummary({
-  accruedCents,
+  earnedCents,
   bonusCents,
   deductionCents,
   paidCents,
   outstandingCents,
 }: {
-  accruedCents: number;
+  earnedCents: number;
   bonusCents: number;
   deductionCents: number;
   paidCents: number;
@@ -157,7 +157,7 @@ export function BalanceSummary({
 
   return (
     <div className="grid grid-cols-2 gap-4 sm:grid-cols-5">
-      {item("Начислено", accruedCents)}
+      {item("Заработано", earnedCents)}
       {item("Бонусы", bonusCents)}
       {item("Удержания", deductionCents, deductionCents > 0 ? "text-amber-600" : "text-slate-900")}
       {item("Выплачено", paidCents)}

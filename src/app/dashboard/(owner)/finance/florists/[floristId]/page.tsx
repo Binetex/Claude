@@ -8,7 +8,8 @@ import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/button";
 import { FloristAvatar } from "@/components/FloristAvatar";
 import { BalanceSummary, LedgerTable } from "@/components/finance/LedgerTable";
-import { getFloristBalance, listLedgerEntries } from "@/modules/finance/ledger";
+import { listLedgerEntries } from "@/modules/finance/ledger";
+import { floristBalance } from "@/modules/finance/balance";
 import { REVERSIBLE_TYPES } from "@/modules/finance/ledgerRules";
 import { resolveProfileAt } from "@/modules/finance/profile";
 import { AddPaymentDialog, AddAdjustmentDialog, ReverseEntryButton } from "./FinanceForms";
@@ -51,7 +52,7 @@ export default async function FloristFinancePage({
   const [balance, list, profile] = await Promise.all([
     // Баланс — за ВСЁ время, а не за выбранный период: «к выплате» не бывает
     // за март. Фильтр периода влияет только на список операций ниже.
-    getFloristBalance(floristId),
+    floristBalance(floristId),
     listLedgerEntries(floristId, { from, to, types, page, perPage: PER_PAGE }),
     resolveProfileAt(floristId, new Date()),
   ]);

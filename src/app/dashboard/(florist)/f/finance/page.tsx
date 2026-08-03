@@ -5,7 +5,8 @@ import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Button } from "@/components/ui/button";
 import { formatCents } from "@/lib/cents";
 import { BalanceSummary, LedgerTable } from "@/components/finance/LedgerTable";
-import { getFloristBalance, listLedgerEntries } from "@/modules/finance/ledger";
+import { listLedgerEntries } from "@/modules/finance/ledger";
+import { floristBalance } from "@/modules/finance/balance";
 import { resolveProfileAt } from "@/modules/finance/profile";
 
 export const dynamic = "force-dynamic";
@@ -30,7 +31,7 @@ export default async function FloristFinancePage({
   const page = Math.max(Number(sp.page ?? 1) || 1, 1);
 
   const [balance, list, profile] = await Promise.all([
-    getFloristBalance(user.floristId),
+    floristBalance(user.floristId),
     listLedgerEntries(user.floristId, { page, perPage: PER_PAGE }),
     resolveProfileAt(user.floristId, new Date()),
   ]);

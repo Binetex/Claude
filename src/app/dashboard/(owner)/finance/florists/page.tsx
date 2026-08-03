@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/Badge";
 import { EmptyState } from "@/components/ui/states";
 import { FloristAvatar } from "@/components/FloristAvatar";
 import { formatCents } from "@/lib/cents";
-import { getFloristBalances } from "@/modules/finance/ledger";
+import { floristBalances } from "@/modules/finance/balance";
 import { listCurrentProfiles } from "@/modules/finance/profile";
 import { countDeliveredByFlorist } from "@/modules/finance/review";
 import { accrualGate } from "@/modules/finance/config";
@@ -29,7 +29,7 @@ export default async function FinanceFloristsPage() {
   const ids = florists.map((f) => f.id);
 
   const [balances, profiles, delivered] = await Promise.all([
-    getFloristBalances(ids),
+    floristBalances(ids),
     listCurrentProfiles(),
     countDeliveredByFlorist(ids),
   ]);
@@ -40,7 +40,7 @@ export default async function FinanceFloristsPage() {
     <div className="space-y-4">
       <PageHeader
         title="Финансы — флористы"
-        description="Начисления и выплаты. Все суммы считаются из книги операций, отдельного «сколько должны» не существует."
+        description="Заработок считается из данных, выплаты — из книги операций. Отдельного хранимого «сколько должны» не существует."
       />
 
       {!gate.enabled && (
@@ -97,7 +97,7 @@ export default async function FinanceFloristsPage() {
                           )}
                         </td>
                         <td className="px-3 py-3 text-right tabular-nums text-slate-600">{delivered.get(f.id) ?? 0}</td>
-                        <td className="px-3 py-3 text-right tabular-nums">{formatCents(b.accruedCents)}</td>
+                        <td className="px-3 py-3 text-right tabular-nums">{formatCents(b.earnedCents)}</td>
                         <td className="px-3 py-3 text-right tabular-nums text-slate-600">{formatCents(b.bonusCents)}</td>
                         <td className="px-3 py-3 text-right tabular-nums text-slate-600">{formatCents(b.deductionCents)}</td>
                         <td className="px-3 py-3 text-right tabular-nums text-slate-600">{formatCents(b.paidCents)}</td>

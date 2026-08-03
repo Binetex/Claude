@@ -151,18 +151,7 @@ export function foldBalance(entries: BalanceInput[]): FloristBalance {
 // Формат ключей — часть контракта с базой (@unique). Менять их нельзя: старые записи
 // перестанут дедуплицироваться, и повторная обработка создаст дубль.
 
-/** Начисление за доставленный заказ. v1 — версия правила расчёта. */
-export function orderAccrualKey(orderId: string, floristId: string): string {
-  return `SECONDARY_ORDER_ACCRUAL:${orderId}:${floristId}:v1`;
-}
 
-/**
- * Повторное начисление после сторно. Привязано к id сторнированной записи, а не к
- * счётчику: сценарий 100 → 120 → 100 не даёт коллизии ключа, и порядок не важен.
- */
-export function orderReaccrualKey(orderId: string, floristId: string, reversedEntryId: string): string {
-  return `SECONDARY_ORDER_ACCRUAL:${orderId}:${floristId}:after:${reversedEntryId}`;
-}
 
 /** Сторно любой записи. Одна отмена на запись — это же гарантирует @unique(reversedEntryId). */
 export function reversalKey(reversedEntryId: string): string {

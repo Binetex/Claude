@@ -8,8 +8,6 @@ import {
   resolveDirection,
   oppositeDirection,
   reversalTypeFor,
-  orderAccrualKey,
-  orderReaccrualKey,
   reversalKey,
   LedgerRuleError,
   type BalanceInput,
@@ -119,16 +117,6 @@ describe("баланс", () => {
 });
 
 describe("ключи идемпотентности", () => {
-  it("формат ключа начисления зафиксирован — от него зависит дедуп в БД", () => {
-    expect(orderAccrualKey("ord1", "fl1")).toBe("SECONDARY_ORDER_ACCRUAL:ord1:fl1:v1");
-  });
-
-  it("повторное начисление привязано к сторно, поэтому 100 → 120 → 100 не даёт коллизии", () => {
-    const first = orderReaccrualKey("ord1", "fl1", "rev-a");
-    const second = orderReaccrualKey("ord1", "fl1", "rev-b");
-    expect(first).not.toBe(second);
-    expect(first).not.toBe(orderAccrualKey("ord1", "fl1"));
-  });
 
   it("у сторно ключ один на отменяемую запись", () => {
     expect(reversalKey("entry1")).toBe("LEDGER_REVERSAL:entry1");
