@@ -234,7 +234,7 @@ type ItemFinance = {
  * Классификация и закупочная стоимость позиций заказа на дату доставки.
  * Резолв целиком делегирован Stage 1 (`resolveVariantFinance`) — второй формулы нет.
  */
-async function resolveItemsFinance(
+export async function resolveItemsFinance(
   items: Array<{ id: string; name: string; productId: string | null; variantId: string | null }>,
   at: Date
 ): Promise<Map<string, ItemFinance>> {
