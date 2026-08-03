@@ -18,7 +18,7 @@ import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
 import { toNumber } from "@/lib/money";
 import { computeDayFinance, type DayFinanceResult, type DayOrderInput } from "./dayCalc";
-import { resolveItemsFinance } from "./snapshot";
+import { resolveItemsFinance } from "./itemFinance";
 import { estimateFeeCents, resolveConsumablesRate, resolveDailyFlowerExpense, resolveFeeModel } from "./settings";
 
 const toCents = (v: unknown) => Math.round(toNumber(v as never) * 100);
