@@ -768,6 +768,7 @@ model FloristFinanceProfile {
   scope         FinanceScope                @default(ALL_SITES)
   sites         FloristFinanceProfileSite[]
   flowerExpense DailyFlowerExpense[]
+  dayFinances   DayFinance[]
 
   effectiveFrom DateTime
   effectiveTo   DateTime? // NULL = действует сейчас; если задан — строго > effectiveFrom (CHECK)
@@ -942,6 +943,58 @@ model OrderAdditionalExpense {
 
   @@index([orderId])
   @@index([floristIdSnapshot, reversedAt])
+}
+
+/// Финансовый итог дня основного флориста.
+///
+/// ОДНА строка на (профиль, день), и она ИЗМЕНЯЕМАЯ: это всегда текущий расчёт, а не
+/// история. Ревизий, статусов и жизненного цикла здесь нет намеренно — предыдущая модель
+/// замораживала расчёт при каждом пересчёте и накапливала ленту «вытеснено», которая
+/// ничего не объясняла.
+///
+/// Замораживается не расчёт, а ДЕНЬГИ: в момент начисления цифры дня копируются в
+/// LedgerEntry.calcJson. Книга и так append-only, поэтому чек там неизменяем бесплатно, а
+/// история дня становится историей движения денег: начислено → сторно → начислено заново.
+///
+/// Дневная закупка цветов лежит здесь ПРЯМО, без распределения по заказам: она и есть
+/// расход дня. Раскладывать её по заказам и собирать обратно было нужно только потому,
+/// что расчёт хранился в позаказных строках.
+model DayFinance {
+  id               String                @id @default(cuid())
+  financeProfileId String
+  financeProfile   FloristFinanceProfile @relation(fields: [financeProfileId], references: [id], onDelete: Cascade)
+  /// UTC-полночь ЛОКАЛЬНОГО дня доставки — та же конвенция, что у Order.deliveryDate.
+  day              DateTime
+
+  /// Заполнены ли ВСЕ заказы дня. День считается целиком или не считается вовсе.
+  complete    Boolean
+  /// Почему не считается: коды недостающих данных. Пусто у полного дня.
+  blockers    String[]
+  ordersTotal Int
+
+  // ── Суммы дня, целые центы ──
+  grossRevenueCents   Int
+  tipsCents           Int
+  taxCents            Int
+  deliveryCents       Int
+  acquiringFeeCents   Int
+  vaseGiftCostCents   Int
+  consumablesCents    Int
+  /// Дневная закупка цветов: расход дня, а не сумма позаказных долей.
+  flowerPurchaseCents Int
+  additionalCents     Int
+  distributableCents  Int
+
+  /// Детализация по заказам — как ДАННЫЕ, а не как отдельные строки со своей жизнью.
+  /// Нужна редко: «что-то пошло не так», разбор полётов.
+  ordersJson Json
+
+  updatedBy String
+  updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now())
+
+  @@unique([financeProfileId, day])
+  @@index([day])
 }
 
 /// Из каких ревизий снимков собрано начисление.
