@@ -130,7 +130,7 @@ async function metaForOrders(orderIds: string[], day: Date): Promise<Map<string,
     },
   });
 
-  const finance = await resolveItemsFinance(orders.flatMap((o) => o.items), day);
+  const finance = await resolveItemsFinance(orders.flatMap((o) => o.items));
 
   for (const o of orders) {
     out.set(o.id, {
@@ -293,7 +293,7 @@ async function globalDrafts(floristId: string, now: Date): Promise<Draft[]> {
   const out: Draft[] = [];
 
   for (const site of sites) {
-    const policy = await resolveOwnerTaxPolicy(site.id, now);
+    const policy = await resolveOwnerTaxPolicy(site.id);
     if (policy) continue;
     const hasOrders = await prisma.order.count({
       where: { siteId: site.id, currentFloristId: floristId, orderStatus: "DELIVERED" },

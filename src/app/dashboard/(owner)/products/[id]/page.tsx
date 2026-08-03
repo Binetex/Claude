@@ -61,8 +61,7 @@ export default async function ProductDetailPage({
     include: {
       site: { select: { name: true, shortName: true, colorTag: true, platform: true } },
       variants: { orderBy: [{ remoteDeleted: "asc" }, { position: "asc" }, { title: "asc" }] },
-      // Стоимость вазы уровня товара: и действующая, и история — владельцу видно всё.
-      vaseCosts: { orderBy: { effectiveFrom: "desc" } },
+      vaseCosts: true,
     },
   });
   if (!product) notFound();
@@ -77,8 +76,6 @@ export default async function ProductDetailPage({
         : `${formatMoney(priceMin)}–${formatMoney(priceMax)}`;
 
   // ── Финансовая классификация: эффективные значения считает общий резолвер, а не страница ──
-  // Резолв «на сейчас»: это карточка настройки, а не расчёт заказа (там дата доставки).
-  const now = new Date();
 
   const linkedVaseIds = [
     product.defaultIncludedVaseVariantId,
@@ -88,7 +85,6 @@ export default async function ProductDetailPage({
   const [variantCosts, vaseOptions, linkedVases, usedInBouquets] = await Promise.all([
     prisma.vasePurchaseCost.findMany({
       where: { OR: [{ productVariantId: { in: product.variants.map((v) => v.id) } }, { productVariantId: { in: linkedVaseIds } }] },
-      orderBy: { effectiveFrom: "desc" },
     }),
     listVaseOptions(product.siteId),
     linkedVaseIds.length
@@ -122,8 +118,6 @@ export default async function ProductDetailPage({
     productVariantId: c.productVariantId,
     costType: c.costType,
     purchaseCostCents: c.purchaseCostCents,
-    effectiveFrom: c.effectiveFrom,
-    effectiveTo: c.effectiveTo,
   }));
 
   const vases: Record<string, LinkedVaseInfo> = {};
@@ -140,8 +134,6 @@ export default async function ProductDetailPage({
   const toRowVM = (c: (typeof allCosts)[number]) => ({
     id: c.id,
     purchaseCostCents: c.purchaseCostCents,
-    effectiveFrom: c.effectiveFrom.toISOString(),
-    effectiveTo: c.effectiveTo ? c.effectiveTo.toISOString() : null,
     level: (c.productVariantId ? "VARIANT" : "PRODUCT") as "VARIANT" | "PRODUCT",
     comment: null as string | null,
   });
@@ -151,18 +143,11 @@ export default async function ProductDetailPage({
   // карточке, иначе блок товара говорит «не указана», хотя у варианта значение есть.
   const variantOwnCosts = product.variants
     .map((v) => {
-      const active = allCosts.find(
-        (c) =>
-          c.productVariantId === v.id &&
-          c.costType === "STANDALONE_VASE" &&
-          c.effectiveFrom <= now &&
-          (c.effectiveTo === null || c.effectiveTo > now)
-      );
+      const active = allCosts.find((c) => c.productVariantId === v.id && c.costType === "STANDALONE_VASE");
       return active ? { title: v.title, cents: active.purchaseCostCents } : null;
     })
     .filter((x): x is { title: string; cents: number } => !!x);
-  const productActiveCost =
-    product.vaseCosts.find((c) => c.effectiveFrom <= now && (c.effectiveTo === null || c.effectiveTo > now)) ?? null;
+  const productActiveCost = product.vaseCosts[0] ?? null;
 
   // Ваза по умолчанию у товара — то же состояние, что и у варианта, но без наследования.
   const productResolved = resolveVariantFinance({
@@ -170,7 +155,6 @@ export default async function ProductDetailPage({
     product: { id: product.id, financialType: product.financialType, defaultIncludesVase: null, defaultIncludedVaseVariantId: null },
     costs: allCosts,
     vases,
-    at: now,
   });
   const productVaseState = {
     ownIncludesVase: product.defaultIncludesVase,
@@ -195,11 +179,8 @@ export default async function ProductDetailPage({
       },
       costs: allCosts,
       vases,
-      at: now,
     });
-    const ownCost = allCosts.find(
-      (c) => c.productVariantId === v.id && c.costType === "STANDALONE_VASE" && c.effectiveFrom <= now && (c.effectiveTo === null || c.effectiveTo > now)
-    );
+    const ownCost = allCosts.find((c) => c.productVariantId === v.id && c.costType === "STANDALONE_VASE");
     financeByVariant.set(v.id, {
       variantId: v.id,
       productId: product.id,

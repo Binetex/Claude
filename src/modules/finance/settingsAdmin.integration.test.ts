@@ -1,9 +1,9 @@
 /**
  * DB integration: исправление и удаление настроек расчёта.
  *
- * Проверяется главное различие раздела: новая ставка прошлое не трогает, а исправление
- * ошибки пересобирает расчёт и, если деньги изменились, правит книгу сторно + новой
- * записью. Плюс инварианты цепочки периодов на живой БД, где наложение ловит GiST.
+ * Проверяется то, что нельзя проверить в отрыве от БД: правка настройки пересчитывает
+ * дни и двигает заработок, удаление возвращает день в разбор, а история значений остаётся
+ * в FinanceAudit после того, как сама запись исчезла.
  *
  * Запуск: DATABASE_URL=<local> npx vitest run --no-file-parallelism \
  *           src/modules/finance/settingsAdmin.integration.test.ts
@@ -28,8 +28,8 @@ const RUN = `sad${crypto.randomBytes(3).toString("hex")}`;
 const OWNER = { userId: "", role: "OWNER" as const };
 const FLORIST_ACTOR = { userId: "", role: "FLORIST" as const };
 const DAY = new Date("2026-07-28T00:00:00.000Z");
+const SHARE_START = new Date("2026-07-01T00:00:00.000Z");
 const NOW = new Date("2026-07-29T12:00:00.000Z");
-const START = new Date("2026-07-01T00:00:00.000Z");
 
 let siteId = "";
 let productId = "";
@@ -69,8 +69,7 @@ async function makeOrder(n: string, cents: number): Promise<string> {
   return o.id;
 }
 
-const consumablesRows = () =>
-  prisma.consumablesRate.findMany({ where: { siteId: null }, orderBy: { effectiveFrom: "asc" } });
+const consumablesRows = () => prisma.consumablesRate.findMany({ where: { siteId: null } });
 
 beforeAll(async () => {
   process.env.FINANCE_PRIMARY_SHARE_START_DATE = "2026-07-01";
@@ -102,15 +101,15 @@ beforeAll(async () => {
   floristId = florist.id;
 
   profileId = (
-    await setFinanceProfile({ floristId, model: "PRIMARY", sharePercentBp: 6660, effectiveFrom: START, actor: OWNER })
+    await setFinanceProfile({ floristId, model: "PRIMARY", effectiveFrom: SHARE_START, sharePercentBp: 6660, actor: OWNER })
   ).createdId;
 
   orderA = await makeOrder("A", 10000);
   orderB = await makeOrder("B", 20000);
 
-  await fixConsumablesRate({ siteId: null, amountCents: 500, effectiveFrom: START, actor: OWNER, now: NOW });
-  await fixSiteFeeModel({ siteId, percentBp: 290, fixedCents: 30, effectiveFrom: START, actor: OWNER, now: NOW });
-  await fixOwnerTaxPolicy({ siteId: null, actualShareBp: 2000, effectiveFrom: START, actor: OWNER, now: NOW });
+  await fixConsumablesRate({ siteId: null, amountCents: 500, actor: OWNER, now: NOW });
+  await fixSiteFeeModel({ siteId, percentBp: 290, fixedCents: 30, actor: OWNER, now: NOW });
+  await fixOwnerTaxPolicy({ siteId: null, actualShareBp: 2000, actor: OWNER, now: NOW });
   await fixDeliveryActualCost({ orderId: orderA, amountCents: 1000, actor: OWNER, now: NOW });
   await fixDeliveryActualCost({ orderId: orderB, amountCents: 1000, actor: OWNER, now: NOW });
   await fixDailyFlowerExpense({ expenseDay: DAY, amountCents: 6000, actor: OWNER, now: NOW });
@@ -145,7 +144,6 @@ describe("права", () => {
         entity: "CONSUMABLES_RATE",
         id: rate.id,
         values: { entity: "CONSUMABLES_RATE", amountCents: 700 },
-        effectiveFrom: START,
         reason: "нет",
         actor: FLORIST_ACTOR,
         now: NOW,
@@ -160,7 +158,6 @@ describe("права", () => {
         entity: "CONSUMABLES_RATE",
         id: rate.id,
         values: { entity: "CONSUMABLES_RATE", amountCents: 700 },
-        effectiveFrom: START,
         reason: "   ",
         actor: OWNER,
         now: NOW,
@@ -172,39 +169,7 @@ describe("права", () => {
   });
 });
 
-describe("новая ставка против исправления", () => {
-  it("сначала считается день по исходным настройкам", async () => {
-    const computed = await computeDayShare(profileId, DAY);
-    expect(computed!.complete).toBe(true);
-    expect(computed!.shareCents).toBeGreaterThan(0);
-  });
-
-  it("новая ставка с будущей даты прошлое не трогает", async () => {
-    const before = await computeDayShare(profileId, DAY);
-    const ledgerBefore = await prisma.ledgerEntry.count({ where: { floristId } });
-
-    await fixConsumablesRate({
-      siteId: null,
-      amountCents: 900,
-      effectiveFrom: new Date("2026-07-29T00:00:00.000Z"),
-      actor: OWNER,
-      now: NOW,
-    });
-
-    // 28-е осталось в прежнем периоде — доля та же, книга не тронута.
-    expect((await computeDayShare(profileId, DAY))!.shareCents).toBe(before!.shareCents);
-    expect(await prisma.ledgerEntry.count({ where: { floristId } })).toBe(ledgerBefore);
-    expect(await consumablesRows()).toHaveLength(2);
-  });
-
-  it("периоды в цепочке сомкнуты: конец первого равен началу второго", async () => {
-    const [first, second] = await consumablesRows();
-    expect(first.effectiveTo).toEqual(second.effectiveFrom);
-    expect(second.effectiveTo).toBeNull();
-  });
-});
-
-describe("предпросмотр исправления", () => {
+describe("предпросмотр правки", () => {
   it("показывает заказы и будущую долю, ничего не записывая", async () => {
     const [rate] = await consumablesRows();
     const daysBefore = await prisma.dayFinance.findMany({ select: { day: true, distributableCents: true } });
@@ -215,7 +180,6 @@ describe("предпросмотр исправления", () => {
       id: rate.id,
       op: "CORRECT",
       values: { entity: "CONSUMABLES_RATE", amountCents: 1500 },
-      effectiveFrom: START,
       now: NOW,
     });
 
@@ -238,7 +202,6 @@ describe("предпросмотр исправления", () => {
       id: rate.id,
       op: "CORRECT",
       values: { entity: "CONSUMABLES_RATE", amountCents: 800 },
-      effectiveFrom: START,
       now: NOW,
     });
 
@@ -246,7 +209,6 @@ describe("предпросмотр исправления", () => {
       entity: "CONSUMABLES_RATE",
       id: rate.id,
       values: { entity: "CONSUMABLES_RATE", amountCents: 800 },
-      effectiveFrom: START,
       reason: "ошиблись в ставке",
       actor: OWNER,
       now: NOW,
@@ -256,11 +218,11 @@ describe("предпросмотр исправления", () => {
   });
 });
 
-describe("исправление ошибочной записи", () => {
-  it("правит существующий период, а не создаёт новый", async () => {
-    expect(await consumablesRows()).toHaveLength(2);
-    const [rate] = await consumablesRows();
-    expect(rate.amountCents).toBe(800);
+describe("правка настройки", () => {
+  it("переписывает ту же строку, а не заводит вторую", async () => {
+    const rows = await consumablesRows();
+    expect(rows).toHaveLength(1);
+    expect(rows[0].amountCents).toBe(800);
   });
 
   it("заработок меняется сам, без единой записи в книге", async () => {
@@ -275,99 +237,43 @@ describe("исправление ошибочной записи", () => {
     const correction = history.find((h) => h.action === "CORRECT_ConsumablesRate");
     expect(correction).toBeDefined();
     expect(correction!.reason).toBe("ошиблись в ставке");
-    // Предыдущее значение — то, что стояло на момент правки, а не первоначальное:
-    // аудит фиксирует конкретный переход.
     expect((correction!.beforeJson as { amountCents: number }).amountCents).toBe(500);
     expect((correction!.afterJson as { amountCents: number }).amountCents).toBe(800);
   });
 
   it("та же сумма пересчитывает день, но денег не двигает", async () => {
     const [rate] = await consumablesRows();
-    const ledgerBefore = await prisma.ledgerEntry.count({ where: { floristId } });
+    const before = await floristBalance(floristId);
 
     const r = await correctSetting({
       entity: "CONSUMABLES_RATE",
       id: rate.id,
       values: { entity: "CONSUMABLES_RATE", amountCents: 800 },
-      effectiveFrom: START,
       reason: "повторное подтверждение",
       actor: OWNER,
       now: NOW,
     });
 
     expect(r.affectedDays).toBe(1);
-    expect(await prisma.ledgerEntry.count({ where: { floristId } })).toBe(ledgerBefore);
-  });
-
-  it("сдвиг даты не может заехать на соседний период", async () => {
-    const rows = await consumablesRows();
-    await expect(
-      correctSetting({
-        entity: "CONSUMABLES_RATE",
-        id: rows[0].id,
-        values: { entity: "CONSUMABLES_RATE", amountCents: 800 },
-        effectiveFrom: new Date("2026-07-29T00:00:00.000Z"),
-        reason: "проверка границы",
-        actor: OWNER,
-        now: NOW,
-      })
-    ).rejects.toThrow(SettingsAdminError);
-  });
-
-  it("сдвиг даты двигает и границу соседнего периода — дыры не появляется", async () => {
-    const rows = await consumablesRows();
-    await correctSetting({
-      entity: "CONSUMABLES_RATE",
-      id: rows[1].id,
-      values: { entity: "CONSUMABLES_RATE", amountCents: 900 },
-      effectiveFrom: new Date("2026-07-30T00:00:00.000Z"),
-      reason: "не с той даты",
-      actor: OWNER,
-      now: NOW,
-    });
-
-    const [first, second] = await consumablesRows();
-    expect(first.effectiveTo).toEqual(second.effectiveFrom);
-    expect(second.effectiveFrom.toISOString().slice(0, 10)).toBe("2026-07-30");
+    expect((await floristBalance(floristId)).outstandingCents).toBe(before.outstandingCents);
   });
 });
 
 describe("удаление", () => {
-  it("предпросмотр удаления показывает, что заказы выпадут из расчёта", async () => {
+  it("предпросмотр показывает, что заказы выпадут из расчёта", async () => {
     const fee = await prisma.siteAcquiringFeeModel.findFirst({ where: { siteId } });
     const p = await previewSettingChange({ entity: "FEE_MODEL", id: fee!.id, op: "DELETE", now: NOW });
 
     // Без модели комиссии заказ посчитать нечем — это не «ставка другая», а «настройки нет».
-    expect(p.shareAfterCents).toBe(0);
     expect(p.shareBeforeCents).toBeGreaterThan(0);
+    expect(p.shareAfterCents).toBe(0);
     expect(p.daysChanged).toBeGreaterThan(0);
+    expect(p.warnings.join(" ")).toMatch(/Требует заполнения/);
   });
 
-  it("предыдущий период забирает отрезок — дня без настройки не остаётся", async () => {
-    const rows = await consumablesRows();
-    expect(rows).toHaveLength(2);
-
-    await deleteSetting({ entity: "CONSUMABLES_RATE", id: rows[1].id, reason: "лишняя запись", actor: OWNER, now: NOW });
-
-    const left = await consumablesRows();
-    expect(left).toHaveLength(1);
-    expect(left[0].id).toBe(rows[0].id);
-    // Открытый конец вернулся предыдущему периоду.
-    expect(left[0].effectiveTo).toBeNull();
-  });
-
-  it("история удалённой записи сохраняется", async () => {
-    const audits = await prisma.financeAudit.findMany({
-      where: { entity: "ConsumablesRate", action: "DELETE_ConsumablesRate" },
-    });
-    expect(audits).toHaveLength(1);
-    expect(audits[0].reason).toBe("лишняя запись");
-    expect((audits[0].beforeJson as { amountCents: number }).amountCents).toBe(900);
-  });
-
-  it("удаление последней записи открывает блокирующую проблему", async () => {
-    const [last] = await consumablesRows();
-    await deleteSetting({ entity: "CONSUMABLES_RATE", id: last.id, reason: "удаляем совсем", actor: OWNER, now: NOW });
+  it("удаление ставки открывает блокирующую проблему и обнуляет заработок за день", async () => {
+    const [rate] = await consumablesRows();
+    await deleteSetting({ entity: "CONSUMABLES_RATE", id: rate.id, reason: "заведена по ошибке", actor: OWNER, now: NOW });
 
     expect(await consumablesRows()).toHaveLength(0);
 
@@ -388,31 +294,34 @@ describe("удаление", () => {
     expect((await floristBalance(floristId)).earnedCents).toBe(0);
   });
 
+  it("история удалённой записи сохраняется", async () => {
+    const audits = await prisma.financeAudit.findMany({
+      where: { entity: "ConsumablesRate", action: "DELETE_ConsumablesRate" },
+      orderBy: { createdAt: "desc" },
+    });
+    expect(audits.length).toBeGreaterThan(0);
+    expect(audits[0].reason).toBe("заведена по ошибке");
+    expect((audits[0].beforeJson as { amountCents: number }).amountCents).toBe(800);
+  });
+
   it("после возврата настройки день считается заново", async () => {
-    await fixConsumablesRate({ siteId: null, amountCents: 500, effectiveFrom: START, actor: OWNER, now: NOW });
+    await fixConsumablesRate({ siteId: null, amountCents: 500, actor: OWNER, now: NOW });
 
     const computed = await computeDayShare(profileId, DAY);
     expect(computed!.complete).toBe(true);
     expect(computed!.shareCents).toBeGreaterThan(0);
     expect((await floristBalance(floristId)).earnedCents).toBe(computed!.shareCents);
   });
-
-  it("предпросмотр удаления предупреждает, что настройка исчезнет совсем", async () => {
-    const [only] = await consumablesRows();
-    const p = await previewSettingChange({ entity: "CONSUMABLES_RATE", id: only.id, op: "DELETE", now: NOW });
-    expect(p.warnings.join(" ")).toMatch(/исчезнет полностью/);
-  });
 });
 
 describe("налоговая политика", () => {
   it("предпросмотр честно говорит, что на долю флориста она не влияет", async () => {
-    const policy = await prisma.ownerTaxPolicy.findFirst({ where: { siteId: null } });
+    const policy = await prisma.ownerTaxPolicy.findFirstOrThrow({ where: { siteId: null } });
     const p = await previewSettingChange({
       entity: "TAX_POLICY",
-      id: policy!.id,
+      id: policy.id,
       op: "CORRECT",
       values: { entity: "TAX_POLICY", actualShareBp: 3000 },
-      effectiveFrom: START,
       now: NOW,
     });
 
@@ -421,34 +330,40 @@ describe("налоговая политика", () => {
     expect(p.warnings.join(" ")).toMatch(/на долю флориста не влияет/);
   });
 
-  it("исправление налоговой политики не трогает книгу", async () => {
-    const policy = await prisma.ownerTaxPolicy.findFirst({ where: { siteId: null } });
-    const ledgerBefore = await prisma.ledgerEntry.count({ where: { floristId } });
+  it("исправление налоговой политики не трогает деньги флориста", async () => {
+    const policy = await prisma.ownerTaxPolicy.findFirstOrThrow({ where: { siteId: null } });
+    const before = await floristBalance(floristId);
 
     await correctSetting({
       entity: "TAX_POLICY",
-      id: policy!.id,
+      id: policy.id,
       values: { entity: "TAX_POLICY", actualShareBp: 3000 },
-      effectiveFrom: START,
-      reason: "уточнили долю",
+      reason: "уточнили ставку налога",
       actor: OWNER,
       now: NOW,
     });
 
-    expect(await prisma.ledgerEntry.count({ where: { floristId } })).toBe(ledgerBefore);
-    const updated = await prisma.ownerTaxPolicy.findUnique({ where: { id: policy!.id } });
-    expect(updated!.actualShareBp).toBe(3000);
+    expect((await floristBalance(floristId)).outstandingCents).toBe(before.outstandingCents);
+    expect(await prisma.ledgerEntry.count({ where: { floristId } })).toBe(0);
   });
 });
 
 describe("список записей", () => {
-  it("показывает область действия, активность и наличие предыдущего периода", async () => {
-    const rows = await listSettingRecords(NOW);
+  it("показывает область действия и автора", async () => {
+    const rows = await listSettingRecords();
+    const globalRate = rows.find((r) => r.entity === "CONSUMABLES_RATE" && r.siteId === null);
+    expect(globalRate).toBeDefined();
+    expect(globalRate!.siteShortName).toBeNull();
+    expect(globalRate!.createdByName).toBe("Owner");
+
     const fee = rows.find((r) => r.entity === "FEE_MODEL");
-    expect(fee).toBeDefined();
-    expect(fee!.siteShortName).toBe(RUN.slice(0, 8).toUpperCase());
-    expect(fee!.active).toBe(true);
-    expect(fee!.hasPrevious).toBe(false);
-    expect(fee!.createdByName).toBe("Owner");
+    expect(fee!.siteId).toBe(siteId);
+    expect(fee!.siteShortName).not.toBeNull();
+  });
+
+  it("на каждую область не больше одной записи", async () => {
+    const rows = await listSettingRecords();
+    const keys = rows.map((r) => `${r.entity}:${r.siteId ?? ""}`);
+    expect(new Set(keys).size).toBe(keys.length);
   });
 });

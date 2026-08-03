@@ -18,6 +18,7 @@ import { computeDay } from "./dayFinance";
 const RUN = `vcl${crypto.randomBytes(3).toString("hex")}`;
 const OWNER = { userId: "", role: "OWNER" as const };
 const DAY = new Date("2026-08-01T00:00:00.000Z");
+const SHARE_START = new Date("2026-07-01T00:00:00.000Z");
 
 let siteId = "";
 let floristId = "";
@@ -116,8 +117,8 @@ beforeAll(async () => {
   const { createdId } = await setFinanceProfile({
     floristId,
     model: "PRIMARY",
+      effectiveFrom: SHARE_START,
     sharePercentBp: 6660,
-    effectiveFrom: DAY,
     actor: OWNER,
   });
   profileId = createdId;
@@ -129,7 +130,6 @@ beforeAll(async () => {
       productId: vaseA.productId,
       costType: "STANDALONE_VASE",
       purchaseCostCents: 2000,
-      effectiveFrom: DAY,
       createdBy: OWNER.userId,
     },
   });
@@ -142,7 +142,6 @@ beforeAll(async () => {
       productVariantId: vaseB.variantId,
       costType: "STANDALONE_VASE",
       purchaseCostCents: 3000,
-      effectiveFrom: DAY,
       createdBy: OWNER.userId,
     },
   });

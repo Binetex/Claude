@@ -8,7 +8,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import crypto from "crypto";
 import { prisma } from "@/lib/db";
-import { setVasePurchaseCost, updateVasePurchaseCost, deleteVasePurchaseCost } from "./setVasePurchaseCost";
+import { setVasePurchaseCost, deleteVasePurchaseCost } from "./setVasePurchaseCost";
 
 const RUN = `vase${crypto.randomBytes(3).toString("hex")}`;
 let siteId = "";
@@ -54,61 +54,44 @@ afterAll(async () => {
 const actor = () => ({ userId, role: "OWNER" as const });
 
 describe("setVasePurchaseCost", () => {
-  it("первая запись открывает интервал и пишет аудит", async () => {
+  it("первая запись создаёт стоимость и пишет аудит", async () => {
     const res = await setVasePurchaseCost({
       target: { productVariantId: variantId },
       costType: "INCLUDED_VASE",
       purchaseCostCents: 1200,
-      effectiveFrom: new Date("2026-08-01T00:00:00Z"),
       actor: actor(),
       comment: "первая закупка",
     });
-    expect(res.closedId).toBeNull();
+    expect(res.previousCents).toBeNull();
 
     const rows = await prisma.vasePurchaseCost.findMany({ where: { productVariantId: variantId } });
     expect(rows).toHaveLength(1);
     expect(rows[0].purchaseCostCents).toBe(1200);
-    expect(rows[0].effectiveTo).toBeNull();
 
     const audit = await prisma.financeAudit.findFirst({ where: { entityId: variantId, action: "SET_COST" } });
     expect(audit?.beforeJson).toBeNull();
     expect(audit?.afterJson).toMatchObject({ purchaseCostCents: 1200 });
   });
 
-  it("подорожание закрывает прошлый интервал и открывает новый", async () => {
+  it("подорожание переписывает ту же строку, а не заводит вторую", async () => {
     const res = await setVasePurchaseCost({
       target: { productVariantId: variantId },
       costType: "INCLUDED_VASE",
       purchaseCostCents: 1500,
-      effectiveFrom: new Date("2026-11-01T00:00:00Z"),
       actor: actor(),
     });
-    expect(res.closedId).not.toBeNull();
+    expect(res.previousCents).toBe(1200);
 
-    const rows = await prisma.vasePurchaseCost.findMany({
-      where: { productVariantId: variantId },
-      orderBy: { effectiveFrom: "asc" },
+    const rows = await prisma.vasePurchaseCost.findMany({ where: { productVariantId: variantId } });
+    expect(rows).toHaveLength(1);
+    expect(rows[0].purchaseCostCents).toBe(1500);
+
+    // Прежняя сумма не потеряна: она в истории правок.
+    const audit = await prisma.financeAudit.findFirst({
+      where: { entityId: variantId, action: "SET_COST" },
+      orderBy: { createdAt: "desc" },
     });
-    expect(rows).toHaveLength(2);
-    expect(rows[0].effectiveTo?.toISOString()).toBe("2026-11-01T00:00:00.000Z");
-    expect(rows[1].effectiveTo).toBeNull();
-    // История не переписана: старая цена на месте.
-    expect(rows[0].purchaseCostCents).toBe(1200);
-  });
-
-  it("параллельные вызовы оставляют ровно один открытый интервал", async () => {
-    const at = new Date("2027-01-01T00:00:00Z");
-    const results = await Promise.allSettled([
-      setVasePurchaseCost({ target: { productVariantId: variantId }, costType: "INCLUDED_VASE", purchaseCostCents: 1700, effectiveFrom: at, actor: actor() }),
-      setVasePurchaseCost({ target: { productVariantId: variantId }, costType: "INCLUDED_VASE", purchaseCostCents: 1800, effectiveFrom: at, actor: actor() }),
-    ]);
-    // Один из двух мог законно провалиться (одинаковая дата начала), но состояние обязано остаться целым.
-    expect(results.some((r) => r.status === "fulfilled")).toBe(true);
-
-    const open = await prisma.vasePurchaseCost.findMany({
-      where: { productVariantId: variantId, costType: "INCLUDED_VASE", effectiveTo: null },
-    });
-    expect(open).toHaveLength(1);
+    expect(audit?.beforeJson).toMatchObject({ purchaseCostCents: 1200 });
   });
 
   it("стоимость товара и варианта живут независимо", async () => {
@@ -116,12 +99,16 @@ describe("setVasePurchaseCost", () => {
       target: { productId },
       costType: "INCLUDED_VASE",
       purchaseCostCents: 900,
-      effectiveFrom: new Date("2026-08-01T00:00:00Z"),
       actor: actor(),
     });
-    const onProduct = await prisma.vasePurchaseCost.findMany({ where: { productId, effectiveTo: null } });
+    const onProduct = await prisma.vasePurchaseCost.findMany({ where: { productId } });
     expect(onProduct).toHaveLength(1);
     expect(onProduct[0].purchaseCostCents).toBe(900);
+
+    // Строка варианта на месте и своя.
+    const onVariant = await prisma.vasePurchaseCost.findMany({ where: { productVariantId: variantId } });
+    expect(onVariant).toHaveLength(1);
+    expect(onVariant[0].purchaseCostCents).toBe(1500);
   });
 
   it("отрицательная стоимость и bulk без причины отклоняются", async () => {
@@ -130,7 +117,6 @@ describe("setVasePurchaseCost", () => {
         target: { productVariantId: variantId },
         costType: "INCLUDED_VASE",
         purchaseCostCents: -1,
-        effectiveFrom: new Date("2027-06-01T00:00:00Z"),
         actor: actor(),
       })
     ).rejects.toThrow();
@@ -140,63 +126,29 @@ describe("setVasePurchaseCost", () => {
         target: { productVariantId: variantId },
         costType: "INCLUDED_VASE",
         purchaseCostCents: 100,
-        effectiveFrom: new Date("2027-06-01T00:00:00Z"),
         actor: actor(),
         batchId: "batch-1",
       })
     ).rejects.toThrow(/причин/);
   });
 
-  it("опечатку можно исправить прямо в текущем интервале", async () => {
-    const open = await prisma.vasePurchaseCost.findFirstOrThrow({
-      where: { productVariantId: variantId, costType: "INCLUDED_VASE", effectiveTo: null },
-    });
-    await updateVasePurchaseCost({ costId: open.id, purchaseCostCents: 111, actor: actor() });
-    const after = await prisma.vasePurchaseCost.findUniqueOrThrow({ where: { id: open.id } });
-    expect(after.purchaseCostCents).toBe(111);
-
-    const audit = await prisma.financeAudit.findFirst({ where: { userId, action: "CORRECT_COST" }, orderBy: { createdAt: "desc" } });
-    expect((audit?.beforeJson as { purchaseCostCents?: number })?.purchaseCostCents).toBe(open.purchaseCostCents);
-    expect((audit?.afterJson as { purchaseCostCents?: number })?.purchaseCostCents).toBe(111);
-  });
-
-  it("ошибочный интервал удаляется, предыдущий снова становится действующим", async () => {
-    const before = await prisma.vasePurchaseCost.findMany({
+  it("ошибочная запись удаляется, стоимость снова неизвестна", async () => {
+    const row = await prisma.vasePurchaseCost.findFirstOrThrow({
       where: { productVariantId: variantId, costType: "INCLUDED_VASE" },
-      orderBy: { effectiveFrom: "asc" },
     });
-    const last = before[before.length - 1];
-    const prev = before[before.length - 2];
 
-    await deleteVasePurchaseCost({ costId: last.id, actor: actor() });
+    await deleteVasePurchaseCost({ costId: row.id, actor: actor() });
 
-    expect(await prisma.vasePurchaseCost.findUnique({ where: { id: last.id } })).toBeNull();
-    const reopened = await prisma.vasePurchaseCost.findUniqueOrThrow({ where: { id: prev.id } });
-    // Предыдущий «дотянулся» до конца удалённого — дыры в истории не осталось.
-    expect(reopened.effectiveTo).toEqual(last.effectiveTo);
+    expect(await prisma.vasePurchaseCost.findUnique({ where: { id: row.id } })).toBeNull();
 
     const audit = await prisma.financeAudit.findFirst({ where: { userId, action: "DELETE_COST" }, orderBy: { createdAt: "desc" } });
-    expect((audit?.beforeJson as { costRecordId?: string })?.costRecordId).toBe(last.id);
+    expect((audit?.beforeJson as { costRecordId?: string })?.costRecordId).toBe(row.id);
   });
 
-  it("править стоимость может только владелец", async () => {
-    const open = await prisma.vasePurchaseCost.findFirstOrThrow({
-      where: { productVariantId: variantId, costType: "INCLUDED_VASE", effectiveTo: null },
-    });
+  it("удалять стоимость может только владелец", async () => {
+    const row = await prisma.vasePurchaseCost.findFirstOrThrow({ where: { productId, costType: "INCLUDED_VASE" } });
     await expect(
-      updateVasePurchaseCost({ costId: open.id, purchaseCostCents: 1, actor: { userId, role: "FLORIST" } })
+      deleteVasePurchaseCost({ costId: row.id, actor: { userId, role: "FLORIST" } })
     ).rejects.toThrow(/владелец/);
-  });
-
-  it("нельзя открыть интервал раньше действующего", async () => {
-    await expect(
-      setVasePurchaseCost({
-        target: { productVariantId: variantId },
-        costType: "INCLUDED_VASE",
-        purchaseCostCents: 100,
-        effectiveFrom: new Date("2020-01-01T00:00:00Z"),
-        actor: actor(),
-      })
-    ).rejects.toThrow(/позже/);
   });
 });

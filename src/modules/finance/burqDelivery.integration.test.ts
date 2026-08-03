@@ -17,6 +17,7 @@ import { FinanceFixError, confirmBurqDeliveryCosts, listBurqDeliveryCandidates, 
 const RUN = `burq${crypto.randomBytes(3).toString("hex")}`;
 const OWNER = { userId: "", role: "OWNER" as const };
 const DAY = new Date("2026-07-28T00:00:00.000Z");
+const SHARE_START = new Date("2026-07-01T00:00:00.000Z");
 
 let siteId = "";
 let floristId = "";
@@ -96,7 +97,7 @@ beforeAll(async () => {
   const florist = await prisma.florist.create({ data: { userId: user.id }, select: { id: true } });
   floristId = florist.id;
 
-  await setFinanceProfile({ floristId, model: "PRIMARY", effectiveFrom: new Date("2026-07-01T00:00:00.000Z"), actor: OWNER });
+  await setFinanceProfile({ floristId, model: "PRIMARY", effectiveFrom: SHARE_START, actor: OWNER });
 
   withFinal = await makeOrder("final", { finalCost: "12.50" });
   withQuote = await makeOrder("quote", { quote: "9.99" });

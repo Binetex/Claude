@@ -191,7 +191,6 @@ export async function fixSiteFeeModel(args: {
   siteId: string;
   percentBp: number;
   fixedCents: number;
-  effectiveFrom: Date;
   issueId?: string | null;
   comment?: string | null;
   actor: FixActor;
@@ -205,7 +204,6 @@ export async function fixSiteFeeModel(args: {
     siteId: args.siteId,
     percentBp: args.percentBp,
     fixedCents: args.fixedCents,
-    effectiveFrom: args.effectiveFrom,
     comment: args.comment ?? null,
     actor: args.actor,
   });
@@ -248,7 +246,6 @@ export async function fixDailyFlowerExpense(args: {
 export async function fixVasePurchaseCost(args: {
   variantId: string;
   amountCents: number;
-  effectiveFrom: Date;
   issueId?: string | null;
   comment?: string | null;
   actor: FixActor;
@@ -269,7 +266,6 @@ export async function fixVasePurchaseCost(args: {
     // Стоимость задаётся у самой позиции: STANDALONE_VASE — «эта позиция и есть ваза/подарок».
     costType: "STANDALONE_VASE",
     purchaseCostCents: args.amountCents,
-    effectiveFrom: args.effectiveFrom,
     comment: args.comment ?? undefined,
     entityNameSnapshot: `${variant.product.name} — ${variant.title}`,
     siteShortNameSnapshot: variant.product.site.shortName,
@@ -314,7 +310,6 @@ export async function fixVaseLink(args: {
 export async function fixConsumablesRate(args: {
   siteId: string | null;
   amountCents: number;
-  effectiveFrom: Date;
   issueId?: string | null;
   comment?: string | null;
   actor: FixActor;
@@ -327,7 +322,6 @@ export async function fixConsumablesRate(args: {
   await setConsumablesRate({
     siteId: args.siteId,
     amountCents: args.amountCents,
-    effectiveFrom: args.effectiveFrom,
     comment: args.comment ?? null,
     actor: args.actor,
   });
@@ -343,7 +337,6 @@ export async function fixConsumablesRate(args: {
 export async function fixOwnerTaxPolicy(args: {
   siteId: string | null;
   actualShareBp: number;
-  effectiveFrom: Date;
   issueId?: string | null;
   comment?: string | null;
   actor: FixActor;
@@ -356,7 +349,6 @@ export async function fixOwnerTaxPolicy(args: {
   await setOwnerTaxPolicy({
     siteId: args.siteId,
     actualShareBp: args.actualShareBp,
-    effectiveFrom: args.effectiveFrom,
     comment: args.comment ?? null,
     actor: args.actor,
   });

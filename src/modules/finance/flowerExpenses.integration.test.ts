@@ -33,6 +33,7 @@ const CC_ACTOR = { userId: "", role: "CALL_CENTER" as const };
 
 /** Рабочий день расчёта и день из глубокой истории — заведомо старше 30 суток. */
 const DAY = new Date("2026-07-28T00:00:00.000Z");
+const SHARE_START = new Date("2026-07-01T00:00:00.000Z");
 const OLD_DAY = new Date("2026-01-14T00:00:00.000Z");
 const NOW = new Date("2026-07-29T12:00:00.000Z");
 
@@ -126,8 +127,8 @@ beforeAll(async () => {
     await setFinanceProfile({
       floristId,
       model: "PRIMARY",
+      effectiveFrom: SHARE_START,
       sharePercentBp: 6660,
-      effectiveFrom: new Date("2026-01-01T00:00:00.000Z"),
       actor: OWNER,
     })
   ).createdId;
@@ -136,7 +137,7 @@ beforeAll(async () => {
     await setFinanceProfile({
       floristId: secondaryFloristId,
       model: "SECONDARY",
-      effectiveFrom: new Date("2026-01-01T00:00:00.000Z"),
+      effectiveFrom: SHARE_START,
       actor: OWNER,
     })
   ).createdId;
@@ -145,8 +146,8 @@ beforeAll(async () => {
   orderB = await makeOrder("B", 20000, DAY, floristId);
   oldOrder = await makeOrder("OLD", 15000, OLD_DAY, floristId);
 
-  await fixConsumablesRate({ siteId: null, amountCents: 500, effectiveFrom: new Date("2026-01-01T00:00:00.000Z"), actor: OWNER, now: NOW });
-  await fixSiteFeeModel({ siteId, percentBp: 290, fixedCents: 30, effectiveFrom: new Date("2026-01-01T00:00:00.000Z"), actor: OWNER, now: NOW });
+  await fixConsumablesRate({ siteId: null, amountCents: 500, actor: OWNER, now: NOW });
+  await fixSiteFeeModel({ siteId, percentBp: 290, fixedCents: 30, actor: OWNER, now: NOW });
   await fixDeliveryActualCost({ orderId: orderA, amountCents: 1000, actor: OWNER, now: NOW });
   await fixDeliveryActualCost({ orderId: orderB, amountCents: 1000, actor: OWNER, now: NOW });
   await fixDeliveryActualCost({ orderId: oldOrder, amountCents: 1000, actor: OWNER, now: NOW });

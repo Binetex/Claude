@@ -99,7 +99,7 @@ export function VariantFinanceBlock({ vm, vaseOptions }: { vm: VariantFinanceVM;
           target={{ productVariantId: vm.variantId }}
           costType="STANDALONE_VASE"
           title={purchaseCostTitle(shownType)}
-          history={vm.ownCostHistory}
+          rows={vm.ownCostHistory}
           effectiveCostCents={vm.ownCostCents}
           effectiveSource={vm.ownCostCents == null ? "UNKNOWN" : "VARIANT"}
           productId={vm.productId}

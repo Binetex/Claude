@@ -27,9 +27,6 @@ const today = () => new Date().toISOString().slice(0, 10);
  * сегодня останутся без неё и заблокируют расчёт. Когда записи уже есть, речь идёт о
  * настоящей смене ставки — она начинается сегодня.
  */
-function defaultFrom(hasRecords: boolean, shareStartDate: string | null): string {
-  return hasRecords || !shareStartDate ? today() : shareStartDate;
-}
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -133,24 +130,19 @@ function SiteSelect({ sites, allowGlobal }: { sites: { id: string; shortName: st
 export function ConsumablesForm({
   sites,
   hasRecords = false,
-  shareStartDate = null,
 }: {
   sites: { id: string; shortName: string }[];
   hasRecords?: boolean;
-  shareStartDate?: string | null;
 }) {
   return (
     <SettingDialog
-      trigger={hasRecords ? "Новая ставка с даты" : "Задать ставку"}
+      trigger={hasRecords ? "Изменить ставку" : "Задать ставку"}
       title="Ставка расходников"
       action={applyConsumablesRate}
     >
       <SiteSelect sites={sites} allowGlobal />
       <Field label="Сумма на заказ, $">
         <Input name="amount" inputMode="decimal" placeholder="5.00" required />
-      </Field>
-      <Field label="Действует с">
-        <Input name="effectiveFrom" type="date" defaultValue={defaultFrom(hasRecords, shareStartDate)} />
       </Field>
       <Field label="Комментарий">
         <Input name="comment" />
@@ -162,17 +154,15 @@ export function ConsumablesForm({
 export function FeeModelForm({
   sites,
   configuredSiteIds = [],
-  shareStartDate = null,
 }: {
   sites: { id: string; shortName: string }[];
   /** У каких магазинов модель уже есть — чтобы видеть, что осталось завести. */
   configuredSiteIds?: string[];
-  shareStartDate?: string | null;
 }) {
   const missing = sites.filter((s) => !configuredSiteIds.includes(s.id));
   return (
     <SettingDialog
-      trigger={configuredSiteIds.length > 0 ? "Новая модель с даты" : "Добавить модель"}
+      trigger="Добавить модель"
       title="Модель комиссии магазина"
       action={applyFeeModel}
     >
@@ -189,9 +179,6 @@ export function FeeModelForm({
       <Field label="Фиксированная часть, $">
         <Input name="fixed" inputMode="decimal" placeholder="0.30" />
       </Field>
-      <Field label="Действует с">
-        <Input name="effectiveFrom" type="date" defaultValue={defaultFrom(configuredSiteIds.length > 0, shareStartDate)} />
-      </Field>
       <Field label="Комментарий">
         <Input name="comment" />
       </Field>
@@ -202,24 +189,19 @@ export function FeeModelForm({
 export function TaxPolicyForm({
   sites,
   hasRecords = false,
-  shareStartDate = null,
 }: {
   sites: { id: string; shortName: string }[];
   hasRecords?: boolean;
-  shareStartDate?: string | null;
 }) {
   return (
     <SettingDialog
-      trigger={hasRecords ? "Новая политика с даты" : "Задать политику"}
+      trigger={hasRecords ? "Изменить политику" : "Задать политику"}
       title="Налоговая политика владельца"
       action={applyOwnerTaxPolicy}
     >
       <SiteSelect sites={sites} allowGlobal />
       <Field label="Реальный налоговый расход, % от собранного">
         <Input name="percent" inputMode="decimal" placeholder="20" required />
-      </Field>
-      <Field label="Действует с">
-        <Input name="effectiveFrom" type="date" defaultValue={defaultFrom(hasRecords, shareStartDate)} />
       </Field>
       <Field label="Комментарий">
         <Input name="comment" />

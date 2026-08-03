@@ -14,7 +14,6 @@ import { Prisma } from "@/generated/prisma/client";
 import type { Role } from "@/generated/prisma/enums";
 import { prisma } from "@/lib/db";
 
-const EXCLUSION_VIOLATION = "23P01";
 
 export class FinanceSettingsError extends Error {
   constructor(
@@ -46,11 +45,6 @@ function assertBp(value: number, what: string): void {
   }
 }
 
-/** Общий предикат «действует на дату» для effective-dated настроек. */
-function activeAt(at: Date) {
-  return { effectiveFrom: { lte: at }, OR: [{ effectiveTo: null }, { effectiveTo: { gt: at } }] };
-}
-
 // ─────────────────────────── Расходники ───────────────────────────
 
 export type ResolvedConsumables = { amountCents: number; rateId: string; scope: "SITE" | "GLOBAL" };
@@ -59,9 +53,9 @@ export type ResolvedConsumables = { amountCents: number; rateId: string; scope: 
  * Ставка расходников на дату: настройка магазина приоритетнее глобальной.
  * NULL — ставка не задана, и заказ в расчёт не попадёт.
  */
-export async function resolveConsumablesRate(siteId: string, at: Date): Promise<ResolvedConsumables | null> {
+export async function resolveConsumablesRate(siteId: string): Promise<ResolvedConsumables | null> {
   const rows = await prisma.consumablesRate.findMany({
-    where: { AND: [activeAt(at), { OR: [{ siteId }, { siteId: null }] }] },
+    where: { OR: [{ siteId }, { siteId: null }] },
     select: { id: true, siteId: true, amountCents: true },
   });
   const site = rows.find((r) => r.siteId === siteId);
@@ -70,64 +64,63 @@ export async function resolveConsumablesRate(siteId: string, at: Date): Promise<
   return global ? { amountCents: global.amountCents, rateId: global.id, scope: "GLOBAL" } : null;
 }
 
+/**
+ * Задаёт ставку расходников. Строка одна на область: правка переписывает значение.
+ *
+ * Периодов действия нет. Прежнее значение не теряется — оно в `FinanceAudit`, — но
+ * расчёт всегда идёт по текущему. Это сознательный размен: датированные ставки означали
+ * бы, что вчерашний день считается не так, как сегодняшний, и «почему тут другая сумма»
+ * требовало бы раскопок в интервалах.
+ */
 export async function setConsumablesRate(args: {
   siteId: string | null;
   amountCents: number;
-  effectiveFrom: Date;
   comment?: string | null;
   actor: SettingsActor;
-}): Promise<{ closedId: string | null; createdId: string }> {
+}): Promise<{ id: string; previousCents: number | null }> {
   assertOwner(args.actor);
   assertNonNegativeInt(args.amountCents, "Ставка расходников");
 
-  return retryOnOverlap(() =>
-    prisma.$transaction(async (tx) => {
-      const active = await tx.consumablesRate.findFirst({
-        where: { siteId: args.siteId, effectiveTo: null },
-        orderBy: { effectiveFrom: "desc" },
-      });
-      assertLater(active, args.effectiveFrom);
+  return prisma.$transaction(async (tx) => {
+    const existing = await tx.consumablesRate.findFirst({ where: { siteId: args.siteId } });
 
-      let closedId: string | null = null;
-      if (active) {
-        await tx.consumablesRate.update({ where: { id: active.id }, data: { effectiveTo: args.effectiveFrom } });
-        closedId = active.id;
-      }
+    const row = existing
+      ? await tx.consumablesRate.update({
+          where: { id: existing.id },
+          data: { amountCents: args.amountCents, comment: args.comment ?? null },
+          select: { id: true },
+        })
+      : await tx.consumablesRate.create({
+          data: {
+            siteId: args.siteId,
+            amountCents: args.amountCents,
+            comment: args.comment ?? null,
+            createdBy: args.actor.userId,
+          },
+          select: { id: true },
+        });
 
-      const created = await tx.consumablesRate.create({
-        data: {
-          siteId: args.siteId,
-          amountCents: args.amountCents,
-          effectiveFrom: args.effectiveFrom,
-          comment: args.comment ?? null,
-          createdBy: args.actor.userId,
-        },
-        select: { id: true },
-      });
+    await writeAudit(
+      tx,
+      "ConsumablesRate",
+      row.id,
+      existing ? { amountCents: existing.amountCents } : null,
+      { amountCents: args.amountCents, siteId: args.siteId },
+      args.actor,
+      args.comment ?? null
+    );
 
-      await writeAudit(
-        tx,
-        "ConsumablesRate",
-        created.id,
-        active ? { amountCents: active.amountCents } : null,
-        { amountCents: args.amountCents, siteId: args.siteId, effectiveFrom: args.effectiveFrom.toISOString() },
-        args.actor,
-        args.comment ?? null
-      );
-
-      return { closedId, createdId: created.id };
-    })
-  );
+    return { id: row.id, previousCents: existing?.amountCents ?? null };
+  });
 }
 
 // ─────────────────────── Комиссия эквайринга ───────────────────────
 
 export type ResolvedFeeModel = { modelId: string; percentBp: number; fixedCents: number };
 
-export async function resolveFeeModel(siteId: string, at: Date): Promise<ResolvedFeeModel | null> {
+export async function resolveFeeModel(siteId: string): Promise<ResolvedFeeModel | null> {
   const row = await prisma.siteAcquiringFeeModel.findFirst({
-    where: { siteId, ...activeAt(at) },
-    orderBy: { effectiveFrom: "desc" },
+    where: { siteId },
     select: { id: true, percentBp: true, fixedCents: true },
   });
   return row ? { modelId: row.id, percentBp: row.percentBp, fixedCents: row.fixedCents } : null;
@@ -142,58 +135,48 @@ export async function setFeeModel(args: {
   siteId: string;
   percentBp: number;
   fixedCents: number;
-  effectiveFrom: Date;
   comment?: string | null;
   actor: SettingsActor;
-}): Promise<{ closedId: string | null; createdId: string }> {
+}): Promise<{ id: string; previous: { percentBp: number; fixedCents: number } | null }> {
   assertOwner(args.actor);
   assertBp(args.percentBp, "Процент комиссии");
   assertNonNegativeInt(args.fixedCents, "Фиксированная часть комиссии");
 
-  return retryOnOverlap(() =>
-    prisma.$transaction(async (tx) => {
-      const active = await tx.siteAcquiringFeeModel.findFirst({
-        where: { siteId: args.siteId, effectiveTo: null },
-        orderBy: { effectiveFrom: "desc" },
-      });
-      assertLater(active, args.effectiveFrom);
+  return prisma.$transaction(async (tx) => {
+    const existing = await tx.siteAcquiringFeeModel.findFirst({ where: { siteId: args.siteId } });
 
-      let closedId: string | null = null;
-      if (active) {
-        await tx.siteAcquiringFeeModel.update({ where: { id: active.id }, data: { effectiveTo: args.effectiveFrom } });
-        closedId = active.id;
-      }
+    const row = existing
+      ? await tx.siteAcquiringFeeModel.update({
+          where: { id: existing.id },
+          data: { percentBp: args.percentBp, fixedCents: args.fixedCents, comment: args.comment ?? null },
+          select: { id: true },
+        })
+      : await tx.siteAcquiringFeeModel.create({
+          data: {
+            siteId: args.siteId,
+            percentBp: args.percentBp,
+            fixedCents: args.fixedCents,
+            comment: args.comment ?? null,
+            createdBy: args.actor.userId,
+          },
+          select: { id: true },
+        });
 
-      const created = await tx.siteAcquiringFeeModel.create({
-        data: {
-          siteId: args.siteId,
-          percentBp: args.percentBp,
-          fixedCents: args.fixedCents,
-          effectiveFrom: args.effectiveFrom,
-          comment: args.comment ?? null,
-          createdBy: args.actor.userId,
-        },
-        select: { id: true },
-      });
+    await writeAudit(
+      tx,
+      "SiteAcquiringFeeModel",
+      row.id,
+      existing ? { percentBp: existing.percentBp, fixedCents: existing.fixedCents } : null,
+      { percentBp: args.percentBp, fixedCents: args.fixedCents, siteId: args.siteId },
+      args.actor,
+      args.comment ?? null
+    );
 
-      await writeAudit(
-        tx,
-        "SiteAcquiringFeeModel",
-        created.id,
-        active ? { percentBp: active.percentBp, fixedCents: active.fixedCents } : null,
-        {
-          percentBp: args.percentBp,
-          fixedCents: args.fixedCents,
-          siteId: args.siteId,
-          effectiveFrom: args.effectiveFrom.toISOString(),
-        },
-        args.actor,
-        args.comment ?? null
-      );
-
-      return { closedId, createdId: created.id };
-    })
-  );
+    return {
+      id: row.id,
+      previous: existing ? { percentBp: existing.percentBp, fixedCents: existing.fixedCents } : null,
+    };
+  });
 }
 
 // ───────────────────── Налоговая политика владельца ─────────────────────
@@ -204,9 +187,9 @@ export type ResolvedTaxPolicy = { policyId: string; actualShareBp: number };
  * Доля Order.tax, считающаяся реальным расходом владельца.
  * ФЛОРИСТАМ не отдаётся никогда: в их базе налог вычитается на 100% независимо от политики.
  */
-export async function resolveOwnerTaxPolicy(siteId: string, at: Date): Promise<ResolvedTaxPolicy | null> {
+export async function resolveOwnerTaxPolicy(siteId: string): Promise<ResolvedTaxPolicy | null> {
   const rows = await prisma.ownerTaxPolicy.findMany({
-    where: { AND: [activeAt(at), { OR: [{ siteId }, { siteId: null }] }] },
+    where: { OR: [{ siteId }, { siteId: null }] },
     select: { id: true, siteId: true, actualShareBp: true },
   });
   const site = rows.find((r) => r.siteId === siteId);
@@ -218,51 +201,43 @@ export async function resolveOwnerTaxPolicy(siteId: string, at: Date): Promise<R
 export async function setOwnerTaxPolicy(args: {
   siteId: string | null;
   actualShareBp: number;
-  effectiveFrom: Date;
   comment?: string | null;
   actor: SettingsActor;
-}): Promise<{ closedId: string | null; createdId: string }> {
+}): Promise<{ id: string; previousBp: number | null }> {
   assertOwner(args.actor);
   assertBp(args.actualShareBp, "Доля налогового расхода");
 
-  return retryOnOverlap(() =>
-    prisma.$transaction(async (tx) => {
-      const active = await tx.ownerTaxPolicy.findFirst({
-        where: { siteId: args.siteId, effectiveTo: null },
-        orderBy: { effectiveFrom: "desc" },
-      });
-      assertLater(active, args.effectiveFrom);
+  return prisma.$transaction(async (tx) => {
+    const existing = await tx.ownerTaxPolicy.findFirst({ where: { siteId: args.siteId } });
 
-      let closedId: string | null = null;
-      if (active) {
-        await tx.ownerTaxPolicy.update({ where: { id: active.id }, data: { effectiveTo: args.effectiveFrom } });
-        closedId = active.id;
-      }
+    const row = existing
+      ? await tx.ownerTaxPolicy.update({
+          where: { id: existing.id },
+          data: { actualShareBp: args.actualShareBp, comment: args.comment ?? null },
+          select: { id: true },
+        })
+      : await tx.ownerTaxPolicy.create({
+          data: {
+            siteId: args.siteId,
+            actualShareBp: args.actualShareBp,
+            comment: args.comment ?? null,
+            createdBy: args.actor.userId,
+          },
+          select: { id: true },
+        });
 
-      const created = await tx.ownerTaxPolicy.create({
-        data: {
-          siteId: args.siteId,
-          actualShareBp: args.actualShareBp,
-          effectiveFrom: args.effectiveFrom,
-          comment: args.comment ?? null,
-          createdBy: args.actor.userId,
-        },
-        select: { id: true },
-      });
+    await writeAudit(
+      tx,
+      "OwnerTaxPolicy",
+      row.id,
+      existing ? { actualShareBp: existing.actualShareBp } : null,
+      { actualShareBp: args.actualShareBp, siteId: args.siteId },
+      args.actor,
+      args.comment ?? null
+    );
 
-      await writeAudit(
-        tx,
-        "OwnerTaxPolicy",
-        created.id,
-        active ? { actualShareBp: active.actualShareBp } : null,
-        { actualShareBp: args.actualShareBp, siteId: args.siteId, effectiveFrom: args.effectiveFrom.toISOString() },
-        args.actor,
-        args.comment ?? null
-      );
-
-      return { closedId, createdId: created.id };
-    })
-  );
+    return { id: row.id, previousBp: existing?.actualShareBp ?? null };
+  });
 }
 
 // ─────────────────────── Дневная закупка цветов ───────────────────────
@@ -280,9 +255,8 @@ export async function resolveDailyFlowerExpense(
 }
 
 /**
- * Вносит или исправляет дневную закупку. В отличие от effective-dated настроек здесь
- * правка на месте допустима: это факт одного дня, а не период действия. Прежнее значение
- * сохраняется в аудите, а снимки дня пересобираются новой ревизией.
+ * Вносит или исправляет дневную закупку. Это факт одного дня: правка на месте, прежнее
+ * значение сохраняется в аудите, день пересчитывается.
  */
 export async function setDailyFlowerExpense(args: {
   financeProfileId: string;
@@ -335,21 +309,6 @@ export async function setDailyFlowerExpense(args: {
 
 // ─────────────────────────── Общее ───────────────────────────
 
-/**
- * Проверка «новый период начинается позже текущего». Одинакова у всех трёх настроек,
- * а вот сама смена периода написана для каждой отдельно: обобщать её через
- * Prisma-делегат пришлось бы небезопасными приведениями типов, и ошибка в поле
- * перестала бы ловиться компилятором.
- */
-function assertLater(active: { effectiveFrom: Date } | null, effectiveFrom: Date): void {
-  if (active && active.effectiveFrom.getTime() >= effectiveFrom.getTime()) {
-    throw new FinanceSettingsError(
-      "bad_period",
-      `Новое значение должно действовать позже текущего (текущее — с ${active.effectiveFrom.toISOString().slice(0, 10)}).`
-    );
-  }
-}
-
 async function writeAudit(
   tx: Prisma.TransactionClient,
   entity: string,
@@ -371,17 +330,4 @@ async function writeAudit(
       role: actor.role,
     },
   });
-}
-
-/** Гонку выигрывает первая транзакция; проигравшая перечитывает состояние и повторяет. */
-async function retryOnOverlap<T>(run: () => Promise<T>): Promise<T> {
-  try {
-    return await run();
-  } catch (err) {
-    const isExclusion =
-      (err instanceof Prisma.PrismaClientKnownRequestError && err.meta?.code === EXCLUSION_VIOLATION) ||
-      (err instanceof Prisma.PrismaClientUnknownRequestError && String(err.message).includes(EXCLUSION_VIOLATION));
-    if (isExclusion) return await run();
-    throw err;
-  }
 }

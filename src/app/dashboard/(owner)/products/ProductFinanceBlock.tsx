@@ -87,7 +87,7 @@ export function ProductFinanceBlock({
             target={{ productId }}
             costType="STANDALONE_VASE"
             title={purchaseCostTitle(shownType)}
-            history={costHistory}
+            rows={costHistory}
             effectiveCostCents={effectiveCostCents}
             effectiveSource={effectiveCostCents == null ? "UNKNOWN" : "PRODUCT"}
             productId={productId}

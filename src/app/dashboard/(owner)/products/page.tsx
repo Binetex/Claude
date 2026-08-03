@@ -132,7 +132,6 @@ export default async function ProductsPage({ searchParams }: { searchParams: Pro
   ]);
 
   // Резолв «на сейчас»: список — экран настройки каталога, а не расчёт заказа.
-  const now = new Date();
 
   const rows: ProductVM[] = products.map((p) => {
     const variants: VariantVM[] = p.variants.map((v) => ({
@@ -171,8 +170,6 @@ export default async function ProductsPage({ searchParams }: { searchParams: Pro
       productVariantId: c.productVariantId,
       costType: c.costType,
       purchaseCostCents: c.purchaseCostCents,
-      effectiveFrom: c.effectiveFrom,
-      effectiveTo: c.effectiveTo,
     }));
     const finance: ProductFinanceVM = {
       vaseCount: 0,
@@ -192,8 +189,7 @@ export default async function ProductsPage({ searchParams }: { searchParams: Pro
           defaultIncludedVaseVariantId: p.defaultIncludedVaseVariantId,
         },
         costs: allCosts,
-        vases,
-        at: now,
+        vases
       });
       if (r.financialType === "VASE") finance.vaseCount += 1;
       if (r.financialType === "FLOWER_PRODUCT" && r.includesVase === true) finance.bouquetWithVaseCount += 1;

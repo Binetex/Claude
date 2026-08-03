@@ -10,7 +10,7 @@ import { prisma } from "@/lib/db";
 import { Prisma } from "@/generated/prisma/client";
 import type { OrderStatus, FloristFinanceVisibility, Role, FinancialItemType, VaseCostType } from "@/generated/prisma/enums";
 import { setProductClassification, setVariantClassification } from "@/modules/catalog/finance/classification";
-import { setVasePurchaseCost, updateVasePurchaseCost, deleteVasePurchaseCost } from "@/modules/catalog/finance/setVasePurchaseCost";
+import { setVasePurchaseCost, deleteVasePurchaseCost } from "@/modules/catalog/finance/setVasePurchaseCost";
 import { setVariantVase, setProductDefaultVase, type VaseSelection } from "@/modules/catalog/finance/vaseLink";
 import { usdToCents } from "@/lib/cents";
 import {
@@ -247,7 +247,6 @@ export async function ownerAddVaseCost(args: {
   target: { productId: string } | { productVariantId: string };
   costType: VaseCostType;
   amountUsd: string;
-  effectiveFrom: string; // YYYY-MM-DD
   comment?: string;
 }): Promise<{ ok: true } | { ok: false; error: string }> {
   const user = await requireRole("OWNER");
@@ -259,10 +258,6 @@ export async function ownerAddVaseCost(args: {
     return { ok: false, error: err instanceof Error ? err.message : "некорректная сумма" };
   }
   if (cents == null) return { ok: false, error: "укажите закупочную стоимость" };
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(args.effectiveFrom)) return { ok: false, error: "укажите дату начала действия" };
-
-  const effectiveFrom = new Date(`${args.effectiveFrom}T00:00:00.000Z`);
-  if (Number.isNaN(effectiveFrom.getTime())) return { ok: false, error: "некорректная дата начала действия" };
 
   // Снимки названий для аудита: отчёт должен читаться и после исчезновения товара с платформы.
   const named =
@@ -283,7 +278,6 @@ export async function ownerAddVaseCost(args: {
       target: args.target,
       costType: args.costType,
       purchaseCostCents: cents,
-      effectiveFrom,
       actor: { userId: user.id, role: user.role },
       comment: args.comment?.trim() || undefined,
       entityNameSnapshot: named?.name,
@@ -303,43 +297,7 @@ export async function ownerAddVaseCost(args: {
   return { ok: true };
 }
 
-/**
- * Исправление ошибочно введённой стоимости. Именно правка, а не новый интервал: подорожание
- * оформляется через ownerAddVaseCost, а опечатка — здесь. Правка пишется в аудит.
- */
-export async function ownerUpdateVaseCost(args: {
-  costId: string;
-  amountUsd: string;
-  effectiveFrom: string;
-  productId: string;
-}): Promise<{ ok: true } | { ok: false; error: string }> {
-  const user = await requireRole("OWNER");
-
-  let cents: number | null;
-  try {
-    cents = usdToCents(args.amountUsd);
-  } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : "некорректная сумма" };
-  }
-  if (cents == null) return { ok: false, error: "укажите закупочную стоимость" };
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(args.effectiveFrom)) return { ok: false, error: "укажите дату начала действия" };
-
-  try {
-    await updateVasePurchaseCost({
-      costId: args.costId,
-      purchaseCostCents: cents,
-      effectiveFrom: new Date(`${args.effectiveFrom}T00:00:00.000Z`),
-      actor: { userId: user.id, role: user.role },
-    });
-  } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : "не удалось сохранить" };
-  }
-  revalidatePath(`/dashboard/products/${args.productId}`);
-  revalidatePath("/dashboard/products");
-  return { ok: true };
-}
-
-/** Удаление ошибочного интервала стоимости. Предыдущий интервал снова становится действующим. */
+/** Удаление ошибочно заведённой стоимости. После него она считается неизвестной. */
 export async function ownerDeleteVaseCost(args: {
   costId: string;
   productId: string;

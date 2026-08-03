@@ -30,6 +30,7 @@ const PRIMARY_ACTOR = { userId: "", role: "FLORIST" as const, floristId: "" };
 const SECOND_ACTOR = { userId: "", role: "FLORIST" as const, floristId: "" };
 
 const DAY = new Date("2026-07-28T00:00:00.000Z");
+const SHARE_START = new Date("2026-07-01T00:00:00.000Z");
 const NOW = new Date("2026-07-29T12:00:00.000Z");
 const START = new Date("2026-07-01T00:00:00.000Z");
 
@@ -120,16 +121,16 @@ beforeAll(async () => {
   SECOND_ACTOR.floristId = secondFloristId;
 
   primaryProfileId = (
-    await setFinanceProfile({ floristId: primaryFloristId, model: "PRIMARY", sharePercentBp: 6660, effectiveFrom: START, actor: OWNER })
+    await setFinanceProfile({ floristId: primaryFloristId, model: "PRIMARY", effectiveFrom: SHARE_START, sharePercentBp: 6660, actor: OWNER })
   ).createdId;
-  await setFinanceProfile({ floristId: secondFloristId, model: "SECONDARY", effectiveFrom: START, actor: OWNER });
+  await setFinanceProfile({ floristId: secondFloristId, model: "SECONDARY", effectiveFrom: SHARE_START, actor: OWNER });
 
   orderA = await makeOrder("A", 10000, primaryFloristId);
   orderB = await makeOrder("B", 20000, primaryFloristId);
   secondOrder = await makeOrder("S", 15000, secondFloristId, "118.00");
 
-  await fixConsumablesRate({ siteId: null, amountCents: 500, effectiveFrom: START, actor: OWNER, now: NOW });
-  await fixSiteFeeModel({ siteId, percentBp: 290, fixedCents: 30, effectiveFrom: START, actor: OWNER, now: NOW });
+  await fixConsumablesRate({ siteId: null, amountCents: 500, actor: OWNER, now: NOW });
+  await fixSiteFeeModel({ siteId, percentBp: 290, fixedCents: 30, actor: OWNER, now: NOW });
   await fixDeliveryActualCost({ orderId: orderA, amountCents: 1000, actor: OWNER, now: NOW });
   await fixDeliveryActualCost({ orderId: orderB, amountCents: 1000, actor: OWNER, now: NOW });
   await fixDailyFlowerExpense({ expenseDay: DAY, amountCents: 6000, actor: OWNER, now: NOW });

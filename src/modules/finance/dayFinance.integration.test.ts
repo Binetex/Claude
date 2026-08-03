@@ -20,6 +20,7 @@ import { dayShareCents } from "./dayCalc";
 const RUN = `dfn${crypto.randomBytes(3).toString("hex")}`;
 const OWNER = { userId: "", role: "OWNER" as const };
 const DAY = new Date("2026-07-28T00:00:00.000Z");
+const SHARE_START = new Date("2026-07-01T00:00:00.000Z");
 const NOW = new Date("2026-07-29T12:00:00.000Z");
 const START = new Date("2026-07-01T00:00:00.000Z");
 
@@ -89,7 +90,7 @@ beforeAll(async () => {
   floristId = (await prisma.florist.create({ data: { userId: user.id }, select: { id: true } })).id;
 
   profileId = (
-    await setFinanceProfile({ floristId, model: "PRIMARY", sharePercentBp: 6660, effectiveFrom: START, actor: OWNER })
+    await setFinanceProfile({ floristId, model: "PRIMARY", effectiveFrom: SHARE_START, sharePercentBp: 6660, actor: OWNER })
   ).createdId;
 
   // Разные суммы заказов: при распределении их доли закупки различались бы, и если бы
@@ -97,8 +98,8 @@ beforeAll(async () => {
   orderA = await makeOrder("A", 10000);
   orderB = await makeOrder("B", 30000);
 
-  await fixConsumablesRate({ siteId: null, amountCents: 500, effectiveFrom: START, actor: OWNER, now: NOW });
-  await fixSiteFeeModel({ siteId, percentBp: 290, fixedCents: 30, effectiveFrom: START, actor: OWNER, now: NOW });
+  await fixConsumablesRate({ siteId: null, amountCents: 500, actor: OWNER, now: NOW });
+  await fixSiteFeeModel({ siteId, percentBp: 290, fixedCents: 30, actor: OWNER, now: NOW });
   await fixDeliveryActualCost({ orderId: orderA, amountCents: 1000, actor: OWNER, now: NOW });
   await fixDeliveryActualCost({ orderId: orderB, amountCents: 1500, actor: OWNER, now: NOW });
   await fixDailyFlowerExpense({ expenseDay: DAY, amountCents: 6000, actor: OWNER, now: NOW });

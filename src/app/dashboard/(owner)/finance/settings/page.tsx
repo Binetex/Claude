@@ -3,10 +3,8 @@ import { requireRole } from "@/lib/rbac";
 import { prisma } from "@/lib/db";
 import { PageHeader } from "@/components/ui/misc";
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/Card";
-import { Badge } from "@/components/ui/Badge";
 import { EmptyState } from "@/components/ui/states";
 import { formatCents } from "@/lib/cents";
-import { dayKey } from "@/modules/finance/dayFinance";
 import { listSettingRecords, type SettingRecord } from "@/modules/finance/settingsAdmin";
 import { primaryShareStartDate } from "@/modules/finance/config";
 import { CorrectSettingDialog, DeleteSettingDialog, type SettingRowDto } from "@/components/finance/SettingRowActions";
@@ -15,7 +13,6 @@ import { correctSettingAction, deleteSettingAction, previewSettingAction } from 
 
 export const dynamic = "force-dynamic";
 
-const period = (from: Date, to: Date | null) => `${dayKey(from)} — ${to ? dayKey(to) : "сейчас"}`;
 
 const th = "px-3 py-2 text-left text-[11px] font-medium tracking-wide text-slate-400 uppercase";
 const td = "px-3 py-2";
@@ -43,9 +40,6 @@ export default async function FinanceSettingsPage() {
   const rates = records.filter((r) => r.entity === "CONSUMABLES_RATE");
   const feeModels = records.filter((r) => r.entity === "FEE_MODEL");
   const taxPolicies = records.filter((r) => r.entity === "TAX_POLICY");
-
-  const start = primaryShareStartDate();
-  const startKey = start ? dayKey(start) : null;
   const actions = { correct: correctSettingAction, remove: deleteSettingAction, preview: previewSettingAction };
 
   return (
@@ -66,7 +60,7 @@ export default async function FinanceSettingsPage() {
       <Card>
         <CardHeader className="flex items-center justify-between gap-2">
           <CardTitle>Расходники · фиксированная сумма на заказ</CardTitle>
-          <ConsumablesForm sites={sites} hasRecords={rates.length > 0} shareStartDate={startKey} />
+          <ConsumablesForm sites={sites} hasRecords={rates.length > 0} />
         </CardHeader>
         <CardBody className="p-0">
           {rates.length === 0 ? (
@@ -77,7 +71,6 @@ export default async function FinanceSettingsPage() {
                 <tr className="border-b border-slate-100">
                   <th className={th}>Область</th>
                   <th className={th}>Сумма</th>
-                  <th className={th}>Период</th>
                   <th className={`${th} text-right`}>Действия</th>
                 </tr>
               </thead>
@@ -87,9 +80,6 @@ export default async function FinanceSettingsPage() {
                     <td className={td}>{r.siteShortName ?? "Все магазины"}</td>
                     <td className={`${td} tabular-nums`}>
                       {r.values.entity === "CONSUMABLES_RATE" ? formatCents(r.values.amountCents) : "—"}
-                    </td>
-                    <td className={`${td} text-slate-500 tabular-nums`}>
-                      {period(r.effectiveFrom, r.effectiveTo)} <ActiveMark record={r} />
                     </td>
                     <RowActions record={r} />
                   </tr>
@@ -106,7 +96,7 @@ export default async function FinanceSettingsPage() {
           <FeeModelForm
             sites={sites}
             configuredSiteIds={[...new Set(feeModels.map((m) => m.siteId).filter((v): v is string => v != null))]}
-            shareStartDate={startKey}
+           
           />
         </CardHeader>
         <CardBody className="p-0">
@@ -119,7 +109,6 @@ export default async function FinanceSettingsPage() {
                   <th className={th}>Магазин</th>
                   <th className={th}>Процент</th>
                   <th className={th}>Фикс</th>
-                  <th className={th}>Период</th>
                   <th className={`${th} text-right`}>Действия</th>
                 </tr>
               </thead>
@@ -133,9 +122,6 @@ export default async function FinanceSettingsPage() {
                     <td className={`${td} tabular-nums`}>
                       {m.values.entity === "FEE_MODEL" ? formatCents(m.values.fixedCents) : "—"}
                     </td>
-                    <td className={`${td} text-slate-500 tabular-nums`}>
-                      {period(m.effectiveFrom, m.effectiveTo)} <ActiveMark record={m} />
-                    </td>
                     <RowActions record={m} />
                   </tr>
                 ))}
@@ -148,7 +134,7 @@ export default async function FinanceSettingsPage() {
       <Card>
         <CardHeader className="flex items-center justify-between gap-2">
           <CardTitle>Налоговая политика владельца</CardTitle>
-          <TaxPolicyForm sites={sites} hasRecords={taxPolicies.length > 0} shareStartDate={startKey} />
+          <TaxPolicyForm sites={sites} hasRecords={taxPolicies.length > 0} />
         </CardHeader>
         <CardBody className="p-0">
           <div className="px-3 pt-2 text-xs text-slate-500">
@@ -163,7 +149,6 @@ export default async function FinanceSettingsPage() {
                 <tr className="border-b border-slate-100">
                   <th className={th}>Область</th>
                   <th className={th}>Реальный расход</th>
-                  <th className={th}>Период</th>
                   <th className={`${th} text-right`}>Действия</th>
                 </tr>
               </thead>
@@ -173,9 +158,6 @@ export default async function FinanceSettingsPage() {
                     <td className={td}>{p.siteShortName ?? "Все магазины"}</td>
                     <td className={`${td} tabular-nums`}>
                       {p.values.entity === "TAX_POLICY" ? `${(p.values.actualShareBp / 100).toFixed(2)}%` : "—"}
-                    </td>
-                    <td className={`${td} text-slate-500 tabular-nums`}>
-                      {period(p.effectiveFrom, p.effectiveTo)} <ActiveMark record={p} />
                     </td>
                     <RowActions record={p} />
                   </tr>
@@ -202,9 +184,8 @@ export default async function FinanceSettingsPage() {
       </Card>
 
       <p className="text-xs text-slate-400">
-        «Новая ставка с даты» закрывает текущий период и оставляет прошлые расчёты как есть. «Изменить» — исправление
-        ошибки ввода: значение считается неверным с начала периода, поэтому расчёты внутри него пересобираются, а если
-        доля изменилась, прежнее начисление сторнируется и создаётся новое.
+        У настройки одно значение, и оно действует всегда. Правка пересчитывает все дни расчёта: прежняя сумма
+        остаётся в истории правок, но заказы считаются по текущей.
       </p>
     </div>
   );
@@ -213,7 +194,6 @@ export default async function FinanceSettingsPage() {
     const row: SettingRowDto = {
       id: record.id,
       entity: record.entity,
-      effectiveFrom: dayKey(record.effectiveFrom),
       ...(record.values.entity === "CONSUMABLES_RATE" ? { amountCents: record.values.amountCents } : {}),
       ...(record.values.entity === "FEE_MODEL"
         ? { percentBp: record.values.percentBp, fixedCents: record.values.fixedCents }
@@ -231,7 +211,3 @@ export default async function FinanceSettingsPage() {
   }
 }
 
-function ActiveMark({ record }: { record: SettingRecord }) {
-  if (!record.active) return null;
-  return <Badge className="border-emerald-200 bg-emerald-50 text-emerald-700">действует</Badge>;
-}

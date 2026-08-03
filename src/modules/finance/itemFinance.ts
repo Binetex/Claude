@@ -24,12 +24,11 @@ export type ItemFinance = {
 };
 
 /**
- * Классификация и закупочная стоимость позиций заказа на дату доставки.
+ * Классификация и закупочная стоимость позиций заказа.
  * Резолв целиком делегирован Stage 1 (`resolveVariantFinance`) — второй формулы нет.
  */
 export async function resolveItemsFinance(
-  items: Array<{ id: string; name: string; productId: string | null; variantId: string | null }>,
-  at: Date
+  items: Array<{ id: string; name: string; productId: string | null; variantId: string | null }>
 ): Promise<Map<string, ItemFinance>> {
   const result = new Map<string, ItemFinance>();
 
@@ -97,8 +96,6 @@ export async function resolveItemsFinance(
           productVariantId: true,
           costType: true,
           purchaseCostCents: true,
-          effectiveFrom: true,
-          effectiveTo: true,
         },
       })
     : [];
@@ -137,7 +134,6 @@ export async function resolveItemsFinance(
         },
         costs: costs as VaseCostRow[],
         vases: vaseInfo,
-        at,
       });
       // Закупка обязательна там, где позиция не является обычным букетом без вазы:
       // именно эти случаи Stage 1 помечает причинами разбора.

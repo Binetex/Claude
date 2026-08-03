@@ -37,11 +37,6 @@ function parseEntity(raw: FormDataEntryValue | null): SettingEntity {
   throw new SettingsAdminError("bad_entity", "Неизвестная настройка.");
 }
 
-function parseDay(raw: FormDataEntryValue | null): Date {
-  const v = String(raw ?? "");
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(v)) throw new SettingsAdminError("bad_day", "Дата должна быть в формате ГГГГ-ММ-ДД.");
-  return new Date(`${v}T00:00:00.000Z`);
-}
 
 /** Денежная строка формы в целые центы. */
 function cents(raw: FormDataEntryValue | null, what: string): number {
@@ -79,7 +74,6 @@ export async function correctSettingAction(formData: FormData): Promise<AdminAct
       entity,
       id: String(formData.get("id") ?? ""),
       values: parseValues(entity, formData),
-      effectiveFrom: parseDay(formData.get("effectiveFrom")),
       reason: String(formData.get("reason") ?? ""),
       actor: { userId: user.id, role: user.role },
     });
@@ -115,7 +109,6 @@ export async function previewSettingAction(input: {
   percent?: string;
   fixed?: string;
   share?: string;
-  effectiveFrom?: string;
 }): Promise<{ error?: string; preview?: SettingPreview }> {
   await requireRole("OWNER");
   try {
@@ -131,7 +124,6 @@ export async function previewSettingAction(input: {
         id: input.id,
         op: input.op,
         values: input.op === "CORRECT" ? parseValues(input.entity, fd) : undefined,
-        effectiveFrom: input.op === "CORRECT" && input.effectiveFrom ? parseDay(input.effectiveFrom) : undefined,
       }),
     };
   } catch (e) {

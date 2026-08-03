@@ -20,6 +20,7 @@ import { listShareDaysRead, readShareDayBreakdown } from "./shareRead";
 const RUN = `shr${crypto.randomBytes(3).toString("hex")}`;
 const OWNER = { userId: "", role: "OWNER" as const };
 const NOW = new Date("2026-07-31T12:00:00.000Z");
+const SHARE_START = new Date("2026-07-01T00:00:00.000Z");
 const START = new Date("2026-07-01T00:00:00.000Z");
 
 /** Три дня: два посчитанных и один без снимков. */
@@ -91,15 +92,15 @@ beforeAll(async () => {
   floristId = (await prisma.florist.create({ data: { userId: user.id }, select: { id: true } })).id;
 
   profileId = (
-    await setFinanceProfile({ floristId, model: "PRIMARY", sharePercentBp: 6660, effectiveFrom: START, actor: OWNER })
+    await setFinanceProfile({ floristId, model: "PRIMARY", effectiveFrom: SHARE_START, sharePercentBp: 6660, actor: OWNER })
   ).createdId;
 
   const a = await makeOrder("A", 10000, D1);
   const b = await makeOrder("B", 20000, D1);
   const c = await makeOrder("C", 15000, D2);
 
-  await fixConsumablesRate({ siteId: null, amountCents: 500, effectiveFrom: START, actor: OWNER, now: NOW });
-  await fixSiteFeeModel({ siteId, percentBp: 290, fixedCents: 30, effectiveFrom: START, actor: OWNER, now: NOW });
+  await fixConsumablesRate({ siteId: null, amountCents: 500, actor: OWNER, now: NOW });
+  await fixSiteFeeModel({ siteId, percentBp: 290, fixedCents: 30, actor: OWNER, now: NOW });
   for (const id of [a, b, c]) await fixDeliveryActualCost({ orderId: id, amountCents: 1000, actor: OWNER, now: NOW });
 
   // Заполнение закупки публикует снимки и начисляет долю — это путь ЗАПИСИ.

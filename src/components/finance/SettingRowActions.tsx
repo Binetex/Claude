@@ -38,7 +38,6 @@ export type SettingPreviewDto = {
     orderNumbers: string[];
     shareBeforeCents: number | null;
     shareAfterCents: number | null;
-    accruedCents: number | null;
   }>;
   warnings: string[];
 };
@@ -54,14 +53,12 @@ export type SettingActions = {
     percent?: string;
     fixed?: string;
     share?: string;
-    effectiveFrom?: string;
   }) => Promise<{ error?: string; preview?: SettingPreviewDto }>;
 };
 
 export type SettingRowDto = {
   id: string;
   entity: SettingEntityDto;
-  effectiveFrom: string;
   amountCents?: number;
   percentBp?: number;
   fixedCents?: number;
@@ -146,9 +143,6 @@ export function CorrectSettingDialog({ actions, row }: { actions: SettingActions
   const [percent, setPercent] = useState(row.percentBp != null ? (row.percentBp / 100).toFixed(2) : "");
   const [fixed, setFixed] = useState(row.fixedCents != null ? (row.fixedCents / 100).toFixed(2) : "");
   const [share, setShare] = useState(row.actualShareBp != null ? (row.actualShareBp / 100).toFixed(2) : "");
-  // По умолчанию — существующая дата записи: исправляют обычно значение, а не период.
-  const [from, setFrom] = useState(row.effectiveFrom);
-
   const touched = () => setPreview(null);
 
   const askPreview = () =>
@@ -161,7 +155,6 @@ export function CorrectSettingDialog({ actions, row }: { actions: SettingActions
         percent,
         fixed,
         share,
-        effectiveFrom: from,
       });
       if (r.error) {
         toast.error(r.error);
@@ -229,10 +222,6 @@ export function CorrectSettingDialog({ actions, row }: { actions: SettingActions
               <Input name="share" inputMode="decimal" required value={share} onChange={(e) => { setShare(e.target.value); touched(); }} />
             </Field>
           )}
-
-          <Field label="Действует с" hint="Меняется вместе с концом предыдущего периода — дыры не появится.">
-            <Input name="effectiveFrom" type="date" required value={from} onChange={(e) => { setFrom(e.target.value); touched(); }} />
-          </Field>
 
           <Field label="Причина исправления" hint="Обязательна: уходит в историю изменений.">
             <Textarea name="reason" rows={2} required />

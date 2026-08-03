@@ -23,6 +23,7 @@ import { manualKey } from "./ledgerRules";
 const RUN = `bal${crypto.randomBytes(3).toString("hex")}`;
 const OWNER = { userId: "", role: "OWNER" as const };
 const DAY = new Date("2026-07-28T00:00:00.000Z");
+const SHARE_START = new Date("2026-07-01T00:00:00.000Z");
 const DAY2 = new Date("2026-07-29T00:00:00.000Z");
 const NOW = new Date("2026-07-30T12:00:00.000Z");
 const START = new Date("2026-07-01T00:00:00.000Z");
@@ -101,15 +102,15 @@ beforeAll(async () => {
   secondaryId = (await prisma.florist.create({ data: { userId: su.id }, select: { id: true } })).id;
 
   profileId = (
-    await setFinanceProfile({ floristId: primaryId, model: "PRIMARY", sharePercentBp: 6660, effectiveFrom: START, actor: OWNER })
+    await setFinanceProfile({ floristId: primaryId, model: "PRIMARY", effectiveFrom: SHARE_START, sharePercentBp: 6660, actor: OWNER })
   ).createdId;
-  await setFinanceProfile({ floristId: secondaryId, model: "SECONDARY", effectiveFrom: START, actor: OWNER });
+  await setFinanceProfile({ floristId: secondaryId, model: "SECONDARY", effectiveFrom: SHARE_START, actor: OWNER });
 
   orderA = await makeOrder("A", 20000, DAY, primaryId);
   secondOrder = await makeOrder("S", 15000, DAY, secondaryId, "118.00");
 
-  await fixConsumablesRate({ siteId: null, amountCents: 500, effectiveFrom: START, actor: OWNER, now: NOW });
-  await fixSiteFeeModel({ siteId, percentBp: 290, fixedCents: 30, effectiveFrom: START, actor: OWNER, now: NOW });
+  await fixConsumablesRate({ siteId: null, amountCents: 500, actor: OWNER, now: NOW });
+  await fixSiteFeeModel({ siteId, percentBp: 290, fixedCents: 30, actor: OWNER, now: NOW });
   await fixDeliveryActualCost({ orderId: orderA, amountCents: 1000, actor: OWNER, now: NOW });
   await fixDailyFlowerExpense({ expenseDay: DAY, amountCents: 6000, actor: OWNER, now: NOW });
 

@@ -71,7 +71,7 @@ export async function gatherDayOrders(
       where: { orderId: { in: orders.map((o) => o.id) }, reversedAt: null },
       select: { orderId: true, amountCents: true },
     }),
-    resolveItemsFinance(orders.flatMap((o) => o.items), day),
+    resolveItemsFinance(orders.flatMap((o) => o.items)),
   ]);
 
   const additionalByOrder = new Map<string, number>();
@@ -102,14 +102,14 @@ export async function gatherDayOrders(
       order.deliveryActualCostConfirmedAt != null || deliveryCents > 0 ? deliveryCents : null;
 
     // Фактическая комиссия приоритетнее модели магазина.
-    const feeModel = order.acquiringFee ? null : await resolveFeeModel(order.siteId, day);
+    const feeModel = order.acquiringFee ? null : await resolveFeeModel(order.siteId);
     const acquiringFeeCents = order.acquiringFee
       ? order.acquiringFee.feeCents
       : feeModel
         ? estimateFeeCents(feeModel, toCents(order.customerTotal))
         : null;
 
-    const rate = order.consumablesOverride ? null : await resolveConsumablesRate(order.siteId, day);
+    const rate = order.consumablesOverride ? null : await resolveConsumablesRate(order.siteId);
     const consumablesCents = order.consumablesOverride ? order.consumablesOverride.amountCents : (rate?.amountCents ?? null);
 
     result.push({

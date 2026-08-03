@@ -40,8 +40,6 @@ export type VaseCostRow = {
   productVariantId: string | null;
   costType: VaseCostType;
   purchaseCostCents: number;
-  effectiveFrom: Date;
-  effectiveTo: Date | null;
 };
 
 /** Сведения о варианте-вазе, на который ссылается букет. Собирает вызывающий. */
@@ -71,15 +69,14 @@ export type VariantFinanceInput = {
   costs: VaseCostRow[];
   /** Справочник связанных ваз по id варианта. */
   vases?: Record<string, LinkedVaseInfo>;
-  at: Date;
 };
 
 export type CatalogReviewReason =
   /** Букет заявлен с вазой, но ваза не выбрана. */
   | "VASE_LINK_MISSING"
-  /** У связанной вазы нет закупочной стоимости на дату. */
+  /** У связанной вазы нет закупочной стоимости. */
   | "VASE_COST_MISSING"
-  /** У самой позиции (ваза, подарок, прочее) нет закупочной стоимости на дату. */
+  /** У самой позиции (ваза, подарок, прочее) нет закупочной стоимости. */
   | "PURCHASE_COST_MISSING"
   | "VASE_ARCHIVED";
 
@@ -94,7 +91,7 @@ export type VariantFinance = {
   vase: LinkedVaseInfo | null;
   vaseSource: EffectiveSource;
   /**
-   * Закупочная себестоимость, применимая к позиции на дату:
+   * Закупочная себестоимость, применимая к позиции:
    * для вазы/подарка/прочего — её собственная, для букета с вазой — стоимость связанной вазы.
    * Обычный букет своей закупки не имеет: его себестоимость — это цена флориста.
    */
@@ -103,22 +100,16 @@ export type VariantFinance = {
   reviewReasons: CatalogReviewReason[];
 };
 
-/** Активна ли строка на дату: полуинтервал [from, to). */
-function isActiveAt(row: VaseCostRow, at: Date): boolean {
-  if (row.effectiveFrom.getTime() > at.getTime()) return false;
-  return row.effectiveTo === null || row.effectiveTo.getTime() > at.getTime();
-}
-
-function pick(costs: VaseCostRow[], at: Date, match: (row: VaseCostRow) => boolean): VaseCostRow | null {
+function pick(costs: VaseCostRow[], match: (row: VaseCostRow) => boolean): VaseCostRow | null {
   // STANDALONE_VASE здесь означает «закупочная себестоимость самой позиции»: она нужна не
   // только вазам, но и подаркам и прочим непветочным позициям. Имя значения осталось от
   // первой версии; заводить второе с тем же смыслом хуже, чем пояснить это здесь.
   // INCLUDED_VASE не используется: стоимость вазы внутри букета берётся у связанной вазы.
-  return costs.find((r) => r.costType === "STANDALONE_VASE" && match(r) && isActiveAt(r, at)) ?? null;
+  return costs.find((r) => r.costType === "STANDALONE_VASE" && match(r)) ?? null;
 }
 
 export function resolveVariantFinance(input: VariantFinanceInput): VariantFinance {
-  const { variant, product, costs, at } = input;
+  const { variant, product, costs } = input;
   const vases = input.vases ?? {};
 
   const financialType = effectiveFinancialType(variant.financialType, product.financialType);
@@ -138,7 +129,7 @@ export function resolveVariantFinance(input: VariantFinanceInput): VariantFinanc
 
   if (financialType !== "FLOWER_PRODUCT") {
     // Ваза, подарок, прочее — у позиции есть собственная закупка. Признак вазы не участвует.
-    row = pick(costs, at, (r) => r.productVariantId === variant.id) ?? pick(costs, at, (r) => r.productId === product.id);
+    row = pick(costs, (r) => r.productVariantId === variant.id) ?? pick(costs, (r) => r.productId === product.id);
     if (row === null) reviewReasons.push("PURCHASE_COST_MISSING");
   } else if (includesVase === true) {
     // Букет с вазой: ссылка варианта приоритетнее товарного дефолта.
@@ -154,8 +145,8 @@ export function resolveVariantFinance(input: VariantFinanceInput): VariantFinanc
       vase = linked;
       if (linked.archived) reviewReasons.push("VASE_ARCHIVED");
       row =
-        pick(costs, at, (r) => r.productVariantId === linked.id) ??
-        pick(costs, at, (r) => r.productId === linked.productId);
+        pick(costs, (r) => r.productVariantId === linked.id) ??
+        pick(costs, (r) => r.productId === linked.productId);
       if (row === null) reviewReasons.push("VASE_COST_MISSING");
     }
   }

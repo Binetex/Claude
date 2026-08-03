@@ -236,21 +236,17 @@ export async function listVaseOptions(siteId: string): Promise<
           status: true,
           // Стоимость вазы чаще всего задают на карточке ТОВАРА, а не варианта. Без этой
           // выборки список показывал «закуп не указан» у вазы, которой цена уже задана.
-          vaseCosts: { where: { costType: "STANDALONE_VASE" }, orderBy: { effectiveFrom: "desc" } },
+          vaseCosts: { where: { costType: "STANDALONE_VASE" } },
         },
       },
-      vaseCosts: { where: { costType: "STANDALONE_VASE" }, orderBy: { effectiveFrom: "desc" } },
+      vaseCosts: { where: { costType: "STANDALONE_VASE" } },
     },
     orderBy: [{ product: { name: "asc" } }, { title: "asc" }],
   });
 
-  const now = new Date();
-  const activeAt = (rows: { effectiveFrom: Date; effectiveTo: Date | null; purchaseCostCents: number }[]) =>
-    rows.find((c) => c.effectiveFrom <= now && (c.effectiveTo === null || c.effectiveTo > now)) ?? null;
-
   return variants.map((v) => {
     // Тот же приоритет, что и в расчёте заказа: своя цена варианта, иначе цена товара.
-    const active = activeAt(v.vaseCosts) ?? activeAt(v.product.vaseCosts);
+    const active = v.vaseCosts[0] ?? v.product.vaseCosts[0] ?? null;
     return {
       id: v.id,
       productId: v.product.id,

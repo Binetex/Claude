@@ -177,7 +177,6 @@ describe("селектор ваз", () => {
         productId: vp.productId,
         costType: "STANDALONE_VASE",
         purchaseCostCents: 900,
-        effectiveFrom: new Date("2026-01-01T00:00:00Z"),
         createdBy: userId,
       },
     });

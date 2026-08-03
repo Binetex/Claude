@@ -9,7 +9,6 @@
 import { revalidatePath } from "next/cache";
 import { requireRole } from "@/lib/rbac";
 import { usdToCents, CentsParseError } from "@/lib/cents";
-import { prisma } from "@/lib/db";
 import {
   FinanceFixError,
   confirmBurqDeliveryCosts,
@@ -103,7 +102,6 @@ export async function applyFeeModel(formData: FormData): Promise<SetupResult> {
       siteId: String(formData.get("siteId") ?? ""),
       percentBp: percentToBp(formData.get("percent"), "Процент комиссии"),
       fixedCents: String(formData.get("fixed") ?? "").trim() ? requiredCents(formData.get("fixed"), "фиксированную часть") : 0,
-      effectiveFrom: parseDay(String(formData.get("effectiveFrom") ?? "")),
       issueId: String(formData.get("issueId") ?? "") || null,
       comment: String(formData.get("comment") ?? "").trim() || null,
       actor: { userId: user.id, role: user.role },
@@ -136,7 +134,6 @@ export async function applyVasePurchaseCost(formData: FormData): Promise<SetupRe
     const r = await fixVasePurchaseCost({
       variantId: String(formData.get("variantId") ?? ""),
       amountCents: requiredCents(formData.get("amount"), "закупочную стоимость"),
-      effectiveFrom: parseDay(String(formData.get("effectiveFrom") ?? "")),
       issueId: String(formData.get("issueId") ?? "") || null,
       comment: String(formData.get("comment") ?? "").trim() || null,
       actor: { userId: user.id, role: user.role },
@@ -171,7 +168,6 @@ export async function applyConsumablesRate(formData: FormData): Promise<SetupRes
     const r = await fixConsumablesRate({
       siteId: String(formData.get("siteId") ?? "").trim() || null,
       amountCents: requiredCents(formData.get("amount"), "ставку расходников"),
-      effectiveFrom: parseDay(String(formData.get("effectiveFrom") ?? "")),
       issueId: String(formData.get("issueId") ?? "") || null,
       comment: String(formData.get("comment") ?? "").trim() || null,
       actor: { userId: user.id, role: user.role },
@@ -188,7 +184,6 @@ export async function applyOwnerTaxPolicy(formData: FormData): Promise<SetupResu
     const r = await fixOwnerTaxPolicy({
       siteId: String(formData.get("siteId") ?? "").trim() || null,
       actualShareBp: percentToBp(formData.get("percent"), "Доля налогового расхода"),
-      effectiveFrom: parseDay(String(formData.get("effectiveFrom") ?? "")),
       issueId: String(formData.get("issueId") ?? "") || null,
       comment: String(formData.get("comment") ?? "").trim() || null,
       actor: { userId: user.id, role: user.role },
@@ -250,8 +245,8 @@ export async function applyPrimarySharePercent(formData: FormData): Promise<Setu
     await setFinanceProfile({
       floristId,
       model: "PRIMARY",
-      sharePercentBp: percentToBp(formData.get("percent"), "Доля основного флориста"),
       effectiveFrom: parseDay(String(formData.get("effectiveFrom") ?? "")),
+      sharePercentBp: percentToBp(formData.get("percent"), "Доля основного флориста"),
       comment: String(formData.get("comment") ?? "").trim() || null,
       actor: { userId: user.id, role: user.role },
     });

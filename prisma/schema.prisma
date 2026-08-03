@@ -592,8 +592,6 @@ model VasePurchaseCost {
   costType          VaseCostType
   purchaseCostCents Int // >= 0, проверяется CHECK
   currency          String       @default("USD")
-  effectiveFrom     DateTime
-  effectiveTo       DateTime? // NULL = действует сейчас; если задан — строго > effectiveFrom (CHECK)
   comment           String?
   createdBy         String // User.id
   createdAt         DateTime     @default(now())
@@ -601,9 +599,10 @@ model VasePurchaseCost {
   product Product?        @relation(fields: [productId], references: [id], onDelete: Restrict)
   variant ProductVariant? @relation(fields: [productVariantId], references: [id], onDelete: Restrict)
 
-  @@index([productVariantId, costType, effectiveFrom])
-  @@index([productId, costType, effectiveFrom])
-  @@index([effectiveTo])
+  /// Одна цена на цель и тип. Частичные уникальные индексы — в миграции: цель задана
+  /// либо вариантом, либо товаром, и NULL во второй колонке не должен снимать проверку.
+  @@index([productVariantId, costType])
+  @@index([productId, costType])
 }
 
 /// Общий финансовый аудит. Заводится этой миграцией для каталога и переиспользуется
@@ -829,19 +828,18 @@ model DailyFlowerExpense {
 
 /// Ставка расходников на один доставленный заказ, с датами действия.
 model ConsumablesRate {
-  id            String    @id @default(cuid())
+  id          String   @id @default(cuid())
   /// NULL = глобальная ставка; заданный siteId переопределяет её для магазина.
-  siteId        String?
-  site          Site?     @relation(fields: [siteId], references: [id], onDelete: Restrict)
-  amountCents   Int // >= 0
-  effectiveFrom DateTime
-  effectiveTo   DateTime?
-  comment       String?
-  createdBy     String
-  createdAt     DateTime  @default(now())
+  siteId      String?
+  site        Site?    @relation(fields: [siteId], references: [id], onDelete: Restrict)
+  amountCents Int // >= 0
+  comment     String?
+  createdBy   String
+  createdAt   DateTime @default(now())
 
-  @@index([siteId, effectiveFrom])
-  @@index([effectiveTo])
+  /// Одна строка на область. Уникальность глобальной строки держит частичный индекс в
+  /// миграции: NULL в обычном уникальном индексе не сравнивается сам с собой.
+  @@unique([siteId])
 }
 
 /// Ручная поправка расходников по конкретному заказу — перебивает ставку.
@@ -863,20 +861,15 @@ enum AcquiringFeeSource {
 /// Модель комиссии эквайринга магазина: процент + фиксированная часть.
 /// Применяется, когда фактической комиссии по заказу нет.
 model SiteAcquiringFeeModel {
-  id            String    @id @default(cuid())
-  siteId        String
-  site          Site      @relation(fields: [siteId], references: [id], onDelete: Restrict)
+  id         String   @id @default(cuid())
+  siteId     String   @unique
+  site       Site     @relation(fields: [siteId], references: [id], onDelete: Restrict)
   /// Базисные пункты: 2.9% = 290. Float в деньгах не заводим.
-  percentBp     Int
-  fixedCents    Int
-  effectiveFrom DateTime
-  effectiveTo   DateTime?
-  comment       String?
-  createdBy     String
-  createdAt     DateTime  @default(now())
-
-  @@index([siteId, effectiveFrom])
-  @@index([effectiveTo])
+  percentBp  Int
+  fixedCents Int
+  comment    String?
+  createdBy  String
+  createdAt  DateTime @default(now())
 }
 
 /// Фактическая комиссия по заказу. Отсутствие строки = «неизвестна», тогда
@@ -895,19 +888,16 @@ model OrderAcquiringFee {
 /// Доля Order.tax, являющаяся РЕАЛЬНЫМ расходом владельца.
 /// Флористам не отдаётся никогда: в их базе налог вычитается на 100%.
 model OwnerTaxPolicy {
-  id            String    @id @default(cuid())
+  id            String   @id @default(cuid())
   siteId        String? // NULL = глобальная политика
-  site          Site?     @relation(fields: [siteId], references: [id], onDelete: Restrict)
+  site          Site?    @relation(fields: [siteId], references: [id], onDelete: Restrict)
   /// Базисные пункты от Order.tax: 20% = 2000.
   actualShareBp Int
-  effectiveFrom DateTime
-  effectiveTo   DateTime?
   comment       String?
   createdBy     String
-  createdAt     DateTime  @default(now())
+  createdAt     DateTime @default(now())
 
-  @@index([siteId, effectiveFrom])
-  @@index([effectiveTo])
+  @@unique([siteId])
 }
 
 /// Дополнительный расход по заказу: повторная доставка, переделка букета, компенсация.
