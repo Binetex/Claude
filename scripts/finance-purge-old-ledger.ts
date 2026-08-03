@@ -17,32 +17,37 @@ import "dotenv/config";
  * осознанная защита, поэтому обход здесь ОДИН, явный и узкий: триггер удаления снимается и
  * возвращается внутри одной транзакции, ничего другого скрипт не трогает.
  *
- * Отсечка по effectiveDate — бизнес-дате операции, той же, по которой история сортируется.
+ * Отбор — по ТИПУ записи, а не по дате. Сухой прогон на проде показал, что часть начислений
+ * снесённой модели датирована уже августом (доля Насти за 2026-08-02 со сторно и «уточнено»,
+ * заказы Olga), поэтому отсечка по дате оставила бы ровно ту путаницу, ради которой всё
+ * затевалось. Решения владельца (PAYMENT / PAYMENT_REVERSAL / BONUS / MANUAL_ADJUSTMENT) не
+ * трогаются никогда — только они и формируют баланс (см. balance.ts::recordedEntries).
  */
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
+import type { LedgerEntryType } from "@/generated/prisma/enums";
 import { prisma } from "@/lib/db";
 
-const CUTOFF = new Date("2026-08-01T00:00:00.000Z");
+/** Типы снесённой модели: начисления и сторно к ним. В балансе не участвуют. */
+const ACCRUAL_TYPES: LedgerEntryType[] = ["ORDER_ACCRUAL", "PRIMARY_FLORIST_SHARE", "CORRECTION"];
 
 const args = process.argv.slice(2);
 const live = args.includes("--live") && args.includes("--confirm");
 
 async function main() {
   const doomed = await prisma.ledgerEntry.findMany({
-    where: { effectiveDate: { lt: CUTOFF } },
+    where: { type: { in: ACCRUAL_TYPES } },
     orderBy: [{ floristNameSnapshot: "asc" }, { effectiveDate: "asc" }],
   });
   const survivors = await prisma.ledgerEntry.findMany({
-    where: { effectiveDate: { gte: CUTOFF } },
+    where: { type: { notIn: ACCRUAL_TYPES } },
     orderBy: { effectiveDate: "asc" },
   });
 
-  console.log(`Отсечка: ${CUTOFF.toISOString().slice(0, 10)}`);
+  console.log(`Удаляем типы: ${ACCRUAL_TYPES.join(", ")}`);
   console.log(`К удалению: ${doomed.length}. Остаётся: ${survivors.length}.`);
 
-  // Что остаётся — показываем построчно: отсечка по дате не гарантирует, что среди
-  // выживших нет начислений снесённой модели, датированных уже августом.
+  // Что остаётся — построчно: в книге должны остаться ТОЛЬКО решения владельца.
   if (survivors.length) {
     console.log("Остаются:");
     for (const e of survivors) {
@@ -65,7 +70,7 @@ async function main() {
   // Иначе DELETE упрётся в ON DELETE RESTRICT — лучше узнать это до, чем в середине.
   const doomedIds = new Set(doomed.map((e) => e.id));
   const danglingReversals = await prisma.ledgerEntry.findMany({
-    where: { effectiveDate: { gte: CUTOFF }, reversedEntryId: { not: null } },
+    where: { type: { notIn: ACCRUAL_TYPES }, reversedEntryId: { not: null } },
     select: { id: true, reversedEntryId: true },
   });
   const broken = danglingReversals.filter((r) => r.reversedEntryId && doomedIds.has(r.reversedEntryId));
@@ -91,7 +96,14 @@ async function main() {
 
   const deleted = await prisma.$transaction(async (tx) => {
     await tx.$executeRawUnsafe(`ALTER TABLE "LedgerEntry" DISABLE TRIGGER "LedgerEntry_no_delete"`);
-    const n = await tx.$executeRawUnsafe(`DELETE FROM "LedgerEntry" WHERE "effectiveDate" < $1`, CUTOFF);
+    // Два прохода, и порядок важен: сторно ссылается на сторнируемую запись
+    // (reversedEntryId, ON DELETE RESTRICT — проверяется построчно и отложить его нельзя).
+    // Сначала уходят ссылающиеся CORRECTION, только потом сами начисления.
+    const corrections = await tx.$executeRawUnsafe(`DELETE FROM "LedgerEntry" WHERE "type" = 'CORRECTION'`);
+    const accruals = await tx.$executeRawUnsafe(
+      `DELETE FROM "LedgerEntry" WHERE "type" IN ('ORDER_ACCRUAL', 'PRIMARY_FLORIST_SHARE')`
+    );
+    const n = corrections + accruals;
     await tx.$executeRawUnsafe(`ALTER TABLE "LedgerEntry" ENABLE TRIGGER "LedgerEntry_no_delete"`);
     return n;
   });
