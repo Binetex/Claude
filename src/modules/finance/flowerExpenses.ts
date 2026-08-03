@@ -24,12 +24,12 @@ import "server-only";
 import { Prisma } from "@/generated/prisma/client";
 import type { Role } from "@/generated/prisma/enums";
 import { prisma } from "@/lib/db";
-import { buildDayPlan, dayKey, publishDaySnapshots } from "./snapshot";
-import { detectFinanceIssues } from "./issues";
-import { accrueDayShare, computeDayShare } from "./primaryShare";
+import { buildDayPlan, dayKey } from "./snapshot";
+import { computeDayShare } from "./primaryShare";
 import { primaryShareCents } from "./calc";
 import { appendEntry } from "./ledger";
 import { reversalKey } from "./ledgerRules";
+import { recalculateAffectedFinance } from "./fix";
 
 export class FlowerExpenseError extends Error {
   constructor(
@@ -715,27 +715,30 @@ export async function deleteFlowerExpense(args: {
   return { ...aftermath, reversedCents: accrual?.amountCents ?? null };
 }
 
-/** Общий хвост записи: ревизия снимков дня → детектор → пересчёт доли. */
+/**
+ * Хвост записи — ОБЩИЙ для всего модуля: ревизия снимков дня → детектор → пересчёт доли.
+ *
+ * Собственной копии здесь больше нет. Она была, и это ровно тот случай, когда правишь
+ * одно место, а второе продолжает жить по-старому.
+ *
+ * Публикация и начисление идут с ролью OWNER даже когда правку внёс флорист: это шаги
+ * владельческого конвейера, а настоящий автор записан в FinanceAudit вместе со своей ролью.
+ */
 async function applyAftermath(
   profile: { id: string; floristId: string },
   day: Date,
   actor: ExpenseActor,
   now: Date
 ): Promise<ExpenseApplyResult> {
-  // Публикация снимков и начисление — системные шаги владельческого конвейера, поэтому
-  // идут с ролью OWNER и тогда, когда правку внёс флорист. Настоящий автор изменения от
-  // этого не теряется: он записан в FinanceAudit вместе со своей ролью.
-  const { published } = await publishDaySnapshots(profile.id, day, { userId: actor.userId, role: "OWNER" });
-  const detector = await detectFinanceIssues(now);
-  const outcome = await accrueDayShare(profile.id, day, { userId: actor.userId, role: "OWNER" });
-
+  const r = await recalculateAffectedFinance(profile.id, [day], { userId: actor.userId, role: "OWNER" }, now);
+  const outcome = r.outcomes[0]?.outcome;
   return {
     day: dayKey(day),
-    republished: published,
+    republished: r.republished,
     share:
-      outcome.status === "CORRECTED"
+      outcome?.status === "CORRECTED"
         ? { status: outcome.status, fromCents: outcome.fromCents, toCents: outcome.toCents }
-        : { status: outcome.status },
-    issuesOpened: detector.opened + detector.reopened,
+        : { status: outcome?.status ?? "SKIPPED" },
+    issuesOpened: r.detector.opened + r.detector.reopened,
   };
 }

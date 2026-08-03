@@ -18,7 +18,7 @@ import { prisma } from "@/lib/db";
 import { appendEntry, type LedgerActor } from "./ledger";
 import { reversalKey } from "./ledgerRules";
 import { primaryShareCents } from "./calc";
-import { buildDayPlan, dayKey } from "./snapshot";
+import { buildDayPlan, dayKey, publishDaySnapshots } from "./snapshot";
 import { primaryShareGate } from "./config";
 
 /** Ключ дневного начисления. Формат — часть контракта с БД, менять нельзя. */
@@ -119,7 +119,7 @@ export async function accrueDayShare(profileId: string, day: Date, actor: Ledger
   // Без процента считать нечего, и подставлять его «по умолчанию» нельзя: это деньги.
   if (profile.sharePercentBp == null) return { status: "SKIPPED", reason: "NO_SHARE_PERCENT" };
 
-  const computed = await computeDayShare(profileId, day);
+  let computed = await computeDayShare(profileId, day);
   if (!computed) return { status: "SKIPPED", reason: "NO_PROFILE" };
   if (computed.ordersTotal === 0) return { status: "SKIPPED", reason: "NO_ORDERS" };
   if (computed.blocked) return { status: "SKIPPED", reason: "DAY_BLOCKED" };
@@ -155,6 +155,23 @@ export async function accrueDayShare(profileId: string, day: Date, actor: Ledger
   if (existing && existing.amountCents === computed.shareCents) {
     return { status: "UNCHANGED", amountCents: computed.shareCents };
   }
+
+  /**
+   * Сумма меняется — значит, СНАЧАЛА публикуем снимки дня, и только потом пишем в книгу.
+   *
+   * Иначе запись ссылается на ревизии, которые её не объясняют: именно так и случилось на
+   * проде, когда диспетчер поправил деньги за 2 августа, а снимки остались от прежнего
+   * состава дня. Владельцу пришлось жать «Пересчитать день» руками.
+   *
+   * Публикация стоит здесь, а не в начале: на пути «ничего не изменилось» — а это
+   * подавляющее большинство проходов диспетчера — она не нужна и стоила бы сборки плана
+   * на каждый день каждые 15 минут.
+   */
+  // Публикация — системный шаг конвейера, поэтому идёт с ролью владельца независимо
+  // от того, чья правка запустила пересчёт.
+  await publishDaySnapshots(profileId, day, { userId: actor.userId, role: "OWNER" });
+  computed = (await computeDayShare(profileId, day))!;
+  if (computed.blocked) return { status: "SKIPPED", reason: "DAY_BLOCKED" };
 
   // Ничего не начислено и начислять нечего — не заводим запись на ноль: «за этот день
   // ноль» и «день ещё не считался» должны различаться.
@@ -281,15 +298,23 @@ export async function primaryShareDays(now: Date = new Date()): Promise<{ profil
   return { profileId: profile.id, days: rows.map((r) => r.deliveryDate) };
 }
 
-/** Пересчитывает долю по перечисленным дням. Используется и воркером, и исправлениями. */
+/**
+ * Пересчитывает долю по перечисленным дням. Используется и воркером, и исправлениями.
+ *
+ * Возвращает не только счётчики, но и сами исходы: вызывающему часто нужно «было → стало»
+ * по конкретному дню, и добывать это отдельным запросом к книге значило бы спросить у
+ * системы то, что она только что сама и посчитала.
+ */
 export async function accrueDays(profileId: string, days: Date[], actor: LedgerActor) {
   const result = { created: 0, corrected: 0, unchanged: 0, skipped: 0 };
+  const outcomes: { day: Date; outcome: ShareOutcome }[] = [];
   for (const day of days) {
     const outcome = await accrueDayShare(profileId, day, actor);
+    outcomes.push({ day, outcome });
     if (outcome.status === "CREATED") result.created++;
     else if (outcome.status === "CORRECTED") result.corrected++;
     else if (outcome.status === "UNCHANGED") result.unchanged++;
     else result.skipped++;
   }
-  return result;
+  return { ...result, outcomes };
 }

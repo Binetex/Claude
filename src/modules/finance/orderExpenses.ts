@@ -23,7 +23,7 @@ import { prisma } from "@/lib/db";
 import { appendEntry } from "./ledger";
 import { reversalKey } from "./ledgerRules";
 import { resolveProfileAt } from "./profile";
-import { republishAndDetect } from "./fix";
+import { recalculateAffectedFinance } from "./fix";
 import { accrueDayShare } from "./primaryShare";
 import { dayKey } from "./snapshot";
 import { primaryShareStartDate } from "./config";
@@ -493,14 +493,16 @@ async function recomputePrimaryDay(order: OrderContext, actor: ExpenseActor, now
   });
   if (!profile) return { kind: "NONE", reason: "Нет действующего профиля основного флориста." };
 
-  const result = await republishAndDetect(profile.id, [order.deliveryDate], { userId: actor.userId, role: "OWNER" }, now);
-  const outcome = await accrueDayShare(profile.id, order.deliveryDate, { userId: actor.userId, role: "OWNER" });
+  // Отдельного accrueDayShare здесь нет: общий конвейер уже начисляет. Второй вызов был
+  // безобиден только благодаря идемпотентности — но это ровно тот случай, когда «работает»
+  // и «правильно» расходятся.
+  const result = await recalculateAffectedFinance(profile.id, [order.deliveryDate], { userId: actor.userId, role: "OWNER" }, now);
 
   return {
     kind: "PRIMARY_DAY",
     day: dayKey(order.deliveryDate),
     republished: result.republished,
-    share: outcome.status,
+    share: result.outcomes[0]?.outcome.status ?? "SKIPPED",
   };
 }
 

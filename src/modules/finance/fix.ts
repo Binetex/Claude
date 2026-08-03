@@ -20,7 +20,7 @@ import { detectFinanceIssues, DETECTOR_WINDOW_DAYS } from "./issues";
 import { publishDaySnapshots } from "./snapshot";
 import { setConsumablesRate, setDailyFlowerExpense, setFeeModel, setOwnerTaxPolicy } from "./settings";
 import { primaryShareStartDate } from "./config";
-import { accrueDays } from "./primaryShare";
+import { accrueDays, type ShareOutcome } from "./primaryShare";
 
 export type FixActor = { userId: string; role: Role };
 
@@ -49,6 +49,8 @@ export type FixResult = {
   detector: { opened: number; updated: number; reopened: number; autoResolved: number };
   /** Что стало с начислением доли по затронутым дням. */
   share: { created: number; corrected: number; unchanged: number; skipped: number };
+  /** Исходы по каждому дню — чтобы «было → стало» не пришлось добывать заново. */
+  outcomes: { day: Date; outcome: ShareOutcome }[];
 };
 
 /** Действующий профиль основного флориста. Без него считать нечего. */
@@ -94,11 +96,19 @@ async function daysFor(
 }
 
 /**
- * Общий хвост любого исправления: пересобрать снимки затронутых дней и прогнать детектор.
- * Публикация ревизий идёт по дням, а не по заказам: распределение закупки общее для дня,
- * и пересчитать один заказ в отрыве от остальных нельзя.
+ * ЕДИНСТВЕННЫЙ путь пересчёта после любого изменения входных данных.
+ *
+ * Порядок фиксирован: снимки затронутых дней → детектор → пересчёт доли. Начисление идёт
+ * последним, потому что опирается на уже опубликованные ревизии — иначе запись в книге
+ * сослалась бы на снимки, которые её не объясняют.
+ *
+ * Пересчёт идёт по ДНЯМ, а не по заказам: дневная закупка общая, и посчитать один заказ
+ * в отрыве от остальных нельзя.
+ *
+ * Копий этой функции быть не должно. Она уже существовала в двух экземплярах, и когда
+ * правился один, второй продолжал работать по-старому.
  */
-export async function republishAndDetect(
+export async function recalculateAffectedFinance(
   profileId: string,
   days: Date[],
   actor: FixActor,
@@ -112,12 +122,13 @@ export async function republishAndDetect(
   const detector = await detectFinanceIssues(now);
   // Пересчёт доли — последним шагом: он опирается на уже опубликованные снимки.
   // Опубликованную запись не редактирует: при изменении суммы создаёт сторно и новую.
-  const share = await accrueDays(profileId, days, actor);
+  const { outcomes, ...share } = await accrueDays(profileId, days, actor);
   return {
     republished,
     days: days.length,
     detector: { opened: detector.opened, updated: detector.updated, reopened: detector.reopened, autoResolved: detector.autoResolved },
     share,
+    outcomes,
   };
 }
 
@@ -181,7 +192,7 @@ export async function fixDeliveryActualCost(args: {
 
   await resolveIssue(args.issueId ?? null, args.actor, args.comment ?? null);
   const days = await daysFor(profile.floristId, { orderId: args.orderId }, now);
-  return republishAndDetect(profile.id, days, args.actor, now);
+  return recalculateAffectedFinance(profile.id, days, args.actor, now);
 }
 
 // ─────────────────────── 2. Модель комиссии магазина ───────────────────────
@@ -212,7 +223,7 @@ export async function fixSiteFeeModel(args: {
   const now = args.now ?? new Date();
   await resolveIssue(args.issueId ?? null, args.actor, args.comment ?? null);
   const days = await daysFor(profile.floristId, { siteId: args.siteId }, now);
-  return republishAndDetect(profile.id, days, args.actor, now);
+  return recalculateAffectedFinance(profile.id, days, args.actor, now);
 }
 
 // ─────────────────────── 3. Дневная закупка цветов ───────────────────────
@@ -239,7 +250,7 @@ export async function fixDailyFlowerExpense(args: {
 
   const now = args.now ?? new Date();
   await resolveIssue(args.issueId ?? null, args.actor, args.comment ?? null);
-  return republishAndDetect(profile.id, [args.expenseDay], args.actor, now);
+  return recalculateAffectedFinance(profile.id, [args.expenseDay], args.actor, now);
 }
 
 // ─────────────────── 4. Закупочная стоимость вазы/подарка ───────────────────
@@ -278,7 +289,7 @@ export async function fixVasePurchaseCost(args: {
   const now = args.now ?? new Date();
   await resolveIssue(args.issueId ?? null, args.actor, args.comment ?? null);
   const days = await daysFor(profile.floristId, { variantId: args.variantId }, now);
-  return republishAndDetect(profile.id, days, args.actor, now);
+  return recalculateAffectedFinance(profile.id, days, args.actor, now);
 }
 
 // ─────────────────────── 5. Привязка вазы к букету ───────────────────────
@@ -305,7 +316,7 @@ export async function fixVaseLink(args: {
   const now = args.now ?? new Date();
   await resolveIssue(args.issueId ?? null, args.actor, args.comment ?? null);
   const days = await daysFor(profile.floristId, { variantId: args.variantId }, now);
-  return republishAndDetect(profile.id, days, args.actor, now);
+  return recalculateAffectedFinance(profile.id, days, args.actor, now);
 }
 
 // ─────────────────────── 6. Ставка расходников ───────────────────────
@@ -334,7 +345,7 @@ export async function fixConsumablesRate(args: {
   const now = args.now ?? new Date();
   await resolveIssue(args.issueId ?? null, args.actor, args.comment ?? null);
   const days = await daysFor(profile.floristId, args.siteId ? { siteId: args.siteId } : {}, now);
-  return republishAndDetect(profile.id, days, args.actor, now);
+  return recalculateAffectedFinance(profile.id, days, args.actor, now);
 }
 
 // ─────────────────── 7. Налоговая политика владельца ───────────────────
@@ -365,7 +376,7 @@ export async function fixOwnerTaxPolicy(args: {
   // База флориста от политики не зависит (в ней налог всегда 100%), но ссылка на
   // применённую политику обязана попасть в снимок — иначе расчёт владельца не объяснить.
   const days = await daysFor(profile.floristId, args.siteId ? { siteId: args.siteId } : {}, now);
-  return republishAndDetect(profile.id, days, args.actor, now);
+  return recalculateAffectedFinance(profile.id, days, args.actor, now);
 }
 
 // ───────── Массовое подтверждение доставки по суммам Burq ─────────
@@ -535,7 +546,7 @@ export async function confirmBurqDeliveryCosts(args: {
   });
 
   const days = [...new Map(candidates.map((c) => [c.deliveryDay, new Date(`${c.deliveryDay}T00:00:00.000Z`)])).values()];
-  const result = await republishAndDetect(profile.id, days, args.actor, now);
+  const result = await recalculateAffectedFinance(profile.id, days, args.actor, now);
   return { ...result, confirmed: candidates.length };
 }
 

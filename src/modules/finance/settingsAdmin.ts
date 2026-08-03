@@ -28,7 +28,7 @@ import { prisma } from "@/lib/db";
 import { buildDayPlan, dayKey, type CalcOverrides } from "./snapshot";
 import { primaryShareCents } from "./calc";
 import { primaryShareStartDate } from "./config";
-import { republishAndDetect, type FixResult } from "./fix";
+import { recalculateAffectedFinance, type FixResult } from "./fix";
 import {
   affectedRange,
   leavesNoCoverage,
@@ -701,12 +701,19 @@ async function runAftermath(
 ): Promise<SettingApplyResult> {
   const profile = await activeProfile();
   if (!profile) {
-    return { republished: 0, days: 0, detector: { opened: 0, updated: 0, reopened: 0, autoResolved: 0 }, share: { created: 0, corrected: 0, unchanged: 0, skipped: 0 }, affectedDays: 0 };
+    return {
+      republished: 0,
+      days: 0,
+      detector: { opened: 0, updated: 0, reopened: 0, autoResolved: 0 },
+      share: { created: 0, corrected: 0, unchanged: 0, skipped: 0 },
+      outcomes: [],
+      affectedDays: 0,
+    };
   }
 
   const widened = nextFrom && nextFrom < range.from ? { ...range, from: nextFrom } : range;
   const days = await affectedDays(profile.floristId, siteId, widened, now);
-  const result = await republishAndDetect(profile.id, days, actor, now);
+  const result = await recalculateAffectedFinance(profile.id, days, actor, now);
   return { ...result, affectedDays: days.length };
 }
 
