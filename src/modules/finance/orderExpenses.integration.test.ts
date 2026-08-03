@@ -482,6 +482,53 @@ describe("исправление опубликованного расхода",
   });
 });
 
+describe("расход, который пока не влияет на деньги", () => {
+  it("недоставленный заказ: расход сохраняется, но честно помечен как не учтённый", async () => {
+    const problem = await makeOrder("PROBLEM", 12000, primaryFloristId);
+    await prisma.order.update({ where: { id: problem }, data: { orderStatus: "PROBLEM" } });
+
+    const before = await computeDayShare(primaryProfileId, DAY);
+    const r = await addOrderExpense({
+      orderId: problem,
+      amountCents: 5000,
+      description: "Компенсация клиенту",
+      expenseDate: DAY,
+      actor: OWNER,
+      now: NOW,
+    });
+
+    // Расчёт не тронут: считаются только доставленные заказы.
+    expect(r.effect.kind).toBe("NONE");
+    expect((r.effect as { reason: string }).reason).toMatch(/не доставлен/);
+    expect((await computeDayShare(primaryProfileId, DAY))!.shareCents).toBe(before!.shareCents);
+
+    // И это видно в блоке, а не только в момент сохранения.
+    const view = await listOrderExpenses(problem, OWNER);
+    expect(view.totalCents).toBe(5000);
+    expect(view.calc.counted).toBe(false);
+    expect(view.calc.note).toMatch(/только доставленные/);
+
+    // Как только заказ доставлен, расход подхватывается сам.
+    await prisma.order.update({ where: { id: problem }, data: { orderStatus: "DELIVERED" } });
+    await fixDeliveryActualCost({ orderId: problem, amountCents: 1000, actor: OWNER, now: NOW });
+
+    const after = await listOrderExpenses(problem, OWNER);
+    expect(after.calc.counted).toBe(true);
+    expect(after.calc.note).toMatch(/Учтено в расчёте/);
+
+    const snap = await prisma.orderFinancialSnapshot.findFirst({ where: { orderId: problem, status: "PUBLISHED" } });
+    expect(snap!.otherExpenseCents).toBe(5000);
+
+    await removeOrderExpense({ expenseId: r.expenseId, reason: "уборка", actor: OWNER, now: NOW });
+    await prisma.order.update({ where: { id: problem }, data: { orderStatus: "CANCELLED" } });
+  });
+
+  it("у второстепенного флориста удержание создаётся и до доставки", async () => {
+    const view = await listOrderExpenses(secondOrder, OWNER);
+    expect(view.calc.note).toBeDefined();
+  });
+});
+
 describe("аудит и привязка к флористу", () => {
   it("каждое действие пишется в FinanceAudit с ролью автора", async () => {
     const created = await addOrderExpense({

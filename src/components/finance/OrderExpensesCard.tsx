@@ -233,12 +233,14 @@ export function OrderExpensesCard({
   rows,
   totalCents,
   canEdit,
+  calc,
   actions,
 }: {
   orderId: string;
   rows: OrderExpenseDto[];
   totalCents: number;
   canEdit: boolean;
+  calc: { counted: boolean; note: string | null };
   actions: OrderExpenseActions;
 }) {
   return (
@@ -301,6 +303,15 @@ export function OrderExpensesCard({
         <span className="text-slate-500">Всего дополнительных расходов</span>
         <span className="font-semibold tabular-nums text-slate-900">{formatCents(totalCents)}</span>
       </div>
+      {calc.note && (
+        <div
+          className={`border-t px-4 py-2 text-xs ${
+            calc.counted ? "border-slate-100 text-slate-400" : "border-amber-200 bg-amber-50 text-amber-800"
+          }`}
+        >
+          {calc.note}
+        </div>
+      )}
     </Card>
   );
 }

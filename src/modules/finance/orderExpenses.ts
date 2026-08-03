@@ -56,7 +56,11 @@ export type OrderExpensesView = {
   /** Сумма ДЕЙСТВУЮЩИХ расходов. Отменённые в итог не входят. */
   totalCents: number;
   canEdit: boolean;
+  /** Дошли ли действующие расходы до денег и, если нет, почему. */
+  calc: ExpenseCalcState;
 };
+
+export type ExpenseCalcState = { counted: boolean; note: string | null };
 
 /** Ключ удержания. Формат — часть контракта с БД, менять нельзя. */
 export function expenseDeductionKey(expenseId: string): string {
@@ -128,7 +132,71 @@ export async function listOrderExpenses(orderId: string, actor: ExpenseActor): P
     })),
     totalCents: rows.filter((r) => r.reversedAt == null).reduce((a, r) => a + r.amountCents, 0),
     canEdit,
+    calc: await expenseCalcState(orderId, rows.filter((r) => r.reversedAt == null).length),
   };
+}
+
+/**
+ * Дошёл ли расход до денег.
+ *
+ * Нужно потому, что «сохранено» и «учтено» — разные вещи, а выглядят одинаково. Заказ в
+ * работе, незакрытый день, исторический период — во всех этих случаях расход честно лежит
+ * в базе и ждёт своего часа, но на выплату пока не влияет. Молчать об этом нельзя: именно
+ * так выглядит «я внёс, а ничего не изменилось».
+ */
+export async function expenseCalcState(orderId: string, activeCount?: number): Promise<ExpenseCalcState> {
+  const active =
+    activeCount ?? (await prisma.orderAdditionalExpense.count({ where: { orderId, reversedAt: null } }));
+  if (active === 0) return { counted: true, note: null };
+
+  const order = await prisma.order.findUnique({
+    where: { id: orderId },
+    select: { deliveryDate: true, currentFloristId: true, orderStatus: true },
+  });
+  if (!order?.currentFloristId) {
+    return { counted: false, note: "У заказа нет исполнителя, поэтому расход ни на кого не отнесён." };
+  }
+
+  const profile = await resolveProfileAt(order.currentFloristId, order.deliveryDate);
+  if (!profile) {
+    return { counted: false, note: "У флориста нет финансового профиля на дату доставки — расход в расчёт не входит." };
+  }
+
+  if (profile.model === "SECONDARY") {
+    const expenses = await prisma.orderAdditionalExpense.findMany({
+      where: { orderId, reversedAt: null },
+      select: { id: true },
+    });
+    const found = await prisma.ledgerEntry.count({
+      where: { idempotencyKey: { in: expenses.map((e) => expenseDeductionKey(e.id)) } },
+    });
+    return found === expenses.length
+      ? { counted: true, note: "Учтено удержанием в балансе флориста." }
+      : { counted: false, note: "Удержание ещё не создано." };
+  }
+
+  const start = primaryShareStartDate();
+  if (start && order.deliveryDate < start) {
+    return { counted: false, note: "Заказ доставлен до даты запуска расчёта доли, поэтому в неё не входит." };
+  }
+  if (order.orderStatus !== "DELIVERED") {
+    return {
+      counted: false,
+      note: "В расчёт пока не входит: считаются только доставленные заказы. Расход учтётся сам, когда заказ будет доставлен.",
+    };
+  }
+
+  const snapshot = await prisma.orderFinancialSnapshot.findFirst({
+    where: { orderId, status: "PUBLISHED" },
+    select: { isCalculable: true, otherExpenseCents: true },
+  });
+  if (!snapshot || !snapshot.isCalculable) {
+    return {
+      counted: false,
+      note: "День посчитан не полностью — расход учтётся, когда будут заполнены недостающие данные (см. «Требует заполнения»).",
+    };
+  }
+  return { counted: true, note: "Учтено в расчёте доли основного флориста." };
 }
 
 /**
@@ -181,12 +249,13 @@ type OrderContext = {
   orderId: string;
   deliveryDate: Date;
   floristId: string;
+  delivered: boolean;
 };
 
 async function loadOrder(orderId: string): Promise<OrderContext> {
   const order = await prisma.order.findUnique({
     where: { id: orderId },
-    select: { id: true, deliveryDate: true, currentFloristId: true },
+    select: { id: true, deliveryDate: true, currentFloristId: true, orderStatus: true },
   });
   if (!order) throw new OrderExpenseError("not_found", "Заказ не найден.");
   if (!order.currentFloristId) {
@@ -197,7 +266,12 @@ async function loadOrder(orderId: string): Promise<OrderContext> {
       "У заказа не назначен флорист. Назначьте исполнителя — тогда расход будет на кого отнести."
     );
   }
-  return { orderId: order.id, deliveryDate: order.deliveryDate, floristId: order.currentFloristId };
+  return {
+    orderId: order.id,
+    deliveryDate: order.deliveryDate,
+    floristId: order.currentFloristId,
+    delivered: order.orderStatus === "DELIVERED",
+  };
 }
 
 /** Добавляет расход и сразу проводит его через расчёт. */
@@ -383,7 +457,14 @@ async function settle(order: OrderContext, expenseId: string, actor: ExpenseActo
   const profile = await resolveProfileAt(order.floristId, order.deliveryDate);
   if (!profile) return { kind: "NONE", reason: "У флориста нет финансового профиля на дату доставки." };
 
-  if (profile.model === "PRIMARY") return recomputePrimaryDay(order, actor, now);
+  if (profile.model === "PRIMARY") {
+    if (!order.delivered) {
+      // Снимки строятся только по доставленным заказам, поэтому пересчитывать нечего.
+      // Расход не потерян: он попадёт в расчёт сам, когда заказ станет доставленным.
+      return { kind: "NONE", reason: "Заказ ещё не доставлен — в расчёт доли расход войдёт после доставки." };
+    }
+    return recomputePrimaryDay(order, actor, now);
+  }
   return applySecondaryDeduction(order, expenseId, actor);
 }
 
@@ -392,7 +473,10 @@ async function settleReversal(order: OrderContext, expenseId: string, actor: Exp
   const profile = await resolveProfileAt(order.floristId, order.deliveryDate);
   if (!profile) return { kind: "NONE", reason: "У флориста нет финансового профиля на дату доставки." };
 
-  if (profile.model === "PRIMARY") return recomputePrimaryDay(order, actor, now);
+  if (profile.model === "PRIMARY") {
+    if (!order.delivered) return { kind: "NONE", reason: "Заказ ещё не доставлен — пересчитывать нечего." };
+    return recomputePrimaryDay(order, actor, now);
+  }
   return reverseSecondaryDeduction(order, expenseId, actor);
 }
 

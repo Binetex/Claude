@@ -49,15 +49,23 @@ function refresh(orderId: string): void {
   revalidatePath("/dashboard/f/finance");
 }
 
-function describe(effect: { kind: string; share?: string; day?: string }): string {
+/**
+ * Что именно произошло с деньгами.
+ *
+ * «Сохранено» без продолжения — худший из возможных ответов: пользователь видит успех и
+ * идёт искать изменение там, где его нет. Поэтому случай «расчёт не тронут» объясняется
+ * так же подробно, как и случай «пересчитано».
+ */
+function describe(effect: { kind: string; share?: string; day?: string; reason?: string }): string {
   if (effect.kind === "PRIMARY_DAY") {
-    return effect.share === "CORRECTED"
-      ? ` Доля за ${effect.day} пересчитана.`
-      : effect.share === "UNCHANGED"
-        ? " Доля за день не изменилась."
-        : "";
+    if (effect.share === "CORRECTED") return ` Доля за ${effect.day} пересчитана.`;
+    if (effect.share === "UNCHANGED") return " Доля за день не изменилась.";
+    if (effect.share === "CREATED") return ` Доля за ${effect.day} начислена.`;
+    // SKIPPED — день пока не считается целиком; расход учтётся, когда он закроется.
+    return ` День ${effect.day} пока не посчитан, поэтому доля не изменилась.`;
   }
   if (effect.kind === "SECONDARY_DEDUCTION") return " Удержание отражено в балансе флориста.";
+  if (effect.kind === "NONE") return ` ${effect.reason ?? "На расчёт пока не влияет."}`;
   return "";
 }
 

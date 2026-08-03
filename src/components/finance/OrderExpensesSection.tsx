@@ -39,6 +39,7 @@ export async function OrderExpensesSection({ orderId }: { orderId: string }) {
       }))}
       totalCents={view.totalCents}
       canEdit={view.canEdit}
+      calc={view.calc}
       actions={{
         add: addOrderExpenseAction,
         update: updateOrderExpenseAction,
