@@ -37,9 +37,22 @@ function iconFor(href: string) {
   return Circle;
 }
 
-function isActive(pathname: string, href: string) {
+/**
+ * Активен пункт с САМЫМ ДЛИННЫМ подходящим href, а не любой подходящий.
+ *
+ * Иначе «Мои заказы» (/dashboard/f) подсвечивались всегда: их адрес — префикс всех
+ * остальных страниц кабинета (/dashboard/f/finance, /dashboard/f/pickup …), и по правилу
+ * «начинается с» они выигрывали на каждой вкладке.
+ */
+function isActive(pathname: string, href: string, nav: NavItem[]) {
   if (href === "/dashboard") return pathname === "/dashboard";
-  return pathname === href || pathname.startsWith(href + "/");
+  if (pathname === href) return true;
+  if (!pathname.startsWith(href + "/")) return false;
+
+  const longest = nav
+    .filter((t) => pathname === t.href || pathname.startsWith(t.href + "/"))
+    .reduce((a, b) => (a.href.length >= b.href.length ? a : b));
+  return longest.href === href;
 }
 
 export function SidebarNav({ nav, variant }: { nav: NavItem[]; variant: "sidebar" | "mobile" }) {
@@ -50,7 +63,7 @@ export function SidebarNav({ nav, variant }: { nav: NavItem[]; variant: "sidebar
       <nav className="flex gap-1 overflow-x-auto border-b border-slate-200 bg-white px-2 py-2 md:hidden">
         {nav.map((item) => {
           const Icon = iconFor(item.href);
-          const active = isActive(pathname, item.href);
+          const active = isActive(pathname, item.href, nav);
           return (
             <Link
               key={item.href}
@@ -73,7 +86,7 @@ export function SidebarNav({ nav, variant }: { nav: NavItem[]; variant: "sidebar
     <nav className="flex flex-col gap-0.5 px-3">
       {nav.map((item) => {
         const Icon = iconFor(item.href);
-        const active = isActive(pathname, item.href);
+        const active = isActive(pathname, item.href, nav);
         return (
           <Link
             key={item.href}

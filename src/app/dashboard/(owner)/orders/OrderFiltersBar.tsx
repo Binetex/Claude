@@ -75,9 +75,12 @@ export function OrderFiltersBar({
 
   return (
     <div className="space-y-2.5">
+      {/* Два ряда на телефоне: вкладки занимают первый целиком, всё остальное — второй.
+          Раньше строка ломалась на три ряда, потому что длинные плейсхолдеры («Даты
+          доставки», «Поиск: № / имя / телефон / адрес») выталкивали поиск на свою строку. */}
       <div className="flex flex-wrap items-center gap-2">
         {/* Сегментированные вкладки */}
-        <div className="flex items-center gap-0.5 rounded-lg bg-slate-100 p-0.5">
+        <div className="flex w-full items-center gap-0.5 overflow-x-auto rounded-lg bg-slate-100 p-0.5 md:w-auto">
           {presets.map((p) => (
             <button
               key={p.key}
@@ -98,25 +101,34 @@ export function OrderFiltersBar({
         <DateRangePicker
           value={{ from: rangeFrom || undefined, to: rangeTo || undefined }}
           disabled={pending}
+          placeholder="Даты"
           onChange={(next) => update({ from: next.from, to: next.to, date: undefined, preset: undefined })}
         />
 
-        <div className="ml-auto flex items-center gap-2">
-          <div className="relative">
+        <div className="flex flex-1 items-center gap-2 md:ml-auto md:flex-none">
+          <div className="relative flex-1 md:flex-none">
             <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-slate-400" />
             <Input
               type="search"
-              placeholder="Поиск: № / имя / телефон / адрес"
+              placeholder="Поиск"
+              aria-label="Поиск по номеру, имени, телефону или адресу"
               defaultValue={current.search}
               onKeyDown={(e) => {
                 if (e.key === "Enter") update({ search: (e.target as HTMLInputElement).value || undefined });
               }}
-              className="w-56 pl-8 md:w-64"
+              className="w-full pl-8 md:w-64"
             />
           </div>
-          <Button variant={advanced ? "secondary" : "outline"} onClick={() => setAdvanced((v) => !v)}>
+          {/* На узком экране остаётся одна иконка — подпись уезжает в aria-label, иначе
+              кнопка вытесняла бы поиск на третий ряд. */}
+          <Button
+            variant={advanced ? "secondary" : "outline"}
+            aria-label="Фильтры"
+            aria-expanded={advanced}
+            onClick={() => setAdvanced((v) => !v)}
+          >
             <SlidersHorizontal />
-            Фильтры
+            <span className="hidden sm:inline">Фильтры</span>
           </Button>
         </div>
       </div>
