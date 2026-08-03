@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { localDateStr, todayStrInTz } from "@/lib/tz";
 import { TERMINAL_ORDER_STATUSES } from "@/lib/statuses";
 import { getOrderItemImages } from "@/modules/orders/images";
+import { isTipItem } from "@/modules/pricing/serviceItems";
 
 export type PurchaseItem = {
   orderNumber: string;
@@ -25,6 +26,9 @@ export type PurchaseItem = {
  * Позиции НЕ-букеты (ваза, подарок, открытка, прочее — всё, кроме FLOWER_PRODUCT) состава не
  * имеют: закупать по ним нечего. Вместо состава показываем название самого товара. Позиции без
  * классификации (financialType не задан) ведут себя как раньше — букет по умолчанию.
+ *
+ * Служебные позиции-чаевые (isTipItem) в список не попадают вовсе: это не товар, а строка
+ * платежа, и флористу она ничего не говорит.
  */
 export async function getTodayPurchaseList(opts: { floristId?: string } = {}): Promise<PurchaseItem[]> {
   const orders = await prisma.order.findMany({
@@ -51,6 +55,8 @@ export async function getTodayPurchaseList(opts: { floristId?: string } = {}): P
     const deliveryDay = localDateStr(o.deliveryDate, "UTC");
     if (deliveryDay !== today) continue;
     for (const it of o.items) {
+      // Чаевые Shopify присылает отдельной строкой line_items — флористу в закупке она не нужна.
+      if (isTipItem(it)) continue;
       result.push({
         orderNumber: o.orderNumber,
         productName: it.name,
