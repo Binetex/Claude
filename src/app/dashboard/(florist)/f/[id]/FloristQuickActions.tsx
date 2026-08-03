@@ -104,7 +104,7 @@ export function FloristQuickActions({
           <DialogHeader>
             <DialogTitle>Передать заказ</DialogTitle>
           </DialogHeader>
-          <FloristHandoff orderId={orderId} florists={handoffTargets} embedded onDone={() => setHandoffOpen(false)} />
+          <FloristHandoff orderId={orderId} florists={handoffTargets} onDone={() => setHandoffOpen(false)} />
         </DialogContent>
       </Dialog>
     </Card>

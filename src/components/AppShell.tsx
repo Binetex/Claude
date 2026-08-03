@@ -27,21 +27,11 @@ export function AppShell({
       <div className="mx-auto flex min-h-screen max-w-[1400px] flex-col md:flex-row">
         {/* Боковая навигация (десктоп) */}
         <aside className="hidden w-60 shrink-0 border-r border-slate-200 bg-white md:flex md:flex-col">
-          {/* Логотип-локап уже содержит название, поэтому текстового «Floremart» рядом нет —
-              иначе имя читалось бы дважды. Подпись «Дашборд заказов» остаётся: она говорит,
-              что это за раздел, а не повторяет бренд.
+          {/* Только логотип: название уже внутри локапа, подписи рядом ничего не добавляли.
               width/height заданы по реальным пропорциям файла (940×188) — без них строка
               подпрыгивает, пока картинка грузится, а неверные пропорции растянули бы логотип. */}
           <div className="px-5 py-4">
-            <Image
-              src="/logo.png"
-              alt="FloreMart"
-              width={940}
-              height={188}
-              priority
-              className="h-7 w-auto"
-            />
-            <div className="mt-1 text-[11px] text-slate-400">Дашборд заказов</div>
+            <Image src="/logo.png" alt="FloreMart" width={940} height={188} priority className="h-7 w-auto" />
           </div>
           <div className="mt-1">
             <SidebarNav nav={nav} variant="sidebar" />

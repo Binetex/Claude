@@ -1,6 +1,9 @@
 "use client";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
+import { Select } from "@/components/ui/select";
 import { floristHandoff } from "@/app/dashboard/(florist)/actions";
 
 const REASONS: Record<string, string> = {
@@ -13,80 +16,66 @@ const REASONS: Record<string, string> = {
 };
 
 /**
- * Передача заказа выбранному активному флористу (замена простого «Отказаться»). Флорист выбирает,
- * кому передать (как владелец при переназначении). `florists` — активные, кроме себя.
+ * Форма передачи заказа другому активному флористу (замена простого «Отказаться»).
+ *
+ * Своего триггера у неё нет: форма живёт внутри модалки «Передать заказ», которую
+ * открывают «Быстрые действия». Второго входа в этот сценарий на странице быть не должно.
+ *
+ * `florists` — активные, кроме себя.
  */
 export function FloristHandoff({
   orderId,
   florists,
-  btnClass = "",
-  embedded = false,
   onDone,
 }: {
   orderId: string;
   florists: { id: string; name: string }[];
-  btnClass?: string;
-  /** Форма уже внутри модалки — собственная кнопка-триггер не нужна. */
-  embedded?: boolean;
-  /** Вызывается после успешной передачи и по «Отмена» — закрыть внешнюю модалку. */
+  /** Закрыть внешнюю модалку — после успешной передачи и по «Отмена». */
   onDone?: () => void;
 }) {
-  const [open, setOpen] = useState(embedded);
   const [target, setTarget] = useState("");
   const [pending, start] = useTransition();
 
-  if (!open) {
-    return (
-      <button
-        type="button"
-        disabled={florists.length === 0}
-        onClick={(e) => { e.preventDefault(); setOpen(true); }}
-        className={btnClass}
-        title={florists.length === 0 ? "Нет других активных флористов" : undefined}
-      >
-        {florists.length === 0 ? "Некому передать" : "Передать…"}
-      </button>
-    );
+  function submit() {
+    start(async () => {
+      const r = await floristHandoff(orderId, target);
+      if (r?.ok) {
+        toast.success("Заказ передан");
+        setTarget("");
+        onDone?.();
+      } else {
+        toast.error(REASONS[r?.reason ?? ""] ?? "Не удалось передать заказ");
+      }
+    });
   }
 
   return (
-    <div className={embedded ? "space-y-2" : "col-span-2 space-y-2"} onClick={(e) => e.preventDefault()}>
-      <select
-        value={target}
-        onChange={(e) => setTarget(e.target.value)}
-        className="w-full rounded-lg border border-slate-300 px-2 py-2 text-sm"
-        aria-label="Кому передать заказ"
-      >
-        <option value="">Кому передать заказ…</option>
-        {florists.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
-      </select>
-      <div className="grid grid-cols-2 gap-2">
-        <button
-          type="button"
-          disabled={pending || !target}
-          onClick={() =>
-            start(async () => {
-              const r = await floristHandoff(orderId, target);
-              if (r?.ok) {
-                toast.success("Заказ передан");
-                setTarget("");
-                if (embedded) onDone?.();
-                else setOpen(false);
-              } else toast.error(REASONS[r?.reason ?? ""] ?? "Не удалось передать заказ");
-            })
-          }
-          className="rounded-lg bg-amber-600 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-700 disabled:opacity-60"
+    <div className="space-y-4">
+      <div className="space-y-1.5">
+        <Label htmlFor="handoff-target">Кому передать</Label>
+        <Select
+          id="handoff-target"
+          value={target}
+          onChange={(e) => setTarget(e.target.value)}
+          disabled={pending || florists.length === 0}
         >
-          {pending ? "…" : "Передать"}
-        </button>
-        <button
-          type="button"
-          disabled={pending}
-          onClick={() => { setTarget(""); if (embedded) onDone?.(); else setOpen(false); }}
-          className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50"
-        >
+          <option value="">Выберите флориста…</option>
+          {florists.map((f) => (
+            <option key={f.id} value={f.id}>{f.name}</option>
+          ))}
+        </Select>
+        <p className="text-xs text-slate-500">
+          Заказ уйдёт выбранному флористу вместе с ценой и составом. Вы перестанете его видеть.
+        </p>
+      </div>
+
+      <div className="flex justify-end gap-2">
+        <Button variant="outline" disabled={pending} onClick={() => { setTarget(""); onDone?.(); }}>
           Отмена
-        </button>
+        </Button>
+        <Button disabled={pending || !target} onClick={submit}>
+          {pending ? "Передаём…" : "Передать заказ"}
+        </Button>
       </div>
     </div>
   );
