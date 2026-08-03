@@ -3,7 +3,7 @@ import { prisma } from "@/lib/db";
 import { Prisma } from "@/generated/prisma/client";
 import type { OrderStatus } from "@/generated/prisma/enums";
 import { DEFAULT_STORE_TZ, utcDayRangeForLocalToday } from "@/lib/tz";
-import { IN_WORK_ORDER_STATUSES } from "@/lib/statuses";
+import { ACCEPTED_ORDER_STATUSES } from "@/lib/statuses";
 import {
   orderInclude,
   serializeForOwner,
@@ -62,8 +62,9 @@ function buildWhere(f: OrderFilters): Prisma.OrderWhereInput {
   }
 
   if (f.preset === "done") where.orderStatus = { in: DONE_STATUSES };
-  // Фильтр «В работе» ищет всю группу: пользователь выбирает смысл, а не значение enum.
-  else if (f.status && IN_WORK_ORDER_STATUSES.includes(f.status)) where.orderStatus = { in: IN_WORK_ORDER_STATUSES };
+  // Фильтр «Принят» ищет всю группу: пользователь выбирает смысл, а не значение enum.
+  // «Начат» (IN_PROGRESS) в группу не входит — это отдельный смысл и отдельный пункт.
+  else if (f.status && ACCEPTED_ORDER_STATUSES.includes(f.status)) where.orderStatus = { in: ACCEPTED_ORDER_STATUSES };
   else if (f.status) where.orderStatus = f.status;
 
   if (f.siteId) where.siteId = f.siteId;

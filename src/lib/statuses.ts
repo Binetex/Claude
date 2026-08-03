@@ -17,23 +17,29 @@ const TONE = {
 } as const;
 
 /**
- * Три состояния с одинаковым смыслом «заказ у флориста, идёт работа»:
- *  - ASSIGNED — легаси старого flow (assign + отдельное «принять»), новых не появляется;
- *  - FLORIST_ACCEPTED — то, что ставит текущее назначение с авто-принятием;
- *  - IN_PROGRESS — исторический переход «начать работу», на практике не используется.
- * Разделять их в интерфейсе нечем: передача заказа флористу и означает, что он в работе,
- * а если флорист не берёт — он передаёт заказ дальше сам. Поэтому в UI это ОДИН статус,
- * а в БД значения остаются как есть (миграция ради косметики не нужна).
+ * Заказ у флориста — три значения enum, но ДВА разных смысла:
+ *
+ *  - ASSIGNED / FLORIST_ACCEPTED — «Принят»: заказ закреплён за флористом. ASSIGNED —
+ *    легаси старого flow (assign + отдельное «принять»), новых не появляется;
+ *    FLORIST_ACCEPTED ставит текущее назначение с авто-принятием. Для человека это одно
+ *    и то же, поэтому в интерфейсе они под одной меткой.
+ *  - IN_PROGRESS — «Начат»: флорист сел за букет. Отдельный смысл, а не синоним: по
+ *    переходу «Принят → Начат» когда-нибудь можно будет мерить, сколько заказ пролежал.
+ *
+ * В БД значения остаются как есть — миграция ради переименования меток не нужна.
  */
-export const IN_WORK_ORDER_STATUSES: OrderStatus[] = ["ASSIGNED", "FLORIST_ACCEPTED", "IN_PROGRESS"];
+export const ACCEPTED_ORDER_STATUSES: OrderStatus[] = ["ASSIGNED", "FLORIST_ACCEPTED"];
+
+/** Всё, что «у флориста» — и принятое, и начатое. Для метрик и общих выборок. */
+export const IN_WORK_ORDER_STATUSES: OrderStatus[] = [...ACCEPTED_ORDER_STATUSES, "IN_PROGRESS"];
 
 export const orderStatusMeta: Record<OrderStatus, Meta> = {
   AWAITING_PAYMENT: { label: "Ожидает оплаты", className: TONE.neutral },
   // Оплачен и ждёт флориста. «Подтверждён» ничего не говорило: подтверждает заказ оплата.
   CONFIRMED: { label: "Оплачен", className: TONE.success },
-  ASSIGNED: { label: "В работе", className: TONE.info },
-  FLORIST_ACCEPTED: { label: "В работе", className: TONE.info },
-  IN_PROGRESS: { label: "В работе", className: TONE.info },
+  ASSIGNED: { label: "Принят", className: TONE.info },
+  FLORIST_ACCEPTED: { label: "Принят", className: TONE.info },
+  IN_PROGRESS: { label: "Начат", className: TONE.info },
   READY: { label: "Готов", className: TONE.success },
   AWAITING_COURIER: { label: "Ожидает курьера", className: TONE.info },
   IN_TRANSIT: { label: "В пути", className: TONE.info },
@@ -43,14 +49,15 @@ export const orderStatusMeta: Record<OrderStatus, Meta> = {
 };
 
 /**
- * Пункты фильтра по статусу — по одному на СМЫСЛ, а не на значение enum. Три «рабочих»
- * статуса схлопнуты в один пункт (см. IN_WORK_ORDER_STATUSES), иначе в списке три
- * одинаковых «В работе», из которых два ничего не находят.
+ * Пункты фильтра по статусу — по одному на СМЫСЛ, а не на значение enum. ASSIGNED и
+ * FLORIST_ACCEPTED схлопнуты в «Принят» (см. ACCEPTED_ORDER_STATUSES): иначе в списке два
+ * одинаковых пункта, из которых один ничего не находит.
  */
 export const orderStatusFilterOptions: { value: OrderStatus; label: string }[] = [
   { value: "AWAITING_PAYMENT", label: orderStatusMeta.AWAITING_PAYMENT.label },
   { value: "CONFIRMED", label: orderStatusMeta.CONFIRMED.label },
-  { value: "IN_PROGRESS", label: orderStatusMeta.IN_PROGRESS.label }, // покрывает всю группу «в работе»
+  { value: "FLORIST_ACCEPTED", label: orderStatusMeta.FLORIST_ACCEPTED.label }, // вся группа «принят»
+  { value: "IN_PROGRESS", label: orderStatusMeta.IN_PROGRESS.label },
   { value: "READY", label: orderStatusMeta.READY.label },
   { value: "AWAITING_COURIER", label: orderStatusMeta.AWAITING_COURIER.label },
   { value: "IN_TRANSIT", label: orderStatusMeta.IN_TRANSIT.label },
@@ -59,10 +66,10 @@ export const orderStatusFilterOptions: { value: OrderStatus; label: string }[] =
   { value: "CANCELLED", label: orderStatusMeta.CANCELLED.label },
 ];
 
-/** Значение для select фильтра: вся группа «в работе» показывается одним пунктом IN_PROGRESS. */
+/** Значение для select фильтра: группа «принят» показывается одним пунктом FLORIST_ACCEPTED. */
 export function statusFilterValue(status?: OrderStatus | null): string {
   if (!status) return "";
-  return IN_WORK_ORDER_STATUSES.includes(status) ? "IN_PROGRESS" : status;
+  return ACCEPTED_ORDER_STATUSES.includes(status) ? "FLORIST_ACCEPTED" : status;
 }
 
 /**
@@ -113,6 +120,7 @@ export const TERMINAL_ORDER_STATUSES: OrderStatus[] = ["DELIVERED", "CANCELLED"]
 // Статусы, которые владелец/колл-центр может выставлять вручную (не через действия флориста).
 export const manualOrderStatuses: OrderStatus[] = [
   "CONFIRMED",
+  "FLORIST_ACCEPTED",
   "IN_PROGRESS",
   "READY",
   "AWAITING_COURIER",

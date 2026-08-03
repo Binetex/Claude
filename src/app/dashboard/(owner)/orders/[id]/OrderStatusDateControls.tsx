@@ -2,7 +2,7 @@
 import { useState } from "react";
 import { Check } from "lucide-react";
 import { OrderStatusBadge } from "@/components/StatusBadge";
-import { manualOrderStatuses, orderStatusMeta, IN_WORK_ORDER_STATUSES } from "@/lib/statuses";
+import { manualOrderStatuses, orderStatusMeta, ACCEPTED_ORDER_STATUSES } from "@/lib/statuses";
 import { Card, CardHeader, CardTitle, CardBody } from "@/components/ui/Card";
 import { Button } from "@/components/ui/button";
 import { Tooltip } from "@/components/ui/tooltip";
@@ -74,7 +74,7 @@ function StatusForm({ orderId, updatedAt, current }: { orderId: string; updatedA
   // вместо реального статуса, и «ОК» без выбора молча переписал бы заказ. Поэтому группу
   // «в работе» сводим к её выбираемому представителю, а нестандартный статус добавляем
   // отдельным нередактируемым пунктом.
-  const selectable = IN_WORK_ORDER_STATUSES.includes(current) ? "IN_PROGRESS" : current;
+  const selectable = ACCEPTED_ORDER_STATUSES.includes(current) ? "FLORIST_ACCEPTED" : current;
   const isManual = manualOrderStatuses.includes(selectable);
   const [status, setStatus] = useState<OrderStatus>(selectable);
   const { pending, conflict, save, acceptCurrentVersion } = useBlockSave(orderId, "status", updatedAt);
