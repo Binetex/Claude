@@ -20,12 +20,9 @@ import "server-only";
 import type { Role } from "@/generated/prisma/enums";
 import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
-import { appendEntry } from "./ledger";
-import { reversalKey } from "./ledgerRules";
 import { resolveProfileAt } from "./profile";
 import { recalculateAffectedFinance } from "./fix";
-import { accrueDayShare } from "./primaryShare";
-import { dayKey } from "./snapshot";
+import { dayKey, readOrderContribution } from "./dayFinance";
 import { primaryShareStartDate } from "./config";
 
 export class OrderExpenseError extends Error {
@@ -163,16 +160,11 @@ export async function expenseCalcState(orderId: string, activeCount?: number): P
   }
 
   if (profile.model === "SECONDARY") {
-    const expenses = await prisma.orderAdditionalExpense.findMany({
-      where: { orderId, reversedAt: null },
-      select: { id: true },
-    });
-    const found = await prisma.ledgerEntry.count({
-      where: { idempotencyKey: { in: expenses.map((e) => expenseDeductionKey(e.id)) } },
-    });
-    return found === expenses.length
+    // Удержание выводится из данных: действующий расход по доставленному заказу
+    // уменьшает заработок сразу, отдельной записи в книге для этого нет.
+    return order.orderStatus === "DELIVERED"
       ? { counted: true, note: "Учтено удержанием в балансе флориста." }
-      : { counted: false, note: "Удержание ещё не создано." };
+      : { counted: false, note: "Учтётся, когда заказ будет доставлен." };
   }
 
   const start = primaryShareStartDate();
@@ -186,11 +178,10 @@ export async function expenseCalcState(orderId: string, activeCount?: number): P
     };
   }
 
-  const snapshot = await prisma.orderFinancialSnapshot.findFirst({
-    where: { orderId, status: "PUBLISHED" },
-    select: { isCalculable: true, otherExpenseCents: true },
-  });
-  if (!snapshot || !snapshot.isCalculable) {
+  // Заказ считается только целиком посчитанным днём: пока по нему не хватает данных,
+  // его вклад — и вместе с ним расход — в прибыль дня не входит.
+  const contribution = await readOrderContribution(orderId);
+  if (!contribution || contribution.order.missing.length > 0) {
     return {
       counted: false,
       note: "День посчитан не полностью — расход учтётся, когда будут заполнены недостающие данные (см. «Требует заполнения»).",
@@ -231,7 +222,7 @@ export type ExpenseApplyResult = {
 };
 
 export type ExpenseEffect =
-  | { kind: "PRIMARY_DAY"; day: string; republished: number; share: string }
+  | { kind: "PRIMARY_DAY"; day: string; complete: boolean }
   | { kind: "SECONDARY_DEDUCTION"; deductionEntryId: string | null; reversedEntryId: string | null }
   | { kind: "NONE"; reason: string };
 
@@ -489,17 +480,9 @@ async function recomputePrimaryDay(order: OrderContext, actor: ExpenseActor, now
   });
   if (!profile) return { kind: "NONE", reason: "Нет действующего профиля основного флориста." };
 
-  // Отдельного accrueDayShare здесь нет: общий конвейер уже начисляет. Второй вызов был
-  // безобиден только благодаря идемпотентности — но это ровно тот случай, когда «работает»
-  // и «правильно» расходятся.
   const result = await recalculateAffectedFinance(profile.id, [order.deliveryDate], { userId: actor.userId, role: "OWNER" }, now);
 
-  return {
-    kind: "PRIMARY_DAY",
-    day: dayKey(order.deliveryDate),
-    republished: result.republished,
-    share: result.outcomes[0]?.outcome.status ?? "SKIPPED",
-  };
+  return { kind: "PRIMARY_DAY", day: dayKey(order.deliveryDate), complete: result.complete > 0 };
 }
 
 

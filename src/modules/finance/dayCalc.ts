@@ -30,6 +30,8 @@ export type DayOrderInput = {
   siteId: string;
   /** Всё, что заплатил клиент: товары + налог + доставка + чаевые. */
   grossRevenueCents: number;
+  /** Сколько заплатил клиент — база расчёта комиссии эквайринга. */
+  customerTotalCents: number;
   tipCents: number;
   taxCents: number;
   /** null — фактическая доставка не подтверждена, а не «бесплатно». */
@@ -39,6 +41,10 @@ export type DayOrderInput = {
   consumablesCents: number | null;
   /** Дополнительные расходы по заказу: повторная доставка, переделка, компенсация. */
   additionalCents: number;
+  /** Комиссия взята фактическая, а не посчитана по модели магазина. */
+  feeFromActual: boolean;
+  /** Расходники заданы по заказу, а не ставкой магазина. */
+  consumablesFromOverride: boolean;
 };
 
 export type DayOrderResult = DayOrderInput & {

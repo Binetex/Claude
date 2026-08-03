@@ -6,21 +6,19 @@ import "server-only";
  * и у Airwallex. Считает и пересчитывает дни начиная с даты запуска — исторические не
  * трогает вовсе.
  *
- * Начисление НЕ переводит деньги: оно показывает рассчитанный долг. Реальная выплата
- * появляется только ручной операцией PAYMENT от владельца, поэтому автоматический пересчёт
- * безопасен — он не может ничего «заплатить» по ошибке.
+ * Пересчёт НЕ трогает деньги: он переписывает итог дня, из которого выводится долг.
+ * Реальная выплата появляется только ручной операцией PAYMENT от владельца, поэтому
+ * автоматический пересчёт безопасен — он не может ничего «заплатить» по ошибке.
  */
 import type { PrismaClient } from "@/generated/prisma/client";
-import { accrueDays, primaryShareDays } from "./primaryShare";
-import { recomputeDay } from "./dayFinance";
+import { primaryShareDays, recomputeDay } from "./dayFinance";
 import { primaryShareGate } from "./config";
 
 export type ShareDispatchResult = {
   days: number;
-  created: number;
-  corrected: number;
-  unchanged: number;
-  skipped: number;
+  /** Дни, которые посчитались целиком, — только они дают заработок. */
+  complete: number;
+  incomplete: number;
   reason?: string;
 };
 
@@ -29,15 +27,11 @@ export async function dispatchPrimaryShare(
   now: Date = new Date()
 ): Promise<ShareDispatchResult> {
   const gate = primaryShareGate();
-  if (!gate.enabled) {
-    return { days: 0, created: 0, corrected: 0, unchanged: 0, skipped: 0, reason: gate.reason };
-  }
+  if (!gate.enabled) return { days: 0, complete: 0, incomplete: 0, reason: gate.reason };
 
   const plan = await primaryShareDays(now);
-  if (!plan) {
-    return { days: 0, created: 0, corrected: 0, unchanged: 0, skipped: 0, reason: "профиль или процент доли не заданы" };
-  }
-  if (plan.days.length === 0) return { days: 0, created: 0, corrected: 0, unchanged: 0, skipped: 0 };
+  if (!plan) return { days: 0, complete: 0, incomplete: 0, reason: "профиль или процент доли не заданы" };
+  if (plan.days.length === 0) return { days: 0, complete: 0, incomplete: 0 };
 
   // Пересчёт дня подписывается владельцем: аноним в финансовых данных недопустим —
   // у каждой строки должен быть тот, кого можно спросить.
@@ -45,10 +39,11 @@ export async function dispatchPrimaryShare(
   if (!owner) throw new Error("[finance] не найден активный OWNER — некому приписать пересчёт");
   const actor = { userId: owner.id, role: "OWNER" as const };
 
-  // Итог дня пересчитывается всегда: из него считается долг. Начисления в книге пока
-  // создаются параллельно старым путём — они уйдут вместе с ним.
-  for (const day of plan.days) await recomputeDay(plan.profileId, day, actor);
+  let complete = 0;
+  for (const day of plan.days) {
+    const r = await recomputeDay(plan.profileId, day, actor);
+    if (r?.complete) complete++;
+  }
 
-  const { outcomes: _outcomes, ...r } = await accrueDays(plan.profileId, plan.days, actor);
-  return { days: plan.days.length, ...r };
+  return { days: plan.days.length, complete, incomplete: plan.days.length - complete };
 }

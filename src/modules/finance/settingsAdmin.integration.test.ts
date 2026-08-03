@@ -11,9 +11,9 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import crypto from "crypto";
 import { prisma } from "@/lib/db";
+import { computeDayShare } from "./dayFinance";
 import { setFinanceProfile } from "./profile";
-import { computeDayShare } from "./primaryShare";
-import { getFloristBalance } from "./ledger";
+import { floristBalance } from "./balance";
 import { fixConsumablesRate, fixDailyFlowerExpense, fixDeliveryActualCost, fixSiteFeeModel, fixOwnerTaxPolicy } from "./fix";
 import {
   correctSetting,
@@ -118,13 +118,9 @@ beforeAll(async () => {
 
 afterAll(async () => {
   delete process.env.FINANCE_PRIMARY_SHARE_START_DATE;
-  await prisma.ledgerEntrySnapshot.deleteMany({ where: { ledgerEntry: { floristId } } });
   await prisma.$executeRawUnsafe(`ALTER TABLE "LedgerEntry" DISABLE TRIGGER USER`);
   await prisma.ledgerEntry.deleteMany({ where: { floristId } });
   await prisma.$executeRawUnsafe(`ALTER TABLE "LedgerEntry" ENABLE TRIGGER USER`);
-  await prisma.$executeRawUnsafe(`ALTER TABLE "OrderFinancialSnapshot" DISABLE TRIGGER USER`);
-  await prisma.orderFinancialSnapshot.deleteMany({ where: { order: { siteId } } });
-  await prisma.$executeRawUnsafe(`ALTER TABLE "OrderFinancialSnapshot" ENABLE TRIGGER USER`);
 
   await prisma.financeIssue.deleteMany({ where: { OR: [{ siteId }, { floristId }] } });
   await prisma.financeAudit.deleteMany({ where: { userId: { in: [OWNER.userId, FLORIST_ACTOR.userId] } } });
@@ -179,12 +175,8 @@ describe("права", () => {
 describe("новая ставка против исправления", () => {
   it("сначала считается день по исходным настройкам", async () => {
     const computed = await computeDayShare(profileId, DAY);
-    expect(computed!.blocked).toBe(false);
-    const entries = await prisma.ledgerEntry.findMany({
-      where: { floristId, type: "PRIMARY_FLORIST_SHARE", effectiveDate: DAY, reversal: null },
-    });
-    expect(entries).toHaveLength(1);
-    expect(entries[0].amountCents).toBe(computed!.shareCents);
+    expect(computed!.complete).toBe(true);
+    expect(computed!.shareCents).toBeGreaterThan(0);
   });
 
   it("новая ставка с будущей даты прошлое не трогает", async () => {
@@ -213,9 +205,9 @@ describe("новая ставка против исправления", () => {
 });
 
 describe("предпросмотр исправления", () => {
-  it("показывает заказы, ревизии и будущую долю, ничего не записывая", async () => {
+  it("показывает заказы и будущую долю, ничего не записывая", async () => {
     const [rate] = await consumablesRows();
-    const snapsBefore = await prisma.orderFinancialSnapshot.count({ where: { order: { siteId } } });
+    const daysBefore = await prisma.dayFinance.findMany({ select: { day: true, distributableCents: true } });
     const ledgerBefore = await prisma.ledgerEntry.count({ where: { floristId } });
 
     const p = await previewSettingChange({
@@ -229,39 +221,14 @@ describe("предпросмотр исправления", () => {
 
     expect(p.affectedDays).toBe(1);
     expect(p.affectedOrders).toBe(2);
-    expect(p.revisionsToRepublish).toBe(2);
     expect(p.days[0].ordersChanged).toBe(2);
     // Расходники выросли на $10 на каждый из двух заказов — прибыль и доля падают.
     expect(p.shareAfterCents).toBeLessThan(p.shareBeforeCents);
-    expect(p.needsLedgerCorrection).toBe(true);
+    expect(p.daysChanged).toBe(1);
     expect(p.days[0].orderNumbers).toHaveLength(2);
 
-    expect(await prisma.orderFinancialSnapshot.count({ where: { order: { siteId } } })).toBe(snapsBefore);
+    expect(await prisma.dayFinance.findMany({ select: { day: true, distributableCents: true } })).toEqual(daysBefore);
     expect(await prisma.ledgerEntry.count({ where: { floristId } })).toBe(ledgerBefore);
-  });
-
-  it("обещанное число ревизий совпадает с тем, сколько публикация выпустит", async () => {
-    const [rate] = await consumablesRows();
-    const p = await previewSettingChange({
-      entity: "CONSUMABLES_RATE",
-      id: rate.id,
-      op: "CORRECT",
-      values: { entity: "CONSUMABLES_RATE", amountCents: 1100 },
-      effectiveFrom: START,
-      now: NOW,
-    });
-
-    const applied = await correctSetting({
-      entity: "CONSUMABLES_RATE",
-      id: rate.id,
-      values: { entity: "CONSUMABLES_RATE", amountCents: 1100 },
-      effectiveFrom: START,
-      reason: "сверка числа ревизий",
-      actor: OWNER,
-      now: NOW,
-    });
-
-    expect(applied.republished).toBe(p.revisionsToRepublish);
   });
 
   it("предсказанная доля совпадает с тем, что получится на самом деле", async () => {
@@ -296,18 +263,10 @@ describe("исправление ошибочной записи", () => {
     expect(rate.amountCents).toBe(800);
   });
 
-  it("сторнирует прежнее начисление и создаёт новое", async () => {
-    const reversal = await prisma.ledgerEntry.findFirst({
-      where: { floristId, type: "CORRECTION", reversedEntryId: { not: null } },
-    });
-    expect(reversal).not.toBeNull();
-
-    const live = await prisma.ledgerEntry.findMany({
-      where: { floristId, type: "PRIMARY_FLORIST_SHARE", effectiveDate: DAY, reversal: null },
-    });
-    expect(live).toHaveLength(1);
-    expect(live[0].amountCents).toBe((await computeDayShare(profileId, DAY))!.shareCents);
-    expect((await getFloristBalance(floristId)).outstandingCents).toBe(live[0].amountCents);
+  it("заработок меняется сам, без единой записи в книге", async () => {
+    const computed = await computeDayShare(profileId, DAY);
+    expect((await floristBalance(floristId)).earnedCents).toBe(computed!.shareCents);
+    expect(await prisma.ledgerEntry.count({ where: { floristId } })).toBe(0);
   });
 
   it("пишет FinanceAudit с причиной и обеими величинами", async () => {
@@ -316,13 +275,13 @@ describe("исправление ошибочной записи", () => {
     const correction = history.find((h) => h.action === "CORRECT_ConsumablesRate");
     expect(correction).toBeDefined();
     expect(correction!.reason).toBe("ошиблись в ставке");
-    // Предыдущее значение — то, что стояло на момент правки (его выставила проверка
-    // числа ревизий), а не первоначальное: аудит фиксирует конкретный переход.
-    expect((correction!.beforeJson as { amountCents: number }).amountCents).toBe(1100);
+    // Предыдущее значение — то, что стояло на момент правки, а не первоначальное:
+    // аудит фиксирует конкретный переход.
+    expect((correction!.beforeJson as { amountCents: number }).amountCents).toBe(500);
     expect((correction!.afterJson as { amountCents: number }).amountCents).toBe(800);
   });
 
-  it("та же сумма пересобирает ревизии, но книгу не трогает", async () => {
+  it("та же сумма пересчитывает день, но денег не двигает", async () => {
     const [rate] = await consumablesRows();
     const ledgerBefore = await prisma.ledgerEntry.count({ where: { floristId } });
 
@@ -336,8 +295,7 @@ describe("исправление ошибочной записи", () => {
       now: NOW,
     });
 
-    expect(r.share.corrected).toBe(0);
-    expect(r.share.unchanged).toBe(1);
+    expect(r.affectedDays).toBe(1);
     expect(await prisma.ledgerEntry.count({ where: { floristId } })).toBe(ledgerBefore);
   });
 
@@ -380,10 +338,9 @@ describe("удаление", () => {
     const p = await previewSettingChange({ entity: "FEE_MODEL", id: fee!.id, op: "DELETE", now: NOW });
 
     // Без модели комиссии заказ посчитать нечем — это не «ставка другая», а «настройки нет».
-    expect(p.revisionsToRepublish).toBeGreaterThan(0);
     expect(p.shareAfterCents).toBe(0);
     expect(p.shareBeforeCents).toBeGreaterThan(0);
-    expect(p.needsLedgerCorrection).toBe(true);
+    expect(p.daysChanged).toBeGreaterThan(0);
   });
 
   it("предыдущий период забирает отрезок — дня без настройки не остаётся", async () => {
@@ -423,42 +380,21 @@ describe("удаление", () => {
     // Без ставки расходников заказы недозаполнены, поэтому день перестаёт считаться
     // целиком — правило «всё или ничего».
     const computed = await computeDayShare(profileId, DAY);
-    expect(computed!.blocked).toBe(true);
-    expect(computed!.ordersCalculable).toBe(0);
+    expect(computed!.complete).toBe(false);
+    expect(computed!.blockers).toContain("ORDER_DATA_INCOMPLETE");
     expect(computed!.shareCents).toBe(0);
 
-    // Прежнее начисление при этом СОХРАНЯЕТСЯ, и это сознательно. Оно было верным на
-    // момент создания, а блокировка чаще всего временная: данные доедут через час.
-    // Сторнировать и начислять заново на каждую такую паузу — ровно та болтанка, ради
-    // устранения которой день и сделан «всё или ничего». Расхождение не прячется:
-    // в списке день помечен «не считается», а сумма начисления показана как требующая
-    // внимания.
-    expect(
-      await prisma.ledgerEntry.count({
-        where: { floristId, type: "PRIMARY_FLORIST_SHARE", effectiveDate: DAY, reversal: null },
-      })
-    ).toBe(1);
+    // Заработок за этот день обнуляется вместе с расчётом — он и есть расчёт.
+    expect((await floristBalance(floristId)).earnedCents).toBe(0);
   });
 
-  it("после возврата настройки день начисляется заново, а не падает на занятом ключе", async () => {
-    // Ключ дня уже израсходован сторнированной записью — новое начисление обязано
-    // получить свой. Это тот случай, ради которого ключ привязывается к сторно.
+  it("после возврата настройки день считается заново", async () => {
     await fixConsumablesRate({ siteId: null, amountCents: 500, effectiveFrom: START, actor: OWNER, now: NOW });
 
     const computed = await computeDayShare(profileId, DAY);
+    expect(computed!.complete).toBe(true);
     expect(computed!.shareCents).toBeGreaterThan(0);
-
-    const live = await prisma.ledgerEntry.findMany({
-      where: { floristId, type: "PRIMARY_FLORIST_SHARE", effectiveDate: DAY, reversal: null },
-    });
-    expect(live).toHaveLength(1);
-    expect(live[0].amountCents).toBe(computed!.shareCents);
-    expect((await getFloristBalance(floristId)).outstandingCents).toBe(computed!.shareCents);
-
-    const keys = (
-      await prisma.ledgerEntry.findMany({ where: { floristId }, select: { idempotencyKey: true } })
-    ).map((e) => e.idempotencyKey);
-    expect(new Set(keys).size).toBe(keys.length);
+    expect((await floristBalance(floristId)).earnedCents).toBe(computed!.shareCents);
   });
 
   it("предпросмотр удаления предупреждает, что настройка исчезнет совсем", async () => {
@@ -481,7 +417,7 @@ describe("налоговая политика", () => {
     });
 
     expect(p.shareDeltaCents).toBe(0);
-    expect(p.needsLedgerCorrection).toBe(false);
+    expect(p.daysChanged).toBe(0);
     expect(p.warnings.join(" ")).toMatch(/на долю флориста не влияет/);
   });
 

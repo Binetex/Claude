@@ -741,7 +741,6 @@ model LedgerEntry {
 
   /// Ревизии снимков, из которых собрано начисление. У дневной доли основного флориста
   /// их много (по снимку на каждый заказ дня), поэтому связь многие-ко-многим.
-  snapshots LedgerEntrySnapshot[]
 
   @@index([floristId, effectiveDate])
   @@index([floristId, type, effectiveDate])
@@ -921,16 +920,16 @@ model OwnerTaxPolicy {
 /// заказа: расход несёт тот, кто выполнял заказ тогда, а не тот, кому заказ достался потом.
 /// Пользователь его не выбирает и не видит — поле техническое.
 model OrderAdditionalExpense {
-  id                String    @id @default(cuid())
+  id                String   @id @default(cuid())
   orderId           String
-  order             Order     @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  order             Order    @relation(fields: [orderId], references: [id], onDelete: Restrict)
   amountCents       Int // > 0, CHECK
   description       String
   /// Дата возникновения расхода. На расчёт PRIMARY не влияет — там расход принадлежит
   /// дню доставки заказа; используется как дата удержания у SECONDARY и для отчётности.
   expenseDate       DateTime
   floristIdSnapshot String
-  florist           Florist   @relation(fields: [floristIdSnapshot], references: [id], onDelete: Restrict)
+  florist           Florist  @relation(fields: [floristIdSnapshot], references: [id], onDelete: Restrict)
 
   createdBy      String
   createdAt      DateTime  @default(now())
@@ -995,99 +994,6 @@ model DayFinance {
 
   @@unique([financeProfileId, day])
   @@index([day])
-}
-
-/// Из каких ревизий снимков собрано начисление.
-///
-/// Нужна ровно для одного вопроса: «почему за этот день начислено столько». Ответ должен
-/// оставаться верным и через год, поэтому ссылка идёт на КОНКРЕТНУЮ ревизию, а не на заказ:
-/// ревизия неизменяема, а действующий снимок заказа к тому времени может быть уже другим.
-model LedgerEntrySnapshot {
-  id            String                 @id @default(cuid())
-  ledgerEntryId String
-  ledgerEntry   LedgerEntry            @relation(fields: [ledgerEntryId], references: [id], onDelete: Restrict)
-  snapshotId    String
-  snapshot      OrderFinancialSnapshot @relation(fields: [snapshotId], references: [id], onDelete: Restrict)
-
-  @@unique([ledgerEntryId, snapshotId])
-  @@index([snapshotId])
-}
-
-enum SnapshotStatus {
-  DRAFT // черновик пересчёта: изменяем и удаляем, начислением не используется
-  PUBLISHED // действующая ревизия: неизменяема и неудаляема
-  SUPERSEDED // вытеснена более новой; остаётся неизменяемой навсегда
-}
-
-/// Заморожённый расчёт по заказу. Ревизии НЕ переписываются: исправление входных
-/// данных публикует следующую, а прежняя продолжает объяснять уже созданное начисление.
-/// Действующая ревизия — единственная в статусе PUBLISHED.
-///
-/// Жизненный цикл: DRAFT → PUBLISHED → SUPERSEDED. Триггер в БД разрешает ровно один
-/// переход у неизменяемых статусов — PUBLISHED → SUPERSEDED без изменения остальных
-/// полей; всё прочее отклоняется. Удалять можно только DRAFT: он по определению нигде
-/// не использован, потому что начисление ссылается только на PUBLISHED.
-///
-/// Stage 3b свяжет `PRIMARY_FLORIST_SHARE` со снимками. Связь будет МНОГИЕ-КО-МНОГИМ
-/// (дневное начисление собирается из снимков всех заказов дня), поэтому колонки
-/// `ledgerEntryId` здесь сознательно НЕТ — она навязала бы связь один-к-одному.
-/// Stage 3b добавит отдельную таблицу связи; сами снимки при этом не меняются:
-/// их id стабильны, а PUBLISHED-строки неизменяемы.
-model OrderFinancialSnapshot {
-  id       String         @id @default(cuid())
-  orderId  String
-  order    Order          @relation(fields: [orderId], references: [id], onDelete: Restrict)
-  revision Int
-  status   SnapshotStatus @default(DRAFT)
-
-  /// Участвует ли заказ в начислении. false — расчёт невозможен (нет доставки,
-  /// комиссии, стоимости вазы…); причины лежат в calcInputJson.needsReview.
-  isCalculable Boolean
-
-  // ── Заморожённые суммы, целые центы ──
-  /// Всё, что заплатил клиент: товары + налог + доставка + чаевые. Совпадает с суммой
-  /// оплаченного заказа на платформе, поэтому расчёт сверяется с Shopify напрямую.
-  grossRevenueCents    Int
-  /// Чаевые. Входят в выручку и тут же вычитаются отдельной строкой расхода: на
-  /// распределяемую прибыль они не влияют, но видно, что они учтены и отданы владельцу.
-  /// У ревизий, опубликованных до этого разделения, здесь 0, а выручка чаевых не включает —
-  /// такая ревизия остаётся внутренне непротиворечивой.
-  tipsCents            Int                @default(0)
-  /// Цветочная часть — база распределения дневной закупки.
-  flowerRevenueCents   Int
-  taxCents             Int
-  deliveryActualCents  Int
-  acquiringFeeCents    Int
-  acquiringFeeSource   AcquiringFeeSource
-  vaseGiftCostCents    Int
-  consumablesCents     Int
-  /// ЗАРЕЗЕРВИРОВАННАЯ доля дневной закупки. Считается по ПОЛНОМУ знаменателю дня —
-  /// включая заказы, которые в начисление не попали. Иначе их доля расходов легла бы
-  /// на исправные заказы и занизила бы начисление. У isCalculable = false эта сумма
-  /// и есть «нераспределённый остаток» дня.
-  allocatedFlowerCents Int
-  otherExpenseCents    Int                @default(0)
-  /// База доли: выручка минус ПОЛНЫЙ налог и остальные расходы. У isCalculable = false
-  /// смысла не имеет и равна нулю.
-  distributableCents   Int
-
-  /// ПОЛНЫЙ вход расчёта: суммы заказа, позиции с классификацией, связанные вазы и их
-  /// закупочные стоимости, применённая ставка расходников, модель комиссии и её id,
-  /// источник комиссии, доставка, налоговая политика, дневная закупка и знаменатель
-  /// распределения, id и даты действия ВСЕХ использованных настроек, причины needsReview.
-  ///
-  /// Смысл: старый расчёт должен объясняться целиком по этому полю, без обращения к
-  /// текущему каталогу и текущим настройкам — они к тому времени уже изменятся.
-  calcInputJson Json
-
-  createdAt DateTime @default(now())
-  createdBy String
-
-  ledgerEntries LedgerEntrySnapshot[]
-
-  @@unique([orderId, revision])
-  @@index([orderId, revision])
-  @@index([orderId, status])
 }
 
 // ───────────────  FINANCE SETUP ASSISTANT (Stage 3a)  ───────────────
@@ -1310,7 +1216,6 @@ model Order {
   ledgerEntries      LedgerEntry[]
 
   // ── Финансы Stage 3a ──
-  financialSnapshots  OrderFinancialSnapshot[]
   consumablesOverride OrderConsumablesOverride?
   acquiringFee        OrderAcquiringFee?
   financeIssues       FinanceIssue[]

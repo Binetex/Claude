@@ -22,8 +22,8 @@ const STATUSES: { value: string; label: string }[] = [
   { value: "", label: "Любой статус" },
   { value: "MISSING", label: "Отсутствует" },
   { value: "FILLED", label: "Заполнено" },
-  { value: "NEEDS_CHECK", label: "Требует проверки" },
-  { value: "USED", label: "Использовано в расчёте" },
+  { value: "INCOMPLETE", label: "Не хватает данных" },
+  { value: "COUNTED", label: "Посчитан" },
 ];
 
 const selectCls = "h-9 rounded-lg border border-slate-200 bg-white px-2.5 text-sm shadow-xs";

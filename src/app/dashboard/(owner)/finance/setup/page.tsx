@@ -7,7 +7,7 @@ import { EmptyState } from "@/components/ui/states";
 import { formatCents } from "@/lib/cents";
 import { listOpenIssues, getIssueSummary, type IssueGroup } from "@/modules/finance/issues";
 import { listBurqDeliveryCandidates } from "@/modules/finance/fix";
-import { dayKey } from "@/modules/finance/snapshot";
+import { dayKey } from "@/modules/finance/dayFinance";
 import { IssueList, type IssueRow } from "./IssueList";
 import { RescanButton, SetupFilters } from "./SetupControls";
 import type { FinanceIssueType } from "@/generated/prisma/enums";

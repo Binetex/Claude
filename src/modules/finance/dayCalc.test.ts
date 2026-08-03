@@ -7,6 +7,7 @@ function order(id: string, over: Partial<DayOrderInput> = {}): DayOrderInput {
     orderNumber: id,
     siteId: "s1",
     grossRevenueCents: 18000, // 150 товары + 10 налог + 20 доставка
+    customerTotalCents: 18000,
     tipCents: 0,
     taxCents: 1000,
     deliveryActualCents: 1200,
@@ -14,6 +15,8 @@ function order(id: string, over: Partial<DayOrderInput> = {}): DayOrderInput {
     vaseGiftCostCents: 0,
     consumablesCents: 500,
     additionalCents: 0,
+    feeFromActual: false,
+    consumablesFromOverride: false,
     ...over,
   };
 }

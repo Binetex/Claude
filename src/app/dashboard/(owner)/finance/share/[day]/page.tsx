@@ -36,7 +36,7 @@ export default async function ShareDayPage({ params }: { params: Promise<{ day: 
   const head = await listShareDaysRead({ page: 1, perPage: 20 });
   if (!head.profileId) notFound();
 
-  const detail = await readShareDayBreakdown(head.profileId, new Date(`${day}T00:00:00.000Z`), true);
+  const detail = await readShareDayBreakdown(head.profileId, new Date(`${day}T00:00:00.000Z`));
   if (!detail) notFound();
 
   return (

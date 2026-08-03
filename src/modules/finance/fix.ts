@@ -8,7 +8,7 @@ import "server-only";
  * не создаёт ни одной строкой.
  *
  * Порядок после любой записи одинаков и нарушать его нельзя:
- *   настройка → аудит → новая ревизия снимков затронутых дней → детектор.
+ *   настройка → аудит → пересчёт итогов затронутых дней → детектор.
  * Аудит пишут сами сервисы настроек (settings.ts, setVasePurchaseCost, vaseLink), поэтому
  * второй раз он здесь не дублируется — иначе одна операция дала бы две записи истории.
  */
@@ -17,11 +17,9 @@ import { prisma } from "@/lib/db";
 import { setVasePurchaseCost } from "@/modules/catalog/finance/setVasePurchaseCost";
 import { setVariantVase, type VaseSelection } from "@/modules/catalog/finance/vaseLink";
 import { detectFinanceIssues, DETECTOR_WINDOW_DAYS } from "./issues";
-import { publishDaySnapshots } from "./snapshot";
 import { recomputeDay } from "./dayFinance";
 import { setConsumablesRate, setDailyFlowerExpense, setFeeModel, setOwnerTaxPolicy } from "./settings";
 import { primaryShareStartDate } from "./config";
-import { accrueDays, type ShareOutcome } from "./primaryShare";
 
 export type FixActor = { userId: string; role: Role };
 
@@ -42,16 +40,12 @@ function assertOwner(actor: FixActor): void {
 }
 
 export type FixResult = {
-  /** Сколько ревизий снимков опубликовано. */
-  republished: number;
   /** Сколько дней пересчитано. */
   days: number;
+  /** Сколько из них посчиталось целиком: только такие дни дают заработок. */
+  complete: number;
   /** Итог прогона детектора. */
   detector: { opened: number; updated: number; reopened: number; autoResolved: number };
-  /** Что стало с начислением доли по затронутым дням. */
-  share: { created: number; corrected: number; unchanged: number; skipped: number };
-  /** Исходы по каждому дню — чтобы «было → стало» не пришлось добывать заново. */
-  outcomes: { day: Date; outcome: ShareOutcome }[];
 };
 
 /** Действующий профиль основного флориста. Без него считать нечего. */
@@ -99,12 +93,12 @@ async function daysFor(
 /**
  * ЕДИНСТВЕННЫЙ путь пересчёта после любого изменения входных данных.
  *
- * Порядок фиксирован: снимки затронутых дней → детектор → пересчёт доли. Начисление идёт
- * последним, потому что опирается на уже опубликованные ревизии — иначе запись в книге
- * сослалась бы на снимки, которые её не объясняют.
- *
  * Пересчёт идёт по ДНЯМ, а не по заказам: дневная закупка общая, и посчитать один заказ
  * в отрыве от остальных нельзя.
+ *
+ * Денег эта функция не трогает вовсе. Заработок выводится из итогов дней, поэтому
+ * переписать итог — и значит закончить пересчёт; сторно и корректировок начислений,
+ * которые здесь были раньше, больше не существует.
  *
  * Копий этой функции быть не должно. Она уже существовала в двух экземплярах, и когда
  * правился один, второй продолжал работать по-старому.
@@ -115,26 +109,16 @@ export async function recalculateAffectedFinance(
   actor: FixActor,
   now: Date
 ): Promise<FixResult> {
-  let republished = 0;
+  let complete = 0;
   for (const day of days) {
-    // Новая модель: одна изменяемая строка итога дня. Пишется всегда — именно из неё
-    // считается долг флориста.
-    await recomputeDay(profileId, day, actor);
-    // Старый позаказный снимок пока публикуется рядом: экраны ещё читают его. Уйдёт
-    // вместе с отключением старого пути.
-    const { published } = await publishDaySnapshots(profileId, day, actor);
-    republished += published;
+    const r = await recomputeDay(profileId, day, actor);
+    if (r?.complete) complete++;
   }
   const detector = await detectFinanceIssues(now);
-  // Пересчёт доли — последним шагом: он опирается на уже опубликованные снимки.
-  // Опубликованную запись не редактирует: при изменении суммы создаёт сторно и новую.
-  const { outcomes, ...share } = await accrueDays(profileId, days, actor);
   return {
-    republished,
     days: days.length,
+    complete,
     detector: { opened: detector.opened, updated: detector.updated, reopened: detector.reopened, autoResolved: detector.autoResolved },
-    share,
-    outcomes,
   };
 }
 

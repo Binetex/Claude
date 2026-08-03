@@ -3,7 +3,7 @@
  *
  * Проверяется то, что нельзя проверить в отрыве от БД: что история не обрезается по
  * давности, что права держатся на резолве профиля, а не на честности вызывающего, и что
- * правка расхода доводится до конца — снимки, детектор и книга.
+ * правка расхода доводится до конца — итог дня, детектор и заработок флориста.
  *
  * Запуск: DATABASE_URL=<local> npx vitest run --no-file-parallelism \
  *           src/modules/finance/flowerExpenses.integration.test.ts
@@ -11,9 +11,9 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import crypto from "crypto";
 import { prisma } from "@/lib/db";
+import { computeDayShare } from "./dayFinance";
 import { setFinanceProfile } from "./profile";
-import { computeDayShare } from "./primaryShare";
-import { getFloristBalance } from "./ledger";
+import { floristBalance } from "./balance";
 import { fixConsumablesRate, fixDeliveryActualCost, fixSiteFeeModel } from "./fix";
 import {
   deleteFlowerExpense,
@@ -154,13 +154,9 @@ beforeAll(async () => {
 
 afterAll(async () => {
   delete process.env.FINANCE_PRIMARY_SHARE_START_DATE;
-  await prisma.ledgerEntrySnapshot.deleteMany({ where: { ledgerEntry: { floristId } } });
   await prisma.$executeRawUnsafe(`ALTER TABLE "LedgerEntry" DISABLE TRIGGER USER`);
   await prisma.ledgerEntry.deleteMany({ where: { floristId: { in: [floristId, secondaryFloristId] } } });
   await prisma.$executeRawUnsafe(`ALTER TABLE "LedgerEntry" ENABLE TRIGGER USER`);
-  await prisma.$executeRawUnsafe(`ALTER TABLE "OrderFinancialSnapshot" DISABLE TRIGGER USER`);
-  await prisma.orderFinancialSnapshot.deleteMany({ where: { order: { siteId } } });
-  await prisma.$executeRawUnsafe(`ALTER TABLE "OrderFinancialSnapshot" ENABLE TRIGGER USER`);
 
   await prisma.financeIssue.deleteMany({ where: { OR: [{ siteId }, { floristId }] } });
   await prisma.financeAudit.deleteMany({ where: { userId: { in: [OWNER.userId, PRIMARY_ACTOR.userId, CC_ACTOR.userId] } } });
@@ -273,42 +269,38 @@ describe("история за всё время", () => {
 });
 
 describe("правка расхода доводится до конца", () => {
-  it("внесение закупки публикует снимки и создаёт начисление", async () => {
+  it("внесение закупки делает день посчитанным и даёт заработок", async () => {
     const r = await saveFlowerExpense({ actor: OWNER, expenseDay: DAY, amountCents: 6000, comment: "первая закупка", now: NOW });
-    expect(r.republished).toBeGreaterThan(0);
-    expect(r.share.status).toBe("CREATED");
+    expect(r.complete).toBe(true);
+    expect(r.shareCents).toBeGreaterThan(0);
 
     const computed = await computeDayShare(profileId, DAY);
-    expect(computed!.blocked).toBe(false);
-    // Сверяем именно этот день: у флориста уже есть начисление за январь из проверки прав.
-    const entries = await prisma.ledgerEntry.findMany({
-      where: { floristId, type: "PRIMARY_FLORIST_SHARE", effectiveDate: DAY, reversal: null },
-    });
-    expect(entries).toHaveLength(1);
-    expect(entries[0].amountCents).toBe(computed!.shareCents);
+    expect(computed!.complete).toBe(true);
+    expect(computed!.shareCents).toBe(r.shareCents);
   });
 
-  it("день с расходом, но без посчитанных заказов, не пугает «требует проверки»", async () => {
+  it("день с расходом, но без заказов, не пугает несуществующей проблемой", async () => {
     // Закупка была, доставленных заказов в этот день нет — считать нечего, и статус
-    // должен говорить «заполнено», а не требовать разбираться с несуществующей проблемой.
+    // должен говорить «заполнено», а не требовать разбираться неизвестно с чем.
     const quiet = new Date("2026-03-05T00:00:00.000Z");
     await saveFlowerExpense({ actor: OWNER, expenseDay: quiet, amountCents: 4200, comment: "день без доставок", now: NOW });
 
     const list = await listFlowerExpenses(profileId, floristId, { from: quiet, to: quiet }, { page: 1, perPage: 5 });
     expect(list.rows[0].ordersTotal).toBe(0);
-    expect(list.rows[0].hasPublishedSnapshot).toBe(false);
     expect(list.rows[0].status).toBe("FILLED");
   });
 
-  it("день становится «использован в расчёте»", async () => {
+  it("день становится посчитанным", async () => {
     const list = await listFlowerExpenses(profileId, floristId, { from: DAY, to: DAY }, { page: 1, perPage: 10 });
-    expect(list.rows[0].status).toBe("USED");
-    expect(list.rows[0].accruedCents).toBeGreaterThan(0);
-    expect(list.rows[0].hasPublishedSnapshot).toBe(true);
+    expect(list.rows[0].status).toBe("COUNTED");
+    expect(list.rows[0].complete).toBe(true);
+    expect(list.rows[0].shareCents).toBeGreaterThan(0);
   });
 
   it("предпросмотр показывает будущую разницу, ничего не записывая", async () => {
-    const before = await prisma.ledgerEntry.count({ where: { floristId } });
+    const before = await prisma.dayFinance.findUnique({
+      where: { financeProfileId_day: { financeProfileId: profileId, day: DAY } },
+    });
     const p = await previewFlowerExpense(profileId, DAY, 9000);
 
     expect(p.fromCents).toBe(6000);
@@ -318,50 +310,39 @@ describe("правка расхода доводится до конца", () =>
     // Расход вырос — распределяемая прибыль и доля упали.
     expect(p.shareDeltaCents).toBeLessThan(0);
     expect(p.ordersAffected).toBe(2);
-    expect(await prisma.ledgerEntry.count({ where: { floristId } })).toBe(before);
+
+    // Записанный итог дня предпросмотр не тронул.
+    const after = await prisma.dayFinance.findUnique({
+      where: { financeProfileId_day: { financeProfileId: profileId, day: DAY } },
+    });
+    expect(after!.distributableCents).toBe(before!.distributableCents);
+    expect(after!.updatedAt.getTime()).toBe(before!.updatedAt.getTime());
   });
 
-  it("изменение суммы пересобирает снимки и правит книгу через сторно", async () => {
-    const revisionsBefore = await prisma.orderFinancialSnapshot.count({ where: { order: { siteId } } });
-    const balanceBefore = await getFloristBalance(floristId);
+  it("изменение суммы двигает заработок ровно на разницу доли за этот день", async () => {
+    const shareBefore = (await computeDayShare(profileId, DAY))!.shareCents;
+    const balanceBefore = await floristBalance(floristId);
 
     const r = await saveFlowerExpense({ actor: OWNER, expenseDay: DAY, amountCents: 9000, comment: "уточнил чек", now: NOW });
-    expect(r.share.status).toBe("CORRECTED");
-    expect(r.share.toCents).toBeLessThan(r.share.fromCents!);
+    expect(r.shareCents).toBeLessThan(shareBefore);
 
-    expect(await prisma.orderFinancialSnapshot.count({ where: { order: { siteId } } })).toBeGreaterThan(revisionsBefore);
-    // Прежняя запись не отредактирована, а сторнирована отдельной строкой.
-    const reversal = await prisma.ledgerEntry.findFirst({ where: { floristId, type: "CORRECTION", reversedEntryId: { not: null } } });
-    expect(reversal).not.toBeNull();
-
-    // Баланс изменился ровно на разницу доли за этот день и ни на цент больше:
-    // начисления других дней правка не задевает.
-    const balanceAfter = await getFloristBalance(floristId);
-    expect(balanceBefore.outstandingCents - balanceAfter.outstandingCents).toBe(r.share.fromCents! - r.share.toCents!);
-
-    const live = await prisma.ledgerEntry.findMany({
-      where: { floristId, type: "PRIMARY_FLORIST_SHARE", effectiveDate: DAY, reversal: null },
-    });
-    expect(live).toHaveLength(1);
-    expect(live[0].amountCents).toBe((await computeDayShare(profileId, DAY))!.shareCents);
+    // Другие дни правка не задевает: баланс сдвинулся ровно на разницу этого дня.
+    const balanceAfter = await floristBalance(floristId);
+    expect(balanceBefore.outstandingCents - balanceAfter.outstandingCents).toBe(shareBefore - r.shareCents!);
   });
 
-  it("та же сумма не создаёт ни одной новой записи в книге", async () => {
-    const before = await prisma.ledgerEntry.count({ where: { floristId } });
+  it("та же сумма ничего не двигает", async () => {
+    const before = await floristBalance(floristId);
     const r = await saveFlowerExpense({ actor: OWNER, expenseDay: DAY, amountCents: 9000, comment: "тот же чек", now: NOW });
-    expect(r.share.status).toBe("UNCHANGED");
-    expect(await prisma.ledgerEntry.count({ where: { floristId } })).toBe(before);
+    const after = await floristBalance(floristId);
+    expect(after.outstandingCents).toBe(before.outstandingCents);
+    expect(r.shareCents).toBe(before.earnedCents - (before.earnedCents - r.shareCents!));
   });
 
-  it("правка комментария не трогает ни ревизии, ни книгу", async () => {
-    const snapsBefore = await prisma.orderFinancialSnapshot.count({ where: { order: { siteId } } });
-    const ledgerBefore = await prisma.ledgerEntry.count({ where: { floristId } });
-
-    const r = await saveFlowerExpense({ actor: OWNER, expenseDay: DAY, amountCents: 9000, comment: "переформулировал", now: NOW });
-    expect(r.republished).toBe(0);
-    expect(r.share.status).toBe("UNCHANGED");
-    expect(await prisma.orderFinancialSnapshot.count({ where: { order: { siteId } } })).toBe(snapsBefore);
-    expect(await prisma.ledgerEntry.count({ where: { floristId } })).toBe(ledgerBefore);
+  it("правка комментария не меняет деньги", async () => {
+    const before = await floristBalance(floristId);
+    await saveFlowerExpense({ actor: OWNER, expenseDay: DAY, amountCents: 9000, comment: "переформулировал", now: NOW });
+    expect((await floristBalance(floristId)).outstandingCents).toBe(before.outstandingCents);
   });
 
   it("каждая правка попадает в историю изменений с автором и ролью", async () => {
@@ -389,20 +370,16 @@ describe("удаление", () => {
     );
   });
 
-  it("сторнирует начисление и открывает блокирующую проблему", async () => {
+  it("обнуляет заработок за день и открывает блокирующую проблему", async () => {
     const accrued = (await computeDayShare(profileId, DAY))!.shareCents;
-    const balanceBefore = await getFloristBalance(floristId);
+    const balanceBefore = await floristBalance(floristId);
 
     const r = await deleteFlowerExpense({ actor: OWNER, expenseDay: DAY, reason: "внесено не в тот день", now: NOW });
-    expect(r.reversedCents).toBe(accrued);
+    expect(r.complete).toBe(false);
+    expect(r.shareCents).toBeNull();
 
-    // В книге не осталось действующего начисления за день.
-    const live = await prisma.ledgerEntry.findMany({
-      where: { floristId, type: "PRIMARY_FLORIST_SHARE", effectiveDate: DAY, reversal: null },
-    });
-    expect(live).toHaveLength(0);
-    // Из баланса ушла ровно сторнированная сумма; январское начисление осталось на месте.
-    const balanceAfter = await getFloristBalance(floristId);
+    // Из заработка ушла ровно доля этого дня; другие дни на месте.
+    const balanceAfter = await floristBalance(floristId);
     expect(balanceBefore.outstandingCents - balanceAfter.outstandingCents).toBe(accrued);
 
     // День снова требует заполнения.
@@ -421,23 +398,10 @@ describe("удаление", () => {
     expect(history.find((h) => h.action === "DELETE_DAILY_FLOWER_EXPENSE")!.reason).toBe("внесено не в тот день");
   });
 
-  it("возвращённый расход начисляется заново, а не падает на занятом ключе", async () => {
-    // Ключ дня израсходован сторнированной записью: книга append-only, и прежняя запись
-    // вместе со своим ключом никуда не делась. Новое начисление обязано получить свой.
+  it("возвращённый расход снова даёт заработок", async () => {
     const r = await saveFlowerExpense({ actor: OWNER, expenseDay: DAY, amountCents: 9000, comment: "вернули", now: NOW });
-    expect(r.share.status).toBe("CREATED");
-
-    const computed = await computeDayShare(profileId, DAY);
-    const live = await prisma.ledgerEntry.findMany({
-      where: { floristId, type: "PRIMARY_FLORIST_SHARE", effectiveDate: DAY, reversal: null },
-    });
-    expect(live).toHaveLength(1);
-    expect(live[0].amountCents).toBe(computed!.shareCents);
-
-    const keys = (
-      await prisma.ledgerEntry.findMany({ where: { floristId }, select: { idempotencyKey: true } })
-    ).map((e) => e.idempotencyKey);
-    expect(new Set(keys).size).toBe(keys.length);
+    expect(r.complete).toBe(true);
+    expect(r.shareCents).toBe((await computeDayShare(profileId, DAY))!.shareCents);
 
     await deleteFlowerExpense({ actor: OWNER, expenseDay: DAY, reason: "убираем обратно", now: NOW });
   });

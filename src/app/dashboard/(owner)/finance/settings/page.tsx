@@ -6,7 +6,7 @@ import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { EmptyState } from "@/components/ui/states";
 import { formatCents } from "@/lib/cents";
-import { dayKey } from "@/modules/finance/snapshot";
+import { dayKey } from "@/modules/finance/dayFinance";
 import { listSettingRecords, type SettingRecord } from "@/modules/finance/settingsAdmin";
 import { primaryShareStartDate } from "@/modules/finance/config";
 import { CorrectSettingDialog, DeleteSettingDialog, type SettingRowDto } from "@/components/finance/SettingRowActions";

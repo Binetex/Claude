@@ -27,12 +27,10 @@ export type SettingPreviewDto = {
   op: "CORRECT" | "DELETE";
   affectedDays: number;
   affectedOrders: number;
-  revisionsToRepublish: number;
   shareBeforeCents: number;
   shareAfterCents: number;
   shareDeltaCents: number;
-  daysNeedingCorrection: number;
-  needsLedgerCorrection: boolean;
+  daysChanged: number;
   days: Array<{
     day: string;
     ordersTotal: number;
@@ -90,8 +88,6 @@ function PreviewPanel({ p }: { p: SettingPreviewDto }) {
         <span className="text-right tabular-nums">{p.affectedDays}</span>
         <span className="text-slate-500">Затронуто заказов</span>
         <span className="text-right tabular-nums">{p.affectedOrders}</span>
-        <span className="text-slate-500">Ревизий снимков будет пересобрано</span>
-        <span className="text-right tabular-nums">{p.revisionsToRepublish}</span>
         <span className="text-slate-500">Доля флориста</span>
         <span className="text-right tabular-nums">
           {formatCents(p.shareBeforeCents)} → <span className="font-medium">{formatCents(p.shareAfterCents)}</span>
@@ -100,13 +96,9 @@ function PreviewPanel({ p }: { p: SettingPreviewDto }) {
         <span className={`text-right font-medium tabular-nums ${p.shareDeltaCents !== 0 ? "text-amber-700" : ""}`}>
           {delta(p.shareDeltaCents)}
         </span>
-        <span className="text-slate-500">Правка книги</span>
-        <span className="text-right">
-          {p.needsLedgerCorrection ? (
-            <span className="font-medium text-amber-700">сторно + новое начисление ({p.daysNeedingCorrection})</span>
-          ) : (
-            "не требуется"
-          )}
+        <span className="text-slate-500">Дней с изменением заработка</span>
+        <span className={`text-right tabular-nums ${p.daysChanged > 0 ? "font-medium text-amber-700" : ""}`}>
+          {p.daysChanged}
         </span>
       </div>
 

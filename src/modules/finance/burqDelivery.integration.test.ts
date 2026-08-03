@@ -106,9 +106,6 @@ beforeAll(async () => {
 
 afterAll(async () => {
   delete process.env.FINANCE_PRIMARY_SHARE_START_DATE;
-  await prisma.$executeRawUnsafe(`ALTER TABLE "OrderFinancialSnapshot" DISABLE TRIGGER USER`);
-  await prisma.orderFinancialSnapshot.deleteMany({ where: { order: { siteId } } });
-  await prisma.$executeRawUnsafe(`ALTER TABLE "OrderFinancialSnapshot" ENABLE TRIGGER USER`);
 
   await prisma.financeIssue.deleteMany({ where: { OR: [{ siteId }, { floristId }] } });
   await prisma.financeAudit.deleteMany({ where: { userId: OWNER.userId } });
@@ -192,10 +189,7 @@ describe("применение", () => {
     expect(Number(after!.deliveryActualCost)).toBe(0);
   });
 
-  it("закрывает связанные проблемы и публикует ревизии снимков", async () => {
-    const snapshots = await prisma.orderFinancialSnapshot.count({ where: { orderId: withFinal } });
-    expect(snapshots).toBeGreaterThan(0);
-
+  it("закрывает связанные проблемы", async () => {
     const stillOpen = await prisma.financeIssue.count({
       where: { status: "OPEN", type: "DELIVERY_ACTUAL_COST_MISSING", orderId: { in: [withFinal, withQuote] } },
     });

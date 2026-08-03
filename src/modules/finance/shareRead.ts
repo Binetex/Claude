@@ -154,16 +154,11 @@ export type ShareDayDetail = {
 /**
  * Разбор дня из его строки. Ничего не считает и не пишет.
  *
- * Представления владельца и флориста теперь совпадают: единственным различием было
+ * Представления владельца и флориста совпадают: единственным различием было
  * происхождение комиссии (фактическая или расчётная), а оно относилось к позаказному
- * снимку и в дневной строке не хранится. Параметр оставлен, чтобы не переписывать вызовы;
- * если различий так и не появится — уйдёт.
+ * снимку, которого больше нет. Разных версий этого экрана не существует.
  */
-export async function readShareDayBreakdown(
-  profileId: string,
-  day: Date,
-  _forOwner: boolean
-): Promise<ShareDayDetail | null> {
+export async function readShareDayBreakdown(profileId: string, day: Date): Promise<ShareDayDetail | null> {
   const profile = await prisma.floristFinanceProfile.findUnique({
     where: { id: profileId },
     select: { sharePercentBp: true },

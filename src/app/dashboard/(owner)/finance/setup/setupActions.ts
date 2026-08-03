@@ -26,7 +26,7 @@ import {
 import { FinanceSettingsError } from "@/modules/finance/settings";
 import { detectFinanceIssues } from "@/modules/finance/issues";
 import { setFinanceProfile } from "@/modules/finance/profile";
-import { accrueDays, primaryShareDays } from "@/modules/finance/primaryShare";
+import { primaryShareDays, recomputeDay } from "@/modules/finance/dayFinance";
 
 export type SetupResult = { ok?: true; message?: string; error?: string };
 
@@ -70,10 +70,10 @@ function revalidateSetup() {
   revalidatePath("/dashboard/finance/florists");
 }
 
-function done(message: string, r: { republished: number; days: number; detector: { autoResolved: number } }): SetupResult {
+function done(message: string, r: { days: number; detector: { autoResolved: number } }): SetupResult {
   revalidateSetup();
   const parts = [message];
-  if (r.days > 0) parts.push(`пересчитано дней: ${r.days}, новых ревизий: ${r.republished}`);
+  if (r.days > 0) parts.push(`пересчитано дней: ${r.days}`);
   if (r.detector.autoResolved > 0) parts.push(`закрыто проблем: ${r.detector.autoResolved}`);
   return { ok: true, message: parts.join(" · ") };
 }
@@ -265,8 +265,8 @@ export async function applyPrimarySharePercent(formData: FormData): Promise<Setu
 }
 
 /**
- * Ручной пересчёт доли по всем дням с даты запуска. Начисление показывает рассчитанный
- * долг и денег не переводит — реальная выплата остаётся ручной операцией PAYMENT.
+ * Ручной пересчёт всех дней с даты запуска. Денег не трогает: заработок выводится из
+ * итогов дней, а выплата остаётся ручной операцией PAYMENT.
  */
 export async function recomputePrimaryShare(): Promise<SetupResult> {
   const user = await requireRole("OWNER");
@@ -274,12 +274,17 @@ export async function recomputePrimaryShare(): Promise<SetupResult> {
     const plan = await primaryShareDays();
     if (!plan) return { error: "Не задана дата запуска расчёта, профиль или доля основного флориста." };
 
-    const r = await accrueDays(plan.profileId, plan.days, { userId: user.id, role: user.role });
+    let complete = 0;
+    for (const day of plan.days) {
+      const r = await recomputeDay(plan.profileId, day, { userId: user.id });
+      if (r?.complete) complete++;
+    }
+
     revalidatePath("/dashboard/finance/share");
     revalidatePath("/dashboard/finance/florists");
     return {
       ok: true,
-      message: `Дней: ${plan.days.length} · начислено: ${r.created} · уточнено: ${r.corrected} · без изменений: ${r.unchanged} · пропущено: ${r.skipped}`,
+      message: `Дней: ${plan.days.length} · посчитано целиком: ${complete} · не хватает данных: ${plan.days.length - complete}`,
     };
   } catch (err) {
     return toError(err);

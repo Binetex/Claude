@@ -13,7 +13,9 @@ import { Prisma } from "@/generated/prisma/client";
 import type { FinanceActionType, FinanceIssueSeverity, FinanceIssueType } from "@/generated/prisma/enums";
 import { prisma } from "@/lib/db";
 import { toNumber } from "@/lib/money";
-import { buildDayPlan, dayKey, type DayPlan } from "./snapshot";
+import { computeDay, dayKey } from "./dayFinance";
+import type { DayFinanceResult } from "./dayCalc";
+import { resolveItemsFinance } from "./itemFinance";
 import { resolveOwnerTaxPolicy } from "./settings";
 import { primaryShareGate } from "./config";
 
@@ -73,8 +75,12 @@ export async function detectFinanceIssues(now: Date = new Date()): Promise<Detec
 
   const drafts: Draft[] = [];
   for (const { deliveryDate } of days) {
-    const plan = await buildDayPlan(profile.id, deliveryDate);
-    if (plan) drafts.push(...draftsForDay(plan, profile.id, profile.floristId, deliveryDate));
+    const result = await computeDay(profile.id, deliveryDate);
+    if (!result) continue;
+    // Подробности нужны только по проблемным заказам, и запрашиваются только для них:
+    // на здоровом дне детектор не платит ни одного лишнего запроса.
+    const meta = await metaForOrders(result.orders.filter((o) => o.missing.length > 0).map((o) => o.orderId), deliveryDate);
+    drafts.push(...draftsForDay(result, meta, profile.id, profile.floristId, deliveryDate));
   }
   drafts.push(...(await globalDrafts(profile.floristId, now)));
 
@@ -101,13 +107,63 @@ async function closeOutOfScope(now: Date, startDate: Date | null): Promise<Detec
   return { opened: 0, updated: 0, reopened: 0, autoResolved: open.length, scannedDays: 0 };
 }
 
+type OrderMeta = {
+  orderNumber: string;
+  siteId: string;
+  siteShortName: string;
+  items: Array<{ id: string; name: string; financialType: string | null; catalogReasons: string[] }>;
+};
+
+/** Подробности проблемных заказов: название магазина и разбор позиций. */
+async function metaForOrders(orderIds: string[], day: Date): Promise<Map<string, OrderMeta>> {
+  const out = new Map<string, OrderMeta>();
+  if (orderIds.length === 0) return out;
+
+  const orders = await prisma.order.findMany({
+    where: { id: { in: orderIds } },
+    select: {
+      id: true,
+      orderNumber: true,
+      siteId: true,
+      site: { select: { shortName: true } },
+      items: { select: { id: true, name: true, quantity: true, productId: true, variantId: true } },
+    },
+  });
+
+  const finance = await resolveItemsFinance(orders.flatMap((o) => o.items), day);
+
+  for (const o of orders) {
+    out.set(o.id, {
+      orderNumber: o.orderNumber,
+      siteId: o.siteId,
+      siteShortName: o.site.shortName,
+      items: o.items.map((i) => {
+        const fin = finance.get(i.id);
+        return {
+          id: i.id,
+          name: i.name,
+          financialType: fin?.financialType ?? null,
+          catalogReasons: fin?.reasons ?? [],
+        };
+      }),
+    });
+  }
+  return out;
+}
+
 /** Проблемы одного дня: сначала блокеры дня, затем поштучные по заказам. */
-function draftsForDay(plan: DayPlan, profileId: string, floristId: string, day: Date): Draft[] {
+function draftsForDay(
+  result: DayFinanceResult,
+  meta: Map<string, OrderMeta>,
+  profileId: string,
+  floristId: string,
+  day: Date
+): Draft[] {
   const out: Draft[] = [];
   const key = dayKey(day);
-  const orderCount = plan.result.orders.length;
+  const orderCount = result.ordersTotal;
 
-  if (plan.result.blockers.includes("DAILY_FLOWER_EXPENSE_MISSING")) {
+  if (result.blockers.includes("DAILY_FLOWER_EXPENSE_MISSING")) {
     out.push({
       type: "DAILY_FLOWER_EXPENSE_MISSING",
       severity: "BLOCKING",
@@ -122,64 +178,34 @@ function draftsForDay(plan: DayPlan, profileId: string, floristId: string, day: 
       detailJson: {
         day: key,
         orderCount,
-        flowerRevenueCents: plan.result.denominatorCents,
-        reason: "За этот день не внесены расходы на цветы — распределять нечего.",
+        reason: "За этот день не внесены расходы на цветы — главный расход дня неизвестен.",
       },
       // Без кандидатского значения эффект посчитать нельзя; ноль соврал бы.
       estimatedImpactCents: null,
     });
   }
 
-  if (plan.result.blockers.includes("FLOWER_REVENUE_UNDETERMINED")) {
-    const unknownOrders = plan.inputs.orders
-      .filter((o) => o.items.some((i) => !i.isTip && i.financialType == null))
-      .map((o) => o.orderNumber);
-    out.push({
-      type: "FLOWER_REVENUE_UNDETERMINED",
-      severity: "BLOCKING",
-      deduplicationKey: `FLOWER_REVENUE_UNDETERMINED:${profileId}:${key}`,
-      scopeDate: day,
-      siteId: null,
-      orderId: null,
-      floristId,
-      sourceEntity: "Day",
-      sourceEntityId: `${profileId}:${key}`,
-      suggestedActionType: "CLASSIFY_ORDER_ITEMS",
-      detailJson: {
-        day: key,
-        orderCount,
-        orders: unknownOrders,
-        reason:
-          unknownOrders.length > 0
-            ? "У части позиций нет связи с каталогом, поэтому цветочную выручку дня определить нельзя."
-            : "Цветочная выручка дня равна нулю, а закупка задана — распределять не по чему.",
-      },
-      estimatedImpactCents: null,
-    });
-  }
-
-  // Поштучные проблемы заказов. Не блокируют день целиком: их доля закупки
-  // резервируется и остаётся нераспределённой до исправления.
-  for (const computed of plan.result.orders) {
-    if (computed.isCalculable) continue;
-    const meta = plan.inputs.meta.get(computed.orderId)!;
+  // Поштучные проблемы заказов. Пока хоть одна не разобрана, день не считается целиком:
+  // подставить ноль вместо неизвестного расхода значило бы завысить прибыль.
+  for (const computed of result.orders) {
+    if (computed.missing.length === 0) continue;
+    const m = meta.get(computed.orderId);
+    if (!m) continue;
 
     for (const missing of computed.missing) {
-      if (missing === "DAILY_FLOWER_EXPENSE" || missing === "FLOWER_REVENUE") continue; // уровень дня
-
       if (missing === "DELIVERY_ACTUAL_COST") {
         out.push({
           type: "DELIVERY_ACTUAL_COST_MISSING",
           severity: "BLOCKING",
           deduplicationKey: `DELIVERY_ACTUAL_COST_MISSING:${computed.orderId}`,
           scopeDate: day,
-          siteId: meta.siteId,
+          siteId: m.siteId,
           orderId: computed.orderId,
           floristId,
           sourceEntity: "Order",
           sourceEntityId: computed.orderId,
           suggestedActionType: "SET_DELIVERY_ACTUAL_COST",
-          detailJson: { orderNumber: meta.orderNumber, site: meta.siteShortName, day: key },
+          detailJson: { orderNumber: m.orderNumber, site: m.siteShortName, day: key },
           estimatedImpactCents: null,
         });
       }
@@ -188,18 +214,18 @@ function draftsForDay(plan: DayPlan, profileId: string, floristId: string, day: 
         out.push({
           type: "ACQUIRING_FEE_MODEL_MISSING",
           severity: "BLOCKING",
-          deduplicationKey: `ACQUIRING_FEE_MODEL_MISSING:${meta.siteId}`,
+          deduplicationKey: `ACQUIRING_FEE_MODEL_MISSING:${m.siteId}`,
           scopeDate: day,
-          siteId: meta.siteId,
+          siteId: m.siteId,
           orderId: null,
           floristId,
           sourceEntity: "Site",
-          sourceEntityId: meta.siteId,
+          sourceEntityId: m.siteId,
           suggestedActionType: "CREATE_SITE_FEE_MODEL",
           // Типовая ставка карточного эквайринга — предложение, а не факт.
           suggestedValueJson: { percentBp: 290, fixedCents: 30 },
           detailJson: {
-            site: meta.siteShortName,
+            site: m.siteShortName,
             reason: "У магазина нет ни фактической комиссии, ни модели расчёта.",
           },
           estimatedImpactCents: null,
@@ -207,7 +233,7 @@ function draftsForDay(plan: DayPlan, profileId: string, floristId: string, day: 
       }
 
       if (missing === "VASE_GIFT_COST") {
-        for (const item of meta.items) {
+        for (const item of m.items) {
           if (item.catalogReasons.length === 0) continue;
           const linkMissing = item.catalogReasons.includes("VASE_LINK_MISSING");
           out.push({
@@ -215,14 +241,14 @@ function draftsForDay(plan: DayPlan, profileId: string, floristId: string, day: 
             severity: "BLOCKING",
             deduplicationKey: `${linkMissing ? "VASE_LINK_MISSING" : "VASE_COST_MISSING"}:${item.id}`,
             scopeDate: day,
-            siteId: meta.siteId,
+            siteId: m.siteId,
             orderId: computed.orderId,
             floristId,
             sourceEntity: "OrderItem",
             sourceEntityId: item.id,
             suggestedActionType: linkMissing ? "LINK_VASE_VARIANT" : "SET_VASE_PURCHASE_COST",
             detailJson: {
-              orderNumber: meta.orderNumber,
+              orderNumber: m.orderNumber,
               itemName: item.name,
               financialType: item.financialType,
               reasons: item.catalogReasons,
@@ -237,16 +263,16 @@ function draftsForDay(plan: DayPlan, profileId: string, floristId: string, day: 
         out.push({
           type: "CONSUMABLES_RATE_MISSING",
           severity: "BLOCKING",
-          deduplicationKey: `CONSUMABLES_RATE_MISSING:${meta.siteId}`,
+          deduplicationKey: `CONSUMABLES_RATE_MISSING:${m.siteId}`,
           scopeDate: day,
-          siteId: meta.siteId,
+          siteId: m.siteId,
           orderId: null,
           floristId,
           sourceEntity: "Site",
-          sourceEntityId: meta.siteId,
+          sourceEntityId: m.siteId,
           suggestedActionType: "SET_CONSUMABLES_RATE",
           suggestedValueJson: { amountCents: 500 },
-          detailJson: { site: meta.siteShortName, reason: "Ставка расходников не задана ни для магазина, ни глобально." },
+          detailJson: { site: m.siteShortName, reason: "Ставка расходников не задана ни для магазина, ни глобально." },
           estimatedImpactCents: null,
         });
       }

@@ -84,13 +84,7 @@ export async function correctSettingAction(formData: FormData): Promise<AdminAct
       actor: { userId: user.id, role: user.role },
     });
     refresh();
-    const ledger =
-      r.share.corrected > 0
-        ? ` Начислений пересчитано: ${r.share.corrected}.`
-        : r.share.unchanged > 0
-          ? " Начисления не изменились."
-          : "";
-    return { message: `Исправлено. Дней затронуто: ${r.affectedDays}, ревизий снимков: ${r.republished}.${ledger}` };
+    return { message: `Исправлено. Дней пересчитано: ${r.affectedDays}.` };
   } catch (e) {
     return fail(e);
   }
@@ -106,8 +100,7 @@ export async function deleteSettingAction(formData: FormData): Promise<AdminActi
       actor: { userId: user.id, role: user.role },
     });
     refresh();
-    const ledger = r.share.corrected > 0 ? ` Начислений пересчитано: ${r.share.corrected}.` : "";
-    return { message: `Запись удалена. Дней затронуто: ${r.affectedDays}, ревизий снимков: ${r.republished}.${ledger}` };
+    return { message: `Запись удалена. Дней пересчитано: ${r.affectedDays}.` };
   } catch (e) {
     return fail(e);
   }

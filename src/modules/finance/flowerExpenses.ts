@@ -24,11 +24,8 @@ import "server-only";
 import { Prisma } from "@/generated/prisma/client";
 import type { Role } from "@/generated/prisma/enums";
 import { prisma } from "@/lib/db";
-import { buildDayPlan, dayKey } from "./snapshot";
-import { computeDayShare } from "./primaryShare";
-import { primaryShareCents } from "./calc";
-import { appendEntry } from "./ledger";
-import { reversalKey } from "./ledgerRules";
+import { computeDayFinance, dayShareCents } from "./dayCalc";
+import { computeDay, computeDayShare, dayKey, gatherDayOrders } from "./dayFinance";
 import { recalculateAffectedFinance } from "./fix";
 
 export class FlowerExpenseError extends Error {
@@ -44,7 +41,7 @@ export class FlowerExpenseError extends Error {
 export type ExpenseActor = { userId: string; role: Role; floristId?: string | null };
 
 /** Статус дня в таблице. Порядок — от «нечего делать» к «сделай что-нибудь». */
-export type DayStatus = "USED" | "FILLED" | "NEEDS_CHECK" | "MISSING";
+export type DayStatus = "COUNTED" | "FILLED" | "INCOMPLETE" | "MISSING";
 
 export type FlowerExpenseRow = {
   day: string;
@@ -63,13 +60,13 @@ export type FlowerExpenseRow = {
   } | null;
   status: DayStatus;
   ordersTotal: number;
-  ordersCalculable: number;
-  flowerRevenueCents: number;
-  allocatedCents: number;
-  /** Доля закупки, зарезервированная за заказами вне расчёта. */
-  unallocatedCents: number;
-  hasPublishedSnapshot: boolean;
-  accruedCents: number | null;
+  /** День посчитан целиком — только такой даёт заработок. */
+  complete: boolean;
+  /** Итог дня уже записан: расчёт по этому дню проводился. */
+  calculated: boolean;
+  distributableCents: number;
+  /** Доля флориста за день; null — день не посчитан. */
+  shareCents: number | null;
 };
 
 export type FlowerExpenseFilter = {
@@ -91,7 +88,6 @@ export type FlowerExpenseListResult = {
     expenseCents: number;
     daysFilled: number;
     daysMissing: number;
-    unallocatedCents: number;
     averagePerFilledDayCents: number;
   };
 };
@@ -206,7 +202,7 @@ export async function listFlowerExpenses(
 
   // Факты нужны по всем дням периода: итоги вверху страницы считаются по периоду,
   // а не по видимой странице, иначе «дней без заполнения» менялось бы при листании.
-  const facts = await dayFacts(profileId, floristId, allDays);
+  const facts = await dayFacts(profileId, allDays);
 
   const rows: FlowerExpenseRow[] = allDays.map((day) => {
     const e = byDay.get(day) ?? null;
@@ -251,81 +247,49 @@ export async function listFlowerExpenses(
       expenseCents,
       daysFilled: filledRows.length,
       daysMissing: filtered.filter((r) => r.status === "MISSING").length,
-      unallocatedCents: filtered.reduce((a, r) => a + r.unallocatedCents, 0),
       averagePerFilledDayCents: filledRows.length ? Math.round(expenseCents / filledRows.length) : 0,
     },
   };
 }
 
-type DayFacts = Pick<
-  FlowerExpenseRow,
-  "ordersTotal" | "ordersCalculable" | "flowerRevenueCents" | "allocatedCents" | "unallocatedCents" | "hasPublishedSnapshot" | "accruedCents"
->;
+type DayFacts = Pick<FlowerExpenseRow, "ordersTotal" | "complete" | "calculated" | "distributableCents" | "shareCents">;
 
 /**
- * Факты по дням из опубликованных снимков и книги операций.
- * Три запроса на весь список, а не по запросу на день.
+ * Факты по дням из записанных итогов. Один запрос на весь список, а не по запросу на день.
+ *
+ * Источник ровно один — строка итога дня. Раньше их было два (снимки заказов и книга
+ * операций), и они умели расходиться между собой.
  */
-async function dayFacts(profileId: string, floristId: string, days: string[]): Promise<Map<string, DayFacts>> {
+async function dayFacts(profileId: string, days: string[]): Promise<Map<string, DayFacts>> {
   const empty = (): DayFacts => ({
     ordersTotal: 0,
-    ordersCalculable: 0,
-    flowerRevenueCents: 0,
-    allocatedCents: 0,
-    unallocatedCents: 0,
-    hasPublishedSnapshot: false,
-    accruedCents: null,
+    complete: false,
+    calculated: false,
+    distributableCents: 0,
+    shareCents: null,
   });
   const out = new Map<string, DayFacts>(days.map((d) => [d, empty()]));
   if (days.length === 0) return out;
 
-  const dates = days.map((d) => new Date(`${d}T00:00:00.000Z`));
+  const profile = await prisma.floristFinanceProfile.findUnique({
+    where: { id: profileId },
+    select: { sharePercentBp: true },
+  });
+  const bp = profile?.sharePercentBp ?? 0;
 
-  const [orders, accruals] = await Promise.all([
-    prisma.order.findMany({
-      where: { currentFloristId: floristId, orderStatus: "DELIVERED", deliveryDate: { in: dates } },
-      select: {
-        id: true,
-        deliveryDate: true,
-        financialSnapshots: {
-          where: { status: "PUBLISHED" },
-          select: { isCalculable: true, flowerRevenueCents: true, allocatedFlowerCents: true },
-        },
-      },
-    }),
-    prisma.ledgerEntry.findMany({
-      where: {
-        floristId,
-        type: "PRIMARY_FLORIST_SHARE",
-        effectiveDate: { in: dates },
-        // Сторнированная запись — уже не действующая сумма, показывать её как начисление
-        // дня нельзя: день выглядел бы посчитанным, хотя расчёт отозван.
-        reversal: null,
-      },
-      select: { amountCents: true, effectiveDate: true },
-    }),
-  ]);
+  const rows = await prisma.dayFinance.findMany({
+    where: { financeProfileId: profileId, day: { in: days.map((d) => new Date(`${d}T00:00:00.000Z`)) } },
+    select: { day: true, ordersTotal: true, complete: true, distributableCents: true },
+  });
 
-  for (const o of orders) {
-    const f = out.get(dayKey(o.deliveryDate));
+  for (const r of rows) {
+    const f = out.get(dayKey(r.day));
     if (!f) continue;
-    f.ordersTotal++;
-    const snap = o.financialSnapshots[0];
-    if (!snap) continue;
-    f.hasPublishedSnapshot = true;
-    f.flowerRevenueCents += snap.flowerRevenueCents;
-    if (snap.isCalculable) {
-      f.ordersCalculable++;
-      f.allocatedCents += snap.allocatedFlowerCents;
-    } else {
-      f.unallocatedCents += snap.allocatedFlowerCents;
-    }
-  }
-
-  for (const a of accruals) {
-    const f = out.get(dayKey(a.effectiveDate));
-    if (!f) continue;
-    f.accruedCents = (f.accruedCents ?? 0) + a.amountCents;
+    f.calculated = true;
+    f.ordersTotal = r.ordersTotal;
+    f.complete = r.complete;
+    f.distributableCents = r.distributableCents;
+    f.shareCents = r.complete ? dayShareCents(r.distributableCents, bp) : null;
   }
 
   return out;
@@ -334,17 +298,15 @@ async function dayFacts(profileId: string, floristId: string, days: string[]): P
 /**
  * Статус дня.
  *
- * «Требует проверки» — это не «что-то не так вообще», а строго: день ПОСЧИТАН, но
- * посчитан не весь — часть заказов в расчёт не попала, и их доля закупки повисла
- * нераспределённой. День, по которому расчёт ещё не проводился, к этому статусу
- * отношения не имеет: там пока просто нечего проверять, и пугать им нельзя.
+ * «Не посчитан целиком» — это не «что-то не так вообще», а строго: расчёт по дню
+ * проводился, но чего-то во входных данных не хватило. День, по которому расчёт ещё не
+ * проводился, к этому статусу отношения не имеет: там пока просто нечего проверять.
  */
 function deriveStatus(hasExpense: boolean, f: DayFacts): DayStatus {
   if (!hasExpense) return "MISSING";
-  if (!f.hasPublishedSnapshot) return "FILLED";
-  if (f.unallocatedCents > 0 || f.ordersCalculable < f.ordersTotal) return "NEEDS_CHECK";
-  if (f.accruedCents != null) return "USED";
-  return "FILLED";
+  // День без доставок считать нечего, и пугать «не хватает данных» здесь не за что.
+  if (!f.calculated || f.ordersTotal === 0) return "FILLED";
+  return f.complete ? "COUNTED" : "INCOMPLETE";
 }
 
 /** Имена авторов подставляются одним запросом, а не join'ом на каждую строку. */
@@ -372,7 +334,7 @@ export async function getFlowerExpenseDay(
   day: Date
 ): Promise<{
   row: FlowerExpenseRow;
-  orders: Array<{ orderId: string; orderNumber: string; siteShortName: string; flowerRevenueCents: number; allocatedFlowerCents: number; included: boolean }>;
+  orders: Array<{ orderId: string; orderNumber: string; contributionCents: number; included: boolean }>;
   history: Array<{ id: string; action: string; beforeJson: unknown; afterJson: unknown; reason: string | null; userName: string | null; role: Role; createdAt: Date }>;
 }> {
   const key = dayKey(day);
@@ -384,44 +346,29 @@ export async function getFlowerExpenseDay(
       expense: null,
       status: "MISSING",
       ordersTotal: 0,
-      ordersCalculable: 0,
-      flowerRevenueCents: 0,
-      allocatedCents: 0,
-      unallocatedCents: 0,
-      hasPublishedSnapshot: false,
-      accruedCents: null,
+      complete: false,
+      calculated: false,
+      distributableCents: 0,
+      shareCents: null,
     } satisfies FlowerExpenseRow);
 
-  const plan = await buildDayPlan(profileId, day);
-
-  // На странице дня факты берутся из живого плана, а не из опубликованных снимков.
-  // В списке источник другой (снимки — иначе это сотни запросов на страницу), и для
-  // посчитанного дня оба дают одно и то же. Расходятся они ровно там, где расчёт ещё не
-  // публиковался: список честно показывает «в расчёте пока ничего», а здесь, где заказы
-  // дня и так перечислены построчно, итог обязан сходиться с этими строками.
-  if (plan) {
-    const included = plan.result.orders.filter((o) => o.isCalculable);
-    row.ordersTotal = plan.result.orders.length;
-    row.ordersCalculable = included.length;
-    row.flowerRevenueCents = plan.result.orders.reduce((a, o) => a + o.flowerRevenueCents, 0);
-    row.allocatedCents = included.reduce((a, o) => a + o.allocatedFlowerCents, 0);
-    row.unallocatedCents = plan.result.orders
-      .filter((o) => !o.isCalculable)
-      .reduce((a, o) => a + o.allocatedFlowerCents, 0);
+  // На странице дня факты берутся из ЖИВОГО расчёта, а не из записанного итога: список
+  // показывает то, что уже посчитано, а здесь заказы дня перечислены построчно, и итог
+  // обязан сходиться с этими строками — даже если пересчёт ещё не проходил.
+  const live = await computeDay(profileId, day);
+  if (live) {
+    row.ordersTotal = live.ordersTotal;
+    row.complete = live.complete;
+    row.distributableCents = live.distributableCents;
   }
 
   const orders =
-    plan?.result.orders.map((o) => {
-      const meta = plan.inputs.meta.get(o.orderId)!;
-      return {
-        orderId: o.orderId,
-        orderNumber: meta.orderNumber,
-        siteShortName: meta.siteShortName,
-        flowerRevenueCents: o.flowerRevenueCents,
-        allocatedFlowerCents: o.allocatedFlowerCents,
-        included: o.isCalculable,
-      };
-    }) ?? [];
+    live?.orders.map((o) => ({
+      orderId: o.orderId,
+      orderNumber: o.orderNumber,
+      contributionCents: o.contributionCents,
+      included: o.missing.length === 0,
+    })) ?? [];
 
   // История ведётся по строке расхода. Удалённая строка своей истории не теряет:
   // записи аудита остаются и находятся по прежнему entityId.
@@ -481,7 +428,7 @@ export type ExpensePreview = {
   shareDeltaCents: number;
   accruedCents: number | null;
   ordersAffected: number;
-  /** Расход уже участвует в опубликованном расчёте — правка сдвинет баланс. */
+  /** День уже посчитан — правка сдвинет заработок флориста. */
   alreadyUsed: boolean;
   warnings: string[];
 };
@@ -489,9 +436,9 @@ export type ExpensePreview = {
 /**
  * Что именно изменится, если применить правку. Ничего не пишет.
  *
- * Считается тем же движком, что и настоящий расчёт: buildDayPlan с подменённой суммой.
- * Это принципиально — предпросмотр, который считает по своей формуле, рано или поздно
- * разойдётся с тем, что произойдёт на самом деле.
+ * Считается тем же движком, что и настоящий расчёт: тот же вход дня, только сумма закупки
+ * подменена. Предпросмотр, который считает по своей формуле, рано или поздно разойдётся
+ * с тем, что произойдёт на самом деле.
  */
 export async function previewFlowerExpense(
   profileId: string,
@@ -509,38 +456,28 @@ export async function previewFlowerExpense(
     select: { amountCents: true },
   });
 
-  const current = await computeDayShare(profileId, day);
-  const accrual = await prisma.ledgerEntry.findFirst({
-    where: { floristId: profile.floristId, type: "PRIMARY_FLORIST_SHARE", effectiveDate: day, reversal: null },
-    select: { amountCents: true },
-  });
+  const input = await gatherDayOrders(profileId, day);
+  if (!input) throw new FlowerExpenseError("no_profile", "Финансовый профиль не найден.");
 
-  // Удаление: считать «сколько станет» нечего — день перестаёт быть считаемым.
-  const after =
-    nextCents == null
-      ? null
-      : await buildDayPlan(profileId, day, { dailyExpenseCents: nextCents });
-
-  // Доля считается ТОЙ ЖЕ функцией, что и при настоящем начислении. Своя формула здесь
-  // рано или поздно разойдётся с фактом: primaryShareCents, например, обнуляет долю на
-  // убыточном дне, и предпросмотр со своей арифметикой обещал бы отрицательную выплату.
   const bp = profile.sharePercentBp ?? 0;
-  const shareAfter =
-    after && after.result.blockers.filter((b) => b !== "DAILY_FLOWER_EXPENSE_MISSING").length === 0
-      ? primaryShareCents(after.result.distributableTotalCents, bp)
-      : null;
+  const before = computeDayFinance(input.orders, input.flowerPurchaseCents);
+  // Удаление: считать «сколько станет» нечего — день перестаёт быть считаемым.
+  const after = nextCents == null ? null : computeDayFinance(input.orders, nextCents);
 
-  const shareBefore = current && !current.blocked ? current.shareCents : null;
+  // Доля считается ТОЙ ЖЕ функцией, что и в настоящем расчёте. Своя формула здесь рано
+  // или поздно разойдётся с фактом: dayShareCents, например, обнуляет долю на убыточном
+  // дне, и предпросмотр со своей арифметикой обещал бы отрицательную выплату.
+  const shareBefore = before.complete ? dayShareCents(before.distributableCents, bp) : null;
+  const shareAfter = after?.complete ? dayShareCents(after.distributableCents, bp) : null;
+
   const warnings: string[] = [];
-  const alreadyUsed = accrual != null;
+  const alreadyUsed = before.complete;
 
   if (alreadyUsed && shareAfter !== shareBefore) {
-    warnings.push(
-      "Расход уже участвует в опубликованном расчёте. Начисление будет сторновано и создано заново, баланс флориста изменится."
-    );
+    warnings.push("День уже посчитан. Заработок флориста за этот день изменится.");
   }
   if (nextCents == null && alreadyUsed) {
-    warnings.push("После удаления день станет незасчитываемым, поэтому начисление будет сторновано целиком.");
+    warnings.push("После удаления день перестанет считаться, и заработок за него обнулится.");
   }
   if (nextCents == null && !alreadyUsed) {
     warnings.push("После удаления день попадёт в «Требует заполнения» как блокирующая проблема.");
@@ -554,8 +491,8 @@ export async function previewFlowerExpense(
     shareBeforeCents: shareBefore,
     shareAfterCents: shareAfter,
     shareDeltaCents: (shareAfter ?? 0) - (shareBefore ?? 0),
-    accruedCents: accrual?.amountCents ?? null,
-    ordersAffected: after?.result.orders.length ?? current?.ordersTotal ?? 0,
+    accruedCents: shareBefore,
+    ordersAffected: before.ordersTotal,
     alreadyUsed,
     warnings,
   };
@@ -565,19 +502,19 @@ export async function previewFlowerExpense(
 
 export type ExpenseApplyResult = {
   day: string;
-  republished: number;
-  share: { status: string; fromCents?: number; toCents?: number };
+  /** День посчитался целиком после правки. */
+  complete: boolean;
+  /** Доля флориста за день после правки; null — день не посчитан. */
+  shareCents: number | null;
   issuesOpened: number;
 };
 
 /**
  * Вносит или исправляет расход за день, затем прогоняет обязательный хвост:
- * аудит → новая ревизия снимков дня → детектор → пересчёт доли.
+ * аудит → пересчёт итога дня → детектор.
  *
- * Порядок нарушать нельзя: доля считается по опубликованным снимкам, поэтому пересчёт
- * идёт последним. Если сумма доли не изменилась, accrueDayShare сам вернёт UNCHANGED и
- * книгу не тронет — отдельной проверки «менять ли ledger» здесь нет и быть не должно,
- * иначе появилось бы второе мнение о том, изменились ли деньги.
+ * Отдельной проверки «изменились ли деньги» здесь нет и быть не должно: заработок
+ * выводится из итога дня, поэтому переписать итог — и значит закончить.
  */
 export async function saveFlowerExpense(args: {
   actor: ExpenseActor;
@@ -642,17 +579,15 @@ export async function saveFlowerExpense(args: {
 /**
  * Удаляет ошибочную запись.
  *
- * Начисление за день сторнируется, если оно есть: без расхода день посчитать нельзя, а
- * оставлять в книге сумму, которую расчёт больше не может воспроизвести, — значит
- * показывать долг, за которым не стоит никакого расчёта. Сторно оформляется отдельной
- * записью, прежняя не редактируется — книга по-прежнему append-only.
+ * Сторнировать нечего: без расхода день перестаёт считаться, и заработок за него
+ * обнуляется сам — он выводится из итога дня, а не хранится отдельной записью.
  */
 export async function deleteFlowerExpense(args: {
   actor: ExpenseActor;
   expenseDay: Date;
   reason: string;
   now?: Date;
-}): Promise<ExpenseApplyResult & { reversedCents: number | null }> {
+}): Promise<ExpenseApplyResult> {
   assertCanWrite(args.actor);
   const reason = args.reason.trim();
   if (!reason) throw new FlowerExpenseError("reason_required", "Укажите причину удаления.");
@@ -664,16 +599,6 @@ export async function deleteFlowerExpense(args: {
     where: { financeProfileId_expenseDay: { financeProfileId: profile.id, expenseDay: args.expenseDay } },
   });
   if (!existing) throw new FlowerExpenseError("not_found", "За этот день расход не внесён.");
-
-  const accrual = await prisma.ledgerEntry.findFirst({
-    where: {
-      floristId: profile.floristId,
-      type: "PRIMARY_FLORIST_SHARE",
-      effectiveDate: args.expenseDay,
-      reversal: null,
-    },
-    orderBy: { createdAt: "desc" },
-  });
 
   await prisma.$transaction(async (tx) => {
     await tx.dailyFlowerExpense.delete({ where: { id: existing.id } });
@@ -689,40 +614,19 @@ export async function deleteFlowerExpense(args: {
         role: args.actor.role,
       },
     });
-
-    if (accrual) {
-      await appendEntry(
-        {
-          floristId: profile.floristId,
-          type: "CORRECTION",
-          direction: "DEBIT",
-          amountCents: accrual.amountCents,
-          effectiveDate: args.expenseDay,
-          description: `Сторно доли за ${dayKey(args.expenseDay)}`,
-          comment: `Удалён расход на цветы: ${reason}`,
-          sourceType: "REVERSAL",
-          sourceId: accrual.id,
-          idempotencyKey: reversalKey(accrual.id),
-          reversedEntryId: accrual.id,
-          actor: args.actor,
-        },
-        tx
-      );
-    }
   });
 
-  const aftermath = await applyAftermath(profile, args.expenseDay, args.actor, args.now ?? new Date());
-  return { ...aftermath, reversedCents: accrual?.amountCents ?? null };
+  return applyAftermath(profile, args.expenseDay, args.actor, args.now ?? new Date());
 }
 
 /**
- * Хвост записи — ОБЩИЙ для всего модуля: ревизия снимков дня → детектор → пересчёт доли.
+ * Хвост записи — ОБЩИЙ для всего модуля: пересчёт итога дня → детектор.
  *
  * Собственной копии здесь больше нет. Она была, и это ровно тот случай, когда правишь
  * одно место, а второе продолжает жить по-старому.
  *
- * Публикация и начисление идут с ролью OWNER даже когда правку внёс флорист: это шаги
- * владельческого конвейера, а настоящий автор записан в FinanceAudit вместе со своей ролью.
+ * Пересчёт идёт с ролью OWNER даже когда правку внёс флорист: это шаг владельческого
+ * конвейера, а настоящий автор записан в FinanceAudit вместе со своей ролью.
  */
 async function applyAftermath(
   profile: { id: string; floristId: string },
@@ -731,14 +635,11 @@ async function applyAftermath(
   now: Date
 ): Promise<ExpenseApplyResult> {
   const r = await recalculateAffectedFinance(profile.id, [day], { userId: actor.userId, role: "OWNER" }, now);
-  const outcome = r.outcomes[0]?.outcome;
+  const share = await computeDayShare(profile.id, day);
   return {
     day: dayKey(day),
-    republished: r.republished,
-    share:
-      outcome?.status === "CORRECTED"
-        ? { status: outcome.status, fromCents: outcome.fromCents, toCents: outcome.toCents }
-        : { status: outcome?.status ?? "SKIPPED" },
+    complete: r.complete > 0,
+    shareCents: share?.complete ? share.shareCents : null,
     issuesOpened: r.detector.opened + r.detector.reopened,
   };
 }

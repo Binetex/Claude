@@ -11,8 +11,8 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import crypto from "crypto";
 import { prisma } from "@/lib/db";
+import { computeDayShare, readOrderContribution } from "./dayFinance";
 import { setFinanceProfile } from "./profile";
-import { computeDayShare } from "./primaryShare";
 import { floristBalance } from "./balance";
 import { fixConsumablesRate, fixDailyFlowerExpense, fixDeliveryActualCost, fixSiteFeeModel } from "./fix";
 import {
@@ -142,13 +142,9 @@ afterAll(async () => {
   delete process.env.FINANCE_ACCRUAL_START_DATE;
 
   await prisma.orderAdditionalExpense.deleteMany({ where: { order: { siteId } } });
-  await prisma.ledgerEntrySnapshot.deleteMany({ where: { ledgerEntry: { floristId: { in: [primaryFloristId, secondFloristId] } } } });
   await prisma.$executeRawUnsafe(`ALTER TABLE "LedgerEntry" DISABLE TRIGGER USER`);
   await prisma.ledgerEntry.deleteMany({ where: { floristId: { in: [primaryFloristId, secondFloristId] } } });
   await prisma.$executeRawUnsafe(`ALTER TABLE "LedgerEntry" ENABLE TRIGGER USER`);
-  await prisma.$executeRawUnsafe(`ALTER TABLE "OrderFinancialSnapshot" DISABLE TRIGGER USER`);
-  await prisma.orderFinancialSnapshot.deleteMany({ where: { order: { siteId } } });
-  await prisma.$executeRawUnsafe(`ALTER TABLE "OrderFinancialSnapshot" ENABLE TRIGGER USER`);
 
   await prisma.financeIssue.deleteMany({ where: { OR: [{ siteId }, { floristId: { in: [primaryFloristId, secondFloristId] } }] } });
   await prisma.financeAudit.deleteMany({ where: { userId: { in: [OWNER.userId, CC.userId, PRIMARY_ACTOR.userId, SECOND_ACTOR.userId] } } });
@@ -276,42 +272,13 @@ describe("PRIMARY: расход уменьшает распределяемую 
     expect(shareBefore - after!.shareCents).toBe(6660);
   });
 
-  it("расход виден строкой в опубликованном снимке заказа", async () => {
-    const snap = await prisma.orderFinancialSnapshot.findFirst({
-      where: { orderId: orderA, status: "PUBLISHED" },
-    });
-    expect(snap!.otherExpenseCents).toBe(10000);
+  it("расход виден строкой в разборе заказа", async () => {
+    const calc = await readOrderContribution(orderA);
+    expect(calc!.order.additionalCents).toBe(10000);
   });
 
-  it("начисление пересчитано сторно и новой записью, старая не тронута", async () => {
-    const reversal = await prisma.ledgerEntry.findFirst({
-      where: { floristId: primaryFloristId, type: "CORRECTION", reversedEntryId: { not: null } },
-    });
-    expect(reversal).not.toBeNull();
-
-    const live = await prisma.ledgerEntry.findMany({
-      where: { floristId: primaryFloristId, type: "PRIMARY_FLORIST_SHARE", effectiveDate: DAY, reversal: null },
-    });
-    expect(live).toHaveLength(1);
-    expect(live[0].amountCents).toBe((await computeDayShare(primaryProfileId, DAY))!.shareCents);
-  });
-
-  it("повторный пересчёт не создаёт дубля", async () => {
-    const before = await prisma.ledgerEntry.count({ where: { floristId: primaryFloristId } });
-    await addOrderExpense({
-      orderId: orderB,
-      amountCents: 1,
-      description: "копейка",
-      expenseDate: DAY,
-      actor: OWNER,
-      now: NOW,
-    }).then((r) => removeOrderExpense({ expenseId: r.expenseId, reason: "откат", actor: OWNER, now: NOW }));
-
-    const keys = (
-      await prisma.ledgerEntry.findMany({ where: { floristId: primaryFloristId }, select: { idempotencyKey: true } })
-    ).map((e) => e.idempotencyKey);
-    expect(new Set(keys).size).toBe(keys.length);
-    expect(await prisma.ledgerEntry.count({ where: { floristId: primaryFloristId } })).toBeGreaterThanOrEqual(before);
+  it("книгу расход не трогает вовсе", async () => {
+    expect(await prisma.ledgerEntry.count({ where: { floristId: primaryFloristId } })).toBe(0);
   });
 
   it("отмена расхода возвращает расчёт к прежнему", async () => {
@@ -320,12 +287,6 @@ describe("PRIMARY: расход уменьшает распределяемую 
     const after = await computeDayShare(primaryProfileId, DAY);
     expect(after!.distributableCents).toBe(distributableBefore);
     expect(after!.shareCents).toBe(shareBefore);
-
-    const live = await prisma.ledgerEntry.findMany({
-      where: { floristId: primaryFloristId, type: "PRIMARY_FLORIST_SHARE", effectiveDate: DAY, reversal: null },
-    });
-    expect(live).toHaveLength(1);
-    expect(live[0].amountCents).toBe(shareBefore);
   });
 
   it("отменённый расход не входит в итог блока", async () => {
@@ -485,8 +446,7 @@ describe("расход, который пока не влияет на день�
     expect(after.calc.counted).toBe(true);
     expect(after.calc.note).toMatch(/Учтено в расчёте/);
 
-    const snap = await prisma.orderFinancialSnapshot.findFirst({ where: { orderId: problem, status: "PUBLISHED" } });
-    expect(snap!.otherExpenseCents).toBe(5000);
+    expect((await readOrderContribution(problem))!.order.additionalCents).toBe(5000);
 
     await removeOrderExpense({ expenseId: r.expenseId, reason: "уборка", actor: OWNER, now: NOW });
     await prisma.order.update({ where: { id: problem }, data: { orderStatus: "CANCELLED" } });

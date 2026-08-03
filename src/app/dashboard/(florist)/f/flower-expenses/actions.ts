@@ -63,11 +63,7 @@ export async function deleteMyExpenseAction(formData: FormData): Promise<Expense
     });
     revalidatePath("/dashboard/f/flower-expenses");
     revalidatePath("/dashboard/f/finance");
-    return {
-      message: r.reversedCents
-        ? `Расход за ${r.day} удалён, начисление ${(r.reversedCents / 100).toFixed(2)} сторновано.`
-        : `Расход за ${r.day} удалён.`,
-    };
+    return { message: `Расход за ${r.day} удалён, день пересчитан.` };
   } catch (e) {
     return fail(e);
   }

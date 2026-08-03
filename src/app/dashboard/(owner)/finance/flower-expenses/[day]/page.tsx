@@ -32,7 +32,7 @@ export default async function FlowerExpenseDayPage({ params }: { params: Promise
     <div className="space-y-4">
       <PageHeader
         title={`Расход на цветы · ${day}`}
-        description={`${profile.floristName} · заказов ${row.ordersCalculable} из ${row.ordersTotal}`}
+        description={`${profile.floristName} · заказов ${row.ordersTotal}`}
         actions={
           <div className="flex items-center gap-2">
             <Link href="/dashboard/finance/flower-expenses" className="text-sm text-slate-500 hover:text-slate-800">
@@ -51,27 +51,21 @@ export default async function FlowerExpenseDayPage({ params }: { params: Promise
         }
       />
 
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
         <StatCard label="Закупка" value={row.expense ? formatCents(row.expense.amountCents) : "не внесена"} tone={row.expense ? "default" : "danger"} />
-        <StatCard label="Цветочная выручка" value={formatCents(row.flowerRevenueCents)} />
-        <StatCard label="Распределено" value={formatCents(row.allocatedCents)} />
-        <StatCard
-          label="Нераспределённый остаток"
-          value={formatCents(row.unallocatedCents)}
-          tone={row.unallocatedCents > 0 ? "warning" : "default"}
-        />
+        <StatCard label="Прибыль дня" value={row.complete ? formatCents(row.distributableCents) : "не посчитана"} />
       </div>
 
-      {row.accruedCents != null && (
+      {row.shareCents != null && (
         <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
-          За этот день уже начислена доля {formatCents(row.accruedCents)}. Исправление суммы пересчитает начисление:
-          прежнее будет сторновано, а новое создано — баланс флориста изменится.
+          День посчитан, заработок флориста за него — {formatCents(row.shareCents)}. Правка суммы пересчитает день, и
+          заработок изменится.
         </div>
       )}
 
       <Card>
         <CardHeader>
-          <CardTitle>Как закупка разошлась по заказам · {orders.length}</CardTitle>
+          <CardTitle>Заказы дня · {orders.length}</CardTitle>
         </CardHeader>
         <CardBody className="p-0 px-4">
           {orders.length === 0 ? (
@@ -83,9 +77,7 @@ export default async function FlowerExpenseDayPage({ params }: { params: Promise
               <thead>
                 <tr className="border-b border-slate-100 text-left text-[11px] tracking-wide text-slate-400 uppercase">
                   <th className="py-2 pr-3 font-medium">Заказ</th>
-                  <th className="py-2 pr-3 font-medium">Магазин</th>
-                  <th className="py-2 pr-3 text-right font-medium">Цветочная часть</th>
-                  <th className="py-2 pr-3 text-right font-medium">Доля закупки</th>
+                  <th className="py-2 pr-3 text-right font-medium">Вклад в прибыль</th>
                   <th className="py-2 text-right font-medium">В расчёте</th>
                 </tr>
               </thead>
@@ -97,9 +89,9 @@ export default async function FlowerExpenseDayPage({ params }: { params: Promise
                         {o.orderNumber}
                       </Link>
                     </td>
-                    <td className="py-2 pr-3 text-slate-500">{o.siteShortName}</td>
-                    <td className="py-2 pr-3 text-right tabular-nums">{formatCents(o.flowerRevenueCents)}</td>
-                    <td className="py-2 pr-3 text-right tabular-nums">{formatCents(o.allocatedFlowerCents)}</td>
+                    <td className="py-2 pr-3 text-right tabular-nums">
+                      {o.included ? formatCents(o.contributionCents) : "—"}
+                    </td>
                     <td className="py-2 text-right">{o.included ? "да" : "нет"}</td>
                   </tr>
                 ))}

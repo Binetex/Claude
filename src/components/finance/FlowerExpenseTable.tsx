@@ -14,9 +14,9 @@ import { ExpenseDialog, DeleteExpenseDialog, type ExpenseActions } from "./Flowe
 import type { DayStatus, FlowerExpenseRow } from "@/modules/finance/flowerExpenses";
 
 const statusMeta: Record<DayStatus, { label: string; className: string }> = {
-  USED: { label: "В расчёте", className: "border-emerald-200 bg-emerald-50 text-emerald-700" },
+  COUNTED: { label: "Посчитан", className: "border-emerald-200 bg-emerald-50 text-emerald-700" },
   FILLED: { label: "Заполнено", className: "border-slate-200 bg-slate-50 text-slate-600" },
-  NEEDS_CHECK: { label: "Требует проверки", className: "border-amber-200 bg-amber-50 text-amber-800" },
+  INCOMPLETE: { label: "Не хватает данных", className: "border-amber-200 bg-amber-50 text-amber-800" },
   MISSING: { label: "Отсутствует", className: "border-red-200 bg-red-50 text-red-700" },
 };
 
@@ -43,10 +43,8 @@ export function FlowerExpenseTable({
             <th className="px-3 py-2.5 text-right font-medium">Закупка</th>
             <th className="px-3 py-2.5 font-medium">Комментарий</th>
             <th className="px-3 py-2.5 text-right font-medium">Заказов</th>
-            <th className="px-3 py-2.5 text-right font-medium">Цветочная выручка</th>
-            <th className="px-3 py-2.5 text-right font-medium">Распределено</th>
-            <th className="px-3 py-2.5 text-right font-medium">Остаток</th>
-            <th className="px-3 py-2.5 text-right font-medium">Начислено</th>
+            <th className="px-3 py-2.5 text-right font-medium">Прибыль дня</th>
+            <th className="px-3 py-2.5 text-right font-medium">Заработок</th>
             {!compact && (
               <>
                 <th className="px-3 py-2.5 font-medium">Создал</th>
@@ -73,22 +71,15 @@ export function FlowerExpenseTable({
               <td className="max-w-56 truncate px-3 py-2.5 text-slate-500" title={r.expense?.comment ?? ""}>
                 {r.expense?.comment ?? ""}
               </td>
+              <td className="px-3 py-2.5 text-right tabular-nums text-slate-600">{r.ordersTotal}</td>
               <td className="px-3 py-2.5 text-right tabular-nums text-slate-600">
-                {r.ordersCalculable}
-                {r.ordersTotal !== r.ordersCalculable && <span className="text-slate-400"> / {r.ordersTotal}</span>}
-              </td>
-              <td className="px-3 py-2.5 text-right tabular-nums text-slate-600">{formatCents(r.flowerRevenueCents)}</td>
-              <td className="px-3 py-2.5 text-right tabular-nums text-slate-600">{formatCents(r.allocatedCents)}</td>
-              <td
-                className={`px-3 py-2.5 text-right tabular-nums ${r.unallocatedCents > 0 ? "font-medium text-amber-700" : "text-slate-400"}`}
-              >
-                {formatCents(r.unallocatedCents)}
+                {r.complete ? formatCents(r.distributableCents) : <span className="text-slate-300">—</span>}
               </td>
               <td className="px-3 py-2.5 text-right whitespace-nowrap tabular-nums">
-                {r.accruedCents != null ? (
-                  <span className="font-medium text-emerald-700">{formatCents(r.accruedCents)}</span>
+                {r.shareCents != null ? (
+                  <span className="font-medium text-emerald-700">{formatCents(r.shareCents)}</span>
                 ) : (
-                  <span className="text-slate-300">{r.hasPublishedSnapshot ? "не начислено" : "—"}</span>
+                  <span className="text-slate-300">—</span>
                 )}
               </td>
               {!compact && (

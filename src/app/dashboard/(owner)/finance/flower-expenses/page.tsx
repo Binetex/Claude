@@ -107,11 +107,6 @@ export default async function FlowerExpensesPage({
           value={monthList.totals.daysMissing}
           tone={monthList.totals.daysMissing > 0 ? "danger" : "success"}
         />
-        <StatCard
-          label="Нераспределённый остаток"
-          value={formatCents(monthList.totals.unallocatedCents)}
-          tone={monthList.totals.unallocatedCents > 0 ? "warning" : "default"}
-        />
       </div>
 
       <Card>

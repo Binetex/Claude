@@ -22,7 +22,7 @@ export default async function FloristShareDayPage({ params }: { params: Promise<
   const profile = await primaryProfileForFlorist(user.floristId);
   if (!profile) notFound();
 
-  const breakdown = await readShareDayBreakdown(profile.id, new Date(`${day}T00:00:00.000Z`), false);
+  const breakdown = await readShareDayBreakdown(profile.id, new Date(`${day}T00:00:00.000Z`));
   if (!breakdown) notFound();
 
   return (

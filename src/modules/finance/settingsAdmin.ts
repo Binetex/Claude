@@ -25,8 +25,8 @@ import "server-only";
 import { Prisma } from "@/generated/prisma/client";
 import type { Role } from "@/generated/prisma/enums";
 import { prisma } from "@/lib/db";
-import { buildDayPlan, dayKey, type CalcOverrides } from "./snapshot";
-import { primaryShareCents } from "./calc";
+import { computeDay, dayKey, type DayOverrides } from "./dayFinance";
+import { dayShareCents } from "./dayCalc";
 import { primaryShareStartDate } from "./config";
 import { recalculateAffectedFinance, type FixResult } from "./fix";
 import {
@@ -234,14 +234,11 @@ export type SettingPreview = {
   op: "CORRECT" | "DELETE";
   affectedDays: number;
   affectedOrders: number;
-  /** Сколько ревизий снимков будет опубликовано заново. */
-  revisionsToRepublish: number;
   shareBeforeCents: number;
   shareAfterCents: number;
   shareDeltaCents: number;
-  /** Дни, где уже есть начисление и его придётся сторнировать и создать заново. */
-  daysNeedingCorrection: number;
-  needsLedgerCorrection: boolean;
+  /** Дни, где заработок флориста изменится. */
+  daysChanged: number;
   days: SettingPreviewDay[];
   warnings: string[];
 };
@@ -249,7 +246,7 @@ export type SettingPreview = {
 /**
  * Что произойдёт, если применить правку. Ничего не пишет.
  *
- * Считается тем же движком, что и настоящая публикация: buildDayPlan с подменёнными
+ * Считается тем же движком, что и настоящий расчёт: тот же вход дня с подменёнными
  * значениями настройки. Подменяются они ПОДНЕВНО, а не одним числом на весь период —
  * при сдвиге границы дни по разные стороны от неё получают разные ставки, и «одно
  * значение на всё» показало бы не то, что произойдёт.
@@ -304,62 +301,46 @@ export async function previewSettingChange(args: {
   const perDay: SettingPreviewDay[] = [];
   let shareBefore = 0;
   let shareAfter = 0;
-  let revisions = 0;
   let orders = 0;
-  let daysNeedingCorrection = 0;
+  let daysChanged = 0;
+  const bp = profile.sharePercentBp ?? 0;
 
   for (const day of days) {
-    const before = await buildDayPlan(profile.id, day);
+    const before = await computeDay(profile.id, day);
     if (!before) continue;
 
     const overrides = await overridesForDay(args.entity, record, simulated, day);
-    const after = await buildDayPlan(profile.id, day, overrides);
+    const after = await computeDay(profile.id, day, overrides);
     if (!after) continue;
 
-    const bp = profile.sharePercentBp ?? 0;
-    const shareB = before.result.blockers.length === 0 ? primaryShareCents(before.result.distributableTotalCents, bp) : null;
-    const shareA = after.result.blockers.length === 0 ? primaryShareCents(after.result.distributableTotalCents, bp) : null;
+    const shareB = before.complete ? dayShareCents(before.distributableCents, bp) : null;
+    const shareA = after.complete ? dayShareCents(after.distributableCents, bp) : null;
 
-    // Пересобранной окажется ровно та ревизия, у которой отличается хоть одно денежное
-    // поле ОТ ОПУБЛИКОВАННОЙ. Сравнивать два расчёта между собой нельзя: заказ, у которого
-    // изменился только расход, но не итог, всё равно получит новую ревизию — и обещанное
-    // здесь число разошлось бы с тем, что напишет применение.
-    const published = await publishedSnapshots(after.result.orders.map((o) => o.orderId));
-    const changed = after.result.orders.filter((o) => differsFromPublished(published.get(o.orderId), o));
-
-    const accrual = await prisma.ledgerEntry.findFirst({
-      where: {
-        floristId: profile.floristId,
-        type: "PRIMARY_FLORIST_SHARE",
-        effectiveDate: day,
-        reversal: null,
-      },
-      select: { amountCents: true },
-    });
+    // Заказы, у которых изменился вклад в прибыль дня, — именно их и стоит назвать
+    // владельцу: «затронуто N заказов» без разбора включало бы и те, где ничего не сдвинулось.
+    const beforeByOrder = new Map(before.orders.map((o) => [o.orderId, o.contributionCents]));
+    const changed = after.orders.filter((o) => beforeByOrder.get(o.orderId) !== o.contributionCents);
 
     shareBefore += shareB ?? 0;
     shareAfter += shareA ?? 0;
-    revisions += changed.length;
-    orders += after.result.orders.length;
-    if (accrual && (shareA ?? 0) !== accrual.amountCents) daysNeedingCorrection++;
+    orders += after.ordersTotal;
+    if (shareA !== shareB) daysChanged++;
 
     perDay.push({
       day: dayKey(day),
-      ordersTotal: after.result.orders.length,
+      ordersTotal: after.ordersTotal,
       ordersChanged: changed.length,
-      orderNumbers: changed.map((c) => after.inputs.meta.get(c.orderId)?.orderNumber ?? c.orderId),
+      orderNumbers: changed.map((c) => c.orderNumber),
       shareBeforeCents: shareB,
       shareAfterCents: shareA,
-      accruedCents: accrual?.amountCents ?? null,
+      accruedCents: shareB,
     });
   }
 
-  if (daysNeedingCorrection > 0) {
-    warnings.push(
-      `Затронуты дни с уже созданным начислением (${daysNeedingCorrection}). Прежние записи будут сторнованы, а новые созданы — баланс флориста изменится.`
-    );
-  } else if (revisions > 0) {
-    warnings.push("Денежный результат не меняется: ревизии снимков будут перевыпущены, книга останется нетронутой.");
+  if (daysChanged > 0) {
+    warnings.push(`Заработок флориста изменится: затронуто дней — ${daysChanged}.`);
+  } else if (orders > 0) {
+    warnings.push("Денежный результат не меняется.");
   }
 
   return {
@@ -367,63 +348,13 @@ export async function previewSettingChange(args: {
     op: args.op,
     affectedDays: days.length,
     affectedOrders: orders,
-    revisionsToRepublish: revisions,
     shareBeforeCents: shareBefore,
     shareAfterCents: shareAfter,
     shareDeltaCents: shareAfter - shareBefore,
-    daysNeedingCorrection,
-    needsLedgerCorrection: daysNeedingCorrection > 0,
+    daysChanged,
     days: perDay,
     warnings,
   };
-}
-
-type PublishedFields = {
-  isCalculable: boolean;
-  distributableCents: number;
-  grossRevenueCents: number;
-  tipsCents: number;
-  allocatedFlowerCents: number;
-  acquiringFeeCents: number;
-  consumablesCents: number;
-  vaseGiftCostCents: number;
-  deliveryActualCents: number;
-};
-
-async function publishedSnapshots(orderIds: string[]): Promise<Map<string, PublishedFields>> {
-  if (orderIds.length === 0) return new Map();
-  const rows = await prisma.orderFinancialSnapshot.findMany({
-    where: { orderId: { in: orderIds }, status: "PUBLISHED" },
-    select: {
-      orderId: true,
-      isCalculable: true,
-      distributableCents: true,
-      grossRevenueCents: true,
-      tipsCents: true,
-      allocatedFlowerCents: true,
-      acquiringFeeCents: true,
-      consumablesCents: true,
-      vaseGiftCostCents: true,
-      deliveryActualCents: true,
-    },
-  });
-  return new Map(rows.map((r) => [r.orderId, r]));
-}
-
-/** Ровно тот же набор полей, что сравнивает публикация снимка (см. publishOne). */
-function differsFromPublished(current: PublishedFields | undefined, computed: PublishedFields): boolean {
-  if (!current) return true;
-  return (
-    current.isCalculable !== computed.isCalculable ||
-    current.distributableCents !== computed.distributableCents ||
-    current.grossRevenueCents !== computed.grossRevenueCents ||
-    current.tipsCents !== computed.tipsCents ||
-    current.allocatedFlowerCents !== computed.allocatedFlowerCents ||
-    current.acquiringFeeCents !== computed.acquiringFeeCents ||
-    current.consumablesCents !== computed.consumablesCents ||
-    current.vaseGiftCostCents !== computed.vaseGiftCostCents ||
-    current.deliveryActualCents !== computed.deliveryActualCents
-  );
 }
 
 function emptyPreview(entity: SettingEntity, op: "CORRECT" | "DELETE", warnings: string[]): SettingPreview {
@@ -432,12 +363,10 @@ function emptyPreview(entity: SettingEntity, op: "CORRECT" | "DELETE", warnings:
     op,
     affectedDays: 0,
     affectedOrders: 0,
-    revisionsToRepublish: 0,
     shareBeforeCents: 0,
     shareAfterCents: 0,
     shareDeltaCents: 0,
-    daysNeedingCorrection: 0,
-    needsLedgerCorrection: false,
+    daysChanged: 0,
     days: [],
     warnings,
   };
@@ -485,7 +414,7 @@ async function overridesForDay(
   record: SettingRecord,
   simulated: SimulatedRow[],
   day: Date
-): Promise<CalcOverrides> {
+): Promise<DayOverrides> {
   const covering = simulated.find(
     (r) => r.effectiveFrom.getTime() <= day.getTime() && (r.effectiveTo == null || r.effectiveTo.getTime() > day.getTime())
   );
@@ -691,7 +620,7 @@ export async function deleteSetting(args: {
   return runAftermath(record.siteId, range, args.actor, now, null);
 }
 
-/** Хвост любой правки: ревизии снимков затронутых дней → детектор → пересчёт доли. */
+/** Хвост любой правки: пересчёт итогов затронутых дней → детектор. */
 async function runAftermath(
   siteId: string | null,
   range: { from: Date; to: Date | null },
@@ -702,11 +631,9 @@ async function runAftermath(
   const profile = await activeProfile();
   if (!profile) {
     return {
-      republished: 0,
       days: 0,
+      complete: 0,
       detector: { opened: 0, updated: 0, reopened: 0, autoResolved: 0 },
-      share: { created: 0, corrected: 0, unchanged: 0, skipped: 0 },
-      outcomes: [],
       affectedDays: 0,
     };
   }

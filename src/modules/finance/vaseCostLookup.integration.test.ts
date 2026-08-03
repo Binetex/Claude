@@ -13,7 +13,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import crypto from "crypto";
 import { prisma } from "@/lib/db";
 import { setFinanceProfile } from "./profile";
-import { buildDayPlan } from "./snapshot";
+import { computeDay } from "./dayFinance";
 
 const RUN = `vcl${crypto.randomBytes(3).toString("hex")}`;
 const OWNER = { userId: "", role: "OWNER" as const };
@@ -151,9 +151,6 @@ beforeAll(async () => {
 
 afterAll(async () => {
   delete process.env.FINANCE_PRIMARY_SHARE_START_DATE;
-  await prisma.$executeRawUnsafe(`ALTER TABLE "OrderFinancialSnapshot" DISABLE TRIGGER USER`);
-  await prisma.orderFinancialSnapshot.deleteMany({ where: { order: { siteId } } });
-  await prisma.$executeRawUnsafe(`ALTER TABLE "OrderFinancialSnapshot" ENABLE TRIGGER USER`);
 
   await prisma.financeIssue.deleteMany({ where: { OR: [{ siteId }, { floristId }] } });
   await prisma.financeAudit.deleteMany({ where: { userId: OWNER.userId } });
@@ -170,24 +167,24 @@ afterAll(async () => {
 
 describe("закупочная стоимость связанной вазы", () => {
   it("находится, когда задана на КАРТОЧКЕ ТОВАРА вазы", async () => {
-    const plan = await buildDayPlan(profileId, DAY);
-    const computed = plan!.result.orders.find((o) => o.orderId === orderOnProduct)!;
+    const result = await computeDay(profileId, DAY);
+    const computed = result!.orders.find((o) => o.orderId === orderOnProduct)!;
 
     expect(computed.missing).not.toContain("VASE_GIFT_COST");
     expect(computed.vaseGiftCostCents).toBe(2000);
   });
 
   it("находится, когда задана на ВАРИАНТЕ вазы", async () => {
-    const plan = await buildDayPlan(profileId, DAY);
-    const computed = plan!.result.orders.find((o) => o.orderId === orderOnVariant)!;
+    const result = await computeDay(profileId, DAY);
+    const computed = result!.orders.find((o) => o.orderId === orderOnVariant)!;
 
     expect(computed.missing).not.toContain("VASE_GIFT_COST");
     expect(computed.vaseGiftCostCents).toBe(3000);
   });
 
   it("оба заказа попадают в расчёт, а не выпадают молча", async () => {
-    const plan = await buildDayPlan(profileId, DAY);
-    const withVaseIssue = plan!.result.orders.filter((o) => o.missing.includes("VASE_GIFT_COST"));
+    const result = await computeDay(profileId, DAY);
+    const withVaseIssue = result!.orders.filter((o) => o.missing.includes("VASE_GIFT_COST"));
     expect(withVaseIssue).toHaveLength(0);
   });
 });

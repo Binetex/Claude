@@ -12,8 +12,8 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import crypto from "crypto";
 import { prisma } from "@/lib/db";
+import { computeDayShare } from "./dayFinance";
 import { setFinanceProfile } from "./profile";
-import { computeDayShare } from "./primaryShare";
 import { fixConsumablesRate, fixDailyFlowerExpense, fixDeliveryActualCost, fixSiteFeeModel } from "./fix";
 import { listShareDaysRead, readShareDayBreakdown } from "./shareRead";
 
@@ -114,13 +114,9 @@ beforeAll(async () => {
 
 afterAll(async () => {
   delete process.env.FINANCE_PRIMARY_SHARE_START_DATE;
-  await prisma.ledgerEntrySnapshot.deleteMany({ where: { ledgerEntry: { floristId } } });
   await prisma.$executeRawUnsafe(`ALTER TABLE "LedgerEntry" DISABLE TRIGGER USER`);
   await prisma.ledgerEntry.deleteMany({ where: { floristId } });
   await prisma.$executeRawUnsafe(`ALTER TABLE "LedgerEntry" ENABLE TRIGGER USER`);
-  await prisma.$executeRawUnsafe(`ALTER TABLE "OrderFinancialSnapshot" DISABLE TRIGGER USER`);
-  await prisma.orderFinancialSnapshot.deleteMany({ where: { order: { siteId } } });
-  await prisma.$executeRawUnsafe(`ALTER TABLE "OrderFinancialSnapshot" ENABLE TRIGGER USER`);
 
   await prisma.financeIssue.deleteMany({ where: { OR: [{ siteId }, { floristId }] } });
   await prisma.financeAudit.deleteMany({ where: { userId: OWNER.userId } });
@@ -140,7 +136,7 @@ describe("чтение совпадает с расчётом", () => {
   it("прибыль и доля дня равны живому расчёту до цента", async () => {
     for (const day of [D1, D2]) {
       const computed = await computeDayShare(profileId, day);
-      const read = await readShareDayBreakdown(profileId, day, true);
+      const read = await readShareDayBreakdown(profileId, day);
 
       expect(read!.calculated).toBe(true);
       expect(read!.distributableCents).toBe(computed!.distributableCents);
@@ -149,7 +145,7 @@ describe("чтение совпадает с расчётом", () => {
   });
 
   it("сумма строк формулы сходится с распределяемой прибылью", async () => {
-    const read = await readShareDayBreakdown(profileId, D1, true);
+    const read = await readShareDayBreakdown(profileId, D1);
     const expenses = read!.lines.filter((l) => l.negative).reduce((a, l) => a + l.cents, 0);
     expect(read!.lines[0].cents - expenses).toBe(read!.distributableCents);
   });
@@ -157,7 +153,7 @@ describe("чтение совпадает с расчётом", () => {
   it("список дней даёт те же суммы, что и разбор", async () => {
     const list = await listShareDaysRead({ page: 1, perPage: 20 }, NOW);
     for (const row of list.rows.filter((r) => r.status === "COUNTED")) {
-      const read = await readShareDayBreakdown(profileId, new Date(`${row.day}T00:00:00.000Z`), true);
+      const read = await readShareDayBreakdown(profileId, new Date(`${row.day}T00:00:00.000Z`));
       expect(row.distributableCents).toBe(read!.distributableCents);
       expect(row.shareCents).toBe(read!.shareCents);
     }
@@ -183,21 +179,21 @@ describe("день без опубликованного расчёта", () => 
   });
 
   it("разбор такого дня честно говорит, что расчёта нет", async () => {
-    const read = await readShareDayBreakdown(profileId, D3, true);
+    const read = await readShareDayBreakdown(profileId, D3);
     expect(read!.calculated).toBe(false);
     expect(read!.lines).toHaveLength(0);
     expect(read!.orders).toHaveLength(0);
   });
 
   it("просмотр ничего не создаёт", async () => {
-    const snapsBefore = await prisma.orderFinancialSnapshot.count({ where: { order: { siteId } } });
+    const daysBefore = await prisma.dayFinance.findMany({ select: { day: true, distributableCents: true } });
     const ledgerBefore = await prisma.ledgerEntry.count({ where: { floristId } });
 
     await listShareDaysRead({ page: 1, perPage: 100 }, NOW);
-    await readShareDayBreakdown(profileId, D3, true);
-    await readShareDayBreakdown(profileId, D1, false);
+    await readShareDayBreakdown(profileId, D3);
+    await readShareDayBreakdown(profileId, D1);
 
-    expect(await prisma.orderFinancialSnapshot.count({ where: { order: { siteId } } })).toBe(snapsBefore);
+    expect(await prisma.dayFinance.findMany({ select: { day: true, distributableCents: true } })).toEqual(daysBefore);
     expect(await prisma.ledgerEntry.count({ where: { floristId } })).toBe(ledgerBefore);
   });
 });
@@ -228,8 +224,8 @@ describe("пагинация", () => {
 
 describe("представления", () => {
   it("представления владельца и флориста совпадают", async () => {
-    const owner = await readShareDayBreakdown(profileId, D1, true);
-    const florist = await readShareDayBreakdown(profileId, D1, false);
+    const owner = await readShareDayBreakdown(profileId, D1);
+    const florist = await readShareDayBreakdown(profileId, D1);
 
     // Единственным различием было происхождение комиссии, а оно жило в позаказном снимке.
     // В дневной строке его нет — представления совпали, и разделять их больше нечем.

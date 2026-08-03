@@ -13,7 +13,7 @@ import "server-only";
 import Link from "next/link";
 import { Badge } from "@/components/ui/Badge";
 import { formatCents } from "@/lib/cents";
-import { dayKey } from "@/modules/finance/snapshot";
+import { dayKey } from "@/modules/finance/dayFinance";
 import type { FinanceIssueSeverity, FinanceIssueType } from "@/generated/prisma/enums";
 
 export type IssueRow = {

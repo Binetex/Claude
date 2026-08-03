@@ -163,8 +163,8 @@ async function main() {
   // задачи — в тот же outbox. Гейт двойной (флаг + дата старта), при закрытом гейте интервал
   // не запускается вовсе — деплой сам по себе не начисляет ничего.
 
-  // Доля основного флориста: пересчёт дней начиная с даты запуска. Начисление показывает
-  // рассчитанный долг и денег не переводит — реальная выплата только вручную от владельца,
+  // Доля основного флориста: пересчёт итогов дней начиная с даты запуска. Долг выводится
+  // из этих итогов и денег не переводит — реальная выплата только вручную от владельца,
   // поэтому автоматический пересчёт ничего не может «заплатить» по ошибке.
   const shareGate = primaryShareGate();
   const shareMs = Number(process.env.FINANCE_SHARE_DISPATCH_MS ?? 900_000); // 15 мин
@@ -172,7 +172,7 @@ async function main() {
     ? setInterval(() => {
         if (shuttingDown) return;
         dispatchPrimaryShare(prisma)
-          .then((r) => { if (r.created > 0 || r.corrected > 0) log("finance.share.tick", r); })
+          .then((r) => { if (r.days > 0) log("finance.share.tick", r); })
           .catch((err) => log("finance.share.error", { error: err instanceof Error ? err.message : String(err) }));
       }, shareMs)
     : null;

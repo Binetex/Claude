@@ -123,13 +123,9 @@ afterAll(async () => {
 
   await prisma.orderAdditionalExpense.deleteMany({ where: { order: { siteId } } });
   await prisma.dayFinance.deleteMany({ where: { financeProfileId: profileId } });
-  await prisma.ledgerEntrySnapshot.deleteMany({ where: { ledgerEntry: { floristId: { in: [primaryId, secondaryId] } } } });
   await prisma.$executeRawUnsafe(`ALTER TABLE "LedgerEntry" DISABLE TRIGGER USER`);
   await prisma.ledgerEntry.deleteMany({ where: { floristId: { in: [primaryId, secondaryId] } } });
   await prisma.$executeRawUnsafe(`ALTER TABLE "LedgerEntry" ENABLE TRIGGER USER`);
-  await prisma.$executeRawUnsafe(`ALTER TABLE "OrderFinancialSnapshot" DISABLE TRIGGER USER`);
-  await prisma.orderFinancialSnapshot.deleteMany({ where: { order: { siteId } } });
-  await prisma.$executeRawUnsafe(`ALTER TABLE "OrderFinancialSnapshot" ENABLE TRIGGER USER`);
 
   await prisma.financeIssue.deleteMany({ where: { OR: [{ siteId }, { floristId: { in: [primaryId, secondaryId] } }] } });
   await prisma.financeAudit.deleteMany({ where: { userId: OWNER.userId } });
@@ -155,14 +151,11 @@ describe("основной флорист", () => {
     expect(b.outstandingCents).toBe(b.earnedCents);
     expect(b.detail.days).toBe(1);
 
-    // Пока идёт перестройка, старый путь ещё пишет начисления в книгу — и это не мешает:
-    // баланс их не читает вовсе. Когда старый путь отключат, записи просто исчезнут.
-    const legacy = await prisma.ledgerEntry.findMany({
-      where: { floristId: primaryId, type: "PRIMARY_FLORIST_SHARE", reversal: null },
-      select: { amountCents: true },
+    // Начислений в книге больше не существует вовсе: заработок считается на лету.
+    const legacy = await prisma.ledgerEntry.count({
+      where: { floristId: primaryId, type: "PRIMARY_FLORIST_SHARE" },
     });
-    expect(legacy.length).toBeGreaterThan(0);
-    expect(b.outstandingCents).toBe(b.earnedCents); // старые записи в долг не попали
+    expect(legacy).toBe(0);
   });
 
   it("пересчёт дня меняет долг сам — без сторно и корректировок", async () => {

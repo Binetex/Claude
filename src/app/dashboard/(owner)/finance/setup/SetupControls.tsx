@@ -15,7 +15,6 @@ const TYPE_OPTIONS: { value: string; label: string }[] = [
   { value: "VASE_LINK_MISSING", label: "Ваза не привязана" },
   { value: "CONSUMABLES_RATE_MISSING", label: "Нет ставки расходников" },
   { value: "OWNER_TAX_POLICY_MISSING", label: "Нет налоговой политики" },
-  { value: "FLOWER_REVENUE_UNDETERMINED", label: "Выручка не определена" },
 ];
 
 const GROUP_OPTIONS = [

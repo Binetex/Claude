@@ -12,10 +12,9 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import crypto from "crypto";
 import { prisma } from "@/lib/db";
 import { setFinanceProfile } from "./profile";
-import { computeDayShare } from "./primaryShare";
 import { fixConsumablesRate, fixDailyFlowerExpense, fixDeliveryActualCost, fixSiteFeeModel } from "./fix";
 import { addOrderExpense } from "./orderExpenses";
-import { computeDay, readDay, recomputeDay } from "./dayFinance";
+import { computeDay, readDay, recomputeDay, computeDayShare } from "./dayFinance";
 import { dayShareCents } from "./dayCalc";
 
 const RUN = `dfn${crypto.randomBytes(3).toString("hex")}`;
@@ -109,13 +108,9 @@ afterAll(async () => {
   delete process.env.FINANCE_PRIMARY_SHARE_START_DATE;
   await prisma.orderAdditionalExpense.deleteMany({ where: { order: { siteId } } });
   await prisma.dayFinance.deleteMany({ where: { financeProfileId: profileId } });
-  await prisma.ledgerEntrySnapshot.deleteMany({ where: { ledgerEntry: { floristId } } });
   await prisma.$executeRawUnsafe(`ALTER TABLE "LedgerEntry" DISABLE TRIGGER USER`);
   await prisma.ledgerEntry.deleteMany({ where: { floristId } });
   await prisma.$executeRawUnsafe(`ALTER TABLE "LedgerEntry" ENABLE TRIGGER USER`);
-  await prisma.$executeRawUnsafe(`ALTER TABLE "OrderFinancialSnapshot" DISABLE TRIGGER USER`);
-  await prisma.orderFinancialSnapshot.deleteMany({ where: { order: { siteId } } });
-  await prisma.$executeRawUnsafe(`ALTER TABLE "OrderFinancialSnapshot" ENABLE TRIGGER USER`);
 
   await prisma.financeIssue.deleteMany({ where: { OR: [{ siteId }, { floristId }] } });
   await prisma.financeAudit.deleteMany({ where: { userId: OWNER.userId } });

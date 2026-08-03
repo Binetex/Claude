@@ -2,14 +2,14 @@
 /**
  * Пересчёт одного дня. ЕДИНСТВЕННОЕ действие на странице разбора, которое пишет.
  *
- * Сам просмотр не создаёт ни снимков, ни записей книги: экран читает опубликованное.
- * Кнопка нужна тем, кому не хочется ждать очередного прохода диспетчера.
+ * Сам просмотр ничего не пишет: экран читает записанный итог дня. Кнопка нужна тем, кому
+ * не хочется ждать очередного прохода диспетчера.
  */
 import { revalidatePath } from "next/cache";
 import { requireRole } from "@/lib/rbac";
 import { prisma } from "@/lib/db";
 import { recalculateAffectedFinance } from "@/modules/finance/fix";
-import { accrueDayShare } from "@/modules/finance/primaryShare";
+import { computeDayShare } from "@/modules/finance/dayFinance";
 
 export async function recomputeDayAction(formData: FormData): Promise<{ error?: string; message?: string }> {
   const user = await requireRole("OWNER");
@@ -24,19 +24,15 @@ export async function recomputeDayAction(formData: FormData): Promise<{ error?: 
 
   const date = new Date(`${day}T00:00:00.000Z`);
   const actor = { userId: user.id, role: user.role };
-  const r = await recalculateAffectedFinance(profile.id, [date], actor, new Date());
-  const outcome = await accrueDayShare(profile.id, date, actor);
+  await recalculateAffectedFinance(profile.id, [date], actor, new Date());
+  const share = await computeDayShare(profile.id, date);
 
   revalidatePath(`/dashboard/finance/share/${day}`);
   revalidatePath("/dashboard/finance/share");
 
-  const tail =
-    outcome.status === "CORRECTED"
-      ? " Начисление пересчитано: прежнее сторновано, создано новое."
-      : outcome.status === "CREATED"
-        ? " Начисление создано."
-        : outcome.status === "UNCHANGED"
-          ? " Начисление не изменилось."
-          : ` Начисление не создано (${outcome.reason}).`;
-  return { message: `Пересчитано. Ревизий снимков: ${r.republished}.${tail}` };
+  return {
+    message: share?.complete
+      ? `Пересчитано. Заработок флориста за день: ${(share.shareCents / 100).toFixed(2)}.`
+      : "Пересчитано. День посчитан не целиком — не хватает данных по заказам.",
+  };
 }

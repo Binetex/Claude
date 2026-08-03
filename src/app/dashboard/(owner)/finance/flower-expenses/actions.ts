@@ -50,13 +50,11 @@ export async function saveExpenseAction(formData: FormData): Promise<ExpenseActi
       comment: String(formData.get("comment") ?? "").trim() || null,
     });
     refresh();
-    const share =
-      r.share.status === "CORRECTED"
-        ? ` Начисление пересчитано: было ${(r.share.fromCents! / 100).toFixed(2)}, стало ${(r.share.toCents! / 100).toFixed(2)}.`
-        : r.share.status === "CREATED"
-          ? " Начисление за день создано."
-          : "";
-    return { message: `Расход за ${r.day} сохранён. Ревизий снимков: ${r.republished}.${share}` };
+    return {
+      message: r.shareCents != null
+        ? `Расход за ${r.day} сохранён. Заработок флориста за день: ${(r.shareCents / 100).toFixed(2)}.`
+        : `Расход за ${r.day} сохранён. День пока не посчитан целиком.`,
+    };
   } catch (e) {
     return fail(e);
   }
@@ -71,11 +69,7 @@ export async function deleteExpenseAction(formData: FormData): Promise<ExpenseAc
       reason: String(formData.get("reason") ?? ""),
     });
     refresh();
-    return {
-      message: r.reversedCents
-        ? `Расход за ${r.day} удалён, начисление ${(r.reversedCents / 100).toFixed(2)} сторновано.`
-        : `Расход за ${r.day} удалён.`,
-    };
+    return { message: `Расход за ${r.day} удалён, день пересчитан.` };
   } catch (e) {
     return fail(e);
   }
