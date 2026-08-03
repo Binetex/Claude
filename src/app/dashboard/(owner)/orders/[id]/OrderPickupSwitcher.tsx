@@ -1,5 +1,5 @@
 "use client";
-import { useActionState, useEffect, useState } from "react";
+import { useActionState, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { setOrderPickupLocationAction } from "./deliveryActions";
 
@@ -37,7 +37,13 @@ export function OrderPickupSwitcher({ data }: { data: OrderPickupData }) {
   const [selected, setSelected] = useState(data.currentId ?? "");
   // После сохранения страница перерисовывается с новой действующей точкой — селект обязан
   // показать её, иначе он продолжает предлагать прежнюю и кнопка выглядит «ничего не делает».
-  useEffect(() => setSelected(data.currentId ?? ""), [data.currentId]);
+  // Правка состояния прямо в рендере (а не в эффекте) — рекомендованный React способ
+  // сбросить состояние при смене пропа: лишнего прохода рендера не будет.
+  const [syncedTo, setSyncedTo] = useState(data.currentId);
+  if (syncedTo !== data.currentId) {
+    setSyncedTo(data.currentId);
+    setSelected(data.currentId ?? "");
+  }
   const current = data.options.find((o) => o.id === data.currentId) ?? null;
   const changed = (data.currentId ?? "") !== selected;
 
