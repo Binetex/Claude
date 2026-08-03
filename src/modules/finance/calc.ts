@@ -236,7 +236,11 @@ export function computeOrderSnapshot(
   };
 }
 
-export type DayBlocker = "DAILY_FLOWER_EXPENSE_MISSING" | "FLOWER_REVENUE_UNDETERMINED";
+export type DayBlocker =
+  | "DAILY_FLOWER_EXPENSE_MISSING"
+  | "FLOWER_REVENUE_UNDETERMINED"
+  /** Хотя бы у одного заказа дня не хватает данных — день не считается целиком. */
+  | "ORDER_DATA_INCOMPLETE";
 
 export type DayCalcResult = {
   deliveryDay: string;
@@ -296,6 +300,20 @@ export function computeDay(
     computeOrderSnapshot(o, allocation?.get(o.orderId) ?? null, taxExpenseShareBp)
   );
 
+  /**
+   * День считается целиком или не считается вовсе.
+   *
+   * Раньше незаполненный заказ просто выпадал из дня, а остальные считались — из-за этого
+   * сумма появлялась рано и потом менялась: доехали данные — сторно и пересчёт. Флорист
+   * успевал увидеть одно число, а получить другое.
+   *
+   * DAILY_FLOWER_EXPENSE из проверки исключён намеренно: это блокер уровня дня, он уже
+   * учтён выше, и пока закупки нет, ВСЕ заказы выглядят неполными — проверка стала бы
+   * замкнутой на саму себя.
+   */
+  const incomplete = results.some((r) => r.missing.some((m) => m !== "DAILY_FLOWER_EXPENSE"));
+  if (incomplete) blockers.push("ORDER_DATA_INCOMPLETE");
+
   const allocatedCents = results.filter((r) => r.isCalculable).reduce((a, r) => a + r.allocatedFlowerCents, 0);
   const unallocatedCents = results.filter((r) => !r.isCalculable).reduce((a, r) => a + r.allocatedFlowerCents, 0);
 
@@ -307,9 +325,12 @@ export function computeDay(
     allocatedCents,
     unallocatedCents,
     orders: results,
-    distributableTotalCents: results
-      .filter((r) => r.isCalculable)
-      .reduce((a, r) => a + r.distributableCents, 0),
+    // У заблокированного дня распределяемой прибыли нет: показывать частичную сумму
+    // значит обещать деньги, которых начисление не создаст.
+    distributableTotalCents:
+      blockers.length > 0
+        ? 0
+        : results.filter((r) => r.isCalculable).reduce((a, r) => a + r.distributableCents, 0),
   };
 }
 

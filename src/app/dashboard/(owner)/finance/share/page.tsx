@@ -23,7 +23,7 @@ export const dynamic = "force-dynamic";
 const statusMeta: Record<ShareDayStatus, { label: string; className: string }> = {
   ACCRUED: { label: "начислено", className: "border-emerald-200 bg-emerald-50 text-emerald-700" },
   READY: { label: "готов к начислению", className: "border-slate-200 bg-slate-50 text-slate-600" },
-  PARTIAL: { label: "посчитан частично", className: "border-amber-200 bg-amber-50 text-amber-800" },
+  PARTIAL: { label: "не считается: не все заказы заполнены", className: "border-amber-200 bg-amber-50 text-amber-800" },
   NOT_CALCULATED: { label: "не рассчитан", className: "border-slate-200 bg-slate-50 text-slate-400" },
   STALE: { label: "требует пересчёта", className: "border-amber-200 bg-amber-50 text-amber-800" },
 };
@@ -158,7 +158,7 @@ export default async function PrimarySharePage({
                       </td>
                       <td className="px-4 py-2.5 text-right font-semibold tabular-nums">
                         {r.accruedCents != null ? (
-                          <span className={r.status === "STALE" ? "text-amber-700" : "text-emerald-700"}>
+                          <span className={r.status === "STALE" || r.status === "PARTIAL" ? "text-amber-700" : "text-emerald-700"}>
                             {formatCents(r.accruedCents)}
                           </span>
                         ) : (

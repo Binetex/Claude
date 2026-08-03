@@ -203,7 +203,10 @@ export async function listShareDaysRead(
     // Процент берётся из самого начисления, если оно есть: день, посчитанный по прежней
     // ставке, должен объясняться той ставкой, а не сегодняшней.
     const bp = accrual?.bp ?? profile.sharePercentBp ?? 0;
-    const shareCents = primaryShareCents(distributable, bp);
+    // День считается целиком или не считается: пока заполнены не все заказы, доли нет.
+    // Показать частичную сумму значило бы обещать деньги, которых начисление не создаст.
+    const complete = snapshotted > 0 && calculable === ordersTotal;
+    const shareCents = complete ? primaryShareCents(distributable, bp) : 0;
 
     return {
       day: key,
@@ -240,9 +243,11 @@ function deriveStatus(x: {
   shareCents: number;
 }): ShareDayStatus {
   if (x.snapshotted === 0) return "NOT_CALCULATED";
+  // Незаполненный заказ важнее всего остального: день не считается, и это первое,
+  // что должно быть видно.
+  if (x.calculable < x.ordersTotal) return "PARTIAL";
   if (x.accrued != null && x.accrued !== x.shareCents) return "STALE";
   if (x.accrued != null) return "ACCRUED";
-  if (x.calculable < x.ordersTotal) return "PARTIAL";
   return "READY";
 }
 
@@ -254,6 +259,8 @@ export type ShareDayDetail = {
   day: string;
   /** Нет опубликованных снимков — день ещё не рассчитывали. */
   calculated: boolean;
+  /** Заполнены ли ВСЕ заказы дня. Незаполненный останавливает день целиком. */
+  complete: boolean;
   sharePercentBp: number | null;
   distributableCents: number;
   shareCents: number;
@@ -324,6 +331,7 @@ export async function readShareDayBreakdown(
     return {
       day: dayKey(day),
       calculated: false,
+      complete: false,
       sharePercentBp: profile.sharePercentBp,
       distributableCents: 0,
       shareCents: 0,
@@ -355,16 +363,18 @@ export async function readShareDayBreakdown(
   const additional = sum((s) => s.otherExpenseCents);
   if (additional > 0) lines.push({ label: "Дополнительные расходы", cents: additional, negative: true });
 
+  const complete = included.length === snapshots.length;
   const distributableCents = sum((s) => s.distributableCents);
   const bp =
     (accrual?.metadata && typeof accrual.metadata === "object" && "sharePercentBp" in accrual.metadata
       ? Number((accrual.metadata as { sharePercentBp?: unknown }).sharePercentBp)
       : null) ?? profile.sharePercentBp ?? 0;
-  const shareCents = primaryShareCents(distributableCents, bp);
+  const shareCents = complete ? primaryShareCents(distributableCents, bp) : 0;
 
   return {
     day: dayKey(day),
     calculated: true,
+    complete,
     sharePercentBp: bp,
     distributableCents,
     shareCents,

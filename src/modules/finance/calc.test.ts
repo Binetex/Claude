@@ -229,14 +229,28 @@ describe("расчёт дня", () => {
     expect(day.blockers).toContain("FLOWER_REVENUE_UNDETERMINED");
   });
 
-  it("сумма дня складывается только из просчитанных заказов", () => {
+  it("незаполненный заказ останавливает весь день, а не выпадает из него", () => {
     const day = computeDay(
       "2026-07-28",
       [order("a", { items: [flower(10000)], itemsTotalCents: 10000 }), order("b", { items: [flower(10000)], itemsTotalCents: 10000, consumables: null })],
       2000
     );
-    const a = day.orders.find((o) => o.orderId === "a")!;
-    expect(day.distributableTotalCents).toBe(a.distributableCents);
+    // Раньше день считался по одному заказу «a», а потом менялся, когда доезжали данные
+    // по «b». Теперь суммы нет вовсе, пока день не заполнен целиком.
+    expect(day.blockers).toContain("ORDER_DATA_INCOMPLETE");
+    expect(day.distributableTotalCents).toBe(0);
+    // При этом видно, чего именно не хватает: очередь заполнения на этом и держится.
+    expect(day.orders.find((o) => o.orderId === "b")!.missing).toContain("CONSUMABLES_RATE");
+  });
+
+  it("полный день считается как сумма своих заказов", () => {
+    const day = computeDay(
+      "2026-07-28",
+      [order("a", { items: [flower(10000)], itemsTotalCents: 10000 }), order("b", { items: [flower(10000)], itemsTotalCents: 10000 })],
+      2000
+    );
+    expect(day.blockers).toHaveLength(0);
+    expect(day.distributableTotalCents).toBe(day.orders.reduce((a, o) => a + o.distributableCents, 0));
   });
 });
 
