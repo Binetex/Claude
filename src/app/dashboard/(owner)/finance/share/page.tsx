@@ -1,63 +1,68 @@
 import Link from "next/link";
 import { requireRole } from "@/lib/rbac";
-import { prisma } from "@/lib/db";
 import { PageHeader, StatCard } from "@/components/ui/misc";
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
+import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/states";
 import { formatCents } from "@/lib/cents";
-import { listShareDays, getShareDayBreakdown } from "@/modules/finance/shareView";
+import { listShareDaysRead, PER_PAGE_OPTIONS, type ShareDayStatus } from "@/modules/finance/shareRead";
 import { SharePercentForm, RecomputeShareButton } from "./ShareControls";
+import { PerPageSelect } from "./PerPageSelect";
 
 export const dynamic = "force-dynamic";
 
-export default async function PrimarySharePage() {
+/**
+ * Доля основного флориста — список дней.
+ *
+ * Страница ЧИТАЕТ опубликованный расчёт и книгу: шесть запросов независимо от того,
+ * 20 дней на экране или 100. Живого пересчёта здесь нет — он остался на пути записи.
+ * Раньше страница строила план каждого дня по четыре раза и на длинной истории просто
+ * не открывалась бы.
+ */
+const statusMeta: Record<ShareDayStatus, { label: string; className: string }> = {
+  ACCRUED: { label: "начислено", className: "border-emerald-200 bg-emerald-50 text-emerald-700" },
+  READY: { label: "готов к начислению", className: "border-slate-200 bg-slate-50 text-slate-600" },
+  PARTIAL: { label: "посчитан частично", className: "border-amber-200 bg-amber-50 text-amber-800" },
+  NOT_CALCULATED: { label: "не рассчитан", className: "border-slate-200 bg-slate-50 text-slate-400" },
+  STALE: { label: "требует пересчёта", className: "border-amber-200 bg-amber-50 text-amber-800" },
+};
+
+export default async function PrimarySharePage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | undefined>>;
+}) {
   await requireRole("OWNER");
-  const { startDate, disabledReason, sharePercentBp, floristName, rows } = await listShareDays();
+  const sp = await searchParams;
+  const page = Math.max(Number(sp.page ?? 1) || 1, 1);
+  const perPage = Number(sp.perPage ?? PER_PAGE_OPTIONS[0]) || PER_PAGE_OPTIONS[0];
 
-  const profile = await prisma.floristFinanceProfile.findFirst({
-    where: { model: "PRIMARY", active: true, effectiveTo: null },
-    select: { id: true, floristId: true },
-  });
+  const data = await listShareDaysRead({ page, perPage });
+  const totalPages = Math.max(Math.ceil(data.totalDays / data.perPage), 1);
 
-  const accruedTotal = rows.reduce((a, r) => a + (r.accruedCents ?? 0), 0);
-  const pendingDays = rows.filter((r) => !r.blocked && r.accruedCents == null && r.shareCents > 0).length;
-  const blockedDays = rows.filter((r) => r.blocked).length;
+  const accruedTotal = data.rows.reduce((a, r) => a + (r.accruedCents ?? 0), 0);
+  const pending = data.rows.filter((r) => r.status === "READY" && r.shareCents > 0).length;
+  const attention = data.rows.filter((r) => r.status === "PARTIAL" || r.status === "STALE" || r.status === "NOT_CALCULATED").length;
 
-  // Разбор считаем только для дней, которые уже начислены либо готовы — по
-  // заблокированным показывать нечего, кроме причины.
-  const breakdowns = new Map(
-    await Promise.all(
-      rows
-        .filter((r) => !r.blocked)
-        .slice(0, 10)
-        .map(async (r) => {
-          const b = profile ? await getShareDayBreakdown(profile.id, new Date(`${r.day}T00:00:00.000Z`), true) : null;
-          return [r.day, b] as const;
-        })
-    )
-  );
+  const href = (p: number, pp: number = data.perPage) => `/dashboard/finance/share?page=${p}&perPage=${pp}`;
 
   return (
     <div className="space-y-4">
       <PageHeader
-        title={`Доля основного флориста${floristName ? ` · ${floristName}` : ""}`}
-        description="Ежедневный расчёт. Начисление показывает рассчитанный долг и денег не переводит — реальная выплата появляется только вручную операцией «Выплата»."
-        actions={
-          <div className="flex items-center gap-3">
-            {profile && sharePercentBp != null && <RecomputeShareButton />}
-          </div>
-        }
+        title={`Доля основного флориста${data.floristName ? ` · ${data.floristName}` : ""}`}
+        description="Показан опубликованный расчёт. Начисление отражает рассчитанный долг и денег не переводит — выплата появляется только вручную операцией «Выплата»."
+        actions={data.profileId && data.sharePercentBp != null ? <RecomputeShareButton /> : undefined}
       />
 
-      {disabledReason ? (
+      {data.disabledReason ? (
         <Card>
           <CardBody className="text-sm text-slate-600">
             <div className="font-medium text-slate-800">Расчёт не запущен</div>
-            <div className="mt-1 text-slate-500">{disabledReason}</div>
+            <div className="mt-1 text-slate-500">{data.disabledReason}</div>
           </CardBody>
         </Card>
-      ) : sharePercentBp == null ? (
+      ) : data.sharePercentBp == null ? (
         <Card>
           <CardBody className="space-y-3">
             <div>
@@ -66,29 +71,32 @@ export default async function PrimarySharePage() {
                 Пока процент не задан, начисления не создаются: подставлять значение «по умолчанию» нельзя — это деньги.
               </div>
             </div>
-            {profile && <SharePercentForm floristId={profile.floristId} defaultDate={startDate} />}
+            {data.floristId && <SharePercentForm floristId={data.floristId} defaultDate={data.startDate} />}
           </CardBody>
         </Card>
       ) : (
         <>
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-            <StatCard label="Доля" value={`${(sharePercentBp / 100).toFixed(2)}%`} />
-            <StatCard label="Начислено всего" value={formatCents(accruedTotal)} tone="success" />
-            <StatCard label="Дней ждут начисления" value={pendingDays} tone={pendingDays > 0 ? "info" : "default"} />
-            <StatCard label="Дней заблокировано" value={blockedDays} tone={blockedDays > 0 ? "warning" : "default"} />
+            <StatCard label="Доля" value={`${(data.sharePercentBp / 100).toFixed(2)}%`} />
+            <StatCard label="Начислено на странице" value={formatCents(accruedTotal)} tone="success" />
+            <StatCard label="Дней ждут начисления" value={pending} tone={pending > 0 ? "info" : "default"} />
+            <StatCard label="Дней требуют внимания" value={attention} tone={attention > 0 ? "warning" : "default"} />
           </div>
 
-          {startDate && (
+          {data.startDate && (
             <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-400">
-              <span>Считаются заказы с {startDate.toISOString().slice(0, 10)}. Более ранние — исторические.</span>
-              {profile && <SharePercentForm floristId={profile.floristId} defaultDate={startDate} compact />}
+              <span>
+                Считаются заказы с {data.startDate.toISOString().slice(0, 10)}. Более ранние — исторические. Всего дней:{" "}
+                {data.totalDays}.
+              </span>
+              {data.floristId && <SharePercentForm floristId={data.floristId} defaultDate={data.startDate} compact />}
             </div>
           )}
         </>
       )}
 
-      {rows.length === 0 ? (
-        !disabledReason && (
+      {data.rows.length === 0 ? (
+        !data.disabledReason && (
           <Card>
             <CardBody>
               <EmptyState title="Доставленных заказов с даты запуска пока нет" />
@@ -96,103 +104,95 @@ export default async function PrimarySharePage() {
           </Card>
         )
       ) : (
-        <div className="space-y-3">
-          {rows.map((r) => {
-            const b = breakdowns.get(r.day);
-            return (
-              <Card key={r.day}>
-                <CardHeader className="flex flex-wrap items-center justify-between gap-2">
-                  <CardTitle>
-                    {r.day}{" "}
-                    {r.blocked ? (
-                      <Badge className="border-amber-200 bg-amber-50 text-amber-800">заблокирован</Badge>
-                    ) : r.accruedCents != null ? (
-                      <Badge className="border-emerald-200 bg-emerald-50 text-emerald-700">начислено</Badge>
-                    ) : (
-                      <Badge className="border-slate-200 bg-slate-50 text-slate-600">готов к начислению</Badge>
-                    )}
-                  </CardTitle>
-                  <div className="flex items-center gap-4 text-sm">
-                    <span className="text-slate-400">
-                      заказов {r.ordersCalculable} из {r.ordersTotal}
-                    </span>
-                    <span className="tabular-nums text-slate-600">
-                      прибыль {formatCents(r.distributableCents)}
-                    </span>
-                    <span className="font-semibold tabular-nums text-emerald-700">
-                      доля {formatCents(r.accruedCents ?? r.shareCents)}
-                    </span>
-                  </div>
-                </CardHeader>
-                <CardBody>
-                  {r.blocked ? (
-                    <div className="text-sm text-amber-800">
-                      День не считается: {r.blockers.join(", ")}.{" "}
-                      <Link href="/dashboard/finance/setup" className="text-blue-600 hover:underline">
-                        Заполнить
-                      </Link>
-                    </div>
-                  ) : b ? (
-                    <details>
-                      <summary className="cursor-pointer text-sm text-slate-500">Полная формула</summary>
-                      <table className="mt-2 w-full text-sm">
-                        <tbody>
-                          {b.lines.map((l) => (
-                            <tr key={l.label} className="border-b border-slate-50">
-                              <td className="py-1.5 text-slate-600">{l.label}</td>
-                              <td className="py-1.5 text-right tabular-nums text-slate-700">
-                                {l.negative ? "−" : ""}
-                                {formatCents(l.cents)}
-                              </td>
-                            </tr>
-                          ))}
-                          <tr className="border-t border-slate-200">
-                            <td className="py-2 font-medium text-slate-800">Распределяемая прибыль</td>
-                            <td className="py-2 text-right font-semibold tabular-nums">
-                              {formatCents(b.distributableCents)}
-                            </td>
-                          </tr>
-                          <tr>
-                            <td className="py-1.5 text-slate-600">
-                              × {b.sharePercentBp != null ? (b.sharePercentBp / 100).toFixed(2) : "—"}%
-                            </td>
-                            <td className="py-1.5 text-right font-semibold tabular-nums text-emerald-700">
-                              {formatCents(b.shareCents)}
-                            </td>
-                          </tr>
-                        </tbody>
-                      </table>
-
-                      <div className="mt-3 text-xs text-slate-400">Заказы дня</div>
-                      <table className="mt-1 w-full text-xs">
-                        <tbody>
-                          {b.orders.map((o) => (
-                            <tr key={o.orderId} className={o.included ? "" : "text-slate-400"}>
-                              <td className="py-0.5 pr-2">
-                                <Link href={`/dashboard/finance/orders/${o.orderId}`} className="text-blue-600 hover:underline">
-                                  {o.orderNumber}
-                                </Link>
-                              </td>
-                              <td className="py-0.5 pr-2 text-slate-400">{o.siteShortName}</td>
-                              <td className="py-0.5 pr-2 text-right tabular-nums">цветы {formatCents(o.flowerRevenueCents)}</td>
-                              <td className="py-0.5 pr-2 text-right tabular-nums">закупка {formatCents(o.allocatedFlowerCents)}</td>
-                              <td className="py-0.5 text-right tabular-nums">
-                                {o.included ? formatCents(o.distributableCents) : "не в расчёте"}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </details>
-                  ) : (
-                    <div className="text-sm text-slate-400">Разбор доступен для десяти последних дней.</div>
-                  )}
-                </CardBody>
-              </Card>
-            );
-          })}
-        </div>
+        <Card>
+          <CardHeader className="flex flex-wrap items-center justify-between gap-2">
+            <CardTitle>
+              Дни {(data.page - 1) * data.perPage + 1}–{Math.min(data.page * data.perPage, data.totalDays)} из{" "}
+              {data.totalDays}
+            </CardTitle>
+            <PerPageSelect current={data.perPage} />
+          </CardHeader>
+          <CardBody className="p-0">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-slate-100 text-left text-[11px] tracking-wide text-slate-400 uppercase">
+                    <th className="px-4 py-2.5 font-medium">День</th>
+                    <th className="px-3 py-2.5 font-medium">Статус</th>
+                    <th className="px-3 py-2.5 text-right font-medium">Заказов</th>
+                    <th className="px-3 py-2.5 text-right font-medium">Прибыль</th>
+                    <th className="px-3 py-2.5 text-right font-medium">Расчётная доля</th>
+                    <th className="px-4 py-2.5 text-right font-medium">Начислено</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.rows.map((r) => (
+                    <tr key={r.day} className="border-b border-slate-50 last:border-0 hover:bg-slate-50/60">
+                      <td className="px-4 py-2.5 tabular-nums">
+                        <Link href={`/dashboard/finance/share/${r.day}`} className="font-medium text-slate-800 hover:underline">
+                          {r.day}
+                        </Link>
+                      </td>
+                      <td className="px-3 py-2.5">
+                        <Badge className={statusMeta[r.status].className}>{statusMeta[r.status].label}</Badge>
+                        {r.openIssues > 0 && (
+                          <Link
+                            href="/dashboard/finance/setup"
+                            className="ml-2 text-xs text-blue-600 hover:underline"
+                          >
+                            проблем: {r.openIssues}
+                          </Link>
+                        )}
+                      </td>
+                      <td className="px-3 py-2.5 text-right tabular-nums text-slate-600">
+                        {r.ordersCalculable}
+                        {r.ordersTotal !== r.ordersCalculable && (
+                          <span className="text-slate-400"> / {r.ordersTotal}</span>
+                        )}
+                      </td>
+                      <td className="px-3 py-2.5 text-right tabular-nums text-slate-600">
+                        {r.hasSnapshots ? formatCents(r.distributableCents) : <span className="text-slate-300">—</span>}
+                      </td>
+                      <td className="px-3 py-2.5 text-right tabular-nums text-slate-600">
+                        {r.hasSnapshots ? formatCents(r.shareCents) : <span className="text-slate-300">—</span>}
+                      </td>
+                      <td className="px-4 py-2.5 text-right font-semibold tabular-nums">
+                        {r.accruedCents != null ? (
+                          <span className={r.status === "STALE" ? "text-amber-700" : "text-emerald-700"}>
+                            {formatCents(r.accruedCents)}
+                          </span>
+                        ) : (
+                          <span className="text-slate-300">—</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </CardBody>
+          {totalPages > 1 && (
+            <div className="flex items-center justify-between border-t border-slate-100 px-4 py-3 text-sm">
+              <span className="text-slate-500">
+                Страница {data.page} из {totalPages}
+              </span>
+              <div className="flex gap-2">
+                <Button asChild variant="outline" size="sm" disabled={data.page <= 1}>
+                  <Link href={href(data.page - 1)}>Назад</Link>
+                </Button>
+                <Button asChild variant="outline" size="sm" disabled={data.page >= totalPages}>
+                  <Link href={href(data.page + 1)}>Вперёд</Link>
+                </Button>
+              </div>
+            </div>
+          )}
+        </Card>
       )}
+
+      <p className="text-xs text-slate-400">
+        «Требует пересчёта» означает, что состав дня изменился после начисления — например, заказ переназначили или
+        добавили расход. Диспетчер выровняет сумму сам; кнопка «Пересчитать» делает это немедленно.
+      </p>
     </div>
   );
 }

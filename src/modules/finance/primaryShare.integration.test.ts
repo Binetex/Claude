@@ -18,7 +18,7 @@ import { accrueDayShare, computeDayShare, primaryShareKey } from "./primaryShare
 import { getFloristBalance } from "./ledger";
 import { recordPayment } from "./payouts";
 import { fixConsumablesRate, fixDailyFlowerExpense, fixDeliveryActualCost, fixSiteFeeModel } from "./fix";
-import { getShareDayBreakdown } from "./shareView";
+import { readShareDayBreakdown } from "./shareRead";
 
 const RUN = `psh${crypto.randomBytes(3).toString("hex")}`;
 const OWNER = { userId: "", role: "OWNER" as const };
@@ -157,7 +157,7 @@ describe("расчёт дня", () => {
   });
 
   it("чаевые видно в выручке и тем же расходом, база от них не зависит", async () => {
-    const b = await getShareDayBreakdown(profileId, DAY, true);
+    const b = await readShareDayBreakdown(profileId, DAY, true);
     // Верхняя строка = сколько заплатили клиенты:
     // (100 + 200 товары) + (10 + 10 налог) + (20 + 20 доставка) + (5 + 5 чаевые) = 370.00.
     expect(b!.lines[0].cents).toBe(37000);
@@ -169,6 +169,8 @@ describe("расчёт дня", () => {
     const computed = await computeDayShare(profileId, DAY);
     const expenses = b!.lines.filter((l) => l.negative).reduce((a, l) => a + l.cents, 0);
     expect(b!.lines[0].cents - expenses).toBe(computed!.distributableCents);
+    // Разбор читается из снимков и обязан совпадать с живым расчётом до цента.
+    expect(b!.distributableCents).toBe(computed!.distributableCents);
   });
 
   it("повторный расчёт не создаёт вторую запись", async () => {
@@ -255,8 +257,8 @@ describe("реальные деньги — только вручную", () => 
 
 describe("представления", () => {
   it("флорист не видит происхождение комиссии, владелец видит", async () => {
-    const ownerView = await getShareDayBreakdown(profileId, DAY, true);
-    const floristView = await getShareDayBreakdown(profileId, DAY, false);
+    const ownerView = await readShareDayBreakdown(profileId, DAY, true);
+    const floristView = await readShareDayBreakdown(profileId, DAY, false);
 
     const feeLine = (b: typeof ownerView) => b!.lines.find((l) => l.label.startsWith("Комиссия эквайринга"))!;
     // У владельца в строке комиссии указано её происхождение, у флориста — нет.

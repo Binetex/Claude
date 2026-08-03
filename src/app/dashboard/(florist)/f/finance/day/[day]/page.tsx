@@ -4,7 +4,7 @@ import { requireFlorist } from "@/lib/rbac";
 import { PageHeader } from "@/components/ui/misc";
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/Card";
 import { formatCents } from "@/lib/cents";
-import { getShareDayBreakdown, primaryProfileForFlorist } from "@/modules/finance/shareView";
+import { readShareDayBreakdown, primaryProfileForFlorist } from "@/modules/finance/shareRead";
 
 export const dynamic = "force-dynamic";
 
@@ -23,7 +23,7 @@ export default async function FloristShareDayPage({ params }: { params: Promise<
   const profile = await primaryProfileForFlorist(user.floristId);
   if (!profile) notFound();
 
-  const breakdown = await getShareDayBreakdown(profile.id, new Date(`${day}T00:00:00.000Z`), false);
+  const breakdown = await readShareDayBreakdown(profile.id, new Date(`${day}T00:00:00.000Z`), false);
   if (!breakdown) notFound();
 
   return (
@@ -38,6 +38,13 @@ export default async function FloristShareDayPage({ params }: { params: Promise<
         }
       />
 
+      {!breakdown.calculated ? (
+        <Card>
+          <CardBody className="text-sm text-slate-500">
+            Расчёт за этот день ещё не опубликован. Как только владелец закроет день, здесь появится разбор.
+          </CardBody>
+        </Card>
+      ) : (
       <Card>
         <CardBody>
           <table className="w-full text-sm">
@@ -72,7 +79,9 @@ export default async function FloristShareDayPage({ params }: { params: Promise<
           </p>
         </CardBody>
       </Card>
+      )}
 
+      {breakdown.calculated && (
       <Card>
         <CardHeader>
           <CardTitle>Заказы этого дня · {breakdown.orders.length}</CardTitle>
@@ -108,6 +117,7 @@ export default async function FloristShareDayPage({ params }: { params: Promise<
           </table>
         </CardBody>
       </Card>
+      )}
     </div>
   );
 }
