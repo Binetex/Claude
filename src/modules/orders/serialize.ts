@@ -203,7 +203,9 @@ export type CallCenterOrder = ReturnType<typeof serializeForCallCenter>;
 //
 // financeVisibility на профиле флориста управляет видимостью:
 //  - MAKER_ONLY (по умолчанию) — только floristTotal/floristItemPrice, как в исходном ТЗ.
-//  - FULL       — дополнительно налог/доставка(клиенту)/чаевые/скидка/итог клиента.
+//  - FULL       — дополнительно налог/доставка(клиенту)/чаевые/скидка/итог клиента И цена
+//                 клиента по каждой позиции: основной флорист работает с полной суммой
+//                 заказа, и «его цена» в списке товаров ему ничего не говорит.
 // В ОБОИХ режимах флористу НИКОГДА не отдаются: прибыль владельца (estimatedProfit),
 // фактическая себестоимость доставки (deliveryActualCost) и цены/заказы других флористов.
 export function serializeForFlorist(o: OrderWithRelations) {
@@ -227,7 +229,9 @@ export function serializeForFlorist(o: OrderWithRelations) {
       quantity: i.quantity,
       options: i.options,
       floristItemPrice: florist.itemPrice(i), // его цена за позицию (чаевые — ноль)
-      // externalPrice (цена клиента) НЕ включается.
+      // Цена клиента — ТОЛЬКО при FULL. У MAKER_ONLY её нет по определению режима, и
+      // null здесь означает «не положено видеть», а не «ноль».
+      externalPrice: isFull ? toNumber(i.externalPrice) : null,
     })),
     floristTotal: florist.total, // только его сумма, без чаевых владельца
     // Read-only признак режима видимости — чтобы интерфейс не угадывал его по наличию

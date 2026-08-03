@@ -55,6 +55,9 @@ export default async function FloristOrderPage({ params }: { params: Promise<{ i
     `${order.addressLine}, ${order.city} ${order.zip}`
   )}`;
 
+  // Полная видимость = основной флорист: ему показываем суммы клиента, а не свою цену.
+  const showsCustomerPrice = order.financeVisibility === "FULL";
+
   return (
     <OrderPageShell
       backHref="/dashboard/f"
@@ -99,9 +102,14 @@ export default async function FloristOrderPage({ params }: { params: Promise<{ i
                         showMissingHint={false}
                       />
                     </div>
+                    {/* У основного флориста (полная видимость) в списке товаров стоит цена
+                        КЛИЕНТА: он работает с полной суммой заказа, и «его цена» за позицию
+                        ему ничего не говорит. У второстепенного — по-прежнему своя. */}
                     <div className="text-right whitespace-nowrap">
-                      <div className="text-sm font-medium text-slate-800 tabular-nums">{formatMoney(it.floristItemPrice)}</div>
-                      <div className="text-[11px] text-slate-400">вам</div>
+                      <div className="text-sm font-medium text-slate-800 tabular-nums">
+                        {formatMoney(showsCustomerPrice ? (it.externalPrice ?? 0) : it.floristItemPrice)}
+                      </div>
+                      <div className="text-[11px] text-slate-400">{showsCustomerPrice ? "клиенту" : "вам"}</div>
                     </div>
                   </li>
                 ))}
@@ -219,7 +227,7 @@ export default async function FloristOrderPage({ params }: { params: Promise<{ i
           {/* Цена изготовления — только флористу с MAKER_ONLY. При FULL владелец показывает
               суммы заказчика, и собственная себестоимость в карточке не нужна. Данные и права
               не меняются: floristTotal по-прежнему приходит, просто не отображается. */}
-          {order.financeVisibility !== "FULL" && <FloristPriceCard floristTotal={order.floristTotal} />}
+          {!showsCustomerPrice && <FloristPriceCard floristTotal={order.floristTotal} />}
 
           <OrderStatusCard orderId={order.id} updatedAt={order.updatedAt} orderStatus={order.orderStatus} />
 

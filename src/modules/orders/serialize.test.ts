@@ -138,9 +138,9 @@ describe("serializeForFlorist (MAKER_ONLY) — только своя цена", 
   const o = serializeForFlorist(makeOrder("MAKER_ONLY"));
   it("видит свою сумму floristTotal", () => expect(o.floristTotal).toBe(70));
   it("позиция содержит СВОЮ цену, но НЕ цену клиента", () => {
-    const item = o.items[0] as Record<string, unknown>;
-    expect(item.floristItemPrice).toBe(70);
-    expect(item.externalPrice).toBeUndefined();
+    expect(o.items[0].floristItemPrice).toBe(70);
+    // null, а не число: «не положено видеть». Ноль означал бы «товар бесплатный».
+    expect(o.items[0].externalPrice).toBeNull();
   });
   it("НЕ содержит finance, прибыль, себестоимость доставки, email отправителя", () => {
     expect((o as Record<string, unknown>).finance).toBeUndefined();
@@ -171,8 +171,8 @@ describe("serializeForFlorist (FULL) — расширенная раскладк
     expect(flat).not.toContain("deliveryActualCost");
     expect((o.finance as Record<string, unknown>).estimatedProfit).toBeUndefined();
   });
-  it("позиция всё ещё без цены клиента", () => {
-    expect((o.items[0] as Record<string, unknown>).externalPrice).toBeUndefined();
+  it("позиция получает цену клиента — основной флорист работает с полной суммой заказа", () => {
+    expect(o.items[0].externalPrice).toBe(100);
   });
   it("режим видимости отдаётся интерфейсу явно", () => {
     expect(o.financeVisibility).toBe("FULL");
