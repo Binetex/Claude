@@ -37,6 +37,9 @@ export default async function OrderSnapshotPage({ params }: { params: Promise<{ 
   });
   if (!order) notFound();
 
+  // Показывается ТОЛЬКО действующий расчёт. Список прежних ревизий отсюда убран: он
+  // объяснял историю пересчётов, а объяснять нужно историю денег — она видна в книге,
+  // где у каждой записи свои цифры.
   const revisions = await listSnapshotRevisions(orderId);
   const current = revisions.find((r) => r.status === "PUBLISHED") ?? revisions[0];
 
@@ -136,45 +139,6 @@ export default async function OrderSnapshotPage({ params }: { params: Promise<{ 
             </CardBody>
           </Card>
 
-          {revisions.length > 1 && (
-            <Card>
-              <CardHeader>
-                <CardTitle>Предыдущие ревизии · только чтение</CardTitle>
-              </CardHeader>
-              <CardBody className="p-0">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-slate-100 text-left text-[11px] tracking-wide text-slate-400 uppercase">
-                      <th className="px-4 py-2 font-medium">Ревизия</th>
-                      <th className="px-3 py-2 font-medium">Статус</th>
-                      <th className="px-3 py-2 font-medium">В расчёте</th>
-                      <th className="px-3 py-2 text-right font-medium">Распределяемая прибыль</th>
-                      <th className="px-4 py-2 font-medium">Собрана</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {revisions.map((r) => (
-                      <tr key={r.id} className="border-b border-slate-50 last:border-0">
-                        <td className="px-4 py-2 tabular-nums">{r.revision}</td>
-                        <td className="px-3 py-2">
-                          <Badge className={statusMeta[r.status].className}>{statusMeta[r.status].label}</Badge>
-                        </td>
-                        <td className="px-3 py-2 text-slate-500">{r.isCalculable ? "да" : "нет"}</td>
-                        <td className="px-3 py-2 text-right tabular-nums">{formatCents(r.distributableCents)}</td>
-                        <td className="px-4 py-2 text-slate-400 tabular-nums">
-                          {r.createdAt.toISOString().slice(0, 16).replace("T", " ")}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-                <div className="border-t border-slate-100 px-4 py-2.5 text-xs text-slate-500">
-                  Опубликованные ревизии не меняются: исправление входных данных публикует следующую, а прежняя
-                  продолжает объяснять то, что по ней уже посчитано.
-                </div>
-              </CardBody>
-            </Card>
-          )}
         </>
       )}
     </div>
