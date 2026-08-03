@@ -99,7 +99,12 @@ async function main() {
     [BURQ_POD_REFETCH_EVENT]: buildBurqPodRefetchHandler(prisma),
     // QUO (ex-OpenPhone): обработка проверенного webhook-события → OrderCommunication + привязка.
     [QUO_WEBHOOK_EVENT]: buildQuoWebhookHandler(prisma),
-    // Automation Engine: событие заказа → создать job'ы под активные правила Site (отложенно).
+    // Automation Engine: событие заказа → создать job'ы под активные правила Site (отложенно),
+    // затем отправка job'а в канал и шаги цепочек. Без этих трёх строк любое событие
+    // автоматизаций уходит в DEAD_LETTER с «no handler», и авто-SMS молча не отправляются.
+    [AUTOMATION_TRIGGER_EVENT]: buildAutomationTriggerHandler(prisma),
+    [AUTOMATION_SEND_EVENT]: buildAutomationSendHandler(prisma, { channels: automationChannels }),
+    [FLOW_STEP_EVENT]: buildFlowStepHandler(prisma, { channels: automationChannels }),
     // Внутренние Telegram-уведомления сотрудникам: один обработчик на все типы событий.
     [TELEGRAM_NOTIFY_EVENT]: buildTelegramNotifyHandler(prisma),
     // Сверка платежа с Airwallex (режим наблюдения: business status заказа не меняется).
