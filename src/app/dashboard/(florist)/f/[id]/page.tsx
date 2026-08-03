@@ -11,6 +11,7 @@ import { ContactEditDialog } from "@/app/dashboard/(owner)/orders/[id]/ContactEd
 import { CardNoteCard } from "@/app/dashboard/(owner)/orders/[id]/CardNoteCard";
 import { OrderStatusDateControls } from "@/app/dashboard/(owner)/orders/[id]/OrderStatusDateControls";
 import { DeliveryStatusCard } from "@/app/dashboard/(owner)/orders/[id]/DeliveryStatusCard";
+import { OrderPickupCard } from "@/app/dashboard/(owner)/orders/[id]/OrderPickupCard";
 import { OrderPageShell } from "@/components/orders/OrderPageShell";
 import { FloristPriceCard, FloristQuickActions } from "@/components/orders/FloristPriceCard";
 import { Card, CardHeader, CardTitle, CardBody } from "@/components/ui/Card";
@@ -142,6 +143,13 @@ export default async function FloristOrderPage({ params }: { params: Promise<{ i
             deliveryPhotoUrl={order.deliveryPhotoUrl}
             storeTimeZone={comm.storeTimeZone}
           />
+
+          {/* Откуда курьер забирает этот заказ; переключение пересоздаёт черновик Burq. */}
+          <Card>
+            <CardBody>
+              <OrderPickupCard orderId={order.id} />
+            </CardBody>
+          </Card>
 
           {/* Фото готового букета */}
           {order.bouquetPhotoUrl && (

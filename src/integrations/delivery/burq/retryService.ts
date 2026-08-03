@@ -96,6 +96,7 @@ export async function createRetryDeliveryAttempt(prisma: PrismaClient, orderId: 
     await port.persistDraft({
       orderId,
       floristId: ctx.floristId!,
+      pickupLocationId: ctx.pickupLocationId,
       attemptNumber: attempt,
       externalDeliveryId: burqRes.id,
       checkoutUrl: burqRes.checkoutUrl,

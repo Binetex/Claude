@@ -17,6 +17,16 @@ import { mapBurqStatus } from "./statusMap";
 import { applyDeliveryStatusUpdate, type PublishCompleted } from "./statusIngest";
 import { refetchPodForDelivery } from "./podService";
 import { RETRYABLE_DELIVERY_STATUSES } from "./retryService";
+import { resolvePickupForOrder } from "./pickupResolution";
+
+/** id точки забора, которую выбрал бы резолвер для этого заказа (или null). */
+async function resolvePickupLocationId(prisma: PrismaClient, orderId: string, floristId: string): Promise<string | null> {
+  const [order, pickups] = await Promise.all([
+    prisma.order.findUnique({ where: { id: orderId }, select: { pickupLocationOverrideId: true } }),
+    prisma.floristPickupLocation.findMany({ where: { floristId } }),
+  ]);
+  return resolvePickupForOrder({ overrideId: order?.pickupLocationOverrideId, floristPickups: pickups })?.location.id ?? null;
+}
 
 export type LinkBurqOrderInput = {
   orderId: string;
@@ -160,9 +170,9 @@ async function createLinkedAttempt(
   rawStatus: string,
   supersedesDeliveryId: string | null
 ): Promise<string> {
-  const pickupLocationId = floristId
-    ? await prisma.floristPickupLocation.findUnique({ where: { floristId }, select: { id: true } }).then((r) => r?.id ?? null)
-    : null;
+  // Снимок точки — best-effort: Burq-заказ создан не нами, но точку фиксируем ту же, что
+  // выбрал бы наш резолвер (ручной выбор в заказе, иначе основная точка флориста).
+  const pickupLocationId = floristId ? await resolvePickupLocationId(prisma, orderId, floristId) : null;
   const normalized = mapBurqStatus(rawStatus);
 
   return prisma.$transaction(async (tx) => {

@@ -13,7 +13,7 @@ import { PrismaOutboxRepository } from "@/outbox/prismaRepository";
 import { isBurqRuntimeEnabled } from "@/lib/featureFlags";
 import { TERMINAL_ORDER_STATUSES } from "@/lib/statuses";
 import { scheduleBurqDraftForOrder } from "./schedule";
-import { handleFloristReassignment } from "./reassignmentService";
+import { handleFloristReassignment, type DeliveryCancellationReason, type ReassignmentResult } from "./reassignmentService";
 
 async function enqueueDraftTask(prisma: PrismaClient, orderId: string, scheduleVersion: number): Promise<Date | null> {
   const order = await prisma.order.findUnique({
@@ -74,21 +74,28 @@ export async function rescheduleDeliveryForOrder(prisma: PrismaClient, orderId: 
  * Если активный Burq draft уже создан — DELETE-неинициированного-или-флаг + новая attempt со
  * свежими данными (handleFloristReassignment). Если draft ещё нет — (пере)планирование задачи.
  * Терминальные заказы пропускаются.
+ *
+ * Возвращает исход пересоздания, когда активный draft был (нужен переключению точки забора,
+ * чтобы честно сказать «черновик уже оформлен — решите вручную»), иначе null.
  */
-export async function onOrderDeliveryChange(prisma: PrismaClient, orderId: string): Promise<void> {
-  if (!isBurqRuntimeEnabled()) return; // master gate: hooks назначения/даты/адреса/pickup — no-op
+export async function onOrderDeliveryChange(
+  prisma: PrismaClient,
+  orderId: string,
+  cancellationReason: DeliveryCancellationReason = "INPUTS_CHANGED"
+): Promise<ReassignmentResult | null> {
+  if (!isBurqRuntimeEnabled()) return null; // master gate: hooks назначения/даты/адреса/pickup — no-op
   const order = await prisma.order.findUnique({ where: { id: orderId }, select: { orderStatus: true } });
-  if (!order || TERMINAL_ORDER_STATUSES.includes(order.orderStatus)) return;
+  if (!order || TERMINAL_ORDER_STATUSES.includes(order.orderStatus)) return null;
 
   const currentDraft = await prisma.delivery.findFirst({
     where: { orderId, isCurrentAttempt: true, externalDeliveryId: { not: null } },
     select: { id: true },
   });
   if (currentDraft) {
-    await handleFloristReassignment(prisma, orderId, "INPUTS_CHANGED");
-  } else {
-    await rescheduleDeliveryForOrder(prisma, orderId);
+    return handleFloristReassignment(prisma, orderId, cancellationReason);
   }
+  await rescheduleDeliveryForOrder(prisma, orderId);
+  return null;
 }
 
 /** Не бросающая обёртка для вызова из server actions/сервисов — ошибка логируется, не ломает UX. */

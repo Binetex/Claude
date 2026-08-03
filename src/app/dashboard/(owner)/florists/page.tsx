@@ -2,7 +2,7 @@ import { prisma } from "@/lib/db";
 import { Card, CardHeader, CardTitle, CardBody } from "@/components/ui/Card";
 import { FinanceVisibilityToggle } from "./FinanceVisibilityToggle";
 import { SitePriorityEditor } from "./SitePriorityEditor";
-import { PickupLocationEditor } from "./PickupLocationEditor";
+import { PickupLocationsEditor } from "./PickupLocationsEditor";
 import { AddFloristForm } from "./AddFloristForm";
 import { FloristEditForm } from "./FloristEditForm";
 import { FloristAvatar } from "@/components/FloristAvatar";
@@ -27,7 +27,12 @@ export default async function FloristsPage() {
   });
 
   const florists = await prisma.florist.findMany({
-    include: { user: true, pickupLocation: true, _count: { select: { currentOrders: true } } },
+    include: {
+      user: true,
+      // Основная — первой, дальше по дате создания: список читается сверху вниз.
+      pickupLocations: { orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }] },
+      _count: { select: { currentOrders: true } },
+    },
     orderBy: { createdAt: "asc" },
   });
 
@@ -50,24 +55,22 @@ export default async function FloristsPage() {
             <div className="mt-1 text-sm text-slate-500">{f.user.email} · {f.user.phone}</div>
             <div className="mt-2 text-sm text-slate-600">Активных заказов: {f._count.currentOrders}</div>
             <FinanceVisibilityToggle floristId={f.id} current={f.financeVisibility} />
-            <PickupLocationEditor
+            <PickupLocationsEditor
               floristId={f.id}
-              value={
-                f.pickupLocation
-                  ? {
-                      locationName: f.pickupLocation.locationName,
-                      contactName: f.pickupLocation.contactName,
-                      contactPhone: f.pickupLocation.contactPhone,
-                      addressLine: f.pickupLocation.addressLine,
-                      apartmentOrSuite: f.pickupLocation.apartmentOrSuite,
-                      city: f.pickupLocation.city,
-                      state: f.pickupLocation.state,
-                      zip: f.pickupLocation.zip,
-                      courierInstructions: f.pickupLocation.courierInstructions,
-                      isActive: f.pickupLocation.isActive,
-                    }
-                  : null
-              }
+              locations={f.pickupLocations.map((l) => ({
+                id: l.id,
+                isPrimary: l.isPrimary,
+                locationName: l.locationName,
+                contactName: l.contactName,
+                contactPhone: l.contactPhone,
+                addressLine: l.addressLine,
+                apartmentOrSuite: l.apartmentOrSuite,
+                city: l.city,
+                state: l.state,
+                zip: l.zip,
+                courierInstructions: l.courierInstructions,
+                isActive: l.isActive,
+              }))}
             />
             <FloristEditForm florist={{ id: f.id, name: f.user.name, email: f.user.email, phone: f.user.phone, active: f.active, avatarUrl: f.avatarUrl }} />
           </Card>

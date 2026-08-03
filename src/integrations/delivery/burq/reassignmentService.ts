@@ -17,6 +17,9 @@ import { decideReassignment } from "./reassignment";
 import { createPrismaDraftPort } from "./draftPort.prisma";
 import { handleBurqDraftCreate } from "./draftHandler";
 
+/** Почему прежняя попытка доставки ушла в историю (Delivery.cancellationReason). */
+export type DeliveryCancellationReason = "FLORIST_REASSIGNED" | "INPUTS_CHANGED" | "PICKUP_CHANGED";
+
 export type ReassignmentResult =
   | { outcome: "recreated"; newDeliveryId: string }
   | { outcome: "flagged_problem"; reason: string }
@@ -39,7 +42,7 @@ async function flagProblem(prisma: PrismaClient, deliveryId: string, _orderId: s
 export async function handleFloristReassignment(
   prisma: PrismaClient,
   orderId: string,
-  cancellationReason: "FLORIST_REASSIGNED" | "INPUTS_CHANGED" = "FLORIST_REASSIGNED"
+  cancellationReason: DeliveryCancellationReason = "FLORIST_REASSIGNED"
 ): Promise<ReassignmentResult> {
   const current = await prisma.delivery.findFirst({
     where: { orderId, isCurrentAttempt: true, externalDeliveryId: { not: null } },

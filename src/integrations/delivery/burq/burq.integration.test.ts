@@ -5,6 +5,8 @@ import { createPrismaDraftPort } from "./draftPort.prisma";
 import { handleBurqDraftCreate } from "./draftHandler";
 import { applyDeliveryStatusUpdate } from "./statusIngest";
 import { handleFloristReassignment } from "./reassignmentService";
+import { onOrderDeliveryChange } from "./scheduleService";
+import { setPrimaryPickupLocation } from "@/modules/pickup/service";
 import { resolveDeliveryManually } from "./manualResolution";
 import { createRetryDeliveryAttempt } from "./retryService";
 import { linkBurqOrder } from "./linkService";
@@ -88,10 +90,10 @@ beforeAll(async () => {
   floristBId = (await prisma.florist.create({ data: { userId: userB.id } })).id;
 
   await prisma.floristPickupLocation.create({
-    data: { floristId: floristAId, locationName: "Studio A", contactName: "Jane", contactPhone: "+13105551111", addressLine: "200 Market St", city: "Los Angeles", state: "CA", zip: "90013", isActive: true },
+    data: { floristId: floristAId, isPrimary: true, locationName: "Studio A", contactName: "Jane", contactPhone: "+13105551111", addressLine: "200 Market St", city: "Los Angeles", state: "CA", zip: "90013", isActive: true },
   });
   await prisma.floristPickupLocation.create({
-    data: { floristId: floristBId, locationName: "Studio B", contactName: "Bob", contactPhone: "+13105552222", addressLine: "9 Sunset Blvd", city: "Los Angeles", state: "CA", zip: "90028", isActive: true },
+    data: { floristId: floristBId, isPrimary: true, locationName: "Studio B", contactName: "Bob", contactPhone: "+13105552222", addressLine: "9 Sunset Blvd", city: "Los Angeles", state: "CA", zip: "90028", isActive: true },
   });
 });
 
@@ -426,6 +428,110 @@ describe("Florist reassignment", () => {
     expect(all[0].status).toBe("PROBLEM");
     // Проблема доставки НЕ меняет производственный статус заказа.
     expect((await prisma.order.findUnique({ where: { id: orderId } }))!.orderStatus).toBe(orderBefore!.orderStatus);
+  });
+});
+
+describe("несколько точек забора", () => {
+  /** Вторая (не основная) точка флориста A. Создаём под каждый тест и убираем за собой. */
+  async function makeSecondPickup(floristId = floristAId) {
+    return prisma.floristPickupLocation.create({
+      data: {
+        floristId,
+        isPrimary: false,
+        locationName: "Warehouse",
+        contactName: "Ann",
+        contactPhone: "+13105553333",
+        addressLine: "77 Alameda St",
+        city: "Los Angeles",
+        state: "CA",
+        zip: "90021",
+        isActive: true,
+      },
+    });
+  }
+
+  it("двух основных точек у флориста быть не может (partial unique index)", async () => {
+    const second = await makeSecondPickup();
+    await expect(prisma.floristPickupLocation.update({ where: { id: second.id }, data: { isPrimary: true } })).rejects.toThrow();
+    await prisma.floristPickupLocation.delete({ where: { id: second.id } });
+  });
+
+  it("без ручного выбора черновик уходит с ОСНОВНОЙ точкой, даже когда точек несколько", async () => {
+    __resetMockBurqStore();
+    const second = await makeSecondPickup();
+    const primary = await prisma.floristPickupLocation.findFirst({ where: { floristId: floristAId, isPrimary: true } });
+    const orderId = await makeOrder(floristAId);
+    await handleBurqDraftCreate({ client: createMockBurqClient(), port: createPrismaDraftPort(prisma) }, { orderId, scheduleVersion: 0 });
+
+    const current = await prisma.delivery.findFirst({ where: { orderId, isCurrentAttempt: true } });
+    expect(current!.pickupLocationId).toBe(primary!.id);
+    await prisma.floristPickupLocation.delete({ where: { id: second.id } });
+  });
+
+  it("переключение точки в заказе: старая попытка → CANCELLED/PICKUP_CHANGED, новая с новой точкой", async () => {
+    __resetMockBurqStore();
+    const second = await makeSecondPickup();
+    const orderId = await makeOrder(floristAId);
+    await handleBurqDraftCreate({ client: createMockBurqClient(), port: createPrismaDraftPort(prisma) }, { orderId, scheduleVersion: 0 });
+    const first = await prisma.delivery.findFirst({ where: { orderId, isCurrentAttempt: true } });
+
+    await prisma.order.update({ where: { id: orderId }, data: { pickupLocationOverrideId: second.id } });
+    const res = await onOrderDeliveryChange(prisma, orderId, "PICKUP_CHANGED");
+    expect(res?.outcome).toBe("recreated");
+
+    const all = await prisma.delivery.findMany({ where: { orderId }, orderBy: { attemptNumber: "asc" } });
+    const current = all.filter((d) => d.isCurrentAttempt);
+    expect(current).toHaveLength(1);
+    expect(current[0].attemptNumber).toBe(2);
+    expect(current[0].pickupLocationId).toBe(second.id);
+    expect(current[0].floristId).toBe(floristAId); // флорист тот же, сменилась только точка
+
+    const old = all.find((d) => d.id === first!.id)!;
+    expect(old.isCurrentAttempt).toBe(false);
+    expect(old.status).toBe("CANCELLED");
+    expect(old.cancellationReason).toBe("PICKUP_CHANGED");
+    expect(old.supersededByDeliveryId).toBe(current[0].id);
+
+    await prisma.order.update({ where: { id: orderId }, data: { pickupLocationOverrideId: null } });
+    await prisma.floristPickupLocation.delete({ where: { id: second.id } });
+  });
+
+  it("смена ОСНОВНОЙ точки не трогает заказ с уже созданным черновиком", async () => {
+    __resetMockBurqStore();
+    const second = await makeSecondPickup();
+    const primary = await prisma.floristPickupLocation.findFirst({ where: { floristId: floristAId, isPrimary: true } });
+    const orderId = await makeOrder(floristAId);
+    await handleBurqDraftCreate({ client: createMockBurqClient(), port: createPrismaDraftPort(prisma) }, { orderId, scheduleVersion: 0 });
+    const before = await prisma.delivery.findFirst({ where: { orderId, isCurrentAttempt: true } });
+
+    const res = await setPrimaryPickupLocation(prisma, { locationId: second.id, floristId: floristAId });
+    expect(res.outcome).toBe("changed");
+
+    const after = await prisma.delivery.findMany({ where: { orderId } });
+    expect(after).toHaveLength(1); // новой попытки нет
+    expect(after[0].id).toBe(before!.id);
+    expect(after[0].isCurrentAttempt).toBe(true);
+    expect(after[0].status).toBe(before!.status);
+    expect(after[0].pickupLocationId).toBe(primary!.id); // снимок прежней точки не переписан
+
+    // Вернуть основную обратно и убрать вторую точку.
+    await setPrimaryPickupLocation(prisma, { locationId: primary!.id, floristId: floristAId });
+    await prisma.floristPickupLocation.delete({ where: { id: second.id } });
+  });
+
+  it("новый заказ после смены основной точки получает НОВУЮ основную", async () => {
+    __resetMockBurqStore();
+    const second = await makeSecondPickup();
+    const primary = await prisma.floristPickupLocation.findFirst({ where: { floristId: floristAId, isPrimary: true } });
+    await setPrimaryPickupLocation(prisma, { locationId: second.id, floristId: floristAId });
+
+    const orderId = await makeOrder(floristAId);
+    await handleBurqDraftCreate({ client: createMockBurqClient(), port: createPrismaDraftPort(prisma) }, { orderId, scheduleVersion: 0 });
+    const current = await prisma.delivery.findFirst({ where: { orderId, isCurrentAttempt: true } });
+    expect(current!.pickupLocationId).toBe(second.id);
+
+    await setPrimaryPickupLocation(prisma, { locationId: primary!.id, floristId: floristAId });
+    await prisma.floristPickupLocation.delete({ where: { id: second.id } });
   });
 });
 

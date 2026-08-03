@@ -7,6 +7,7 @@ import { createRetryDeliveryAttempt } from "@/integrations/delivery/burq/retrySe
 import { refetchPodForDelivery } from "@/integrations/delivery/burq/podService";
 import { linkBurqOrder } from "@/integrations/delivery/burq/linkService";
 import { makeCompletedPublisher } from "@/integrations/delivery/burq/webhookHandler";
+import { onOrderDeliveryChange } from "@/integrations/delivery/burq/scheduleService";
 
 type FormState = { error?: string; ok?: boolean; message?: string } | null;
 type LinkFormState = { error?: string; ok?: boolean; message?: string; needsConfirm?: boolean } | null;
@@ -62,6 +63,69 @@ export async function createNewDeliveryAttemptAction(_prev: FormState, formData:
     default:
       return { error: "Повторная доставка недоступна для этого заказа." };
   }
+}
+
+/**
+ * Переключение точки забора У КОНКРЕТНОГО ЗАКАЗА. Доступно любому аутентифицированному
+ * сотруднику (requireUser) — как остальные Burq-действия на этой странице.
+ *
+ * Выбирать можно только точки НАЗНАЧЕННОГО флориста: курьер едет туда, где физически лежит
+ * букет. Пустое значение снимает ручной выбор — заказ возвращается к основной точке флориста.
+ *
+ * После сохранения дёргаем единую точку onOrderDeliveryChange: если Burq-черновик уже создан
+ * и ещё не оформлен — он удаляется в Burq, старая попытка уходит в историю (PICKUP_CHANGED),
+ * создаётся новая с новой точкой. Если черновика ещё нет — просто перепланирование.
+ */
+export async function setOrderPickupLocationAction(_prev: FormState, formData: FormData): Promise<FormState> {
+  await requireUser();
+  const orderId = String(formData.get("orderId") ?? "");
+  const pickupLocationId = String(formData.get("pickupLocationId") ?? "").trim() || null;
+  if (!orderId) return { error: "Не указан заказ." };
+
+  const order = await prisma.order.findUnique({
+    where: { id: orderId },
+    select: { currentFloristId: true, pickupLocationOverrideId: true },
+  });
+  if (!order) return { error: "Заказ не найден." };
+  if (!order.currentFloristId) return { error: "Не назначен флорист — выбирать точку не из чего." };
+
+  if (pickupLocationId) {
+    const loc = await prisma.floristPickupLocation.findUnique({
+      where: { id: pickupLocationId },
+      select: { floristId: true, isActive: true },
+    });
+    if (!loc || loc.floristId !== order.currentFloristId) return { error: "Точка не принадлежит флористу заказа." };
+    if (!loc.isActive) return { error: "Точка отключена — выберите другую." };
+  }
+
+  if (order.pickupLocationOverrideId === pickupLocationId) {
+    return { ok: true, message: "Точка забора не изменилась." };
+  }
+
+  await prisma.order.update({ where: { id: orderId }, data: { pickupLocationOverrideId: pickupLocationId } });
+
+  let outcome: Awaited<ReturnType<typeof onOrderDeliveryChange>> = null;
+  try {
+    outcome = await onOrderDeliveryChange(prisma, orderId, "PICKUP_CHANGED");
+  } catch (err) {
+    console.error(`[burq] pickup change recreate failed for order ${orderId}:`, err instanceof Error ? err.message : String(err));
+    revalidatePath(`/dashboard/orders/${orderId}`);
+    return { error: "Точка сохранена, но пересоздать доставку в Burq не удалось. Проверьте панель доставки." };
+  }
+
+  revalidatePath(`/dashboard/orders/${orderId}`);
+  revalidatePath(`/dashboard/f/${orderId}`);
+
+  if (outcome?.outcome === "flagged_problem") {
+    return { error: "Доставка уже оформлена в Burq — точка сохранена, но доставка не пересоздана. Решите вручную." };
+  }
+  if (outcome?.outcome === "recreated") {
+    return { ok: true, message: "Точка забора изменена, доставка Burq пересоздана. Оформите её в Burq заново." };
+  }
+  if (outcome?.outcome === "waiting") {
+    return { ok: true, message: "Точка забора изменена. Прежняя доставка отменена, новая пока не создана — заказ ждёт." };
+  }
+  return { ok: true, message: "Точка забора изменена. Черновик Burq будет создан с новой точкой." };
 }
 
 /**

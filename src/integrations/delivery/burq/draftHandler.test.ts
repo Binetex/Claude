@@ -32,6 +32,7 @@ function makeCtx(over: Partial<DraftContext> = {}): DraftContext {
     },
     floristId: "flo_1",
     pickup,
+    pickupLocationId: "pl_1",
     hasCurrentDraft: false,
     nextAttemptNumber: 1,
     ...over,
@@ -57,6 +58,12 @@ describe("handleBurqDraftCreate", () => {
     expect(port.persistDraft).toHaveBeenCalledWith(
       expect.objectContaining({ orderId: "o1", floristId: "flo_1", attemptNumber: 1, referenceId: "o1:a1", rawStatus: "request" })
     );
+  });
+
+  it("в снимок Delivery уходит ИМЕННО та точка, что выбрал резолвер", async () => {
+    const port = makePort(makeCtx({ pickupLocationId: "pl_second" }));
+    await handleBurqDraftCreate({ client: createMockBurqClient(), port }, { orderId: "o1", scheduleVersion: 1 });
+    expect(port.persistDraft).toHaveBeenCalledWith(expect.objectContaining({ pickupLocationId: "pl_second" }));
   });
 
   it("устаревшая задача (версия меньше текущей) игнорируется", async () => {

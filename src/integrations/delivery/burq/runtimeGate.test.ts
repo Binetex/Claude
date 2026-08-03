@@ -61,7 +61,7 @@ describe("gate OFF → все runtime-пути no-op (БД не трогаетс
   });
   it("onOrderDeliveryChange (assignment/date/address/pickup hooks)", async () => {
     setGate(false);
-    await expect(onOrderDeliveryChange(throwingPrisma, "o1")).resolves.toBeUndefined();
+    await expect(onOrderDeliveryChange(throwingPrisma, "o1")).resolves.toBeNull();
   });
   it("rescheduleDeliveryForOrder", async () => {
     setGate(false);

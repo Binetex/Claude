@@ -23,6 +23,7 @@ function makeCtx(): DraftContext {
       locationName: "M", contactName: "F", contactPhone: "+13105551111",
       addressLine: "2 B St", city: "LA", state: "CA", zip: "90013", isActive: true,
     },
+    pickupLocationId: "pl_1",
     hasCurrentDraft: false,
     nextAttemptNumber: 1,
   };

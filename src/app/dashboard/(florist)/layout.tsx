@@ -21,6 +21,7 @@ export default async function FloristLayout({ children }: { children: React.Reac
   const nav: NavItem[] = [
     ...baseNav,
     ...(primary ? [{ href: "/dashboard/f/flower-expenses", label: "Расходы на цветы" }] : []),
+    { href: "/dashboard/f/pickup", label: "Мои точки забора" },
     { href: "/dashboard/f/print-notes", label: "Печать записок" },
   ];
 

@@ -3,12 +3,14 @@ import "server-only";
  * Prisma-реализация DraftCreatePort: чтение контекста заказа и транзакционное сохранение
  * Burq draft (Delivery + DeliveryIntent + DeliveryStatusEvent). Оркестрация — в draftHandler.ts.
  *
- * pickup читается ТОЛЬКО из FloristPickupLocation назначенного флориста. Никаких fallback.
+ * pickup читается ТОЛЬКО из точек назначенного флориста (resolvePickupForOrder: ручной выбор
+ * в заказе, иначе основная точка). Никаких fallback на Site/Google/customer.
  */
 import type { PrismaClient } from "@/generated/prisma/client";
 import { mapBurqStatus } from "./statusMap";
 import { getBurqDimensions } from "./settings";
 import { combineDropoffNotes } from "./dropoffNotes";
+import { resolvePickupForOrder } from "./pickupResolution";
 import type { DraftContext, DraftCreatePort, PersistDraftInput } from "./draftHandler";
 
 export function createPrismaDraftPort(prisma: PrismaClient): DraftCreatePort {
@@ -28,9 +30,10 @@ export function createPrismaDraftPort(prisma: PrismaClient): DraftCreatePort {
           city: true,
           zip: true,
           customerNote: true,
+          pickupLocationOverrideId: true,
           site: { select: { burqDraftAutoCreateEnabled: true, burqDefaultDropoffInstructions: true } },
           deliveryIntent: { select: { scheduleVersion: true } },
-          currentFlorist: { select: { id: true, pickupLocation: true } },
+          currentFlorist: { select: { id: true, pickupLocations: true } },
           deliveries: { select: { attemptNumber: true, isCurrentAttempt: true, externalDeliveryId: true } },
         },
       });
@@ -38,7 +41,11 @@ export function createPrismaDraftPort(prisma: PrismaClient): DraftCreatePort {
 
       const hasCurrentDraft = order.deliveries.some((d) => d.isCurrentAttempt && d.externalDeliveryId);
       const maxAttempt = order.deliveries.reduce((m, d) => Math.max(m, d.attemptNumber), 0);
-      const pl = order.currentFlorist?.pickupLocation ?? null;
+      const resolved = resolvePickupForOrder({
+        overrideId: order.pickupLocationOverrideId,
+        floristPickups: order.currentFlorist?.pickupLocations ?? [],
+      });
+      const pl = resolved?.location ?? null;
 
       return {
         order: {
@@ -76,6 +83,7 @@ export function createPrismaDraftPort(prisma: PrismaClient): DraftCreatePort {
               isActive: pl.isActive,
             }
           : null,
+        pickupLocationId: pl?.id ?? null,
         hasCurrentDraft,
         nextAttemptNumber: maxAttempt + 1,
         dimensions: await getBurqDimensions(),
@@ -92,9 +100,8 @@ export function createPrismaDraftPort(prisma: PrismaClient): DraftCreatePort {
 
     async persistDraft(input: PersistDraftInput) {
       const normalized = mapBurqStatus(input.rawStatus);
-      const pickupLocationId = await prisma.floristPickupLocation
-        .findUnique({ where: { floristId: input.floristId }, select: { id: true } })
-        .then((r) => r?.id ?? null);
+      // Точку НЕ перевыбираем: пишем ровно ту, что ушла в Burq (её выбрал резолвер в loadContext).
+      const pickupLocationId = input.pickupLocationId;
 
       await prisma.$transaction(async (tx) => {
         // Гарантия одного текущего attempt: снимаем флаг с прочих.

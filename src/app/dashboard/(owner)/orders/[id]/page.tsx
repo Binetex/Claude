@@ -17,6 +17,7 @@ import { OwnerOrderControls } from "./OwnerOrderControls";
 import { ContactEditDialog } from "./ContactEditDialog";
 import { CardNoteCard } from "./CardNoteCard";
 import { BurqDeliveryPanel } from "./BurqDeliveryPanel";
+import { OrderPickupCard } from "./OrderPickupCard";
 import { OrderCommunications, type CommItem } from "./OrderCommunications";
 import { OrderExpensesSection } from "@/components/finance/OrderExpensesSection";
 import { markOrderCommunicationsRead, countUnreadBySide, parseAttachments } from "@/integrations/quo/communicationsService";
@@ -280,6 +281,9 @@ export default async function OwnerOrderPage({ params }: { params: Promise<{ id:
                   <div><div className="mb-1 text-xs text-slate-400">Фото доставки</div><ZoomableImage src={order.deliveryPhotoUrl} alt="" className="h-24 w-24 rounded-lg object-cover" /></div>
                 )}
               </div>
+
+              {/* Откуда курьер забирает заказ; переключение пересоздаёт черновик Burq. */}
+              <OrderPickupCard orderId={order.id} />
 
               {/* Плашка Burq перенесена сюда целиком (единый блок доставки). */}
               <BurqDeliveryPanel

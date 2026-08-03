@@ -324,7 +324,7 @@ model Florist {
   productPrices  FloristProductPrice[]
   currentOrders  Order[]                @relation("CurrentFlorist")
   assignments    OrderAssignment[]
-  pickupLocation FloristPickupLocation?
+  pickupLocations FloristPickupLocation[]
   telegramBot    TelegramBot?
   deliveries     Delivery[]             @relation("DeliveryFlorist")
 
@@ -1160,6 +1160,12 @@ model Order {
   currentFlorist   Florist?  @relation("CurrentFlorist", fields: [currentFloristId], references: [id])
   priceMode        PriceMode @default(AUTO)
 
+  // Точка забора, выбранная оператором ВРУЧНУЮ именно для этого заказа. null = брать основную
+  // точку назначенного флориста. Это РЕШЕНИЕ, а не снимок: что фактически ушло в Burq —
+  // в Delivery.pickupLocationId конкретной попытки.
+  pickupLocationOverrideId String?
+  pickupLocationOverride   FloristPickupLocation? @relation("OrderPickupOverride", fields: [pickupLocationOverrideId], references: [id])
+
   // Производство и доставка
   readyAt          DateTime?
   bouquetPhotoUrl  String?
@@ -1444,11 +1450,16 @@ model WooCommerceWebhook {
 // Черновики Burq создаются автоматически (отложенная outbox-задача), но курьер и платная
 // доставка оформляются флористом вручную в кабинете Burq (checkout_url). Секреты Burq — в env.
 
-// Точка забора флориста (pickup). 1:1 Florist в v1 (архитектурно расширяемо до нескольких).
+// Точка забора флориста (pickup). У флориста их несколько; ровно одна помечена isPrimary
+// (partial unique index — добавлен в migration.sql, Prisma-схемой не выражается). Основная
+// используется для новых заказов; в конкретном заказе её можно переопределить
+// (Order.pickupLocationOverrideId). Точки не удаляются, а деактивируются: на них ссылаются
+// снимки Delivery.pickupLocationId из истории попыток.
 model FloristPickupLocation {
   id                  String   @id @default(cuid())
-  floristId           String   @unique
+  floristId           String
   florist             Florist  @relation(fields: [floristId], references: [id], onDelete: Cascade)
+  isPrimary           Boolean  @default(false)
   locationName        String
   contactName         String
   contactPhone        String // E.164
@@ -1461,6 +1472,10 @@ model FloristPickupLocation {
   isActive            Boolean  @default(true)
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
+
+  orderOverrides Order[] @relation("OrderPickupOverride")
+
+  @@index([floristId])
 }
 
 // Планирование черновика: версия расписания для anti-stale отложенных задач. 1:1 Order.

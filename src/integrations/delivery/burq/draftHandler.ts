@@ -25,6 +25,8 @@ export type DraftContext = {
   };
   floristId: string | null;
   pickup: (PickupInput & PickupLocationInput) | null;
+  /** id выбранной точки (снимок для Delivery). null, если точка не выбрана. */
+  pickupLocationId: string | null;
   hasCurrentDraft: boolean;
   /** Номер следующей попытки доставки (для reference_id и idempotency-key внешнего POST). */
   nextAttemptNumber: number;
@@ -35,6 +37,8 @@ export type DraftContext = {
 export type PersistDraftInput = {
   orderId: string;
   floristId: string;
+  /** Точка, которая фактически ушла в Burq (снимок). */
+  pickupLocationId: string | null;
   attemptNumber: number;
   externalDeliveryId: string;
   checkoutUrl: string | null;
@@ -114,6 +118,7 @@ export async function handleBurqDraftCreate(deps: DraftHandlerDeps, payload: Bur
   await deps.port.persistDraft({
     orderId: ctx.order.id,
     floristId,
+    pickupLocationId: ctx.pickupLocationId,
     attemptNumber: attempt,
     externalDeliveryId: res.id,
     checkoutUrl: res.checkoutUrl,
