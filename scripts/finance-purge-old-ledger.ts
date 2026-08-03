@@ -33,10 +33,23 @@ async function main() {
     where: { effectiveDate: { lt: CUTOFF } },
     orderBy: [{ floristNameSnapshot: "asc" }, { effectiveDate: "asc" }],
   });
-  const survivors = await prisma.ledgerEntry.count({ where: { effectiveDate: { gte: CUTOFF } } });
+  const survivors = await prisma.ledgerEntry.findMany({
+    where: { effectiveDate: { gte: CUTOFF } },
+    orderBy: { effectiveDate: "asc" },
+  });
 
   console.log(`Отсечка: ${CUTOFF.toISOString().slice(0, 10)}`);
-  console.log(`К удалению: ${doomed.length}. Остаётся: ${survivors}.`);
+  console.log(`К удалению: ${doomed.length}. Остаётся: ${survivors.length}.`);
+
+  // Что остаётся — показываем построчно: отсечка по дате не гарантирует, что среди
+  // выживших нет начислений снесённой модели, датированных уже августом.
+  if (survivors.length) {
+    console.log("Остаются:");
+    for (const e of survivors) {
+      const day = e.effectiveDate.toISOString().slice(0, 10);
+      console.log(`  ${day} ${e.floristNameSnapshot} ${e.type} ${e.direction} ${e.amountCents}¢ ${e.sourceType} «${e.description}»`);
+    }
+  }
 
   const byFlorist = new Map<string, Map<string, number>>();
   for (const e of doomed) {
