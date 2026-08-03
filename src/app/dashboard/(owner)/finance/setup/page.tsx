@@ -5,13 +5,10 @@ import { PageHeader, StatCard } from "@/components/ui/misc";
 import { Card, CardBody } from "@/components/ui/Card";
 import { EmptyState } from "@/components/ui/states";
 import { formatCents } from "@/lib/cents";
-import { listOpenIssues, type IssueGroup } from "@/modules/finance/issues";
+import { listOpenIssues, getIssueSummary, type IssueGroup } from "@/modules/finance/issues";
 import { listBurqDeliveryCandidates } from "@/modules/finance/fix";
-import { getIssueSummary } from "@/modules/finance/issues";
-import { suggestDailyExpenseCents, suggestDeliveryCostCents } from "@/modules/finance/preview";
-import { listVaseOptions } from "@/modules/catalog/finance/vaseLink";
 import { dayKey } from "@/modules/finance/snapshot";
-import { IssueCard, type IssueCardData } from "./IssueCard";
+import { IssueList, type IssueRow } from "./IssueList";
 import { RescanButton, SetupFilters } from "./SetupControls";
 import type { FinanceIssueType } from "@/generated/prisma/enums";
 
@@ -26,6 +23,13 @@ const groupTitles: Record<IssueGroup, string> = {
 
 const GROUP_ORDER: IssueGroup[] = ["TODAY", "LAST_7_DAYS", "OLDER", "NO_DATE"];
 
+/**
+ * Очередь незаполненного.
+ *
+ * Экран только показывает и уводит туда, где правят. Форм исправления здесь больше нет:
+ * ими не воспользовались ни разу — все проблемы закрывались сами, когда данные вносили
+ * через обычные экраны. Второй путь записи убран вместе с ними.
+ */
 export default async function FinanceSetupPage({
   searchParams,
 }: {
@@ -46,52 +50,16 @@ export default async function FinanceSetupPage({
   ]);
   const burqCandidates = burqList.length;
 
-  // Подсказки и списки ваз собираются на сервере: карточка не должна ходить за ними сама.
-  const cards: IssueCardData[] = await Promise.all(
-    issues.map(async (issue) => {
-      const needsDelivery = issue.type === "DELIVERY_ACTUAL_COST_MISSING" && issue.orderId;
-      const needsExpense = issue.type === "DAILY_FLOWER_EXPENSE_MISSING" && issue.scopeDate;
-      const needsVases = issue.type === "VASE_LINK_MISSING" && issue.siteId;
-
-      const [delivery, expense, vaseOptions] = await Promise.all([
-        needsDelivery ? suggestDeliveryCostCents(issue.orderId!) : Promise.resolve(null),
-        needsExpense ? suggestDailyExpense(issue.scopeDate!) : Promise.resolve(null),
-        needsVases ? listVaseOptions(issue.siteId!) : Promise.resolve([]),
-      ]);
-
-      return {
-        id: issue.id,
-        type: issue.type,
-        severity: issue.severity,
-        scopeDate: issue.scopeDate ? dayKey(issue.scopeDate) : null,
-        siteId: issue.siteId,
-        siteShortName: issue.site?.shortName ?? null,
-        orderId: issue.orderId,
-        orderNumber: issue.order?.orderNumber ?? null,
-        sourceEntityId: issue.sourceEntityId,
-        detail: (issue.detailJson as Record<string, unknown> | null) ?? null,
-        suggested: (issue.suggestedValueJson as Record<string, unknown> | null) ?? null,
-        estimatedImpactCents: issue.estimatedImpactCents,
-        suggestion: {
-          ...(delivery ? { deliveryCents: delivery.cents, deliverySource: delivery.source } : {}),
-          ...(expense != null ? { dailyExpenseCents: expense } : {}),
-        },
-        vaseOptions: vaseOptions.map((v) => ({ id: v.id, label: v.label, costCents: v.costCents })),
-      };
-    })
-  );
-
-  const byGroup = new Map<IssueGroup, IssueCardData[]>();
-  for (let i = 0; i < issues.length; i++) {
-    const g = issues[i].group;
-    byGroup.set(g, [...(byGroup.get(g) ?? []), cards[i]]);
+  const byGroup = new Map<IssueGroup, IssueRow[]>();
+  for (const issue of issues) {
+    byGroup.set(issue.group, [...(byGroup.get(issue.group) ?? []), issue as IssueRow]);
   }
 
   return (
     <div className="space-y-4">
       <PageHeader
         title="Финансы — требует заполнения"
-        description="Чего не хватает, чтобы посчитать долю основного флориста. Ассистент записывает только исходные данные — начисления он не создаёт."
+        description="Чего не хватает, чтобы посчитать долю основного флориста. Список показывает проблему и ведёт на экран, где она правится."
         actions={
           <div className="flex items-center gap-3">
             {burqCandidates > 0 && (
@@ -155,24 +123,14 @@ export default async function FinanceSetupPage({
             <h2 className="text-sm font-medium text-slate-500">
               {groupTitles[group]} · {byGroup.get(group)!.length}
             </h2>
-            <div className="space-y-3">
-              {byGroup.get(group)!.map((card) => (
-                <IssueCard key={card.id} issue={card} />
-              ))}
-            </div>
+            <Card>
+              <CardBody className="p-0">
+                <IssueList issues={byGroup.get(group)!} />
+              </CardBody>
+            </Card>
           </section>
         ))
       )}
     </div>
   );
-}
-
-/** Среднее за неделю для конкретного дня — предложение в карточке закупки. */
-async function suggestDailyExpense(scopeDate: Date): Promise<number | null> {
-  const profile = await prisma.floristFinanceProfile.findFirst({
-    where: { model: "PRIMARY", active: true, effectiveTo: null },
-    select: { id: true },
-  });
-  if (!profile) return null;
-  return suggestDailyExpenseCents(profile.id, scopeDate);
 }

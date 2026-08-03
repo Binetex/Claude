@@ -27,8 +27,6 @@ import { FinanceSettingsError } from "@/modules/finance/settings";
 import { detectFinanceIssues } from "@/modules/finance/issues";
 import { setFinanceProfile } from "@/modules/finance/profile";
 import { accrueDays, primaryShareDays } from "@/modules/finance/primaryShare";
-import { previewDay, suggestDailyExpenseCents, suggestDeliveryCostCents } from "@/modules/finance/preview";
-import type { DayPreview } from "@/modules/finance/preview";
 
 export type SetupResult = { ok?: true; message?: string; error?: string };
 
@@ -78,89 +76,6 @@ function done(message: string, r: { republished: number; days: number; detector:
   if (r.days > 0) parts.push(`пересчитано дней: ${r.days}, новых ревизий: ${r.republished}`);
   if (r.detector.autoResolved > 0) parts.push(`закрыто проблем: ${r.detector.autoResolved}`);
   return { ok: true, message: parts.join(" · ") };
-}
-
-// ─────────────────────────── Предпросмотр ───────────────────────────
-
-export type PreviewResult = { ok: true; preview: DayPreview | null } | { error: string };
-
-/**
- * Эффект кандидатского значения. Ничего не пишет: считает тем же кодом, что и публикация,
- * поэтому показанное число совпадёт с тем, что запишется.
- */
-export async function previewFix(input: {
-  day: string;
-  dailyExpenseUsd?: string;
-  orderId?: string;
-  deliveryUsd?: string;
-  siteId?: string;
-  feePercent?: string;
-  feeFixedUsd?: string;
-  consumablesUsd?: string;
-  vaseGiftUsd?: string;
-}): Promise<PreviewResult> {
-  await requireRole("OWNER");
-  try {
-    const profile = await prisma.floristFinanceProfile.findFirst({
-      where: { model: "PRIMARY", active: true, effectiveTo: null },
-      select: { id: true },
-    });
-    if (!profile) return { error: "Не задан профиль основного флориста." };
-
-    const overrides: Parameters<typeof previewDay>[2] = {};
-    if (input.dailyExpenseUsd?.trim()) overrides.dailyExpenseCents = requiredCents(input.dailyExpenseUsd, "сумму");
-    if (input.orderId && input.deliveryUsd?.trim()) {
-      overrides.deliveryActualCentsByOrder = { [input.orderId]: requiredCents(input.deliveryUsd, "стоимость доставки") };
-    }
-    if (input.siteId && input.feePercent?.trim()) {
-      overrides.feeModelBySite = {
-        [input.siteId]: {
-          percentBp: percentToBp(input.feePercent, "Процент комиссии"),
-          fixedCents: input.feeFixedUsd?.trim() ? requiredCents(input.feeFixedUsd, "фиксированную часть") : 0,
-        },
-      };
-    }
-    if (input.siteId && input.consumablesUsd?.trim()) {
-      overrides.consumablesCentsBySite = { [input.siteId]: requiredCents(input.consumablesUsd, "ставку") };
-    }
-    if (input.orderId && input.vaseGiftUsd?.trim()) {
-      overrides.vaseGiftCostCentsByOrder = { [input.orderId]: requiredCents(input.vaseGiftUsd, "стоимость") };
-    }
-
-    return { ok: true, preview: await previewDay(profile.id, parseDay(input.day), overrides) };
-  } catch (err) {
-    const r = toError(err);
-    return { error: r.error ?? "Не удалось посчитать." };
-  }
-}
-
-/** Подсказки для карточек: оценка Burq и средняя дневная закупка. */
-export async function getSuggestions(input: { orderId?: string; day?: string }): Promise<{
-  deliveryCents?: number;
-  deliverySource?: string;
-  dailyExpenseCents?: number;
-}> {
-  await requireRole("OWNER");
-  const out: { deliveryCents?: number; deliverySource?: string; dailyExpenseCents?: number } = {};
-
-  if (input.orderId) {
-    const suggestion = await suggestDeliveryCostCents(input.orderId);
-    if (suggestion) {
-      out.deliveryCents = suggestion.cents;
-      out.deliverySource = suggestion.source;
-    }
-  }
-  if (input.day) {
-    const profile = await prisma.floristFinanceProfile.findFirst({
-      where: { model: "PRIMARY", active: true, effectiveTo: null },
-      select: { id: true },
-    });
-    if (profile) {
-      const avg = await suggestDailyExpenseCents(profile.id, parseDay(input.day));
-      if (avg != null) out.dailyExpenseCents = avg;
-    }
-  }
-  return out;
 }
 
 // ─────────────────────────── Исправления ───────────────────────────

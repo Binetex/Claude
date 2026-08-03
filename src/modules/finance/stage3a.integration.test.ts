@@ -16,7 +16,6 @@ import { prisma } from "@/lib/db";
 import { setFinanceProfile } from "./profile";
 import { buildDayPlan, publishDaySnapshots } from "./snapshot";
 import { detectFinanceIssues, listOpenIssues } from "./issues";
-import { previewDay } from "./preview";
 import {
   FinanceFixError,
   fixConsumablesRate,
@@ -163,16 +162,18 @@ describe("предпросмотр", () => {
       prisma.siteAcquiringFeeModel.count(),
     ]);
 
-    const preview = await previewDay(profileId, DAY, {
+    // Предпросмотр — это buildDayPlan с подменённым входом. Инвариант тот же и после
+    // удаления обёртки previewDay: считает, но не пишет.
+    const plan = await buildDayPlan(profileId, DAY, {
       dailyExpenseCents: 12000,
       consumablesCentsBySite: { [siteId]: 500 },
       feeModelBySite: { [siteId]: { percentBp: 290, fixedCents: 30 } },
       deliveryActualCentsByOrder: { [orderA]: 1000, [orderB]: 1000 },
     });
-    expect(preview).not.toBeNull();
+    expect(plan).not.toBeNull();
     // Знаменатель полный: 100.00 + 200.00 цветочной выручки.
-    expect(preview!.denominatorCents).toBe(30000);
-    expect(preview!.calculableAfter).toBe(2);
+    expect(plan!.result.denominatorCents).toBe(30000);
+    expect(plan!.result.orders.filter((o) => o.isCalculable)).toHaveLength(2);
 
     const after = await Promise.all([
       prisma.orderFinancialSnapshot.count(),
