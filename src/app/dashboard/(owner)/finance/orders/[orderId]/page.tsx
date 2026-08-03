@@ -105,7 +105,7 @@ export default async function OrderSnapshotPage({ params }: { params: Promise<{ 
                     <Row label="Закупка ваз и подарков" cents={-current.vaseGiftCostCents} />
                     <Row label="Расходники" cents={-current.consumablesCents} />
                     <Row label="Распределённые расходы на цветы" cents={-current.allocatedFlowerCents} />
-                    {current.otherExpenseCents > 0 && <Row label="Прочие расходы" cents={-current.otherExpenseCents} />}
+                    {current.otherExpenseCents > 0 && <Row label="Дополнительные расходы" cents={-current.otherExpenseCents} />}
                     <tr className="border-t border-slate-200">
                       <td className="py-2 font-medium text-slate-800">Распределяемая прибыль</td>
                       <td

@@ -150,6 +150,13 @@ export async function getShareDayBreakdown(
     { label: "Расходы на цветы за день", cents: sum((o) => o.allocatedFlowerCents), negative: true },
   ];
 
+  // Строка появляется только когда расходы были: пустая «Дополнительные расходы: $0.00»
+  // в каждом дне — шум, из-за которого перестают замечать непустую.
+  const additional = sum((o) => o.otherExpenseCents);
+  if (additional > 0) {
+    lines.push({ label: "Дополнительные расходы", cents: additional, negative: true });
+  }
+
   return {
     day: computed.day,
     sharePercentBp: computed.sharePercentBp,

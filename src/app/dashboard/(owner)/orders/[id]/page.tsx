@@ -18,6 +18,7 @@ import { ContactEditDialog } from "./ContactEditDialog";
 import { CardNoteCard } from "./CardNoteCard";
 import { BurqDeliveryPanel } from "./BurqDeliveryPanel";
 import { OrderCommunications, type CommItem } from "./OrderCommunications";
+import { OrderExpensesSection } from "@/components/finance/OrderExpensesSection";
 import { markOrderCommunicationsRead, countUnreadBySide, parseAttachments } from "@/integrations/quo/communicationsService";
 
 export const dynamic = "force-dynamic";
@@ -156,6 +157,9 @@ export default async function OwnerOrderPage({ params }: { params: Promise<{ id:
         <>
           {/* Открытка и заметка — важное, наверху */}
           <CardNoteCard orderId={order.id} updatedAt={order.updatedAt} cardMessage={order.cardMessage} customerNote={order.customerNote} />
+
+          {/* Дополнительные расходы по заказу: повторная доставка, переделка, компенсация. */}
+          <OrderExpensesSection orderId={order.id} />
 
           {/* Товары */}
           <Card>

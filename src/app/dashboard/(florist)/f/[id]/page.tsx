@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { format } from "date-fns";
 import { requireFlorist } from "@/lib/rbac";
+import { OrderExpensesSection } from "@/components/finance/OrderExpensesSection";
 import { getForFlorist } from "@/modules/orders/queries";
 import { prisma } from "@/lib/db";
 import { listActiveHandoffTargets } from "@/modules/florists/service";
@@ -179,6 +180,10 @@ export default async function FloristOrderPage({ params }: { params: Promise<{ i
               <FloristOrderActions orderId={order.id} orderStatus={order.orderStatus} florists={handoffTargets} />
             </CardBody>
           </Card>
+
+
+          {/* Дополнительные расходы по заказу: повторная доставка, переделка, компенсация. */}
+          <OrderExpensesSection orderId={order.id} />
 
           {/* Статус заказа + дата/время доставки — редактируемо (OCC). */}
           <OrderStatusDateControls

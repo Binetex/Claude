@@ -329,9 +329,10 @@ model Florist {
   deliveries     Delivery[]             @relation("DeliveryFlorist")
 
   // ── Финансы (Stage 2) ──
-  ledgerEntries   LedgerEntry[]
-  financeProfiles FloristFinanceProfile[]
-  financeIssues   FinanceIssue[]
+  ledgerEntries      LedgerEntry[]
+  financeProfiles    FloristFinanceProfile[]
+  financeIssues      FinanceIssue[]
+  additionalExpenses OrderAdditionalExpense[]
 }
 
 // ─────────────────────────────  САЙТЫ  ─────────────────────────────
@@ -909,6 +910,40 @@ model OwnerTaxPolicy {
   @@index([effectiveTo])
 }
 
+/// Дополнительный расход по заказу: повторная доставка, переделка букета, компенсация.
+///
+/// Отменяется, а не удаляется, как только поучаствовал в расчёте: строка, по которой уже
+/// начислены или удержаны деньги, обязана остаться объяснением этих денег. Пока расчёт до
+/// неё не дошёл, физическое удаление безопасно и разрешено.
+///
+/// `floristIdSnapshot` фиксируется в момент создания и НЕ переносится при переназначении
+/// заказа: расход несёт тот, кто выполнял заказ тогда, а не тот, кому заказ достался потом.
+/// Пользователь его не выбирает и не видит — поле техническое.
+model OrderAdditionalExpense {
+  id                String    @id @default(cuid())
+  orderId           String
+  order             Order     @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  amountCents       Int // > 0, CHECK
+  description       String
+  /// Дата возникновения расхода. На расчёт PRIMARY не влияет — там расход принадлежит
+  /// дню доставки заказа; используется как дата удержания у SECONDARY и для отчётности.
+  expenseDate       DateTime
+  floristIdSnapshot String
+  florist           Florist   @relation(fields: [floristIdSnapshot], references: [id], onDelete: Restrict)
+
+  createdBy      String
+  createdAt      DateTime  @default(now())
+  updatedBy      String?
+  updatedAt      DateTime  @updatedAt
+  /// Отменён: в итог не входит и в расчёте не участвует. История при этом сохраняется.
+  reversedAt     DateTime?
+  reversedBy     String?
+  reversalReason String?
+
+  @@index([orderId])
+  @@index([floristIdSnapshot, reversedAt])
+}
+
 /// Из каких ревизий снимков собрано начисление.
 ///
 /// Нужна ровно для одного вопроса: «почему за этот день начислено столько». Ответ должен
@@ -1226,6 +1261,7 @@ model Order {
   consumablesOverride OrderConsumablesOverride?
   acquiringFee        OrderAcquiringFee?
   financeIssues       FinanceIssue[]
+  additionalExpenses  OrderAdditionalExpense[]
 
   // NULL допустим много раз (Postgres: NULL != NULL) — не мешает заказам без внешнего источника.
   // Источник истины для идемпотентности вебхуков (см. ingestShopifyOrder) — не полагаемся

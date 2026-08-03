@@ -9,6 +9,7 @@ import { ContactEditDialog } from "@/app/dashboard/(owner)/orders/[id]/ContactEd
 import { CardNoteCard } from "@/app/dashboard/(owner)/orders/[id]/CardNoteCard";
 import { OrderStatusDateControls } from "@/app/dashboard/(owner)/orders/[id]/OrderStatusDateControls";
 import { DeliveryStatusCard } from "@/app/dashboard/(owner)/orders/[id]/DeliveryStatusCard";
+import { OrderExpensesSection } from "@/components/finance/OrderExpensesSection";
 import { Card, CardHeader, CardTitle, CardBody } from "@/components/ui/Card";
 import { OrderStatusBadge } from "@/components/StatusBadge";
 import { OrderItemImages } from "@/components/OrderItemImages";
@@ -45,6 +46,9 @@ export default async function CallCenterOrderPage({ params }: { params: Promise<
         <div className="space-y-4 lg:col-span-2">
           {/* Открытка и заметка — редактируемо (OCC). */}
           <CardNoteCard orderId={order.id} updatedAt={order.updatedAt} cardMessage={order.cardMessage} customerNote={order.customerNote} />
+
+          {/* Дополнительные расходы по заказу: повторная доставка, переделка, компенсация. */}
+          <OrderExpensesSection orderId={order.id} />
 
           {/* Товары */}
           <Card>

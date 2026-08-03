@@ -20,6 +20,7 @@ import { isTipItem } from "@/modules/pricing/serviceItems";
 import { effectiveFinancialType, resolveVariantFinance, type VaseCostRow } from "@/modules/catalog/finance/resolveVariantFinance";
 import { computeDay, type DayCalcResult, type OrderCalcInput, type SnapshotItem } from "./calc";
 import { estimateFeeCents, resolveConsumablesRate, resolveDailyFlowerExpense, resolveFeeModel, resolveOwnerTaxPolicy } from "./settings";
+import { activeExpenseCentsByOrder } from "./orderExpenses";
 
 const toCents = (v: unknown) => Math.round(toNumber(v as never) * 100);
 
@@ -107,6 +108,9 @@ export async function gatherDayInputs(profileId: string, day: Date): Promise<Day
   });
 
   const dailyExpense = await resolveDailyFlowerExpense(profile.id, day);
+  // Дополнительные расходы заказа (повторная доставка, переделка, компенсация) входят в
+  // расходы этого заказа наравне с остальными. Отменённые не считаются.
+  const additional = await activeExpenseCentsByOrder(orders.map((o) => o.id));
   const calcInputs: OrderCalcInput[] = [];
   const meta = new Map<string, OrderInputMeta>();
 
@@ -180,7 +184,7 @@ export async function gatherDayInputs(profileId: string, day: Date): Promise<Day
       acquiringFee,
       vaseGiftCostCents,
       consumables,
-      otherExpenseCents: 0,
+      otherExpenseCents: additional.get(order.id) ?? 0,
     });
 
     meta.set(order.id, {
