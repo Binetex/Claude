@@ -1,53 +1,39 @@
 import "server-only";
 /**
- * Чтение доли основного флориста из ОПУБЛИКОВАННОГО расчёта.
+ * Чтение доли основного флориста.
  *
- * Правило, ради которого модуль существует: на пути чтения источник истины — снимок,
- * а не живой пересчёт. Экран не собирает вход расчёта, не резолвит ставки, комиссии,
- * вазы и цветы и не строит планы дней. Он показывает то, что уже опубликовано, и то,
- * что уже проведено по книге.
+ * Источник один — строка `DayFinance`. Ни живого пересчёта, ни агрегатов по позаказным
+ * снимкам, ни сверки с книгой: долг выводится из этих же строк, поэтому расходиться
+ * нечему. Вместе с расхождением исчезли и статусы, которые его описывали, — «требует
+ * пересчёта» и «начислено иначе».
  *
- * Почему так, а не «посчитать на лету»: живой пересчёт на историческом экране может
- * разойтись с начислением — настройки с тех пор могли смениться. Раньше страница именно
- * это и делала, поэтому показывала числа, которых нет ни в одном снимке.
- *
- * Второе следствие — цена. Прежний путь тратил ~60 SQL-запросов НА КАЖДЫЙ день. Здесь
- * число запросов постоянно и не зависит от размера страницы: агрегаты берутся пачкой.
- *
- * Живой `buildDayPlan` остаётся только на пути записи и в предпросмотре — там он и нужен.
+ * Число запросов постоянно и не зависит от размера страницы.
  */
-import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
-import { primaryShareCents } from "./calc";
+import { dayShareCents } from "./dayCalc";
 import { primaryShareGate } from "./config";
-import { dayKey } from "./snapshot";
+import { dayKey } from "./dayFinance";
 import { PER_PAGE_OPTIONS } from "./sharePaging";
 
 export { PER_PAGE_OPTIONS };
 
 /**
- * Статус дня. Считается по опубликованным снимкам и книге — без пересчёта.
+ * Состояние дня.
  *
- * STALE отдельно от ACCRUED намеренно: если состав дня изменился после начисления
- * (заказ переназначили, добавили расход), начисление какое-то время отстаёт. Раньше это
- * было не видно вовсе — страница показывала свежий пересчёт и молчала о том, что в книге
- * лежит другая сумма.
+ * NOT_CALCULATED — строки нет: день ещё не считали.
+ * INCOMPLETE — считали, но заполнены не все заказы: доли нет по построению.
+ * COUNTED — посчитан целиком, доля входит в долг.
  */
-export type ShareDayStatus = "NOT_CALCULATED" | "PARTIAL" | "READY" | "ACCRUED" | "STALE";
+export type ShareDayStatus = "NOT_CALCULATED" | "INCOMPLETE" | "COUNTED";
 
 export type ShareDayRow = {
   day: string;
-  ordersTotal: number;
-  ordersCalculable: number;
-  /** Сумма из опубликованных снимков. Ноль без снимков — это «не считали», а не «ноль». */
-  distributableCents: number;
-  /** Расчётная доля по опубликованному расчёту. */
-  shareCents: number;
-  /** Действующее начисление: сторнированные записи исключены. */
-  accruedCents: number | null;
-  hasSnapshots: boolean;
-  openIssues: number;
   status: ShareDayStatus;
+  ordersTotal: number;
+  distributableCents: number;
+  shareCents: number;
+  blockers: string[];
+  openIssues: number;
 };
 
 export type ShareDaysPage = {
@@ -61,10 +47,10 @@ export type ShareDaysPage = {
   page: number;
   perPage: number;
   totalDays: number;
+  /** Сумма долей посчитанных дней страницы. */
+  pageShareCents: number;
 };
 
-
-/** Действующий профиль основного флориста — единственный запрос профиля на страницу. */
 async function primaryProfile() {
   return prisma.floristFinanceProfile.findFirst({
     where: { model: "PRIMARY", active: true, effectiveTo: null },
@@ -77,12 +63,7 @@ async function primaryProfile() {
   });
 }
 
-/**
- * Страница дней. Ровно шесть запросов независимо от того, 20 дней на странице или 100.
- *
- * Цикла «день → запросы» здесь нет и быть не должно: именно он делал страницу
- * неоткрываемой на длинной истории.
- */
+/** Страница дней. Число запросов постоянно: строки уже посчитаны, их только читают. */
 export async function listShareDaysRead(
   paging: { page: number; perPage: number },
   now: Date = new Date()
@@ -93,7 +74,7 @@ export async function listShareDaysRead(
   const page = Math.max(paging.page, 1);
 
   const gate = primaryShareGate();
-  const profile = await primaryProfile(); // 1
+  const profile = await primaryProfile();
 
   const empty: ShareDaysPage = {
     startDate: gate.enabled ? gate.startDate : null,
@@ -106,149 +87,52 @@ export async function listShareDaysRead(
     page,
     perPage,
     totalDays: 0,
+    pageShareCents: 0,
   };
   if (!gate.enabled || !profile) return empty;
 
-  const floristId = profile.floristId;
+  const where = { financeProfileId: profile.id, day: { gte: gate.startDate, lte: now } };
 
-  // 2 — сколько всего дней. Считается отдельно, чтобы не тянуть всю историю ради
-  // первой страницы.
-  const totalRows = await prisma.$queryRaw<{ total: number }[]>`
-    SELECT count(DISTINCT o."deliveryDate")::int AS total
-    FROM "Order" o
-    WHERE o."currentFloristId" = ${floristId}
-      AND o."orderStatus"::text = 'DELIVERED'
-      AND o."deliveryDate" >= ${gate.startDate}
-      AND o."deliveryDate" <= ${now}
-  `;
-  const totalDays = totalRows[0]?.total ?? 0;
-  if (totalDays === 0) return { ...empty, disabledReason: null, totalDays: 0 };
+  const [totalDays, rows] = await Promise.all([
+    prisma.dayFinance.count({ where }),
+    prisma.dayFinance.findMany({
+      where,
+      orderBy: { day: "desc" },
+      skip: (page - 1) * perPage,
+      take: perPage,
+      select: { day: true, complete: true, blockers: true, ordersTotal: true, distributableCents: true },
+    }),
+  ]);
 
-  // 3 — сами дни страницы, новые сверху.
-  const dayRows = await prisma.$queryRaw<{ day: Date }[]>`
-    SELECT DISTINCT o."deliveryDate" AS day
-    FROM "Order" o
-    WHERE o."currentFloristId" = ${floristId}
-      AND o."orderStatus"::text = 'DELIVERED'
-      AND o."deliveryDate" >= ${gate.startDate}
-      AND o."deliveryDate" <= ${now}
-    ORDER BY o."deliveryDate" DESC
-    LIMIT ${perPage} OFFSET ${(page - 1) * perPage}
-  `;
-  const days = dayRows.map((r) => r.day);
-  if (days.length === 0) return { ...empty, disabledReason: null, totalDays };
-
-  // 4 — агрегат опубликованных снимков по дням страницы, одним запросом.
-  const agg = await prisma.$queryRaw<
-    { day: Date; orders_total: number; snapshotted: number; calculable: number; distributable: number }[]
-  >`
-    SELECT o."deliveryDate" AS day,
-           count(*)::int AS orders_total,
-           count(s.id)::int AS snapshotted,
-           count(s.id) FILTER (WHERE s."isCalculable")::int AS calculable,
-           COALESCE(sum(s."distributableCents") FILTER (WHERE s."isCalculable"), 0)::int AS distributable
-    FROM "Order" o
-    LEFT JOIN "OrderFinancialSnapshot" s
-      ON s."orderId" = o.id AND s.status::text = 'PUBLISHED'
-    WHERE o."currentFloristId" = ${floristId}
-      AND o."orderStatus"::text = 'DELIVERED'
-      AND o."deliveryDate" IN (${Prisma.join(days)})
-    GROUP BY o."deliveryDate"
-  `;
-  const aggByDay = new Map(agg.map((a) => [dayKey(a.day), a]));
-
-  // 5 — действующие начисления. `reversal: null` и есть правило актуальности:
-  // сторнированная запись перестаёт быть суммой дня, оставаясь в истории.
-  const accruals = await prisma.ledgerEntry.findMany({
-    where: {
-      floristId,
-      type: "PRIMARY_FLORIST_SHARE",
-      effectiveDate: { in: days },
-      reversal: null,
-    },
-    select: { amountCents: true, effectiveDate: true, metadata: true },
-  });
-  const accrualByDay = new Map<string, { cents: number; bp: number | null }>();
-  for (const a of accruals) {
-    const key = dayKey(a.effectiveDate);
-    const prev = accrualByDay.get(key);
-    const bp =
-      a.metadata && typeof a.metadata === "object" && "sharePercentBp" in a.metadata
-        ? Number((a.metadata as { sharePercentBp?: unknown }).sharePercentBp)
-        : null;
-    accrualByDay.set(key, { cents: (prev?.cents ?? 0) + a.amountCents, bp: prev?.bp ?? (Number.isFinite(bp) ? bp : null) });
-  }
-
-  // 6 — открытые проблемы: только для статуса дня, без разбора причин.
-  const issues = await prisma.financeIssue.groupBy({
-    by: ["scopeDate"],
-    where: { status: "OPEN", scopeDate: { in: days } },
-    _count: true,
-  });
+  const issues = rows.length
+    ? await prisma.financeIssue.groupBy({
+        by: ["scopeDate"],
+        where: { status: "OPEN", scopeDate: { in: rows.map((r) => r.day) } },
+        _count: true,
+      })
+    : [];
   const issuesByDay = new Map(
     issues.filter((i) => i.scopeDate != null).map((i) => [dayKey(i.scopeDate as Date), i._count])
   );
 
-  const rows: ShareDayRow[] = days.map((d) => {
-    const key = dayKey(d);
-    const a = aggByDay.get(key);
-    const accrual = accrualByDay.get(key) ?? null;
-    const openIssues = issuesByDay.get(key) ?? 0;
-
-    const ordersTotal = a?.orders_total ?? 0;
-    const calculable = a?.calculable ?? 0;
-    const snapshotted = a?.snapshotted ?? 0;
-    const distributable = a?.distributable ?? 0;
-
-    // Процент берётся из самого начисления, если оно есть: день, посчитанный по прежней
-    // ставке, должен объясняться той ставкой, а не сегодняшней.
-    const bp = accrual?.bp ?? profile.sharePercentBp ?? 0;
-    // День считается целиком или не считается: пока заполнены не все заказы, доли нет.
-    // Показать частичную сумму значило бы обещать деньги, которых начисление не создаст.
-    const complete = snapshotted > 0 && calculable === ordersTotal;
-    const shareCents = complete ? primaryShareCents(distributable, bp) : 0;
-
-    return {
-      day: key,
-      ordersTotal,
-      ordersCalculable: calculable,
-      distributableCents: distributable,
-      shareCents,
-      accruedCents: accrual?.cents ?? null,
-      hasSnapshots: snapshotted > 0,
-      openIssues,
-      status: deriveStatus({ snapshotted, calculable, ordersTotal, accrued: accrual?.cents ?? null, shareCents }),
-    };
-  });
+  const bp = profile.sharePercentBp ?? 0;
+  const mapped: ShareDayRow[] = rows.map((r) => ({
+    day: dayKey(r.day),
+    status: r.complete ? "COUNTED" : "INCOMPLETE",
+    ordersTotal: r.ordersTotal,
+    distributableCents: r.distributableCents,
+    shareCents: r.complete ? dayShareCents(r.distributableCents, bp) : 0,
+    blockers: r.blockers,
+    openIssues: issuesByDay.get(dayKey(r.day)) ?? 0,
+  }));
 
   return {
-    startDate: gate.startDate,
+    ...empty,
     disabledReason: null,
-    sharePercentBp: profile.sharePercentBp,
-    floristName: profile.florist.user.name,
-    profileId: profile.id,
-    floristId,
-    rows,
-    page,
-    perPage,
+    rows: mapped,
     totalDays,
+    pageShareCents: mapped.reduce((a, r) => a + r.shareCents, 0),
   };
-}
-
-function deriveStatus(x: {
-  snapshotted: number;
-  calculable: number;
-  ordersTotal: number;
-  accrued: number | null;
-  shareCents: number;
-}): ShareDayStatus {
-  if (x.snapshotted === 0) return "NOT_CALCULATED";
-  // Незаполненный заказ важнее всего остального: день не считается, и это первое,
-  // что должно быть видно.
-  if (x.calculable < x.ordersTotal) return "PARTIAL";
-  if (x.accrued != null && x.accrued !== x.shareCents) return "STALE";
-  if (x.accrued != null) return "ACCRUED";
-  return "READY";
 }
 
 // ─────────────────────── Разбор одного дня ───────────────────────
@@ -257,139 +141,90 @@ export type ShareBreakdownLine = { label: string; cents: number; negative: boole
 
 export type ShareDayDetail = {
   day: string;
-  /** Нет опубликованных снимков — день ещё не рассчитывали. */
   calculated: boolean;
-  /** Заполнены ли ВСЕ заказы дня. Незаполненный останавливает день целиком. */
   complete: boolean;
   sharePercentBp: number | null;
   distributableCents: number;
   shareCents: number;
-  accruedCents: number | null;
-  stale: boolean;
+  blockers: string[];
   lines: ShareBreakdownLine[];
-  orders: Array<{
-    orderId: string;
-    orderNumber: string;
-    siteShortName: string;
-    flowerRevenueCents: number;
-    allocatedFlowerCents: number;
-    distributableCents: number;
-    included: boolean;
-    revision: number;
-  }>;
+  orders: Array<{ orderId: string; orderNumber: string; contributionCents: number; missing: string[] }>;
 };
 
 /**
- * Разбор дня из опубликованных снимков. Ничего не пересчитывает и ничего не пишет.
+ * Разбор дня из его строки. Ничего не считает и не пишет.
  *
- * `forOwner = false` — представление флориста: происхождение комиссии не показывается.
- * Owner-only величин здесь нет и появиться не должно.
+ * Представления владельца и флориста теперь совпадают: единственным различием было
+ * происхождение комиссии (фактическая или расчётная), а оно относилось к позаказному
+ * снимку и в дневной строке не хранится. Параметр оставлен, чтобы не переписывать вызовы;
+ * если различий так и не появится — уйдёт.
  */
 export async function readShareDayBreakdown(
   profileId: string,
   day: Date,
-  forOwner: boolean
+  _forOwner: boolean
 ): Promise<ShareDayDetail | null> {
   const profile = await prisma.floristFinanceProfile.findUnique({
     where: { id: profileId },
-    select: { floristId: true, sharePercentBp: true },
+    select: { sharePercentBp: true },
   });
   if (!profile) return null;
 
-  const snapshots = await prisma.orderFinancialSnapshot.findMany({
-    where: {
-      status: "PUBLISHED",
-      order: { deliveryDate: day, currentFloristId: profile.floristId, orderStatus: "DELIVERED" },
-    },
-    select: {
-      orderId: true,
-      revision: true,
-      isCalculable: true,
-      grossRevenueCents: true,
-      tipsCents: true,
-      taxCents: true,
-      deliveryActualCents: true,
-      acquiringFeeCents: true,
-      acquiringFeeSource: true,
-      vaseGiftCostCents: true,
-      consumablesCents: true,
-      allocatedFlowerCents: true,
-      otherExpenseCents: true,
-      distributableCents: true,
-      flowerRevenueCents: true,
-      order: { select: { orderNumber: true, site: { select: { shortName: true } } } },
-    },
-    orderBy: { revision: "asc" },
+  const row = await prisma.dayFinance.findUnique({
+    where: { financeProfileId_day: { financeProfileId: profileId, day } },
   });
 
-  const accrual = await prisma.ledgerEntry.findFirst({
-    where: { floristId: profile.floristId, type: "PRIMARY_FLORIST_SHARE", effectiveDate: day, reversal: null },
-    select: { amountCents: true, metadata: true },
-  });
-
-  if (snapshots.length === 0) {
+  const bp = profile.sharePercentBp;
+  if (!row) {
     return {
       day: dayKey(day),
       calculated: false,
       complete: false,
-      sharePercentBp: profile.sharePercentBp,
+      sharePercentBp: bp,
       distributableCents: 0,
       shareCents: 0,
-      accruedCents: accrual?.amountCents ?? null,
-      stale: false,
+      blockers: [],
       lines: [],
       orders: [],
     };
   }
 
-  const included = snapshots.filter((s) => s.isCalculable);
-  const sum = (pick: (s: (typeof included)[number]) => number) => included.reduce((a, s) => a + pick(s), 0);
-
-  const estimatedFees = included.filter((s) => s.acquiringFeeSource === "ESTIMATED").length;
-  const feeLabel = forOwner
-    ? `Комиссия эквайринга${estimatedFees > 0 ? ` (расчётных: ${estimatedFees} из ${included.length})` : " (фактическая)"}`
-    : "Комиссия эквайринга";
-
   const lines: ShareBreakdownLine[] = [
-    { label: "Получено от клиентов (товары + налог + доставка + чаевые)", cents: sum((s) => s.grossRevenueCents), negative: false },
-    { label: "Чаевые (принадлежат владельцу)", cents: sum((s) => s.tipsCents), negative: true },
-    { label: "Полный Tax Reserve", cents: sum((s) => s.taxCents), negative: true },
-    { label: "Фактическая доставка", cents: sum((s) => s.deliveryActualCents), negative: true },
-    { label: feeLabel, cents: sum((s) => s.acquiringFeeCents), negative: true },
-    { label: "Закупка ваз и подарков", cents: sum((s) => s.vaseGiftCostCents), negative: true },
-    { label: "Расходники", cents: sum((s) => s.consumablesCents), negative: true },
-    { label: "Расходы на цветы за день", cents: sum((s) => s.allocatedFlowerCents), negative: true },
+    { label: "Получено от клиентов (товары + налог + доставка + чаевые)", cents: row.grossRevenueCents, negative: false },
+    { label: "Чаевые (принадлежат владельцу)", cents: row.tipsCents, negative: true },
+    { label: "Полный Tax Reserve", cents: row.taxCents, negative: true },
+    { label: "Фактическая доставка", cents: row.deliveryCents, negative: true },
+    { label: "Комиссия эквайринга", cents: row.acquiringFeeCents, negative: true },
+    { label: "Закупка ваз и подарков", cents: row.vaseGiftCostCents, negative: true },
+    { label: "Расходники", cents: row.consumablesCents, negative: true },
+    { label: "Расходы на цветы за день", cents: row.flowerPurchaseCents, negative: true },
   ];
-  const additional = sum((s) => s.otherExpenseCents);
-  if (additional > 0) lines.push({ label: "Дополнительные расходы", cents: additional, negative: true });
+  if (row.additionalCents > 0) {
+    lines.push({ label: "Дополнительные расходы", cents: row.additionalCents, negative: true });
+  }
 
-  const complete = included.length === snapshots.length;
-  const distributableCents = sum((s) => s.distributableCents);
-  const bp =
-    (accrual?.metadata && typeof accrual.metadata === "object" && "sharePercentBp" in accrual.metadata
-      ? Number((accrual.metadata as { sharePercentBp?: unknown }).sharePercentBp)
-      : null) ?? profile.sharePercentBp ?? 0;
-  const shareCents = complete ? primaryShareCents(distributableCents, bp) : 0;
+  const orders =
+    (row.ordersJson as unknown as Array<{
+      orderId: string;
+      orderNumber: string;
+      contributionCents: number;
+      missing: string[];
+    }>) ?? [];
 
   return {
     day: dayKey(day),
     calculated: true,
-    complete,
+    complete: row.complete,
     sharePercentBp: bp,
-    distributableCents,
-    shareCents,
-    accruedCents: accrual?.amountCents ?? null,
-    stale: accrual != null && accrual.amountCents !== shareCents,
+    distributableCents: row.distributableCents,
+    shareCents: row.complete ? dayShareCents(row.distributableCents, bp ?? 0) : 0,
+    blockers: row.blockers,
     lines,
-    orders: snapshots.map((s) => ({
-      orderId: s.orderId,
-      orderNumber: s.order.orderNumber,
-      siteShortName: s.order.site.shortName,
-      flowerRevenueCents: s.flowerRevenueCents,
-      allocatedFlowerCents: s.allocatedFlowerCents,
-      distributableCents: s.distributableCents,
-      included: s.isCalculable,
-      revision: s.revision,
+    orders: orders.map((o) => ({
+      orderId: o.orderId,
+      orderNumber: o.orderNumber,
+      contributionCents: o.contributionCents,
+      missing: o.missing ?? [],
     })),
   };
 }

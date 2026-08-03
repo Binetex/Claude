@@ -13,6 +13,7 @@ import "server-only";
 import type { PrismaClient } from "@/generated/prisma/client";
 import { backgroundActor } from "./accrual";
 import { accrueDays, primaryShareDays } from "./primaryShare";
+import { recomputeDay } from "./dayFinance";
 import { primaryShareGate } from "./config";
 
 export type ShareDispatchResult = {
@@ -45,6 +46,10 @@ export async function dispatchPrimaryShare(
     throw new Error("[finance] не найден активный OWNER — некому приписать начисление доли");
   }
 
-  const r = await accrueDays(plan.profileId, plan.days, actor);
+  // Итог дня пересчитывается всегда: из него считается долг. Начисления в книге пока
+  // создаются параллельно старым путём — они уйдут вместе с ним.
+  for (const day of plan.days) await recomputeDay(plan.profileId, day, actor);
+
+  const { outcomes: _outcomes, ...r } = await accrueDays(plan.profileId, plan.days, actor);
   return { days: plan.days.length, ...r };
 }

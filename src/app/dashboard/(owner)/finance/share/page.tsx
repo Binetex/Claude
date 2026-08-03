@@ -21,11 +21,9 @@ export const dynamic = "force-dynamic";
  * не открывалась бы.
  */
 const statusMeta: Record<ShareDayStatus, { label: string; className: string }> = {
-  ACCRUED: { label: "начислено", className: "border-emerald-200 bg-emerald-50 text-emerald-700" },
-  READY: { label: "готов к начислению", className: "border-slate-200 bg-slate-50 text-slate-600" },
-  PARTIAL: { label: "не считается: не все заказы заполнены", className: "border-amber-200 bg-amber-50 text-amber-800" },
+  COUNTED: { label: "посчитан", className: "border-emerald-200 bg-emerald-50 text-emerald-700" },
+  INCOMPLETE: { label: "не все заказы заполнены", className: "border-amber-200 bg-amber-50 text-amber-800" },
   NOT_CALCULATED: { label: "не рассчитан", className: "border-slate-200 bg-slate-50 text-slate-400" },
-  STALE: { label: "требует пересчёта", className: "border-amber-200 bg-amber-50 text-amber-800" },
 };
 
 export default async function PrimarySharePage({
@@ -41,9 +39,8 @@ export default async function PrimarySharePage({
   const data = await listShareDaysRead({ page, perPage });
   const totalPages = Math.max(Math.ceil(data.totalDays / data.perPage), 1);
 
-  const accruedTotal = data.rows.reduce((a, r) => a + (r.accruedCents ?? 0), 0);
-  const pending = data.rows.filter((r) => r.status === "READY" && r.shareCents > 0).length;
-  const attention = data.rows.filter((r) => r.status === "PARTIAL" || r.status === "STALE" || r.status === "NOT_CALCULATED").length;
+  const counted = data.rows.filter((r) => r.status === "COUNTED").length;
+  const attention = data.rows.filter((r) => r.status !== "COUNTED").length;
 
   const href = (p: number, pp: number = data.perPage) => `/dashboard/finance/share?page=${p}&perPage=${pp}`;
 
@@ -78,8 +75,8 @@ export default async function PrimarySharePage({
         <>
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
             <StatCard label="Доля" value={`${(data.sharePercentBp / 100).toFixed(2)}%`} />
-            <StatCard label="Начислено на странице" value={formatCents(accruedTotal)} tone="success" />
-            <StatCard label="Дней ждут начисления" value={pending} tone={pending > 0 ? "info" : "default"} />
+            <StatCard label="Доля за дни страницы" value={formatCents(data.pageShareCents)} tone="success" />
+            <StatCard label="Дней посчитано" value={counted} tone="default" />
             <StatCard label="Дней требуют внимания" value={attention} tone={attention > 0 ? "warning" : "default"} />
           </div>
 
@@ -121,8 +118,7 @@ export default async function PrimarySharePage({
                     <th className="px-3 py-2.5 font-medium">Статус</th>
                     <th className="px-3 py-2.5 text-right font-medium">Заказов</th>
                     <th className="px-3 py-2.5 text-right font-medium">Прибыль</th>
-                    <th className="px-3 py-2.5 text-right font-medium">Расчётная доля</th>
-                    <th className="px-4 py-2.5 text-right font-medium">Начислено</th>
+                    <th className="px-4 py-2.5 text-right font-medium">Доля флориста</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -144,23 +140,17 @@ export default async function PrimarySharePage({
                           </Link>
                         )}
                       </td>
+                      <td className="px-3 py-2.5 text-right tabular-nums text-slate-600">{r.ordersTotal}</td>
                       <td className="px-3 py-2.5 text-right tabular-nums text-slate-600">
-                        {r.ordersCalculable}
-                        {r.ordersTotal !== r.ordersCalculable && (
-                          <span className="text-slate-400"> / {r.ordersTotal}</span>
+                        {r.status === "NOT_CALCULATED" ? (
+                          <span className="text-slate-300">—</span>
+                        ) : (
+                          formatCents(r.distributableCents)
                         )}
                       </td>
-                      <td className="px-3 py-2.5 text-right tabular-nums text-slate-600">
-                        {r.hasSnapshots ? formatCents(r.distributableCents) : <span className="text-slate-300">—</span>}
-                      </td>
-                      <td className="px-3 py-2.5 text-right tabular-nums text-slate-600">
-                        {r.hasSnapshots ? formatCents(r.shareCents) : <span className="text-slate-300">—</span>}
-                      </td>
                       <td className="px-4 py-2.5 text-right font-semibold tabular-nums">
-                        {r.accruedCents != null ? (
-                          <span className={r.status === "STALE" || r.status === "PARTIAL" ? "text-amber-700" : "text-emerald-700"}>
-                            {formatCents(r.accruedCents)}
-                          </span>
+                        {r.status === "COUNTED" ? (
+                          <span className="text-emerald-700">{formatCents(r.shareCents)}</span>
                         ) : (
                           <span className="text-slate-300">—</span>
                         )}
@@ -190,8 +180,8 @@ export default async function PrimarySharePage({
       )}
 
       <p className="text-xs text-slate-400">
-        «Требует пересчёта» означает, что состав дня изменился после начисления — например, заказ переназначили или
-        добавили расход. Диспетчер выровняет сумму сам; кнопка «Пересчитать» делает это немедленно.
+        День считается целиком или не считается: пока по какому-то заказу не хватает данных, доли за этот день нет.
+        Долг флориста складывается из долей посчитанных дней — отдельных начислений в книге больше нет.
       </p>
     </div>
   );

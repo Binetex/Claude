@@ -256,17 +256,13 @@ describe("реальные деньги — только вручную", () => 
 });
 
 describe("представления", () => {
-  it("флорист не видит происхождение комиссии, владелец видит", async () => {
+  it("представления владельца и флориста совпадают", async () => {
     const ownerView = await readShareDayBreakdown(profileId, DAY, true);
     const floristView = await readShareDayBreakdown(profileId, DAY, false);
 
-    const feeLine = (b: typeof ownerView) => b!.lines.find((l) => l.label.startsWith("Комиссия эквайринга"))!;
-    // У владельца в строке комиссии указано её происхождение, у флориста — нет.
-    expect(feeLine(ownerView).label).toMatch(/расчётн|фактическ/i);
-    expect(feeLine(floristView).label).toBe("Комиссия эквайринга");
-    // Сумма при этом одна и та же: различается представление, а не расчёт.
-    expect(feeLine(floristView).cents).toBe(feeLine(ownerView).cents);
-    // Суммы при этом одинаковые: модель расчёта одна, различается только представление.
+    // Происхождение комиссии жило в позаказном снимке; в дневной строке его нет, поэтому
+    // представления совпадают полностью.
+    expect(floristView!.lines).toEqual(ownerView!.lines);
     expect(floristView!.shareCents).toBe(ownerView!.shareCents);
     expect(floristView!.distributableCents).toBe(ownerView!.distributableCents);
   });

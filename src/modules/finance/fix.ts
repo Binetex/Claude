@@ -18,6 +18,7 @@ import { setVasePurchaseCost } from "@/modules/catalog/finance/setVasePurchaseCo
 import { setVariantVase, type VaseSelection } from "@/modules/catalog/finance/vaseLink";
 import { detectFinanceIssues, DETECTOR_WINDOW_DAYS } from "./issues";
 import { publishDaySnapshots } from "./snapshot";
+import { recomputeDay } from "./dayFinance";
 import { setConsumablesRate, setDailyFlowerExpense, setFeeModel, setOwnerTaxPolicy } from "./settings";
 import { primaryShareStartDate } from "./config";
 import { accrueDays, type ShareOutcome } from "./primaryShare";
@@ -116,6 +117,11 @@ export async function recalculateAffectedFinance(
 ): Promise<FixResult> {
   let republished = 0;
   for (const day of days) {
+    // Новая модель: одна изменяемая строка итога дня. Пишется всегда — именно из неё
+    // считается долг флориста.
+    await recomputeDay(profileId, day, actor);
+    // Старый позаказный снимок пока публикуется рядом: экраны ещё читают его. Уйдёт
+    // вместе с отключением старого пути.
     const { published } = await publishDaySnapshots(profileId, day, actor);
     republished += published;
   }

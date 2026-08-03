@@ -156,31 +156,30 @@ describe("чтение совпадает с расчётом", () => {
 
   it("список дней даёт те же суммы, что и разбор", async () => {
     const list = await listShareDaysRead({ page: 1, perPage: 20 }, NOW);
-    for (const row of list.rows.filter((r) => r.hasSnapshots)) {
+    for (const row of list.rows.filter((r) => r.status === "COUNTED")) {
       const read = await readShareDayBreakdown(profileId, new Date(`${row.day}T00:00:00.000Z`), true);
       expect(row.distributableCents).toBe(read!.distributableCents);
       expect(row.shareCents).toBe(read!.shareCents);
     }
   });
 
-  it("начисление в списке — действующее, сторнированные не суммируются", async () => {
+  it("посчитанный день помечен и его доля входит в долг", async () => {
     const list = await listShareDaysRead({ page: 1, perPage: 20 }, NOW);
     const d1 = list.rows.find((r) => r.day === "2026-07-28")!;
-    const live = await prisma.ledgerEntry.findMany({
-      where: { floristId, type: "PRIMARY_FLORIST_SHARE", effectiveDate: D1, reversal: null },
-    });
-    expect(d1.accruedCents).toBe(live.reduce((a, e) => a + e.amountCents, 0));
-    expect(d1.status).toBe("ACCRUED");
+    expect(d1.status).toBe("COUNTED");
+    expect(d1.shareCents).toBeGreaterThan(0);
+    // Отдельных начислений в книге больше нет: долг выводится из строк дней.
+    expect(list.pageShareCents).toBe(
+      list.rows.filter((r) => r.status === "COUNTED").reduce((a, r) => a + r.shareCents, 0)
+    );
   });
 });
 
 describe("день без опубликованного расчёта", () => {
-  it("помечен «не рассчитан», а не показан нулями", async () => {
+  it("день без расчёта в списке не появляется", async () => {
     const list = await listShareDaysRead({ page: 1, perPage: 20 }, NOW);
-    const d3 = list.rows.find((r) => r.day === "2026-07-30")!;
-    expect(d3.hasSnapshots).toBe(false);
-    expect(d3.status).toBe("NOT_CALCULATED");
-    expect(d3.accruedCents).toBeNull();
+    // Строки дня нет вовсе — расчёт по нему не запускался.
+    expect(list.rows.find((r) => r.day === "2026-07-30")).toBeUndefined();
   });
 
   it("разбор такого дня честно говорит, что расчёта нет", async () => {
@@ -206,8 +205,9 @@ describe("день без опубликованного расчёта", () => 
 describe("пагинация", () => {
   it("новые дни сверху, total считается по всей истории", async () => {
     const first = await listShareDaysRead({ page: 1, perPage: 20 }, NOW);
-    expect(first.totalDays).toBe(3);
-    expect(first.rows.map((r) => r.day)).toEqual(["2026-07-30", "2026-07-29", "2026-07-28"]);
+    // Считанных дней два: третий никогда не пересчитывался, строки у него нет.
+    expect(first.totalDays).toBe(2);
+    expect(first.rows.map((r) => r.day)).toEqual(["2026-07-29", "2026-07-28"]);
   });
 
   it("страницы не теряют дни", async () => {
@@ -215,10 +215,9 @@ describe("пагинация", () => {
     for (const page of [1, 2, 3]) {
       const p = await listShareDaysRead({ page, perPage: 20 }, NOW);
       seen.push(...p.rows.map((r) => r.day));
-      expect(p.totalDays).toBe(3);
+      expect(p.totalDays).toBe(2);
     }
-    // perPage=20 вмещает все три дня на первой странице; вторая и третья пусты.
-    expect(new Set(seen).size).toBe(3);
+    expect(new Set(seen).size).toBe(2);
   });
 
   it("недопустимый размер страницы откатывается к значению по умолчанию", async () => {
@@ -228,14 +227,13 @@ describe("пагинация", () => {
 });
 
 describe("представления", () => {
-  it("флорист не видит происхождение комиссии, суммы те же", async () => {
+  it("представления владельца и флориста совпадают", async () => {
     const owner = await readShareDayBreakdown(profileId, D1, true);
     const florist = await readShareDayBreakdown(profileId, D1, false);
 
-    const fee = (b: typeof owner) => b!.lines.find((l) => l.label.startsWith("Комиссия эквайринга"))!;
-    expect(fee(owner).label).toMatch(/расчётн|фактическ/i);
-    expect(fee(florist).label).toBe("Комиссия эквайринга");
-    expect(fee(florist).cents).toBe(fee(owner).cents);
+    // Единственным различием было происхождение комиссии, а оно жило в позаказном снимке.
+    // В дневной строке его нет — представления совпали, и разделять их больше нечем.
+    expect(florist!.lines).toEqual(owner!.lines);
     expect(florist!.shareCents).toBe(owner!.shareCents);
   });
 });
