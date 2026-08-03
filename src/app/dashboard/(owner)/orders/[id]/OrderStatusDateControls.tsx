@@ -1,8 +1,11 @@
 "use client";
 import { useState } from "react";
+import { Check } from "lucide-react";
+import { OrderStatusBadge } from "@/components/StatusBadge";
 import { manualOrderStatuses, orderStatusMeta, IN_WORK_ORDER_STATUSES } from "@/lib/statuses";
 import { Card, CardHeader, CardTitle, CardBody } from "@/components/ui/Card";
 import { Button } from "@/components/ui/button";
+import { Tooltip } from "@/components/ui/tooltip";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
@@ -28,15 +31,40 @@ export function OrderStatusDateControls({
 }) {
   return (
     <div className="space-y-4">
-      <Card>
-        <CardHeader><CardTitle>Статус заказа</CardTitle></CardHeader>
-        <CardBody><StatusForm orderId={orderId} updatedAt={updatedAt} current={orderStatus} /></CardBody>
-      </Card>
+      <OrderStatusCard orderId={orderId} updatedAt={updatedAt} orderStatus={orderStatus} />
       <Card>
         <CardHeader><CardTitle>Дата и время доставки</CardTitle></CardHeader>
         <CardBody><DeliveryForm orderId={orderId} updatedAt={updatedAt} date={deliveryDate} window={deliveryWindow} /></CardBody>
       </Card>
     </div>
+  );
+}
+
+/**
+ * Только «Статус заказа». Отдельная карточка — потому что у флориста в правой колонке
+ * стоит статус БЕЗ даты доставки (дата у него редактируется из шапки), а заводить ради
+ * этого вторую копию формы значило бы чинить OCC потом в двух местах.
+ */
+export function OrderStatusCard({
+  orderId,
+  updatedAt,
+  orderStatus,
+}: {
+  orderId: string;
+  updatedAt: string;
+  orderStatus: OrderStatus;
+}) {
+  return (
+    <Card>
+      <CardHeader className="flex items-center justify-between py-2.5">
+        <CardTitle>Статус заказа</CardTitle>
+        {/* Текущий статус подписан словом, а не только оттенком селекта. */}
+        <OrderStatusBadge status={orderStatus} />
+      </CardHeader>
+      <CardBody className="py-3">
+        <StatusForm orderId={orderId} updatedAt={updatedAt} current={orderStatus} />
+      </CardBody>
+    </Card>
   );
 }
 
@@ -61,12 +89,21 @@ function StatusForm({ orderId, updatedAt, current }: { orderId: string; updatedA
             <option key={s} value={s}>{orderStatusMeta[s].label}</option>
           ))}
         </Select>
-        <Button
-          disabled={pending || status === selectable}
-          onClick={() => save({ orderStatus: status }, { successMessage: "Статус обновлён" })}
-        >
-          ОК
-        </Button>
+        {/* Подтверждение появляется ТОЛЬКО когда значение изменено, и занимает одну иконку.
+            Сохранять по выбору в списке нельзя: на «Доставлен» висят включённые SMS-правила,
+            и промах мышью отправил бы сообщения реальному клиенту. */}
+        {status !== selectable && (
+          <Tooltip content="Сохранить статус">
+            <Button
+              size="icon"
+              aria-label="Сохранить статус"
+              disabled={pending}
+              onClick={() => save({ orderStatus: status }, { successMessage: "Статус обновлён" })}
+            >
+              <Check className="size-4" />
+            </Button>
+          </Tooltip>
+        )}
       </div>
       {conflict && (
         <ConflictNotice

@@ -1,3 +1,4 @@
+import Image from "next/image";
 import Link from "next/link";
 import { getCurrentUser } from "@/lib/auth";
 import { homePathFor } from "@/lib/rbac";
@@ -12,7 +13,7 @@ export default async function Home() {
   return (
     <div className="flex min-h-screen flex-col bg-slate-50 text-slate-900">
       <header className="flex items-center justify-between border-b border-slate-200 bg-white px-6 py-4">
-        <div className="text-lg font-bold text-slate-800">🌸 Floremart</div>
+        <Image src="/logo.png" alt="FloreMart" width={940} height={188} priority className="h-7 w-auto" />
         <Link
           href={ctaHref}
           className="rounded-lg bg-slate-800 px-4 py-2 text-sm font-medium text-white hover:bg-slate-900"

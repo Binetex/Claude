@@ -1,8 +1,8 @@
 import Link from "next/link";
 import { requireFlorist } from "@/lib/rbac";
 import { prisma } from "@/lib/db";
-import { PageHeader, StatCard } from "@/components/ui/misc";
-import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/Card";
+import { PageHeader } from "@/components/ui/misc";
+import { Card, CardBody, CardHeader } from "@/components/ui/Card";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/states";
 import { formatCents } from "@/lib/cents";
@@ -54,11 +54,11 @@ export default async function MyFlowerExpensesPage({
   const page = Math.max(Number(sp.page ?? 1) || 1, 1);
   const status = (sp.status as DayStatus | undefined) || null;
 
-  const [list, earliest, monthList] = await Promise.all([
+  const [list, earliest] = await Promise.all([
     listFlowerExpenses(
       profile.id,
       profile.floristId,
-      { from: period.from, to: period.to, query: sp.q ?? null, status },
+      { from: period.from, to: period.to, query: null, status },
       { page, perPage: PER_PAGE }
     ),
     prisma.dailyFlowerExpense.findFirst({
@@ -66,7 +66,6 @@ export default async function MyFlowerExpensesPage({
       orderBy: { expenseDay: "asc" },
       select: { expenseDay: true },
     }),
-    listFlowerExpenses(profile.id, profile.floristId, resolveExpensePeriod({}), { page: 1, perPage: 1 }),
   ]);
 
   const actions = { save: saveMyExpenseAction, remove: deleteMyExpenseAction, preview: previewMyExpenseAction };
@@ -82,27 +81,21 @@ export default async function MyFlowerExpensesPage({
     <div className="space-y-4">
       <PageHeader
         title="Расходы на цветы"
-        description="Дневная закупка: вычитается из выручки дня и делится между вашими заказами."
         actions={<ExpenseDialog actions={actions} trigger="Добавить расход" variant="default" size="default" />}
       />
 
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <StatCard label="Текущий месяц" value={formatCents(monthList.totals.expenseCents)} />
-        <StatCard label="Средний за день" value={formatCents(monthList.totals.averagePerFilledDayCents)} />
-        <StatCard
-          label="Дней без заполнения"
-          value={monthList.totals.daysMissing}
-          tone={monthList.totals.daysMissing > 0 ? "warning" : "success"}
-        />
-        <StatCard label="Дней с закупкой" value={monthList.totals.daysFilled} />
-      </div>
-
       <Card>
-        <CardHeader className="flex flex-wrap items-center justify-between gap-3">
-          <CardTitle>
-            {period.label} · дней {list.totalDays} · закупка {formatCents(list.totals.expenseCents)}
-          </CardTitle>
+        <CardHeader className="space-y-3">
           <FlowerExpenseFilters years={yearOptions(earliest?.expenseDay ?? null)} />
+          {/* Единственная сводка, которая тут нужна: сколько потрачено за выбранный период. */}
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <span className="text-sm text-slate-500">
+              {period.label} · дней {list.totalDays}
+            </span>
+            <span className="text-xl font-semibold text-slate-900 tabular-nums">
+              {formatCents(list.totals.expenseCents)}
+            </span>
+          </div>
         </CardHeader>
         <CardBody className="p-0">
           {list.rows.length === 0 ? (
@@ -129,11 +122,6 @@ export default async function MyFlowerExpensesPage({
           </div>
         )}
       </Card>
-
-      <p className="text-xs text-slate-400">
-        «В расчёте» означает, что за этот день уже начислена ваша доля. Исправление суммы за такой день пересчитает
-        начисление — прежнее будет сторновано, а новое создано.
-      </p>
     </div>
   );
 }

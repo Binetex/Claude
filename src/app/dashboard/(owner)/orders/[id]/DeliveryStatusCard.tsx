@@ -1,3 +1,4 @@
+import { Truck } from "lucide-react";
 import { prisma } from "@/lib/db";
 import { Card, CardHeader, CardTitle, CardBody } from "@/components/ui/Card";
 import { ZoomableImage } from "@/components/ImageLightbox";
@@ -18,6 +19,8 @@ export async function DeliveryStatusCard({
   bouquetPhotoUrl,
   deliveryPhotoUrl,
   storeTimeZone,
+  pickup,
+  bouquetPhotoAction,
 }: {
   orderId: string;
   orderStatus: OrderStatus;
@@ -26,6 +29,16 @@ export async function DeliveryStatusCard({
   bouquetPhotoUrl: string | null;
   deliveryPhotoUrl: string | null;
   storeTimeZone?: string;
+  /**
+   * Точка забора. Слот, а не встроенный блок: карточка живёт на трёх страницах, и решать,
+   * можно ли на этой переключать точку, должна страница, а не блок доставки.
+   */
+  pickup?: React.ReactNode;
+  /**
+   * Загрузка фото букета (кабинет флориста). Когда передана — заменяет статичное превью
+   * «Фото букета», чтобы одна и та же картинка не показывалась дважды.
+   */
+  bouquetPhotoAction?: React.ReactNode;
 }) {
   let currentDelivery = null;
   let deliveryIntent = null;
@@ -85,8 +98,8 @@ export async function DeliveryStatusCard({
 
   return (
     <Card>
-      <CardHeader><CardTitle>Статус доставки</CardTitle></CardHeader>
-      <CardBody className="space-y-3 text-sm">
+      <CardHeader className="py-2.5"><CardTitle icon={Truck}>Доставка</CardTitle></CardHeader>
+      <CardBody className="space-y-2.5 text-sm">
         {deliveryInstructions?.trim() && (
           <div className="rounded-md border border-amber-200 bg-amber-50 p-2">
             <div className="text-xs font-semibold text-amber-800">Инструкции доставки</div>
@@ -97,13 +110,18 @@ export async function DeliveryStatusCard({
           <Info label="Курьер вызван" value={fmtLocalDateTime(courierCalledAt, storeTimeZone)} />
           <Info label="Доставка завершена" value={fmtLocalDateTime(deliveryCompletedAt, storeTimeZone)} />
           <Info label="Tracking" value={trackingUrl ? <a href={trackingUrl} className="text-sky-600 underline" target="_blank" rel="noreferrer">Открыть</a> : "—"} />
-          {bouquetPhotoUrl && (
+          {/* Своё превью показываем только там, где фото нельзя заменить: иначе картинка
+              дублировала бы ту, что уже стоит рядом с кнопкой загрузки. */}
+          {bouquetPhotoUrl && !bouquetPhotoAction && (
             <div><div className="mb-1 text-xs text-slate-400">Фото букета</div><ZoomableImage src={bouquetPhotoUrl} alt="" className="h-24 w-24 rounded-lg object-cover" /></div>
           )}
           {deliveryPhotoUrl && (
             <div><div className="mb-1 text-xs text-slate-400">Фото доставки</div><ZoomableImage src={deliveryPhotoUrl} alt="" className="h-24 w-24 rounded-lg object-cover" /></div>
           )}
         </div>
+
+        {bouquetPhotoAction}
+        {pickup}
 
         <BurqDeliveryPanel
           orderId={orderId}
@@ -155,8 +173,10 @@ function fmtLocalDateTime(d: Date | string | null | undefined, timeZone?: string
 function Info({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div>
-      <div className="text-xs text-slate-400">{label}</div>
-      <div className="text-slate-700">{value}</div>
+      {/* Подпись — мелким капслоком, значение — обычным: пара читается как «ключ → значение»,
+          а не как две строки одного веса. */}
+      <div className="text-[10px] font-medium tracking-wider text-slate-400 uppercase">{label}</div>
+      <div className="mt-0.5 text-slate-700 tabular-nums">{value}</div>
     </div>
   );
 }

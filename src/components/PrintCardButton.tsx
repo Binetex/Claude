@@ -18,12 +18,15 @@ export function PrintCardButton({
   hasCardMessage,
   dirty = false,
   className,
+  iconOnly = false,
 }: {
   orderId: string;
   /** Пустая открытка — печатать нечего, документ был бы пустым. */
   hasCardMessage: boolean;
   dirty?: boolean;
   className?: string;
+  /** Только иконка: подпись уходит в title/aria-label. Для плотных блоков. */
+  iconOnly?: boolean;
 }) {
   const [msg, setMsg] = useState<string | null>(null);
   // Защита от двойного клика: без неё быстрые нажатия открывают несколько вкладок.
@@ -54,14 +57,20 @@ export function PrintCardButton({
         onClick={onClick}
         disabled={disabled}
         title={disabled ? "В заказе нет текста открытки" : "Печать открытки"}
+        aria-label="Печать открытки"
         className={cn(
-          "inline-flex items-center gap-1 rounded-md bg-slate-900 px-2 py-1 text-xs font-medium text-white transition-colors",
-          "hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300",
+          "inline-flex items-center gap-1 rounded-md text-xs font-medium transition-colors",
+          iconOnly ? "p-1.5" : "px-2 py-1",
+          // Иконочный вариант живёт в ряду со «Скопировать» — там он такой же нейтральный,
+          // иначе одна чёрная кнопка перетягивает внимание с текста открытки.
+          iconOnly
+            ? "border border-slate-200 bg-white text-slate-500 hover:bg-slate-50 hover:text-slate-800 disabled:cursor-not-allowed disabled:text-slate-300"
+            : "bg-slate-900 text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300",
           className
         )}
       >
         <Printer className="size-3.5" />
-        Печать
+        {!iconOnly && "Печать"}
       </button>
     </span>
   );

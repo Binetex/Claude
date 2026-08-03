@@ -8,10 +8,13 @@
  *
  * Состояние живёт в URL, а не в компоненте: ссылку на конкретный месяц можно сохранить
  * и переслать, а «назад» в браузере работает как ожидается.
+ *
+ * Произвольный период выбирается тем же календарём, что и на странице заказов
+ * (DateRangePicker) — второго способа задать даты в проекте быть не должно.
  */
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
-import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
+import { Select } from "@/components/ui/select";
+import { DateRangePicker } from "@/components/ui/date-range-picker";
 
 const MONTHS = [
   "Январь", "Февраль", "Март", "Апрель", "Май", "Июнь",
@@ -25,8 +28,6 @@ const STATUSES: { value: string; label: string }[] = [
   { value: "INCOMPLETE", label: "Не хватает данных" },
   { value: "COUNTED", label: "Посчитан" },
 ];
-
-const selectCls = "h-9 rounded-lg border border-slate-200 bg-white px-2.5 text-sm shadow-xs";
 
 export function FlowerExpenseFilters({ years }: { years: number[] }) {
   const router = useRouter();
@@ -50,77 +51,57 @@ export function FlowerExpenseFilters({ years }: { years: number[] }) {
   };
 
   return (
-    <div className="flex flex-wrap items-end gap-2">
-      <select className={selectCls} value={period} onChange={(e) => update({ period: e.target.value })}>
+    <div className="flex flex-wrap items-center gap-2">
+      <Select
+        aria-label="Период"
+        wrapperClassName="w-32"
+        value={period === "range" ? "month" : period}
+        onChange={(e) => update({ period: e.target.value, from: null, to: null })}
+      >
         <option value="month">Месяц</option>
         <option value="year">Год</option>
-        <option value="range">Период</option>
         <option value="all">Вся история</option>
-      </select>
+      </Select>
 
       {period === "month" && (
-        <>
-          <select className={selectCls} value={month} onChange={(e) => update({ month: e.target.value })}>
-            {MONTHS.map((m, i) => (
-              <option key={m} value={i + 1}>
-                {m}
-              </option>
-            ))}
-          </select>
-          <select className={selectCls} value={year} onChange={(e) => update({ year: e.target.value })}>
-            {years.map((y) => (
-              <option key={y} value={y}>
-                {y}
-              </option>
-            ))}
-          </select>
-        </>
-      )}
-
-      {period === "year" && (
-        <select className={selectCls} value={year} onChange={(e) => update({ year: e.target.value })}>
-          {years.map((y) => (
-            <option key={y} value={y}>
-              {y}
-            </option>
+        <Select aria-label="Месяц" wrapperClassName="w-36" value={month} onChange={(e) => update({ month: e.target.value })}>
+          {MONTHS.map((m, i) => (
+            <option key={m} value={i + 1}>{m}</option>
           ))}
-        </select>
+        </Select>
       )}
 
-      {period === "range" && (
-        <>
-          <Input
-            type="date"
-            className="h-9 w-auto"
-            defaultValue={sp.get("from") ?? ""}
-            onChange={(e) => update({ from: e.target.value })}
-          />
-          <Input
-            type="date"
-            className="h-9 w-auto"
-            defaultValue={sp.get("to") ?? ""}
-            onChange={(e) => update({ to: e.target.value })}
-          />
-        </>
+      {(period === "month" || period === "year") && (
+        <Select aria-label="Год" wrapperClassName="w-24" value={year} onChange={(e) => update({ year: e.target.value })}>
+          {years.map((y) => (
+            <option key={y} value={y}>{y}</option>
+          ))}
+        </Select>
       )}
 
-      <select className={selectCls} value={sp.get("status") ?? ""} onChange={(e) => update({ status: e.target.value })}>
-        {STATUSES.map((s) => (
-          <option key={s.value} value={s.value}>
-            {s.label}
-          </option>
-        ))}
-      </select>
+      {/* Календарь сам задаёт произвольный период: выбор дат переключает режим на «range»,
+          сброс возвращает к месяцу. Отдельного пункта «Период» в списке нет — он был бы
+          вторым способом сделать ровно то же самое. */}
+      <DateRangePicker
+        placeholder="Выбрать даты"
+        value={{ from: sp.get("from") ?? undefined, to: sp.get("to") ?? undefined }}
+        onChange={(next) =>
+          next.from || next.to
+            ? update({ period: "range", from: next.from ?? null, to: next.to ?? null })
+            : update({ period: "month", from: null, to: null })
+        }
+      />
 
-      <form
-        className="flex items-end gap-2"
-        action={(fd) => update({ q: String(fd.get("q") ?? "").trim() || null })}
+      <Select
+        aria-label="Статус"
+        wrapperClassName="w-48"
+        value={sp.get("status") ?? ""}
+        onChange={(e) => update({ status: e.target.value })}
       >
-        <Input name="q" placeholder="Поиск по комментарию" className="h-9 w-52" defaultValue={sp.get("q") ?? ""} />
-        <Button type="submit" size="sm" variant="outline">
-          Найти
-        </Button>
-      </form>
+        {STATUSES.map((s) => (
+          <option key={s.value} value={s.value}>{s.label}</option>
+        ))}
+      </Select>
     </div>
   );
 }

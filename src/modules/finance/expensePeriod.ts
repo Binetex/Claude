@@ -22,6 +22,14 @@ const MONTHS = [
 
 const utcDay = (y: number, m: number, d: number) => new Date(Date.UTC(y, m, d));
 
+/** «1 августа 2026» — календарная дата без пересчёта через таймзону. */
+const dayLabel = (d: Date) => `${d.getUTCDate()} ${MONTHS_GENITIVE[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
+
+const MONTHS_GENITIVE = [
+  "января", "февраля", "марта", "апреля", "мая", "июня",
+  "июля", "августа", "сентября", "октября", "ноября", "декабря",
+];
+
 function parseIsoDay(value: string | undefined): Date | null {
   if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
   const d = new Date(`${value}T00:00:00.000Z`);
@@ -44,12 +52,12 @@ export function resolveExpensePeriod(
   if (kind === "range") {
     const from = parseIsoDay(sp.from);
     const to = parseIsoDay(sp.to);
-    return {
-      kind,
-      from,
-      to,
-      label: from || to ? `${from ? from.toISOString().slice(0, 10) : "…"} — ${to ? to.toISOString().slice(0, 10) : "…"}` : "период не задан",
-    };
+    if (!from && !to) return { kind, from, to, label: "период не задан" };
+    // Один и тот же день с обеих сторон — это выбранная в календаре дата, а не диапазон:
+    // «1 августа 2026 — 1 августа 2026» читается как ошибка.
+    const same = from && to && +from === +to;
+    const label = same ? dayLabel(from) : `${from ? dayLabel(from) : "…"} — ${to ? dayLabel(to) : "…"}`;
+    return { kind, from, to, label };
   }
 
   const year = Number(sp.year) || now.getUTCFullYear();

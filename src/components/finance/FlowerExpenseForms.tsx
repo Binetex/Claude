@@ -104,6 +104,7 @@ export function ExpenseDialog({
   comment,
   variant = "outline",
   size = "sm",
+  className,
 }: {
   actions: ExpenseActions;
   trigger: string;
@@ -112,6 +113,8 @@ export function ExpenseDialog({
   comment?: string | null;
   variant?: "default" | "outline" | "ghost";
   size?: "sm" | "default";
+  /** Класс кнопки-триггера — например, растянуть её по ширине карточки на телефоне. */
+  className?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [pending, start] = useTransition();
@@ -146,7 +149,7 @@ export function ExpenseDialog({
       }}
     >
       <DialogTrigger asChild>
-        <Button size={size} variant={variant}>
+        <Button size={size} variant={variant} className={className}>
           {trigger}
         </Button>
       </DialogTrigger>

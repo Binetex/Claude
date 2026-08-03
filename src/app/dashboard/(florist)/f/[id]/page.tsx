@@ -6,24 +6,42 @@ import { getForFlorist } from "@/modules/orders/queries";
 import { prisma } from "@/lib/db";
 import { listActiveHandoffTargets } from "@/modules/florists/service";
 import { loadOrderCommunicationsCard } from "@/integrations/quo/communicationsService";
+import {
+  addOrderExpenseAction,
+  removeOrderExpenseAction,
+  updateOrderExpenseAction,
+} from "@/app/dashboard/orderExpenseActions";
 import { OrderCommunications } from "@/app/dashboard/(owner)/orders/[id]/OrderCommunications";
 import { ContactEditDialog } from "@/app/dashboard/(owner)/orders/[id]/ContactEditDialog";
 import { CardNoteCard } from "@/app/dashboard/(owner)/orders/[id]/CardNoteCard";
-import { OrderStatusDateControls } from "@/app/dashboard/(owner)/orders/[id]/OrderStatusDateControls";
+import { DeliveryDateDialog } from "@/app/dashboard/(owner)/orders/[id]/DeliveryDateDialog";
+import { OrderStatusCard } from "@/app/dashboard/(owner)/orders/[id]/OrderStatusDateControls";
 import { DeliveryStatusCard } from "@/app/dashboard/(owner)/orders/[id]/DeliveryStatusCard";
 import { OrderPickupCard } from "@/app/dashboard/(owner)/orders/[id]/OrderPickupCard";
 import { OrderPageShell } from "@/components/orders/OrderPageShell";
-import { FloristPriceCard, FloristQuickActions } from "@/components/orders/FloristPriceCard";
+import { FloristPriceCard } from "@/components/orders/FloristPriceCard";
+import { Calculator, Contact, MapPin, Package, Phone, UserRound } from "lucide-react";
 import { Card, CardHeader, CardTitle, CardBody } from "@/components/ui/Card";
 import { OrderStatusBadge } from "@/components/StatusBadge";
-import { ZoomableImage } from "@/components/ImageLightbox";
 import { OrderItemImages } from "@/components/OrderItemImages";
 import { formatMoney } from "@/lib/money";
 import { OrderItemComposition } from "@/components/OrderItemComposition";
-import { FloristOrderActions } from "./FloristOrderActions";
+import { FloristQuickActions } from "./FloristQuickActions";
+import { BouquetPhotoButton } from "./BouquetPhotoButton";
 
 export const dynamic = "force-dynamic";
 
+/**
+ * Заказ в кабинете флориста.
+ *
+ * Порядок блоков — по тому, что нужно для изготовления: сначала что делать (товары),
+ * потом кому и куда (получатель/заказчик), затем открытка, переписка и доставка.
+ * Справа — цена, статус и быстрые действия; всё, что не требует решения, не занимает
+ * отдельную карточку.
+ *
+ * Своей вёрстки здесь минимум: шапка, карточки контактов и блоки доставки/открытки/SMS
+ * общие с владельцем и колл-центром (см. OrderPageShell и соседние компоненты).
+ */
 export default async function FloristOrderPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const user = await requireFlorist();
@@ -46,26 +64,44 @@ export default async function FloristOrderPage({ params }: { params: Promise<{ i
       badges={<OrderStatusBadge status={order.orderStatus} paymentFailed={order.paymentFailed} />}
       deliveryDate={order.deliveryDate}
       deliveryWindow={order.deliveryWindow}
+      rightFirstOnMobile
+      deliveryAction={
+        <DeliveryDateDialog
+          orderId={order.id}
+          updatedAt={order.updatedAt}
+          deliveryDate={format(new Date(order.deliveryDate), "yyyy-MM-dd")}
+          deliveryWindow={order.deliveryWindow}
+        />
+      }
       left={
         <>
-          {/* Открытка и заметка — важное, наверху (как у владельца). */}
-          <CardNoteCard orderId={order.id} updatedAt={order.updatedAt} cardMessage={order.cardMessage} customerNote={order.customerNote} showPrint />
-
-          {/* Товары. Цены — только свои: цена заказчика флористу не отдаётся сериализатором. */}
+          {/* Товары — первое, что нужно флористу. Цены только свои: цена заказчика ему не отдаётся. */}
           <Card>
-            <CardHeader><CardTitle>Товары</CardTitle></CardHeader>
+            <CardHeader className="py-2.5"><CardTitle icon={Package}>Товары</CardTitle></CardHeader>
             <CardBody className="p-0">
               <ul className="divide-y divide-slate-100">
                 {order.items.map((it) => (
-                  <li key={it.id} className="flex items-center gap-3 px-4 py-3">
+                  <li key={it.id} className="flex items-center gap-3 px-4 py-2.5">
                     <OrderItemImages image={it.image} variantImage={it.variantImage} size="h-14 w-14" />
                     <div className="min-w-0 flex-1">
-                      <div className="text-sm font-medium text-slate-800">{it.name} × {it.quantity}</div>
-                      <OrderItemComposition variantName={it.variantName} floristComposition={it.floristComposition} />
+                      <div className="flex items-center gap-2 text-sm font-medium text-slate-800">
+                        <span className="truncate">{it.name}</span>
+                        {/* Количество отдельным чипом: «× 1» в потоке текста сливается с названием. */}
+                        <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[11px] font-semibold text-slate-500 tabular-nums">
+                          ×{it.quantity}
+                        </span>
+                      </div>
+                      {/* Флористу подсказка «состав не указан» не адресована: заполнить каталог
+                          он не может, а строка повторялась бы у каждой позиции. */}
+                      <OrderItemComposition
+                        variantName={it.variantName}
+                        floristComposition={it.floristComposition}
+                        showMissingHint={false}
+                      />
                     </div>
-                    <div className="text-right text-sm whitespace-nowrap">
-                      <div className="text-slate-700">{formatMoney(it.floristItemPrice)}</div>
-                      <div className="text-xs text-slate-400">вам</div>
+                    <div className="text-right whitespace-nowrap">
+                      <div className="text-sm font-medium text-slate-800 tabular-nums">{formatMoney(it.floristItemPrice)}</div>
+                      <div className="text-[11px] text-slate-400">вам</div>
                     </div>
                   </li>
                 ))}
@@ -76,8 +112,8 @@ export default async function FloristOrderPage({ params }: { params: Promise<{ i
           {/* Получатель / Заказчик — редактируемо (OCC). */}
           <div className="grid gap-4 md:grid-cols-2">
             <Card>
-              <CardHeader className="flex items-center justify-between">
-                <CardTitle>Получатель</CardTitle>
+              <CardHeader className="flex items-center justify-between py-2.5">
+                <CardTitle icon={UserRound}>Получатель</CardTitle>
                 <ContactEditDialog
                   kind="recipient"
                   orderId={order.id}
@@ -93,15 +129,22 @@ export default async function FloristOrderPage({ params }: { params: Promise<{ i
                   }}
                 />
               </CardHeader>
-              <CardBody className="space-y-1 text-sm">
+              <CardBody className="space-y-1.5 text-sm">
                 <div className="font-medium text-slate-800">{order.recipientName}</div>
-                <div className="text-slate-600">{order.recipientPhone || "—"}</div>
-                <div className="text-slate-600">{order.addressLine}{order.apartment ? `, ${order.apartment}` : ""}, {order.city} {order.zip}</div>
+                {/* Иконки-якоря: телефон и адрес различаются с одного взгляда, без чтения. */}
+                <div className="flex items-center gap-2 text-slate-600">
+                  <Phone aria-hidden className="size-3.5 shrink-0 text-slate-400" />
+                  <span className="tabular-nums">{order.recipientPhone || "—"}</span>
+                </div>
+                <div className="flex items-start gap-2 text-slate-600">
+                  <MapPin aria-hidden className="mt-0.5 size-3.5 shrink-0 text-slate-400" />
+                  <span>{order.addressLine}{order.apartment ? `, ${order.apartment}` : ""}, {order.city} {order.zip}</span>
+                </div>
               </CardBody>
             </Card>
             <Card>
-              <CardHeader className="flex items-center justify-between">
-                <CardTitle>Заказчик</CardTitle>
+              <CardHeader className="flex items-center justify-between py-2.5">
+                <CardTitle icon={Contact}>Заказчик</CardTitle>
                 <ContactEditDialog
                   kind="sender"
                   orderId={order.id}
@@ -109,9 +152,12 @@ export default async function FloristOrderPage({ params }: { params: Promise<{ i
                   initial={{ senderName: order.senderName, senderPhone: order.senderPhone }}
                 />
               </CardHeader>
-              <CardBody className="space-y-1 text-sm">
+              <CardBody className="space-y-1.5 text-sm">
                 <div className="font-medium text-slate-800">{order.senderName}</div>
-                <div className="text-slate-600">{order.senderPhone || "—"}</div>
+                <div className="flex items-center gap-2 text-slate-600">
+                  <Phone aria-hidden className="size-3.5 shrink-0 text-slate-400" />
+                  <span className="tabular-nums">{order.senderPhone || "—"}</span>
+                </div>
               </CardBody>
             </Card>
           </div>
@@ -119,9 +165,9 @@ export default async function FloristOrderPage({ params }: { params: Promise<{ i
           {/* Полная раскладка — только если владелец включил режим FULL для этого флориста. */}
           {order.finance && (
             <Card>
-              <CardHeader><CardTitle>Полная раскладка заказа</CardTitle></CardHeader>
+              <CardHeader className="py-2.5"><CardTitle icon={Calculator}>Полная раскладка заказа</CardTitle></CardHeader>
               <CardBody>
-                <div className="grid grid-cols-2 gap-x-6 gap-y-1.5 text-sm md:grid-cols-3">
+                <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-sm md:grid-cols-3">
                   <FinRow label="Сумма товаров" value={formatMoney(order.finance.itemsTotal)} />
                   <FinRow label="Итог заказчика" value={formatMoney(order.finance.customerTotal)} />
                   <FinRow label="Налог" value={formatMoney(order.finance.tax)} />
@@ -133,35 +179,17 @@ export default async function FloristOrderPage({ params }: { params: Promise<{ i
             </Card>
           )}
 
-          {/* Статус доставки — полный блок (инструкции + курьер + Burq). */}
-          <DeliveryStatusCard
+          {/* Открытка и заметки — сворачиваемо: пустая открытка не должна занимать экран. */}
+          <CardNoteCard
             orderId={order.id}
-            orderStatus={order.orderStatus}
-            deliveryInstructions={order.deliveryInstructions}
-            trackingUrl={order.trackingUrl}
-            bouquetPhotoUrl={order.bouquetPhotoUrl}
-            deliveryPhotoUrl={order.deliveryPhotoUrl}
-            storeTimeZone={comm.storeTimeZone}
+            updatedAt={order.updatedAt}
+            cardMessage={order.cardMessage}
+            customerNote={order.customerNote}
+            showPrint
+            collapsible
           />
 
-          {/* Откуда курьер забирает этот заказ; переключение пересоздаёт черновик Burq. */}
-          <Card>
-            <CardBody>
-              <OrderPickupCard orderId={order.id} />
-            </CardBody>
-          </Card>
-
-          {/* Фото готового букета */}
-          {order.bouquetPhotoUrl && (
-            <Card>
-              <CardHeader><CardTitle>Фото готового букета</CardTitle></CardHeader>
-              <CardBody>
-                <ZoomableImage src={order.bouquetPhotoUrl} alt="" className="h-40 w-full rounded-lg object-cover" />
-              </CardBody>
-            </Card>
-          )}
-
-          {/* Общение (SMS/звонки) — единый блок QUO. */}
+          {/* Общение (SMS/звонки) — единый блок QUO, открыт сразу. */}
           <OrderCommunications
             orderId={order.id}
             customerPhone={order.senderPhone}
@@ -170,6 +198,19 @@ export default async function FloristOrderPage({ params }: { params: Promise<{ i
             communications={comm.communications}
             storeTimeZone={comm.storeTimeZone}
             unread={comm.unread}
+          />
+
+          {/* Доставка целиком: курьер, Burq, точка забора и фото букета — в одном блоке. */}
+          <DeliveryStatusCard
+            orderId={order.id}
+            orderStatus={order.orderStatus}
+            deliveryInstructions={order.deliveryInstructions}
+            trackingUrl={order.trackingUrl}
+            bouquetPhotoUrl={order.bouquetPhotoUrl}
+            deliveryPhotoUrl={order.deliveryPhotoUrl}
+            storeTimeZone={comm.storeTimeZone}
+            pickup={<OrderPickupCard orderId={order.id} />}
+            bouquetPhotoAction={<BouquetPhotoButton orderId={order.id} photoUrl={order.bouquetPhotoUrl} />}
           />
         </>
       }
@@ -180,27 +221,17 @@ export default async function FloristOrderPage({ params }: { params: Promise<{ i
               не меняются: floristTotal по-прежнему приходит, просто не отображается. */}
           {order.financeVisibility !== "FULL" && <FloristPriceCard floristTotal={order.floristTotal} />}
 
-          <FloristQuickActions mapsUrl={mapsUrl} recipientPhone={order.recipientPhone} />
+          <OrderStatusCard orderId={order.id} updatedAt={order.updatedAt} orderStatus={order.orderStatus} />
 
-          {/* Основные кнопки процесса */}
-          <Card>
-            <CardBody>
-              <FloristOrderActions orderId={order.id} orderStatus={order.orderStatus} florists={handoffTargets} />
-            </CardBody>
-          </Card>
-
-
-          {/* Дополнительные расходы по заказу: повторная доставка, переделка, компенсация. */}
-          <OrderExpensesSection orderId={order.id} />
-
-          {/* Статус заказа + дата/время доставки — редактируемо (OCC). */}
-          <OrderStatusDateControls
+          <FloristQuickActions
             orderId={order.id}
-            updatedAt={order.updatedAt}
-            orderStatus={order.orderStatus}
-            deliveryDate={format(new Date(order.deliveryDate), "yyyy-MM-dd")}
-            deliveryWindow={order.deliveryWindow}
+            mapsUrl={mapsUrl}
+            handoffTargets={handoffTargets}
+            expenseActions={{ add: addOrderExpenseAction, update: updateOrderExpenseAction, remove: removeOrderExpenseAction }}
           />
+
+          {/* Расходы появляются только когда они есть: добавление — в быстрых действиях. */}
+          <OrderExpensesSection orderId={order.id} hideWhenEmpty />
         </>
       }
     />

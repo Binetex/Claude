@@ -1,6 +1,7 @@
 "use server";
 import { revalidatePath } from "next/cache";
 import { requireFlorist } from "@/lib/rbac";
+import { prisma } from "@/lib/db";
 import { imageStorage } from "@/lib/storage";
 import { floristSetCardMessage } from "@/modules/print/cardEdit";
 import { CARD_MESSAGE_MAX } from "@/lib/print/cardText";
@@ -41,6 +42,38 @@ export async function floristHandoff(orderId: string, targetFloristId: string): 
   revalidatePath("/dashboard/f");
   revalidatePath(`/dashboard/f/${orderId}`);
   return r;
+}
+
+/**
+ * Флорист прикладывает фото готового букета. Статус заказа НЕ трогает: «готов» теперь
+ * выражается статусом, а фото — самостоятельное действие, доступное и после смены статуса.
+ *
+ * Чужой заказ отсекается по currentFloristId в самом updateMany: без совпадения ни одна
+ * строка не обновится, и наружу уходит одинаковая ошибка (причину не раскрываем).
+ */
+export async function floristUploadBouquetPhoto(
+  orderId: string,
+  photoDataUrl: string
+): Promise<{ ok?: boolean; error?: string }> {
+  const user = await requireFlorist();
+  if (!photoDataUrl?.startsWith("data:image/")) return { error: "Некорректное изображение." };
+
+  let photoUrl: string;
+  try {
+    photoUrl = await imageStorage.saveImage(photoDataUrl);
+  } catch (err) {
+    console.error(`[florist] не удалось сохранить фото букета для заказа ${orderId}:`, err);
+    return { error: "Не удалось сохранить фото. Попробуйте ещё раз." };
+  }
+
+  const { count } = await prisma.order.updateMany({
+    where: { id: orderId, currentFloristId: user.floristId },
+    data: { bouquetPhotoUrl: photoUrl },
+  });
+  if (count === 0) return { error: "Заказ недоступен." };
+
+  revalidatePath(`/dashboard/f/${orderId}`);
+  return { ok: true };
 }
 
 export async function floristStartWork(orderId: string) {

@@ -14,7 +14,18 @@ import {
 } from "@/app/dashboard/orderExpenseActions";
 import { OrderExpensesCard } from "./OrderExpensesCard";
 
-export async function OrderExpensesSection({ orderId }: { orderId: string }) {
+export async function OrderExpensesSection({
+  orderId,
+  hideWhenEmpty = false,
+}: {
+  orderId: string;
+  /**
+   * Не показывать блок, пока расходов нет. Так сделано в кабинете флориста: добавление
+   * живёт в «Быстрых действиях», и пустая карточка с объяснением, что такое доп. расход,
+   * просто занимала экран, ничего не сообщая.
+   */
+  hideWhenEmpty?: boolean;
+}) {
   const user = await requireUser();
   const view = await listOrderExpenses(orderId, {
     userId: user.id,
@@ -24,6 +35,7 @@ export async function OrderExpensesSection({ orderId }: { orderId: string }) {
 
   // Тому, кто не может править, пустой блок не нужен: он ничего не сообщает.
   if (!view.canEdit && view.rows.length === 0) return null;
+  if (hideWhenEmpty && view.rows.length === 0) return null;
 
   return (
     <OrderExpensesCard

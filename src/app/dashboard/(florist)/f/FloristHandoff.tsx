@@ -16,8 +16,22 @@ const REASONS: Record<string, string> = {
  * Передача заказа выбранному активному флористу (замена простого «Отказаться»). Флорист выбирает,
  * кому передать (как владелец при переназначении). `florists` — активные, кроме себя.
  */
-export function FloristHandoff({ orderId, florists, btnClass = "" }: { orderId: string; florists: { id: string; name: string }[]; btnClass?: string }) {
-  const [open, setOpen] = useState(false);
+export function FloristHandoff({
+  orderId,
+  florists,
+  btnClass = "",
+  embedded = false,
+  onDone,
+}: {
+  orderId: string;
+  florists: { id: string; name: string }[];
+  btnClass?: string;
+  /** Форма уже внутри модалки — собственная кнопка-триггер не нужна. */
+  embedded?: boolean;
+  /** Вызывается после успешной передачи и по «Отмена» — закрыть внешнюю модалку. */
+  onDone?: () => void;
+}) {
+  const [open, setOpen] = useState(embedded);
   const [target, setTarget] = useState("");
   const [pending, start] = useTransition();
 
@@ -36,7 +50,7 @@ export function FloristHandoff({ orderId, florists, btnClass = "" }: { orderId: 
   }
 
   return (
-    <div className="col-span-2 space-y-2" onClick={(e) => e.preventDefault()}>
+    <div className={embedded ? "space-y-2" : "col-span-2 space-y-2"} onClick={(e) => e.preventDefault()}>
       <select
         value={target}
         onChange={(e) => setTarget(e.target.value)}
@@ -53,8 +67,12 @@ export function FloristHandoff({ orderId, florists, btnClass = "" }: { orderId: 
           onClick={() =>
             start(async () => {
               const r = await floristHandoff(orderId, target);
-              if (r?.ok) { toast.success("Заказ передан"); setOpen(false); setTarget(""); }
-              else toast.error(REASONS[r?.reason ?? ""] ?? "Не удалось передать заказ");
+              if (r?.ok) {
+                toast.success("Заказ передан");
+                setTarget("");
+                if (embedded) onDone?.();
+                else setOpen(false);
+              } else toast.error(REASONS[r?.reason ?? ""] ?? "Не удалось передать заказ");
             })
           }
           className="rounded-lg bg-amber-600 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-700 disabled:opacity-60"
@@ -64,7 +82,7 @@ export function FloristHandoff({ orderId, florists, btnClass = "" }: { orderId: 
         <button
           type="button"
           disabled={pending}
-          onClick={() => { setOpen(false); setTarget(""); }}
+          onClick={() => { setTarget(""); if (embedded) onDone?.(); else setOpen(false); }}
           className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50"
         >
           Отмена

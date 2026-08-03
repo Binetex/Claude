@@ -34,7 +34,49 @@ export function FlowerExpenseTable({
   compact?: boolean;
 }) {
   return (
-    <div className="overflow-x-auto">
+    <>
+      {/* Телефон: карточка на день вместо строки таблицы. В восьми колонках кнопка «Внести»
+          оказывалась крайней справа, и внести закупку можно было только домотав таблицу вбок —
+          то есть ровно то действие, ради которого на страницу и заходят, было спрятано. */}
+      <ul className="divide-y divide-slate-100 md:hidden">
+        {rows.map((r) => (
+          <li key={r.day} className="px-4 py-3">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <Link href={`${hrefBase}/${r.day}`} className="font-medium text-slate-800 tabular-nums hover:underline">
+                  {r.day}
+                </Link>
+                <div className="mt-1">
+                  <Badge className={statusMeta[r.status].className}>{statusMeta[r.status].label}</Badge>
+                </div>
+              </div>
+              <div className="shrink-0 text-right">
+                <div className="text-base font-semibold text-slate-900 tabular-nums">
+                  {r.expense ? formatCents(r.expense.amountCents) : <span className="text-slate-300">—</span>}
+                </div>
+                <div className="text-xs text-slate-400 tabular-nums">заказов {r.ordersTotal}</div>
+              </div>
+            </div>
+
+            {r.expense?.comment && <p className="mt-1 truncate text-xs text-slate-500">{r.expense.comment}</p>}
+
+            <div className="mt-2 flex items-center gap-2">
+              <ExpenseDialog
+                actions={actions}
+                trigger={r.expense ? "Изменить" : "Внести"}
+                day={r.day}
+                amountCents={r.expense?.amountCents ?? null}
+                comment={r.expense?.comment ?? null}
+                variant={r.expense ? "outline" : "default"}
+                className="flex-1"
+              />
+              {r.expense && <DeleteExpenseDialog actions={actions} day={r.day} />}
+            </div>
+          </li>
+        ))}
+      </ul>
+
+      <div className="hidden overflow-x-auto md:block">
       <table className="w-full text-sm">
         <thead>
           <tr className="border-b border-slate-100 text-left text-[11px] tracking-wide text-slate-400 uppercase">
@@ -43,8 +85,6 @@ export function FlowerExpenseTable({
             <th className="px-3 py-2.5 text-right font-medium">Закупка</th>
             <th className="px-3 py-2.5 font-medium">Комментарий</th>
             <th className="px-3 py-2.5 text-right font-medium">Заказов</th>
-            <th className="px-3 py-2.5 text-right font-medium">Прибыль дня</th>
-            <th className="px-3 py-2.5 text-right font-medium">Заработок</th>
             {!compact && (
               <>
                 <th className="px-3 py-2.5 font-medium">Создал</th>
@@ -72,16 +112,6 @@ export function FlowerExpenseTable({
                 {r.expense?.comment ?? ""}
               </td>
               <td className="px-3 py-2.5 text-right tabular-nums text-slate-600">{r.ordersTotal}</td>
-              <td className="px-3 py-2.5 text-right tabular-nums text-slate-600">
-                {r.complete ? formatCents(r.distributableCents) : <span className="text-slate-300">—</span>}
-              </td>
-              <td className="px-3 py-2.5 text-right whitespace-nowrap tabular-nums">
-                {r.shareCents != null ? (
-                  <span className="font-medium text-emerald-700">{formatCents(r.shareCents)}</span>
-                ) : (
-                  <span className="text-slate-300">—</span>
-                )}
-              </td>
               {!compact && (
                 <>
                   <td className="px-3 py-2.5 text-xs text-slate-500">
@@ -122,6 +152,7 @@ export function FlowerExpenseTable({
           ))}
         </tbody>
       </table>
-    </div>
+      </div>
+    </>
   );
 }

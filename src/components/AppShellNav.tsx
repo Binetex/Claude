@@ -1,7 +1,20 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, ClipboardList, Store, Package, Flower2, Users, Headphones, Wallet, Circle } from "lucide-react";
+import {
+  LayoutDashboard,
+  ClipboardList,
+  Store,
+  Package,
+  Flower2,
+  Users,
+  Headphones,
+  Wallet,
+  ShoppingBasket,
+  MapPin,
+  Printer,
+  Circle,
+} from "lucide-react";
 import { cn } from "@/lib/cn";
 import type { NavItem } from "./AppShell";
 
@@ -11,6 +24,11 @@ function iconFor(href: string) {
   if (href.includes("/orders") || href.endsWith("/f")) return ClipboardList;
   if (href.includes("/sites")) return Store;
   if (href.includes("/products")) return Package;
+  if (href.includes("/print")) return Printer;
+  if (href.includes("/pickup")) return MapPin;
+  // Закупка цветов проверяется РАНЬШЕ финансов: она лежит и внутри "/dashboard/finance/…",
+  // и отдельным пунктом у флориста, а кошелёк там означал бы «раздел про деньги вообще».
+  if (href.includes("/flower-expenses")) return ShoppingBasket;
   // Проверка финансов идёт РАНЬШЕ флористов: у "/dashboard/finance/florists"
   // иначе выиграла бы иконка флористов, и раздел выглядел бы их дубликатом.
   if (href.includes("/finance")) return Wallet;

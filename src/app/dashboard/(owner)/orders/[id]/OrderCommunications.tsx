@@ -1,5 +1,6 @@
 "use client";
 import { useState } from "react";
+import { MessageSquare } from "lucide-react";
 import { Card, CardHeader, CardTitle, CardBody } from "@/components/ui/Card";
 import { Button } from "@/components/ui/button";
 import { sendOrderSmsAction } from "./commActions";
@@ -74,7 +75,7 @@ export function OrderCommunications({
 
   return (
     <Card>
-      <CardHeader><CardTitle>Общение (SMS)</CardTitle></CardHeader>
+      <CardHeader className="py-2.5"><CardTitle icon={MessageSquare}>Общение (SMS)</CardTitle></CardHeader>
       <CardBody className="space-y-3 text-sm">
         {/* Вкладки по стороне: Получатель слева (по умолчанию), Заказчик справа. */}
         <div className="flex gap-2">
@@ -118,8 +119,10 @@ export function OrderCommunications({
           {result?.ok && <p className="text-xs text-emerald-700">Сообщение {result.status === "SENT" ? "отправлено" : "поставлено в отправку"}.</p>}
         </form>
 
-        {/* История ТОЛЬКО выбранной стороны (не смешиваем номера). Пустая — своё состояние. */}
-        <div className="border-t border-slate-100 pt-2">
+        {/* История ТОЛЬКО выбранной стороны (не смешиваем номера). Пустая — своё состояние.
+            Высота ограничена: длинная переписка иначе растягивает страницу на несколько
+            экранов и уводит блок доставки далеко вниз. */}
+        <div className="max-h-80 overflow-y-auto border-t border-slate-100 pt-2">
           <CommunicationTimeline items={items} storeTimeZone={storeTimeZone} inboundLabel={active.label} />
         </div>
       </CardBody>

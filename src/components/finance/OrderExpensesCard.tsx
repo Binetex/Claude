@@ -56,20 +56,35 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
   );
 }
 
-function ExpenseDialog({
+export function ExpenseDialog({
   actions,
   orderId,
   trigger,
   triggerVariant = "outline",
+  triggerNode,
   expense,
+  open: openProp,
+  onOpenChange,
 }: {
   actions: OrderExpenseActions;
   orderId: string;
   trigger: string;
   triggerVariant?: "default" | "outline" | "ghost";
+  /** Свой триггер вместо обычной кнопки — например, квадратная иконка «Быстрых действий». */
+  triggerNode?: React.ReactNode;
   expense?: OrderExpenseDto;
+  /**
+   * Управляемый режим: диалог открывает кто-то снаружи, своего триггера здесь нет.
+   * Нужен там, где кнопка живёт отдельно от формы — например, в сетке «Быстрых действий»
+   * рядом с картой и звонком.
+   */
+  open?: boolean;
+  onOpenChange?: (v: boolean) => void;
 }) {
-  const [open, setOpen] = useState(false);
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
+  const controlled = openProp !== undefined;
+  const open = controlled ? openProp : uncontrolledOpen;
+  const setOpen = (v: boolean) => (controlled ? onOpenChange?.(v) : setUncontrolledOpen(v));
   const [pending, start] = useTransition();
   const [description, setDescription] = useState(expense?.description ?? "");
 
@@ -78,11 +93,15 @@ function ExpenseDialog({
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <Button size="sm" variant={triggerVariant}>
-          {trigger}
-        </Button>
-      </DialogTrigger>
+      {!controlled && (
+        <DialogTrigger asChild>
+          {triggerNode ?? (
+            <Button size="sm" variant={triggerVariant}>
+              {trigger}
+            </Button>
+          )}
+        </DialogTrigger>
+      )}
       <DialogContent>
         <DialogHeader>
           <DialogTitle>{editing ? "Изменить расход" : "Добавить расход"}</DialogTitle>
