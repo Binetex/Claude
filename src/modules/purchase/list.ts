@@ -21,6 +21,10 @@ export type PurchaseItem = {
  *  - оплата не REFUNDED (PARTIALLY_REFUNDED остаётся — частичный возврат не отменяет заказ).
  * Для флориста — только назначенные ему заказы; для владельца — все.
  * Пустой snapshot не скрываем (composition = null), чтобы было видно, что состав нужно заполнить.
+ *
+ * Позиции НЕ-букеты (ваза, подарок, открытка, прочее — всё, кроме FLOWER_PRODUCT) состава не
+ * имеют: закупать по ним нечего. Вместо состава показываем название самого товара. Позиции без
+ * классификации (financialType не задан) ведут себя как раньше — букет по умолчанию.
  */
 export async function getTodayPurchaseList(opts: { floristId?: string } = {}): Promise<PurchaseItem[]> {
   const orders = await prisma.order.findMany({
@@ -33,10 +37,12 @@ export async function getTodayPurchaseList(opts: { floristId?: string } = {}): P
       orderNumber: true,
       deliveryDate: true,
       site: { select: { timezone: true } },
-      items: { select: { name: true, variantName: true, quantity: true, floristCompositionSnapshot: true, image: true, parentImageUrl: true, variantImageUrl: true } },
+      items: { select: { name: true, variantName: true, quantity: true, floristCompositionSnapshot: true, image: true, parentImageUrl: true, variantImageUrl: true, productId: true, variantId: true } },
     },
     orderBy: { deliveryDate: "asc" },
   });
+
+  const isFlower = await buildFlowerLookup(orders.flatMap((o) => o.items));
 
   const result: PurchaseItem[] = [];
   for (const o of orders) {
@@ -50,13 +56,36 @@ export async function getTodayPurchaseList(opts: { floristId?: string } = {}): P
         productName: it.name,
         variantName: it.variantName,
         quantity: it.quantity,
-        composition: it.floristCompositionSnapshot,
+        // Не-букет закупать не нужно — вместо состава показываем название товара.
+        composition: isFlower(it) ? it.floristCompositionSnapshot : it.name,
         // Закупка — агрегированный список: только родительское фото, без фото вариации.
         image: getOrderItemImages(it).primary,
       });
     }
   }
   return result;
+}
+
+/**
+ * Букет ли позиция. Классификация живёт на варианте (ProductVariant.financialType), а при NULL
+ * наследуется от товара (Product.financialType) — тот же порядок, что и в финансовом модуле.
+ * Ничего не задано → считаем букетом: так список вёл себя до появления классификации.
+ */
+async function buildFlowerLookup(items: { productId: string | null; variantId: string | null }[]) {
+  const productIds = [...new Set(items.map((i) => i.productId).filter((v): v is string => !!v))];
+  const variantIds = [...new Set(items.map((i) => i.variantId).filter((v): v is string => !!v))];
+
+  const [products, variants] = await Promise.all([
+    productIds.length ? prisma.product.findMany({ where: { id: { in: productIds } }, select: { id: true, financialType: true } }) : [],
+    variantIds.length ? prisma.productVariant.findMany({ where: { id: { in: variantIds } }, select: { id: true, financialType: true } }) : [],
+  ]);
+  const byProduct = new Map(products.map((p) => [p.id, p.financialType]));
+  const byVariant = new Map(variants.map((v) => [v.id, v.financialType]));
+
+  return (item: { productId: string | null; variantId: string | null }): boolean => {
+    const type = (item.variantId ? byVariant.get(item.variantId) : null) ?? (item.productId ? byProduct.get(item.productId) : null) ?? null;
+    return type === null || type === "FLOWER_PRODUCT";
+  };
 }
 
 /** Текст для «Копировать список» / печати. Одинаковые строки НЕ объединяются. */
