@@ -14,6 +14,8 @@ import { AirwallexClient, type AirwallexCreds, type AirwallexEnv } from "./clien
  */
 export type AirwallexSettingsView = {
   monitoringEnabled: boolean;
+  /** Подтверждённая оплата переводит заказ в магазине в `processing`. */
+  pushPaidStatusToWoo: boolean;
   clientIdConfigured: boolean;
   apiKeyConfigured: boolean;
   apiKeyMask: string | null;
@@ -32,11 +34,13 @@ export async function loadAirwallexSettings(prisma: PrismaClient, siteId: string
       airwallexMonitoringEnabled: true, airwallexApiClientIdEncrypted: true, airwallexApiKeyEncrypted: true,
       airwallexApiKeyMask: true, airwallexApiEnv: true, airwallexPendingThresholdMin: true,
       airwallexApiVerifiedAt: true, airwallexApiConnStatus: true, airwallexApiErrorSafe: true,
+      pushPaidStatusToWoo: true,
     },
   });
   if (!c) return null;
   return {
     monitoringEnabled: c.airwallexMonitoringEnabled,
+    pushPaidStatusToWoo: c.pushPaidStatusToWoo,
     clientIdConfigured: !!c.airwallexApiClientIdEncrypted,
     apiKeyConfigured: !!c.airwallexApiKeyEncrypted,
     apiKeyMask: c.airwallexApiKeyMask,

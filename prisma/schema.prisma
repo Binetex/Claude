@@ -1430,6 +1430,10 @@ model WooCommerceConnection {
   payLaterMaxWaitMinutes           Int      @default(1440) // сколько ждём финального статуса, иначе предупреждение
   unknownBehavior                  String   @default("HOLD") // HOLD | AWAITING_PAYMENT — поведение при UNKNOWN
 
+  // Мониторинг Airwallex подтвердил оплату (PAID) → проставить заказу в Woo `processing`.
+  // Единственная запись Floremart в чужие заказы, поэтому под отдельным выключателем.
+  pushPaidStatusToWoo Boolean @default(false)
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }

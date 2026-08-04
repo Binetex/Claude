@@ -189,3 +189,15 @@ export async function ownerToggleAirwallexMonitoring(siteId: string, enabled: bo
   revalidatePath("/dashboard/sites");
   return "error" in r ? { error: r.error } : { ok: true, message: enabled ? "Мониторинг включён." : "Мониторинг выключен." };
 }
+
+/**
+ * Разрешить/запретить запись статуса в магазин. Выключатель отдельный от мониторинга:
+ * читать статус платежа и писать в чужой заказ — разные по последствиям вещи, и остановить
+ * вторую надо уметь, не выключая первую.
+ */
+export async function ownerTogglePushPaidStatus(siteId: string, enabled: boolean): Promise<FormState> {
+  await requireRole("OWNER");
+  await prisma.wooCommerceConnection.update({ where: { siteId }, data: { pushPaidStatusToWoo: enabled } });
+  revalidatePath("/dashboard/sites");
+  return { ok: true, message: enabled ? "Статус будет проставляться в магазине." : "Запись статуса в магазин выключена." };
+}

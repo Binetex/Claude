@@ -7,12 +7,18 @@ import {
   HEARTBEAT_AUDIT_MIN, type CheckResult, type NormalizedStatus, type ReconcileState,
 } from "./policy";
 import { publishTelegramNotification } from "@/integrations/telegram/events";
+import { isPushableWooStatus } from "@/integrations/woocommerce/statusPush";
+import { publishWooStatusPush } from "@/integrations/woocommerce/statusPushEvents";
 
 /**
- * Сверка одного заказа с Airwallex. Режим наблюдения: НЕ меняет business status заказа
- * (paymentStatus, paymentClassification, orderStatus), не трогает назначение, SMS, fulfillment,
- * доставку и Woo. Пишет только собственное состояние AirwallexPayment + журнал AirwallexCheck
- * и отправляет уведомления владельцу.
+ * Сверка одного заказа с Airwallex. Сама НЕ меняет business status заказа (paymentStatus,
+ * paymentClassification, orderStatus), не трогает назначение, SMS, fulfillment и доставку.
+ * Пишет собственное состояние AirwallexPayment + журнал AirwallexCheck и уведомляет владельца.
+ *
+ * ЕДИНСТВЕННОЕ исключение из режима наблюдения: подтверждённая оплата (PAID) ставит задачу
+ * перевести заказ в магазине в `processing` — и только если у сайта включён отдельный
+ * выключатель `pushPaidStatusToWoo`. Дальше заказ едет обычным путём приёма вебхука, то есть
+ * решение «оплачен → в работу» по-прежнему принимается в ОДНОМ месте, а не здесь.
  *
  * Вся логика решений — в чистом policy.ts; здесь только ввод-вывод.
  */
@@ -30,7 +36,7 @@ export async function reconcileAirwallexPayment(prisma: PrismaClient, orderId: s
 
   const conn = await prisma.wooCommerceConnection.findUnique({
     where: { siteId: order.siteId },
-    select: { airwallexMonitoringEnabled: true, airwallexPendingThresholdMin: true },
+    select: { airwallexMonitoringEnabled: true, airwallexPendingThresholdMin: true, pushPaidStatusToWoo: true },
   });
   if (!conn?.airwallexMonitoringEnabled) return { outcome: "monitoring_disabled" };
 
@@ -138,6 +144,17 @@ export async function reconcileAirwallexPayment(prisma: PrismaClient, orderId: s
       occurrenceKey: `${orderId}:${rec.paymentIntentId ?? "-"}:${mismatchType}:${plan.patch.normalizedStatus}`,
       context: { mismatchType, normalized: plan.patch.normalizedStatus ?? null, rawStatus: plan.patch.lastRawStatus },
     });
+  }
+
+  // ── Подтверждённая оплата → просим магазин перевести заказ в processing ──
+  // ТОЛЬКО PAID (сырой SUCCEEDED). AUTHORIZED_NOT_CAPTURED сюда не попадает намеренно:
+  // деньги захолдированы, но магазину не пришли, и оплатой это не является.
+  // Сами статус заказа здесь НЕ меняем: его изменит обычный приём, когда Woo отдаст вебхук.
+  // Так переход остаётся в одном месте, а не в двух расходящихся.
+  // Галочку смотрим и здесь, и в обработчике: здесь — чтобы не копить в outbox задачи, которые
+  // заведомо ничего не сделают; там — потому что между постановкой и выполнением её могли снять.
+  if (conn.pushPaidStatusToWoo && plan.patch.normalizedStatus === "PAID" && isPushableWooStatus(order.externalStatus)) {
+    await publishWooStatusPush(prisma, orderId);
   }
 
   return { outcome: mismatchType ? `mismatch:${mismatchType}` : plan.outcome, normalized: plan.patch.normalizedStatus };

@@ -68,6 +68,7 @@ export default async function SitesPage() {
           airwallexMonitoringEnabled: true, airwallexApiClientIdEncrypted: true, airwallexApiKeyEncrypted: true,
           airwallexApiKeyMask: true, airwallexApiEnv: true, airwallexPendingThresholdMin: true,
           airwallexApiVerifiedAt: true, airwallexApiConnStatus: true, airwallexApiErrorSafe: true,
+          pushPaidStatusToWoo: true,
         },
       },
       _count: { select: { orders: true, products: true, wooWebhooks: true } },
@@ -175,6 +176,7 @@ export default async function SitesPage() {
                     siteId={s.id}
                     initial={{
                       monitoringEnabled: s.wooConnection.airwallexMonitoringEnabled,
+                      pushPaidStatusToWoo: s.wooConnection.pushPaidStatusToWoo,
                       clientIdConfigured: !!s.wooConnection.airwallexApiClientIdEncrypted,
                       apiKeyConfigured: !!s.wooConnection.airwallexApiKeyEncrypted,
                       apiKeyMask: s.wooConnection.airwallexApiKeyMask,

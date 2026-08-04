@@ -23,6 +23,8 @@ import { buildShopifyWebhookHandler } from "@/integrations/shopify/customApp/web
 import { shopifyWebhookHandlerDeps } from "@/integrations/shopify/customApp/webhookHandlerDeps";
 import { buildWooWebhookHandler } from "@/integrations/woocommerce/webhookHandler";
 import { buildWooSyncHandler } from "@/integrations/woocommerce/syncDispatch";
+import { buildWooStatusPushHandler } from "@/integrations/woocommerce/statusPushHandler";
+import { WOO_STATUS_PUSH_EVENT } from "@/integrations/woocommerce/statusPushEvents";
 import { buildBurqDraftCreateHandler } from "@/integrations/delivery/burq/outboxHandler";
 import { BURQ_DRAFT_CREATE_EVENT } from "@/integrations/delivery/burq/schedule";
 import { buildBurqWebhookHandler, BURQ_WEBHOOK_EVENT } from "@/integrations/delivery/burq/webhookHandler";
@@ -90,6 +92,9 @@ async function main() {
     // WooCommerce: приём заказов/товаров из webhook и фоновая синхронизация (per-Site credentials).
     "woo.webhook.received": buildWooWebhookHandler(),
     "woo.sync.requested": buildWooSyncHandler(),
+    // WooCommerce: единственная запись Floremart в чужой заказ — перевод в `processing` после
+    // подтверждения оплаты мониторингом Airwallex (под галочкой сайта).
+    [WOO_STATUS_PUSH_EVENT]: buildWooStatusPushHandler(prisma),
     // Burq: отложенное автосоздание черновика доставки (draft-first). Реальные вызовы Burq
     // включаются только при BURQ_ENABLED + креды; иначе mock-клиент (sandbox-gate).
     [BURQ_DRAFT_CREATE_EVENT]: buildBurqDraftCreateHandler(prisma, (event, extra) => log(event, extra)),

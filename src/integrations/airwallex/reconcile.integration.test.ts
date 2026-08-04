@@ -346,3 +346,56 @@ describe("диспетчер", () => {
     expect(await prisma.outboxEvent.count({ where: { aggregateId: order.id, eventType: AIRWALLEX_VERIFY_EVENT } })).toBe(0);
   });
 });
+
+describe("подтверждённая оплата переводит заказ в магазине", () => {
+  const pushes = (orderId: string) =>
+    prisma.outboxEvent.findMany({ where: { aggregateId: orderId, eventType: "woo.status.push_paid" } });
+
+  async function paidOrder(over: Partial<Prisma.OrderUncheckedCreateInput> = {}, push = true) {
+    const siteId = await makeSite();
+    await prisma.wooCommerceConnection.update({ where: { siteId }, data: { pushPaidStatusToWoo: push } });
+    const order = await makeOrder(siteId, over);
+    await withPayment(order.id, siteId);
+    wireApi({ intent: { status: "SUCCEEDED" }, woo: { payment_method: "airwallex_card", date_paid: "2026-08-05", transaction_id: "t1" } });
+    await reconcileAirwallexPayment(prisma, order.id);
+    return order;
+  }
+
+  it("ставит задачу записи в магазин, но САМА статус заказа не меняет", async () => {
+    const order = await paidOrder();
+    expect(await pushes(order.id)).toHaveLength(1);
+
+    // Ключевое свойство схемы: переход «оплачен → в работу» остаётся в приёме вебхука.
+    // Если бы сверка правила заказ сама, у нас было бы два расходящихся места перехода.
+    const after = await prisma.order.findUniqueOrThrow({ where: { id: order.id } });
+    expect(after.paymentStatus).toBe("UNPAID");
+    expect(after.orderStatus).toBe("AWAITING_PAYMENT");
+  });
+
+  it("повторная сверка не плодит вторую запись в магазин", async () => {
+    const order = await paidOrder();
+    await reconcileAirwallexPayment(prisma, order.id);
+    expect(await pushes(order.id)).toHaveLength(1);
+  });
+
+  it("без галочки сайта задача не ставится вовсе", async () => {
+    const order = await paidOrder({}, false);
+    expect(await pushes(order.id)).toHaveLength(0);
+  });
+
+  it("не трогает заказ, который магазин уже перевёл сам", async () => {
+    const order = await paidOrder({ externalStatus: "processing" });
+    expect(await pushes(order.id)).toHaveLength(0);
+  });
+
+  it("неоплаченный платёж в магазин не пишется", async () => {
+    const siteId = await makeSite();
+    await prisma.wooCommerceConnection.update({ where: { siteId }, data: { pushPaidStatusToWoo: true } });
+    const order = await makeOrder(siteId);
+    await withPayment(order.id, siteId);
+    // REQUIRES_CAPTURE → AUTHORIZED_NOT_CAPTURED: деньги захолдированы, но магазину не пришли.
+    wireApi({ intent: { status: "REQUIRES_CAPTURE" } });
+    await reconcileAirwallexPayment(prisma, order.id);
+    expect(await pushes(order.id)).toHaveLength(0);
+  });
+});

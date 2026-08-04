@@ -2,7 +2,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
-import { ownerSaveAirwallex, ownerVerifyAirwallex, ownerToggleAirwallexMonitoring } from "./wooActions";
+import { ownerSaveAirwallex, ownerVerifyAirwallex, ownerToggleAirwallexMonitoring, ownerTogglePushPaidStatus } from "./wooActions";
 import type { AirwallexSettingsView } from "@/integrations/airwallex/settings";
 
 /**
@@ -95,9 +95,27 @@ export function AirwallexMonitoringPanel({ siteId, initial }: { siteId: string; 
         {msg && <span className={msg.ok ? "text-xs text-emerald-700" : "text-xs text-red-600"}>{msg.text}</span>}
       </div>
 
+      {/* Запись в магазин — отдельно от чтения: включается только поверх работающего мониторинга. */}
+      <label className="flex items-start gap-1.5 text-xs text-slate-600">
+        <input
+          type="checkbox" className="mt-0.5 h-4 w-4"
+          checked={initial.pushPaidStatusToWoo}
+          disabled={pending || (!initial.monitoringEnabled && !initial.pushPaidStatusToWoo)}
+          onChange={(e) => run(() => ownerTogglePushPaidStatus(siteId, e.target.checked))}
+        />
+        <span>
+          Проставлять оплату в магазине
+          <span className="block text-[11px] text-slate-400">
+            Когда Airwallex подтвердит оплату (SUCCEEDED), заказу в WooCommerce ставится
+            «processing» — и он уходит флористу обычным путём. Захолдированные, но не снятые
+            платежи оплатой не считаются.
+          </span>
+        </span>
+      </label>
+
       <p className="text-[11px] text-slate-400">
         {verified
-          ? `Проверено ${new Date(initial.verifiedAt!).toLocaleString("ru-RU")}. Мониторинг только читает статус платежа — заказы в работу не переводит.`
+          ? `Проверено ${new Date(initial.verifiedAt!).toLocaleString("ru-RU")}. Без галочки «Проставлять оплату в магазине» мониторинг только читает статус платежа и заказы в работу не переводит.`
           : "Включить мониторинг можно после успешного Verify. Credentials обратно не показываются; пустое поле не стирает существующее."}
       </p>
       {initial.errorSafe && !msg && <p className="text-[11px] text-red-600">{initial.errorSafe}</p>}
