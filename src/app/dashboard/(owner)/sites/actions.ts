@@ -10,6 +10,12 @@ import {
 } from "@/integrations/shopify/customApp/management";
 import { registerWebhooks, REQUIRED_WEBHOOK_TOPICS } from "@/integrations/shopify/customApp/webhookRegistration";
 import { checkConnection } from "@/integrations/shopify/customApp/connection";
+import {
+  getSiteDeletionImpact,
+  deleteSiteCompletely,
+  SiteDeletionError,
+  type SiteDeletionImpact,
+} from "@/modules/sites/deletion";
 import { isCredentialCryptoConfigured } from "@/lib/crypto/secretBox";
 import { prisma } from "@/lib/db";
 import { isValidTimeZone } from "@/lib/tz";
@@ -148,4 +154,38 @@ export async function ownerDisconnectSite(siteId: string): Promise<void> {
   await requireRole("OWNER");
   await disconnectSite(siteId);
   revalidatePath("/dashboard/sites");
+}
+
+/**
+ * Что произойдёт при полном удалении магазина. Ничего не меняет — диалог подтверждения
+ * запрашивает это перед тем, как показать кнопку, чтобы человек видел числа, а не общие
+ * слова «будут удалены связанные данные».
+ */
+export async function ownerGetSiteDeletionImpact(siteId: string): Promise<SiteDeletionImpact | null> {
+  await requireRole("OWNER");
+  return getSiteDeletionImpact(siteId);
+}
+
+/**
+ * Полное удаление магазина. Необратимо.
+ *
+ * Проверка заказов сидит в модуле и повторяется здесь на свежих данных: страница могла
+ * быть открыта давно, а за это время в магазин мог прийти первый заказ.
+ */
+export async function ownerDeleteSite(siteId: string): Promise<FormState> {
+  await requireRole("OWNER");
+  try {
+    const removed = await deleteSiteCompletely(siteId);
+    revalidatePath("/dashboard/sites");
+    // Магазин исчезает из списков заказов, дашборда и финансов — обновляем и их.
+    revalidatePath("/dashboard/orders");
+    revalidatePath("/dashboard");
+    return {
+      ok: true,
+      message: `Магазин «${removed.name}»${removed.domain ? ` (${removed.domain})` : ""} удалён.`,
+    };
+  } catch (e) {
+    if (e instanceof SiteDeletionError) return { error: e.message };
+    throw e;
+  }
 }

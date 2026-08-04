@@ -4,6 +4,7 @@ import { Card, CardHeader, CardBody } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { SiteConnectPanel } from "./SiteConnectPanel";
 import { SiteCardActions } from "./SiteCardActions";
+import { DeleteSiteDialog } from "./DeleteSiteDialog";
 import { SiteNameForm } from "./SiteNameForm";
 import { SiteSyncControls } from "./SiteSyncControls";
 import { WooSiteControls } from "./WooSiteControls";
@@ -261,6 +262,14 @@ export default async function SitesPage() {
                   <SiteSyncControls siteId={s.id} initial={snapshot(s.syncs)} />
                 </div>
               )}
+
+              {/* Удаление стоит у ВСЕХ магазинов, а не только у подключённых: чаще всего
+                  удаляют как раз незавершённое подключение — домен ввели с ошибкой, магазин
+                  так и не активировался, а в списке он остался дубликатом. Диалог сам
+                  посчитает связи и не даст удалить магазин с заказами. */}
+              <div className="flex justify-end border-t border-slate-100 pt-3">
+                <DeleteSiteDialog siteId={s.id} siteName={s.name} />
+              </div>
             </CardBody>
           </Card>
         ))}
