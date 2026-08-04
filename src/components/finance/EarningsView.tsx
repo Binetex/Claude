@@ -78,7 +78,7 @@ export async function EarningsView({
     floristBalance(floristId),
     floristEarningTotals(floristId),
     floristEarningsRange(floristId, period.from, period.to),
-    resolveProfileAt(floristId, new Date()),
+    resolveProfileAt(floristId),
   ]);
 
   // Однодневный период показываем заказами сразу: ради одной строки не стоит заставлять

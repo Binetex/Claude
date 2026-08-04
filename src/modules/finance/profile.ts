@@ -11,6 +11,7 @@ import "server-only";
  */
 import { Prisma } from "@/generated/prisma/client";
 import type { FinanceModel, FinanceScope, Role } from "@/generated/prisma/enums";
+import { cache } from "react";
 import { prisma } from "@/lib/db";
 
 /** Постгресовое нарушение exclusion-constraint (пересечение периодов действия). */
@@ -32,8 +33,15 @@ export type ResolvedProfile = {
  *
  * Интервал полуоткрытый [from, to): заказ, доставленный ровно в момент смены профиля,
  * попадает в НОВЫЙ период — как и у стоимости ваз.
+ *
+ * `at` по умолчанию «сейчас» и мемоизирован через `cache()` на один запрос React: кабинет
+ * флориста спрашивает модель трижды за рендер (шапка, вкладки, экран заработка). Дату
+ * ВАЖНО не передавать вручную там, где имеется в виду «сейчас» — новый Date() на каждом
+ * вызове даёт новый ключ мемоизации, и три запроса снова становятся тремя.
  */
-export async function resolveProfileAt(floristId: string, at: Date): Promise<ResolvedProfile | null> {
+export const resolveProfileAt = cache(_resolveProfileAt);
+
+async function _resolveProfileAt(floristId: string, at: Date = new Date()): Promise<ResolvedProfile | null> {
   const row = await prisma.floristFinanceProfile.findFirst({
     where: {
       floristId,

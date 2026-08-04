@@ -44,7 +44,9 @@ export default async function FloristCabinetLayout({
 
   const [balance, profile] = await Promise.all([
     floristBalance(floristId),
-    resolveProfileAt(floristId, new Date()),
+    // Без явной даты: «сейчас» по умолчанию, и мемоизация cache() срабатывает на все
+    // три обращения к модели за один рендер кабинета.
+    resolveProfileAt(floristId),
   ]);
 
   const base = `/dashboard/finance/florists/${floristId}`;

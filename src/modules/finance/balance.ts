@@ -17,6 +17,7 @@ import "server-only";
  *
  * Долг = заработано + бонусы − удержания − выплачено ± корректировки.
  */
+import { cache } from "react";
 import { prisma } from "@/lib/db";
 import { toNumber } from "@/lib/money";
 import { dayShareCents } from "./dayCalc";
@@ -112,8 +113,18 @@ async function recordedEntries(floristId: string) {
   return { paidCents, bonusCents, adjustmentCents };
 }
 
-/** Баланс одного флориста. */
-export async function floristBalance(floristId: string, at: Date = new Date()): Promise<FloristBalance> {
+/**
+ * Баланс одного флориста.
+ *
+ * Обёрнут в `cache()` — мемоизация НА ОДИН запрос React, не кеш между запросами. Кабинет
+ * флориста спрашивает баланс дважды за рендер: карточкой «К выплате» на заработке и шапкой
+ * ради остатка в форме выплаты. Без мемоизации это два прохода по дням и по книге ради
+ * одного и того же числа; с ней — один. Значение внутри запроса и так обязано быть одним:
+ * два разных ответа на «сколько должны» в одном экране — это баг, а не оптимизация.
+ */
+export const floristBalance = cache(_floristBalance);
+
+async function _floristBalance(floristId: string, at: Date = new Date()): Promise<FloristBalance> {
   const profile = await prisma.floristFinanceProfile.findFirst({
     where: { floristId, active: true, effectiveFrom: { lte: at }, OR: [{ effectiveTo: null }, { effectiveTo: { gt: at } }] },
     select: { id: true, model: true, sharePercentBp: true },
@@ -161,9 +172,14 @@ export async function floristBalance(floristId: string, at: Date = new Date()): 
   };
 }
 
-/** Балансы нескольких флористов — для списка. */
+/**
+ * Балансы нескольких флористов — для списка.
+ *
+ * Параллельно, а не в цикле с await: баланс каждого флориста — это три-четыре независимых
+ * запроса, и последовательный обход превращал список из пяти человек в два десятка
+ * round-trip'ов подряд. Между собой балансы не связаны, порядок ожидания не нужен.
+ */
 export async function floristBalances(floristIds: string[], at: Date = new Date()): Promise<Map<string, FloristBalance>> {
-  const out = new Map<string, FloristBalance>();
-  for (const id of floristIds) out.set(id, await floristBalance(id, at));
-  return out;
+  const rows = await Promise.all(floristIds.map(async (id) => [id, await floristBalance(id, at)] as const));
+  return new Map(rows);
 }

@@ -26,7 +26,7 @@ export default async function OwnerFloristEarningsPage({
 }) {
   await requireRole("OWNER");
   const { floristId } = await params;
-  const profile = await resolveProfileAt(floristId, new Date());
+  const profile = await resolveProfileAt(floristId);
   const gate = accrualGate();
   const base = `/dashboard/finance/florists/${floristId}`;
 

@@ -62,7 +62,10 @@ export default async function FinanceSettingsPage() {
           <CardTitle>Расходники · фиксированная сумма на заказ</CardTitle>
           <ConsumablesForm sites={sites} hasRecords={rates.length > 0} />
         </CardHeader>
-        <CardBody className="p-0">
+        {/* Таблица настроек шире телефона по существу — в ней пять колонок с датами и
+            процентами. Прокрутка ЛОКАЛЬНАЯ: без неё страница целиком уезжала вправо
+            (scrollWidth 437 при экране 320). */}
+        <CardBody className="overflow-x-auto p-0">
           {rates.length === 0 ? (
             <EmptyState title="Ставка не задана" description="Без неё ни один заказ не попадёт в расчёт." />
           ) : (
@@ -99,7 +102,10 @@ export default async function FinanceSettingsPage() {
            
           />
         </CardHeader>
-        <CardBody className="p-0">
+        {/* Таблица настроек шире телефона по существу — в ней пять колонок с датами и
+            процентами. Прокрутка ЛОКАЛЬНАЯ: без неё страница целиком уезжала вправо
+            (scrollWidth 437 при экране 320). */}
+        <CardBody className="overflow-x-auto p-0">
           {feeModels.length === 0 ? (
             <EmptyState title="Моделей нет" description="Там, где нет фактической комиссии, заказ в расчёт не попадёт." />
           ) : (
@@ -136,7 +142,10 @@ export default async function FinanceSettingsPage() {
           <CardTitle>Налоговая политика владельца</CardTitle>
           <TaxPolicyForm sites={sites} hasRecords={taxPolicies.length > 0} />
         </CardHeader>
-        <CardBody className="p-0">
+        {/* Таблица настроек шире телефона по существу — в ней пять колонок с датами и
+            процентами. Прокрутка ЛОКАЛЬНАЯ: без неё страница целиком уезжала вправо
+            (scrollWidth 437 при экране 320). */}
+        <CardBody className="overflow-x-auto p-0">
           <div className="px-3 pt-2 text-xs text-slate-500">
             Флористы видят 100% собранного налога как расход бизнеса всегда. Этот процент влияет только на вашу
             картину прибыли, наружу не отдаётся и на долю флориста не действует.
