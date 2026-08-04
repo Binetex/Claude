@@ -88,6 +88,14 @@ export interface OutboxRepository {
   fail(id: string, opts: FailOptions): Promise<void>;
 
   /**
+   * Отложить событие, НЕ засчитывая попытку (attempts откатывается на единицу, потраченную
+   * при claim). Для случаев, когда обработки не было вовсе — например, воркер не знает такого
+   * типа события. Сломан воркер, а не событие: тратить на это бюджет попыток нельзя, иначе
+   * событие перестанет забираться (claim берёт только attempts < maxAttempts) и тихо зависнет.
+   */
+  defer(id: string, opts: { availableAt: Date; reason: string; now?: Date }): Promise<void>;
+
+  /**
    * Восстанавливает зависшие PROCESSING (worker умер, не сняв lease). Каждое:
    * attempts уже засчитан при claim → если >=maxAttempts, уводим в DEAD_LETTER,
    * иначе возвращаем в FAILED доступным сейчас. Возвращает число восстановленных.

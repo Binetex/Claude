@@ -35,6 +35,7 @@ import { AUTOMATION_TRIGGER_EVENT, AUTOMATION_SEND_EVENT } from "@/modules/autom
 import { buildFlowStepHandler } from "@/modules/automations/flows/handler";
 import { FLOW_STEP_EVENT } from "@/modules/automations/flows/events";
 import { buildTelegramNotifyHandler } from "@/integrations/telegram/handler";
+import { buildDeadLetterAlert } from "@/integrations/telegram/deadLetterAlert";
 import { TELEGRAM_NOTIFY_EVENT } from "@/integrations/telegram/events";
 import { buildAirwallexVerifyHandler } from "@/integrations/airwallex/handler";
 import { AIRWALLEX_VERIFY_EVENT } from "@/integrations/airwallex/events";
@@ -120,6 +121,8 @@ async function main() {
     repo,
     handlers,
     logger: new OutboxLogger(),
+    // Потеря события больше не проходит молча — владельцу уходит сигнал в Telegram.
+    onDeadLetter: buildDeadLetterAlert(prisma),
     workerId: process.env.WORKER_ID,
     policy: {
       batchSize: Number(process.env.OUTBOX_BATCH_SIZE ?? 20),

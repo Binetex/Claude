@@ -88,6 +88,18 @@ export class InMemoryOutboxRepository implements OutboxRepository {
     r.updatedAt = now;
   }
 
+  async defer(id: string, opts: { availableAt: Date; reason: string; now?: Date }): Promise<void> {
+    const r = this.byId.get(id);
+    if (!r) return;
+    r.status = "FAILED";
+    r.attempts = Math.max(0, r.attempts - 1); // попытку не тратим: обработки не было
+    r.availableAt = opts.availableAt;
+    r.lastError = opts.reason;
+    r.lockedAt = null;
+    r.lockedBy = null;
+    r.updatedAt = opts.now ?? new Date();
+  }
+
   async fail(id: string, opts: FailOptions): Promise<void> {
     const r = this.byId.get(id);
     if (!r) return;

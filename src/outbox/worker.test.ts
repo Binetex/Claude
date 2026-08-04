@@ -44,11 +44,113 @@ describe("OutboxWorker — успешная обработка", () => {
     expect((await repo.list())[0].status).toBe("PROCESSED");
   });
 
-  it("неизвестный тип события → DEAD_LETTER (не теряется, не крутится)", async () => {
+});
+
+describe("OutboxWorker — нет обработчика (сломан воркер, а не событие)", () => {
+  const MIN = 60_000;
+  const DAY = 24 * 60 * MIN;
+
+  it("откладывает, а НЕ убивает: событие ждёт сборку с обработчиком", async () => {
     const clock = { t: T0.getTime() };
     const { repo, worker } = makeWorker({}, clock);
     await repo.enqueue(ev({ eventType: "unknown.event" }));
+
     const res = await worker.tick();
+
+    expect(res.deadLettered).toBe(0);
+    expect(res.retried).toBe(1);
+    expect((await repo.list())[0].status).toBe("FAILED");
+  });
+
+  it("не тратит попытки — иначе событие перестало бы забираться и зависло навсегда", async () => {
+    // claimBatch берёт только attempts < maxAttempts. Если бы отсутствие обработчика
+    // расходовало бюджет, событие тихо застряло бы в FAILED, не дожив до деплоя.
+    const clock = { t: T0.getTime() };
+    const { repo, worker } = makeWorker({}, clock);
+    await repo.enqueue(ev({ eventType: "unknown.event" }));
+
+    for (let i = 0; i < 12; i++) {
+      await worker.tick();
+      clock.t += 6 * MIN; // больше паузы перепроверки
+    }
+
+    expect((await repo.list())[0].attempts).toBe(0);
+    expect((await repo.list())[0].status).toBe("FAILED");
+  });
+
+  it("после выката обработчика накопившееся уезжает само", async () => {
+    const clock = { t: T0.getTime() };
+    const repo = new InMemoryOutboxRepository();
+    const handlers: Record<string, OutboxHandler> = {};
+    const worker = new OutboxWorker({
+      repo, handlers, workerId: "W1",
+      now: () => new Date(clock.t), sleep: noSleep,
+      policy: { batchSize: 10, pollIntervalMs: 0, retry: { maxAttempts: 4, baseDelayMs: 10, maxDelayMs: 100 } },
+    });
+    await repo.enqueue(ev({ eventType: "late.handler" }));
+
+    await worker.tick(); // обработчика ещё нет — отложено
+    expect((await repo.list())[0].status).toBe("FAILED");
+
+    // «Деплой»: обработчик появился.
+    const handler = vi.fn(async () => {});
+    handlers["late.handler"] = handler;
+    clock.t += 6 * MIN;
+    const res = await worker.tick();
+
+    expect(res.processed).toBe(1);
+    expect(handler).toHaveBeenCalledOnce();
+    expect((await repo.list())[0].status).toBe("PROCESSED");
+  });
+
+  it("если обработчик так и не появился за отведённый срок — честный DEAD_LETTER", async () => {
+    // Тип, выведенный из употребления, не должен откладываться вечно.
+    // Часы привязаны к настоящему времени: срок отсчитывается от createdAt события,
+    // который репозиторий проставляет системными часами.
+    const clock = { t: Date.now() };
+    const { repo, worker } = makeWorker({}, clock);
+    await repo.enqueue(ev({ eventType: "obsolete.event", availableAt: new Date(clock.t) }));
+
+    await worker.tick();
+    clock.t += 4 * DAY;
+    const res = await worker.tick();
+
+    expect(res.deadLettered).toBe(1);
+    expect((await repo.list())[0].status).toBe("DEAD_LETTER");
+  });
+});
+
+describe("OutboxWorker — сигнал о потере", () => {
+  it("зовёт onDeadLetter, когда событие потеряно окончательно", async () => {
+    const clock = { t: T0.getTime() };
+    const repo = new InMemoryOutboxRepository();
+    const onDeadLetter = vi.fn(async () => {});
+    const worker = new OutboxWorker({
+      repo, workerId: "W1", now: () => new Date(clock.t), sleep: noSleep, onDeadLetter,
+      handlers: { "test.event": async () => { throw new IntegrationError("нельзя повторять", { kind: "permanent", platform: "t" }); } },
+      policy: { batchSize: 10, pollIntervalMs: 0, retry: { maxAttempts: 4, baseDelayMs: 10, maxDelayMs: 100 } },
+    });
+    await repo.enqueue(ev());
+
+    await worker.tick();
+
+    expect(onDeadLetter).toHaveBeenCalledOnce();
+    expect((await repo.list())[0].status).toBe("DEAD_LETTER");
+  });
+
+  it("падение уведомителя не ломает воркер — очередь важнее сигнала о ней", async () => {
+    const clock = { t: T0.getTime() };
+    const repo = new InMemoryOutboxRepository();
+    const worker = new OutboxWorker({
+      repo, workerId: "W1", now: () => new Date(clock.t), sleep: noSleep,
+      onDeadLetter: async () => { throw new Error("Telegram недоступен"); },
+      handlers: { "test.event": async () => { throw new IntegrationError("нельзя повторять", { kind: "permanent", platform: "t" }); } },
+      policy: { batchSize: 10, pollIntervalMs: 0, retry: { maxAttempts: 4, baseDelayMs: 10, maxDelayMs: 100 } },
+    });
+    await repo.enqueue(ev());
+
+    const res = await worker.tick();
+
     expect(res.deadLettered).toBe(1);
     expect((await repo.list())[0].status).toBe("DEAD_LETTER");
   });

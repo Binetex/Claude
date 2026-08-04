@@ -24,6 +24,14 @@ export type OutboxWorkerPolicy = {
   /** PROCESSING старше этого времени считается зависшим и восстанавливается. */
   stuckAfterMs: number;
   retry: RetryPolicy;
+  /** Через сколько перепроверять событие, для которого нет обработчика. */
+  unknownHandlerRetryMs: number;
+  /**
+   * Сколько всего ждать появления обработчика, считая от создания события. Порог отделяет
+   * «сборка без обработчика» (чинится деплоем за минуты-часы) от «тип выведен из
+   * употребления» (обработчика не будет никогда — вот тогда DEAD_LETTER).
+   */
+  unknownHandlerGiveUpMs: number;
 };
 
 export const DEFAULT_WORKER_POLICY: OutboxWorkerPolicy = {
@@ -31,6 +39,8 @@ export const DEFAULT_WORKER_POLICY: OutboxWorkerPolicy = {
   pollIntervalMs: 1000,
   stuckAfterMs: 60_000,
   retry: DEFAULT_RETRY_POLICY,
+  unknownHandlerRetryMs: 5 * 60_000, // 5 минут
+  unknownHandlerGiveUpMs: 3 * 24 * 60 * 60_000, // 3 суток
 };
 
 export type TickResult = { recovered: number; claimed: number; processed: number; retried: number; deadLettered: number };
@@ -43,6 +53,12 @@ export type OutboxWorkerDeps = {
   policy?: Partial<OutboxWorkerPolicy>;
   now?: () => Date;
   sleep?: (ms: number) => Promise<void>;
+  /**
+   * Сигнал наружу о безвозвратно потерянном событии. Раньше DEAD_LETTER не сообщал никуда,
+   * и потерю замечали много позже — по отсутствию SMS. Очередь намеренно ничего не знает про
+   * Telegram: канал подключается в scripts/outbox-worker.ts.
+   */
+  onDeadLetter?: (record: OutboxRecord, err: unknown) => Promise<void>;
 };
 
 const realSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -55,6 +71,7 @@ export class OutboxWorker {
   private readonly policy: OutboxWorkerPolicy;
   private readonly now: () => Date;
   private readonly sleep: (ms: number) => Promise<void>;
+  private readonly onDeadLetter?: (record: OutboxRecord, err: unknown) => Promise<void>;
   private stopping = false;
   private looping = false;
 
@@ -66,6 +83,20 @@ export class OutboxWorker {
     this.policy = { ...DEFAULT_WORKER_POLICY, ...deps.policy, retry: deps.policy?.retry ?? DEFAULT_WORKER_POLICY.retry };
     this.now = deps.now ?? (() => new Date());
     this.sleep = deps.sleep ?? realSleep;
+    this.onDeadLetter = deps.onDeadLetter;
+  }
+
+  /**
+   * Уведомление о потере. Падение самого уведомителя НЕ должно ломать воркер: событие уже
+   * помечено, а очередь важнее сигнала о ней.
+   */
+  private async notifyDeadLetter(record: OutboxRecord, err: unknown): Promise<void> {
+    if (!this.onDeadLetter) return;
+    try {
+      await this.onDeadLetter(record, err);
+    } catch (e) {
+      console.error(`[outbox] уведомление о dead-letter не отправлено:`, e instanceof Error ? e.message : String(e));
+    }
   }
 
   /** Один тик: восстановление зависших + обработка одного батча. Возвращает статистику. */
@@ -96,8 +127,24 @@ export class OutboxWorker {
     const now = this.now();
 
     if (!handler) {
-      // Неизвестный тип события — не теряем и не крутим бесконечно: в DEAD_LETTER, видно в admin.
+      // Незнакомый тип события — это сломанный ВОРКЕР, а не сломанное событие: само событие
+      // корректно, обработчик просто отсутствует в этой сборке. Чинится деплоем, поэтому
+      // событие ОТКЛАДЫВАЕМ и не тратим попытку — после выката всё накопившееся уедет само.
+      //
+      // Раньше здесь был мгновенный DEAD_LETTER с первой же попытки. Это стоило 36 авто-SMS
+      // 3 августа 2026: коммит финансов случайно снёс три строки из реестра обработчиков, и
+      // каждое событие автоматизаций умирало безвозвратно, пока публикация продолжала работать.
+      const ageMs = now.getTime() - record.createdAt.getTime();
+      if (ageMs < this.policy.unknownHandlerGiveUpMs) {
+        const reason = `no handler for eventType ${record.eventType} — ждём сборку с обработчиком`;
+        await this.repo.defer(record.id, { availableAt: new Date(now.getTime() + this.policy.unknownHandlerRetryMs), reason, now });
+        this.logger.retryScheduled(record, this.workerId, this.policy.unknownHandlerRetryMs);
+        return "retry";
+      }
+      // Ждали достаточно долго — обработчика, видимо, не будет вовсе (тип выведен из
+      // употребления). Только теперь событие честно умирает.
       await this.repo.fail(record.id, { deadLetter: true, availableAt: now, error: `no handler for eventType ${record.eventType}`, now });
+      await this.notifyDeadLetter(record, new Error(`no handler for ${record.eventType}`));
       this.logger.deadLetter(record, this.workerId, new Error(`no handler for ${record.eventType}`));
       return "dead_letter";
     }
@@ -116,6 +163,7 @@ export class OutboxWorker {
 
       if (!retryable || exhausted) {
         await this.repo.fail(record.id, { deadLetter: true, availableAt: now, error: safeError(err), now });
+        await this.notifyDeadLetter(record, err);
         this.logger.deadLetter(record, this.workerId, err);
         return "dead_letter";
       }

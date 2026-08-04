@@ -114,6 +114,21 @@ export class PrismaOutboxRepository implements OutboxRepository {
     });
   }
 
+  async defer(id: string, opts: { availableAt: Date; reason: string; now?: Date }): Promise<void> {
+    // attempts откатываем: claim засчитал попытку авансом, а обработки не было.
+    await this.prisma.outboxEvent.update({
+      where: { id },
+      data: {
+        status: "FAILED",
+        attempts: { decrement: 1 },
+        availableAt: opts.availableAt,
+        lastError: opts.reason,
+        lockedAt: null,
+        lockedBy: null,
+      },
+    });
+  }
+
   async fail(id: string, opts: FailOptions): Promise<void> {
     await this.prisma.outboxEvent.update({
       where: { id },
