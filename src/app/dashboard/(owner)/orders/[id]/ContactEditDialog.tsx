@@ -103,9 +103,11 @@ export function ContactEditDialog({
         <DialogHeader>
           <DialogTitle>Редактировать: {title.toLowerCase()}</DialogTitle>
         </DialogHeader>
-        <div className="grid grid-cols-2 gap-3">
+        {/* На телефоне поля в один столбец: на 320px половинка модалки — это ~118px, в которые
+            не помещается ни адрес, ни email. */}
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           {fields.map((fl) => (
-            <div key={fl.k} className={fl.wide ? "col-span-2" : ""}>
+            <div key={fl.k} className={fl.wide ? "sm:col-span-2" : ""}>
               <Label>{fl.label}</Label>
               <Input value={f[fl.k] ?? ""} onChange={(e) => setF({ ...f, [fl.k]: e.target.value })} className="mt-1" />
             </div>

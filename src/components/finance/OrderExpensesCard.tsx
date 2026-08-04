@@ -46,6 +46,15 @@ const HINTS = [
 
 const todayKey = () => new Date().toISOString().slice(0, 10);
 
+/**
+ * Колонки строки расхода на широком экране. Ширины ЗАДАНЫ, а не выведены из содержимого:
+ * каждая строка — своя сетка, и на `auto` колонки разных строк вставали бы по-разному, чего
+ * в таблице не было. Описание — `minmax(0,1fr)`, иначе длинный текст снова начнёт задавать
+ * ширину. До `sm` сетка не включается вовсе, и строка складывается в обычный поток.
+ */
+const rowCols = (canEdit: boolean) =>
+  canEdit ? "@lg:grid-cols-[7rem_minmax(0,1fr)_6rem_9.5rem]" : "@lg:grid-cols-[7rem_minmax(0,1fr)_6rem]";
+
 function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return (
     <div className="space-y-1.5">
@@ -268,54 +277,69 @@ export function OrderExpensesCard({
         <CardTitle>Дополнительные расходы</CardTitle>
         {canEdit && <ExpenseDialog actions={actions} orderId={orderId} trigger="Добавить расход" />}
       </CardHeader>
-      <CardBody className="p-0">
+      {/* @container: раскладка строки зависит от ширины САМОЙ КАРТОЧКИ, а не экрана. Блок
+          стоит и в широкой левой колонке владельца, и в узкой правой колонке флориста — по
+          медиазапросу на 1440px обе считались бы «широкими», и в колонке на 350px колонки
+          строки не поместились бы. */}
+      <CardBody className="@container p-0">
         {rows.length === 0 ? (
           <p className="px-4 py-3 text-sm text-slate-400">
             Расходов нет. Сюда вносят повторную доставку, переделку букета, компенсацию.
           </p>
         ) : (
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-slate-100 text-left text-[11px] tracking-wide text-slate-400 uppercase">
-                <th className="px-4 py-2 font-medium">Дата</th>
-                <th className="px-3 py-2 font-medium">Описание</th>
-                <th className="px-3 py-2 text-right font-medium">Сумма</th>
-                {canEdit && <th className="px-4 py-2 text-right font-medium">Действия</th>}
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r) => {
-                const off = r.reversedAt != null;
-                return (
-                  <tr key={r.id} className={`border-b border-slate-50 last:border-0 ${off ? "text-slate-400" : ""}`}>
-                    <td className="px-4 py-2 tabular-nums">{r.expenseDate}</td>
-                    <td className="px-3 py-2">
-                      <span className={off ? "line-through" : ""}>{r.description}</span>
-                      {off && (
-                        <span className="ml-2 rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[11px] text-slate-500">
-                          Отменено
-                        </span>
-                      )}
-                      {off && r.reversalReason && <div className="text-xs text-slate-400">{r.reversalReason}</div>}
-                    </td>
-                    <td className={`px-3 py-2 text-right tabular-nums ${off ? "line-through" : "font-medium"}`}>
+          /* Не таблица. У <table> ширина колонок считается по содержимому, и четыре колонки
+             (дата + описание + сумма + две кнопки) давали min-content 464px — на телефоне это
+             растягивало карточку и всю страницу. Тот же список на сетке: в широкой карточке
+             четыре колонки как раньше, в узкой строка складывается в три этажа. */
+          <ul className="divide-y divide-slate-50 text-sm">
+            <li
+              className={`hidden border-b border-slate-100 px-4 py-2 text-[11px] tracking-wide text-slate-400 uppercase @lg:grid ${rowCols(canEdit)} @lg:items-baseline @lg:gap-x-3`}
+            >
+              <span>Дата</span>
+              <span>Описание</span>
+              <span className="text-right">Сумма</span>
+              {canEdit && <span className="text-right">Действия</span>}
+            </li>
+            {rows.map((r) => {
+              const off = r.reversedAt != null;
+              return (
+                <li
+                  key={r.id}
+                  className={`px-4 py-2.5 @lg:grid @lg:py-2 ${rowCols(canEdit)} @lg:items-baseline @lg:gap-x-3 ${off ? "text-slate-400" : ""}`}
+                >
+                  <div className="text-xs text-slate-400 tabular-nums @lg:text-sm @lg:text-inherit">{r.expenseDate}</div>
+                  {/* min-w-0 + break-words: длинное описание переносится, а не тянет колонку. */}
+                  <div className="mt-0.5 min-w-0 break-words @lg:mt-0">
+                    <span className={off ? "line-through" : ""}>{r.description}</span>
+                    {off && (
+                      <span className="ml-2 rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[11px] whitespace-nowrap text-slate-500">
+                        Отменено
+                      </span>
+                    )}
+                    {off && r.reversalReason && <div className="text-xs text-slate-400">{r.reversalReason}</div>}
+                  </div>
+                  {/* @lg:contents — в широкой карточке сумма и действия становятся ОТДЕЛЬНЫМИ
+                      ячейками сетки (как колонки прежней таблицы), а в узкой остаются одной
+                      строкой «сумма слева, кнопки справа». */}
+                  <div className="mt-1 flex items-center justify-between gap-2 @lg:mt-0 @lg:contents">
+                    <span className={`tabular-nums @lg:text-right ${off ? "line-through" : "font-medium"}`}>
                       {formatCents(r.amountCents)}
-                    </td>
+                    </span>
                     {canEdit && (
-                      <td className="px-4 py-1.5 text-right whitespace-nowrap">
+                      <span className="flex items-center justify-end gap-1">
                         {!off && (
-                          <div className="flex items-center justify-end gap-1">
+                          <>
                             <ExpenseDialog actions={actions} orderId={orderId} trigger="Изменить" expense={r} />
                             <RemoveDialog actions={actions} orderId={orderId} expense={r} />
-                          </div>
+                          </>
                         )}
-                      </td>
+                      </span>
                     )}
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
         )}
       </CardBody>
       <div className="flex items-center justify-between border-t border-slate-100 px-4 py-2.5 text-sm">

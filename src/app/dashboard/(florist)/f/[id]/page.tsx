@@ -83,12 +83,18 @@ export default async function FloristOrderPage({ params }: { params: Promise<{ i
             <CardHeader className="py-2.5"><CardTitle icon={Package}>Товары</CardTitle></CardHeader>
             <CardBody className="p-0">
               <ul className="divide-y divide-slate-100">
+                {/* flex-wrap + минимальная ширина текста: на телефоне под название остаётся
+                    всего ~117px, и оно рассыпается по слову на строку. Цена в такой ситуации
+                    переносится на свою строку и прижимается вправо, а название получает всю
+                    ширину карточки. На широком экране строка по-прежнему одна. */}
                 {order.items.map((it) => (
-                  <li key={it.id} className="flex items-center gap-3 px-4 py-2.5">
+                  <li key={it.id} className="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-4 py-2.5">
                     <OrderItemImages image={it.image} variantImage={it.variantImage} size="h-14 w-14" />
-                    <div className="min-w-0 flex-1">
+                    <div className="min-w-[10rem] flex-1">
                       <div className="flex items-center gap-2 text-sm font-medium text-slate-800">
-                        <span className="truncate">{it.name}</span>
+                        {/* На телефоне название переносится, а не обрезается: обрезка прятала
+                            почти весь букет, а места по вертикали там как раз хватает. */}
+                        <span className="min-w-0 break-words sm:truncate">{it.name}</span>
                         {/* Количество отдельным чипом: «× 1» в потоке текста сливается с названием. */}
                         <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[11px] font-semibold text-slate-500 tabular-nums">
                           ×{it.quantity}
@@ -105,7 +111,7 @@ export default async function FloristOrderPage({ params }: { params: Promise<{ i
                     {/* У основного флориста (полная видимость) в списке товаров стоит цена
                         КЛИЕНТА: он работает с полной суммой заказа, и «его цена» за позицию
                         ему ничего не говорит. У второстепенного — по-прежнему своя. */}
-                    <div className="text-right whitespace-nowrap">
+                    <div className="ml-auto text-right whitespace-nowrap">
                       <div className="text-sm font-medium text-slate-800 tabular-nums">
                         {formatMoney(showsCustomerPrice ? (it.externalPrice ?? 0) : it.floristItemPrice)}
                       </div>
@@ -175,7 +181,7 @@ export default async function FloristOrderPage({ params }: { params: Promise<{ i
             <Card>
               <CardHeader className="py-2.5"><CardTitle icon={Calculator}>Полная раскладка заказа</CardTitle></CardHeader>
               <CardBody>
-                <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-sm md:grid-cols-3">
+                <div className="grid grid-cols-1 gap-x-6 gap-y-1 text-sm sm:grid-cols-2 md:grid-cols-3">
                   <FinRow label="Сумма товаров" value={formatMoney(order.finance.itemsTotal)} />
                   <FinRow label="Итог заказчика" value={formatMoney(order.finance.customerTotal)} />
                   <FinRow label="Налог" value={formatMoney(order.finance.tax)} />

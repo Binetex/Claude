@@ -167,15 +167,17 @@ export default async function OwnerOrderPage({ params }: { params: Promise<{ id:
             <CardHeader><CardTitle>Товары</CardTitle></CardHeader>
             <CardBody className="p-0">
               <ul className="divide-y divide-slate-100">
+                {/* Строка переносится: на телефоне колонка цен («$249.00 заказчику») занимает
+                    почти всю ширину и оставляла названию товара считанные пиксели. */}
                 {order.items.map((it) => (
-                  <li key={it.id} className="flex items-center gap-3 px-4 py-3">
+                  <li key={it.id} className="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-4 py-3">
                     <OrderItemImages image={it.image} variantImage={it.variantImage} size="h-14 w-14" />
-                    <div className="min-w-0 flex-1">
-                      <div className="text-sm font-medium text-slate-800">{it.name} × {it.quantity}</div>
+                    <div className="min-w-[10rem] flex-1">
+                      <div className="text-sm font-medium break-words text-slate-800">{it.name} × {it.quantity}</div>
                       <OrderItemComposition variantName={it.variantName} floristComposition={it.floristComposition} />
                       <UpdateCompositionButton itemId={it.id} />
                     </div>
-                    <div className="text-right text-sm whitespace-nowrap">
+                    <div className="ml-auto text-right text-sm whitespace-nowrap">
                       <div className="text-slate-700">{formatMoney(it.externalPrice)} <span className="text-xs text-slate-400">заказчику</span></div>
                       <div className="text-slate-500">{formatMoney(it.floristItemPrice)} <span className="text-xs text-slate-400">флористу</span></div>
                     </div>
@@ -185,9 +187,11 @@ export default async function OwnerOrderPage({ params }: { params: Promise<{ id:
             </CardBody>
           </Card>
 
-          {/* Отправитель / Получатель с редактированием из карточки */}
+          {/* Отправитель / Получатель с редактированием из карточки.
+              min-w-0 на карточках: без него длинный e-mail (сплошной токен без пробелов)
+              задавал минимальную ширину колонки, и обе карточки раздувались до 523px. */}
           <div className="grid gap-4 md:grid-cols-2">
-            <Card>
+            <Card className="min-w-0">
               <CardHeader className="flex items-center justify-between">
                 <CardTitle>Отправитель</CardTitle>
                 <ContactEditDialog
@@ -198,10 +202,12 @@ export default async function OwnerOrderPage({ params }: { params: Promise<{ id:
                 />
               </CardHeader>
               <CardBody className="space-y-0.5 text-sm">
-                <div className="font-medium text-slate-800">{order.senderName}</div>
+                <div className="font-medium break-words text-slate-800">{order.senderName}</div>
                 <div className="text-slate-600">{order.senderPhone || "—"}</div>
-                <div className="text-slate-500">{order.senderEmail ?? "—"}</div>
-                <div className="pt-1 text-slate-600">
+                {/* break-all, а не break-words: у адреса почты нет пробелов, и «переносить по
+                    словам» для него равносильно «не переносить». */}
+                <div className="break-all text-slate-500">{order.senderEmail ?? "—"}</div>
+                <div className="pt-1 break-words text-slate-600">
                   {senderAddressLines.length > 0 ? (
                     senderAddressLines.map((l, i) => <div key={i}>{l}</div>)
                   ) : (
@@ -210,7 +216,7 @@ export default async function OwnerOrderPage({ params }: { params: Promise<{ id:
                 </div>
               </CardBody>
             </Card>
-            <Card>
+            <Card className="min-w-0">
               <CardHeader className="flex items-center justify-between">
                 <CardTitle>Получатель</CardTitle>
                 <ContactEditDialog
@@ -229,10 +235,10 @@ export default async function OwnerOrderPage({ params }: { params: Promise<{ id:
                 />
               </CardHeader>
               <CardBody className="space-y-0.5 text-sm">
-                <div className="font-medium text-slate-800">{order.recipientName}</div>
+                <div className="font-medium break-words text-slate-800">{order.recipientName}</div>
                 <div className="text-slate-600">{order.recipientPhone || "—"}</div>
-                <div className="text-slate-500">{order.recipientEmail ?? "—"}</div>
-                <div className="pt-1 text-slate-600">
+                <div className="break-all text-slate-500">{order.recipientEmail ?? "—"}</div>
+                <div className="pt-1 break-words text-slate-600">
                   {order.addressLine}{order.apartment ? `, ${order.apartment}` : ""}, {order.city} {order.zip}
                 </div>
               </CardBody>
@@ -243,13 +249,15 @@ export default async function OwnerOrderPage({ params }: { params: Promise<{ id:
           <Card>
             <CardHeader><CardTitle>Финансы</CardTitle></CardHeader>
             <CardBody>
-              <div className="grid grid-cols-3 gap-3">
+              {/* На телефоне цифры идут столбиком. В три колонки на 320px под сумму остаётся
+                  77px при нужных 96 — «$221.31» упиралась в край плашки. */}
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                 <BigFig label="Итого заказчик" value={formatMoney(order.finance.customerTotal)} />
                 <BigFig label="Флористу" value={formatMoney(order.finance.floristTotal)} />
                 <BigFig label="≈ Прибыль" value={formatMoney(order.finance.estimatedProfit)} tone="text-blue-600" />
               </div>
               <Separator className="my-3" />
-              <div className="grid grid-cols-2 gap-x-6 gap-y-1.5 text-sm md:grid-cols-3">
+              <div className="grid grid-cols-1 gap-x-6 gap-y-1.5 text-sm sm:grid-cols-2 md:grid-cols-3">
                 <FinRow label="Сумма товаров" value={formatMoney(order.finance.itemsTotal)} />
                 <FinRow label="Налог" value={formatMoney(order.finance.tax)} />
                 <FinRow label="Чаевые" value={formatMoney(order.finance.tip)} />

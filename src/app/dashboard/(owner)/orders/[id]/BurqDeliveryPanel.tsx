@@ -217,8 +217,9 @@ export function BurqDeliveryPanel({
           )}
 
           {/* Burq Order ID — мелкий служебный текст для диагностики. */}
+          {/* break-all: идентификатор — один сплошной токен, переносить его больше негде. */}
           {delivery.externalDeliveryId && (
-            <div className="text-[11px] text-slate-400">Burq Order ID (диагностика): {delivery.externalDeliveryId}</div>
+            <div className="text-[11px] break-all text-slate-400">Burq Order ID (диагностика): {delivery.externalDeliveryId}</div>
           )}
 
           {isProblem && (
@@ -266,12 +267,12 @@ export function BurqDeliveryPanel({
                   {a.deliveredAt && ` · доставлена: ${new Date(a.deliveredAt).toLocaleString()}`}
                   {a.cancelledAt && ` · отменена: ${new Date(a.cancelledAt).toLocaleString()}`}
                 </div>
-                <div className="mt-0.5 text-[11px] text-slate-500">
+                <div className="mt-0.5 text-[11px] break-words text-slate-500">
                   {a.finalCost != null && <span>стоимость: ${a.finalCost.toFixed(2)}{a.currency && a.currency.toUpperCase() !== "USD" ? ` ${a.currency.toUpperCase()}` : ""} · </span>}
                   <span>фото: {a.podPresent ? "есть" : "нет"} · </span>
                   {a.floristName && <span>флорист: {a.floristName} · </span>}
                   {a.cancellationReason && <span>причина: {a.cancellationReason} · </span>}
-                  {a.externalDeliveryId && <span className="text-slate-400">Burq: {a.externalDeliveryId}</span>}
+                  {a.externalDeliveryId && <span className="break-all text-slate-400">Burq: {a.externalDeliveryId}</span>}
                 </div>
               </li>
             ))}

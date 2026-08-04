@@ -79,9 +79,13 @@ export function OrderPageShell({
         {deliveryAction && <span className="ml-auto">{deliveryAction}</span>}
       </div>
 
+      {/* min-w-0 на колонках обязателен. У элемента сетки минимальная ширина по умолчанию —
+          auto, то есть не меньше min-content содержимого. Один широкий блок внутри (таблица,
+          кнопка с whitespace-nowrap) растягивал ЕДИНСТВЕННУЮ мобильную колонку под себя, и
+          вместе с ней — все карточки страницы разом: на 390px они становились 806px. */}
       <div className="grid gap-4 lg:grid-cols-3">
-        <div className={`space-y-4 lg:col-span-2 ${rightFirstOnMobile ? "order-2 lg:order-none" : ""}`}>{left}</div>
-        <div className={`lg:col-span-1 ${rightFirstOnMobile ? "order-1 lg:order-none" : ""}`}>
+        <div className={`min-w-0 space-y-4 lg:col-span-2 ${rightFirstOnMobile ? "order-2 lg:order-none" : ""}`}>{left}</div>
+        <div className={`min-w-0 lg:col-span-1 ${rightFirstOnMobile ? "order-1 lg:order-none" : ""}`}>
           <div className="sticky top-16 space-y-4">{right}</div>
         </div>
       </div>

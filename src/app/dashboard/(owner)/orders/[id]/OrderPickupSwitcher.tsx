@@ -82,6 +82,10 @@ export function OrderPickupSwitcher({ data }: { data: OrderPickupData }) {
             type="submit"
             size="sm"
             variant="outline"
+            /* Подпись длинная («Переключить точку и пересоздать доставку») и у кнопок дизайн-системы
+               стоит whitespace-nowrap — на телефоне она вылезала за экран. Здесь текст переносится,
+               а высота задаётся содержимым. */
+            className="h-auto w-full py-1.5 text-center whitespace-normal sm:w-auto"
             disabled={pending || !changed}
             onClick={(e) => {
               if (data.hasActiveDelivery && !confirm("Доставка Burq будет отменена и создана заново с новой точкой. Продолжить?")) {
