@@ -23,7 +23,13 @@ export default async function OrderFinancePage({ params }: { params: Promise<{ o
 
   const order = await prisma.order.findUnique({
     where: { id: orderId },
-    select: { id: true, orderNumber: true, deliveryDate: true, site: { select: { shortName: true } } },
+    select: {
+      id: true,
+      orderNumber: true,
+      deliveryDate: true,
+      currentFloristId: true,
+      site: { select: { shortName: true } },
+    },
   });
   if (!order) notFound();
 
@@ -41,9 +47,16 @@ export default async function OrderFinancePage({ params }: { params: Promise<{ o
             <Link href={`/dashboard/orders/${order.id}`} className="text-slate-500 hover:text-slate-800">
               К заказу
             </Link>
-            <Link href={`/dashboard/finance/share/${order.deliveryDate.toISOString().slice(0, 10)}`} className="text-slate-500 hover:text-slate-800">
-              К дню
-            </Link>
+            {/* День живёт в кабинете флориста: отдельного раздела «Доля основного
+                флориста» больше нет. Без исполнителя вести некуда — ссылки нет. */}
+            {order.currentFloristId && (
+              <Link
+                href={`/dashboard/finance/florists/${order.currentFloristId}/day/${order.deliveryDate.toISOString().slice(0, 10)}`}
+                className="text-slate-500 hover:text-slate-800"
+              >
+                К дню
+              </Link>
+            )}
           </div>
         }
       />

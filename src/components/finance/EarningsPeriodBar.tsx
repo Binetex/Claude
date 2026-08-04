@@ -5,7 +5,8 @@ import { DateRangePicker } from "@/components/ui/date-range-picker";
 import { cn } from "@/lib/cn";
 
 /**
- * Выбор периода в кабинете флориста.
+ * Выбор периода на экране заработка. Один на кабинет флориста и на кабинет флориста
+ * глазами владельца — отсюда basePath: адрес экрана задаёт страница, а не компонент.
  *
  * Оформление и поведение — те же, что в фильтрах заказов: сегментированные вкладки плюс
  * календарь-поповер (`DateRangePicker`). Заводить здесь свой набор пилюль и своё поле дат
@@ -21,7 +22,7 @@ const PRESETS = [
   { key: "month", label: "Месяц" },
 ];
 
-export function EarningsPeriodBar({ activeKey }: { activeKey: string }) {
+export function EarningsPeriodBar({ activeKey, basePath }: { activeKey: string; basePath: string }) {
   const params = useSearchParams();
   const { pending, go } = useOrdersNav();
 
@@ -32,7 +33,7 @@ export function EarningsPeriodBar({ activeKey }: { activeKey: string }) {
       else p.delete(k);
     }
     const s = p.toString();
-    go(`/dashboard/f/finance${s ? `?${s}` : ""}`);
+    go(`${basePath}${s ? `?${s}` : ""}`);
   }
 
   const from = params.get("from") ?? undefined;

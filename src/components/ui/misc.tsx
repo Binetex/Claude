@@ -27,7 +27,11 @@ export function PageHeader({
         <h1 className="text-lg font-semibold text-slate-900">{title}</h1>
         {description && <p className="mt-0.5 text-sm text-slate-500">{description}</p>}
       </div>
-      {actions && <div className="flex flex-shrink-0 items-center gap-2">{actions}</div>}
+      {/* flex-wrap вместо flex-shrink-0: на телефоне три кнопки в ряд (у кабинета флориста —
+          «К списку», «Добавить корректировку», «Добавить выплату») занимают ~350px и не
+          помещались в 288px экрана. Теперь они переносятся, а не вылезают за край; на
+          широком экране, где место есть, поведение прежнее. */}
+      {actions && <div className="flex min-w-0 flex-wrap items-center gap-2">{actions}</div>}
     </div>
   );
 }

@@ -29,7 +29,7 @@ export function LedgerFilters({
     for (const [k, v] of Object.entries({ from, to, type, ...patch })) if (v) p.set(k, v);
     // Страница сбрасывается: третьей страницы у нового фильтра может не быть.
     const s = p.toString();
-    router.push(`/dashboard/finance/florists/${floristId}${s ? `?${s}` : ""}`);
+    router.push(`/dashboard/finance/florists/${floristId}/ledger${s ? `?${s}` : ""}`);
   }
 
   const hasFilters = Boolean(from || to || type);
@@ -68,7 +68,7 @@ export function LedgerFilters({
         <Button
           variant="ghost"
           size="sm"
-          onClick={() => router.push(`/dashboard/finance/florists/${floristId}`)}
+          onClick={() => router.push(`/dashboard/finance/florists/${floristId}/ledger`)}
         >
           Сбросить
         </Button>

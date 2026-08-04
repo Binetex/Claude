@@ -1,6 +1,5 @@
 import { requireRole } from "@/lib/rbac";
 import { getIssueSummary } from "@/modules/finance/issues";
-import { getReviewCounts } from "@/modules/finance/review";
 import { FinanceTabs, type FinanceTab } from "./FinanceTabs";
 
 /**
@@ -15,12 +14,18 @@ import { FinanceTabs, type FinanceTab } from "./FinanceTabs";
 export default async function FinanceLayout({ children }: { children: React.ReactNode }) {
   await requireRole("OWNER");
 
-  const [issues, review] = await Promise.all([getIssueSummary(), getReviewCounts()]);
+  const issues = await getIssueSummary();
 
+  // Три пункта, и все три — про весь бизнес. Всё, что относится к ОДНОМУ флористу (его
+  // заработок, выплаты, доля, дневная закупка цветов), живёт внутри его кабинета:
+  // «Флористы → флорист». Раньше те же данные висели ещё и верхним уровнем —
+  // «Доля основного флориста» и «Расходы на цветы» — и это были копии его же экранов.
+  //
+  // «Разбор заказов» убран: список был только для чтения (колонка действий пустая), а все
+  // три его причины — нет флориста, нет цены, нет модели оплаты — видны прямо в карточке
+  // заказа, где их и исправляют.
   const tabs: FinanceTab[] = [
     { href: "/dashboard/finance/florists", label: "Флористы" },
-    { href: "/dashboard/finance/share", label: "Доля основного флориста" },
-    { href: "/dashboard/finance/flower-expenses", label: "Расходы на цветы" },
     {
       href: "/dashboard/finance/setup",
       label: "Требует заполнения",
@@ -28,12 +33,6 @@ export default async function FinanceLayout({ children }: { children: React.Reac
       alarming: issues.blocking > 0,
     },
     { href: "/dashboard/finance/settings", label: "Настройки расчёта" },
-    {
-      href: "/dashboard/finance/review",
-      label: "Разбор заказов",
-      badge: review.noFlorist + review.needsPrice,
-      alarming: review.noFlorist + review.needsPrice > 0,
-    },
   ];
 
   return (

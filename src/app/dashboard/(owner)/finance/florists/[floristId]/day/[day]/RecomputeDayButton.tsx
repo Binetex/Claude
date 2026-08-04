@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { recomputeDayAction } from "./actions";
 
-export function RecomputeDayButton({ day }: { day: string }) {
+export function RecomputeDayButton({ day, floristId }: { day: string; floristId: string }) {
   const [pending, start] = useTransition();
   return (
     <form
@@ -17,6 +17,7 @@ export function RecomputeDayButton({ day }: { day: string }) {
       }
     >
       <input type="hidden" name="day" value={day} />
+      <input type="hidden" name="floristId" value={floristId} />
       <Button type="submit" size="sm" variant="outline" disabled={pending}>
         {pending ? "Пересчитываю…" : "Пересчитать день"}
       </Button>

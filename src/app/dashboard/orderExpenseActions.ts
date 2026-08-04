@@ -44,7 +44,8 @@ function refresh(orderId: string): void {
   revalidatePath(`/dashboard/orders/${orderId}`);
   revalidatePath(`/dashboard/cc/${orderId}`);
   revalidatePath(`/dashboard/f/${orderId}`);
-  revalidatePath("/dashboard/finance/share");
+  revalidatePath("/dashboard/finance/florists", "layout");
+  revalidatePath("/dashboard/f/finance");
   revalidatePath("/dashboard/finance/florists");
   revalidatePath("/dashboard/f/finance");
 }

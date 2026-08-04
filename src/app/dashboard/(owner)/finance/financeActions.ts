@@ -43,7 +43,6 @@ function parseEffectiveDate(input: string | undefined): Date {
 function revalidateFinance(floristId: string) {
   revalidatePath("/dashboard/finance/florists");
   revalidatePath(`/dashboard/finance/florists/${floristId}`);
-  revalidatePath("/dashboard/finance/review");
   revalidatePath("/dashboard/f/finance");
 }
 

@@ -34,9 +34,14 @@ function fail(e: unknown): ExpenseActionResult {
   throw e;
 }
 
+/**
+ * Закупка меняет итог дня, а он виден сразу в трёх местах: расходы в кабинете флориста у
+ * владельца, заработок в кабинете самого флориста и очередь «Требует заполнения».
+ * Кабинет владельца лежит под [floristId], поэтому обновляем поддерево целиком.
+ */
 function refresh(): void {
-  revalidatePath("/dashboard/finance/flower-expenses");
-  revalidatePath("/dashboard/finance/share");
+  revalidatePath("/dashboard/finance/florists", "layout");
+  revalidatePath("/dashboard/f/finance");
   revalidatePath("/dashboard/finance/setup");
 }
 

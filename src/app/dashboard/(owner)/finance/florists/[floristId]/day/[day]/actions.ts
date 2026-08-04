@@ -14,6 +14,7 @@ import { computeDayShare } from "@/modules/finance/dayFinance";
 export async function recomputeDayAction(formData: FormData): Promise<{ error?: string; message?: string }> {
   const user = await requireRole("OWNER");
   const day = String(formData.get("day") ?? "");
+  const floristId = String(formData.get("floristId") ?? "");
   if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return { error: "Некорректная дата." };
 
   const profile = await prisma.floristFinanceProfile.findFirst({
@@ -27,8 +28,13 @@ export async function recomputeDayAction(formData: FormData): Promise<{ error?: 
   await recalculateAffectedFinance(profile.id, [date], actor, new Date());
   const share = await computeDayShare(profile.id, date);
 
-  revalidatePath(`/dashboard/finance/share/${day}`);
-  revalidatePath("/dashboard/finance/share");
+  // Кабинет флориста и его разбор дня: отдельного раздела «Доля основного флориста»
+  // больше нет, эти два экрана и есть место, где число видно.
+  if (floristId) {
+    revalidatePath(`/dashboard/finance/florists/${floristId}`);
+    revalidatePath(`/dashboard/finance/florists/${floristId}/day/${day}`);
+  }
+  revalidatePath("/dashboard/f/finance");
 
   return {
     message: share?.complete

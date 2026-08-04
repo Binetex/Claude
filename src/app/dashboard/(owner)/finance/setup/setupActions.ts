@@ -252,7 +252,7 @@ export async function applyPrimarySharePercent(formData: FormData): Promise<Setu
     });
 
     revalidateSetup();
-    revalidatePath("/dashboard/finance/share");
+    revalidatePath("/dashboard/finance/florists", "layout");
     return { ok: true, message: "Доля основного флориста сохранена." };
   } catch (err) {
     return toError(err);
@@ -275,7 +275,7 @@ export async function recomputePrimaryShare(): Promise<SetupResult> {
       if (r?.complete) complete++;
     }
 
-    revalidatePath("/dashboard/finance/share");
+    revalidatePath("/dashboard/finance/florists", "layout");
     revalidatePath("/dashboard/finance/florists");
     return {
       ok: true,

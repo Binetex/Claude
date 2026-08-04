@@ -27,7 +27,8 @@ function fail(e: unknown): AdminActionResult {
 
 function refresh(): void {
   revalidatePath("/dashboard/finance/settings");
-  revalidatePath("/dashboard/finance/share");
+  revalidatePath("/dashboard/finance/florists", "layout");
+  revalidatePath("/dashboard/f/finance");
   revalidatePath("/dashboard/finance/setup");
 }
 

@@ -58,6 +58,33 @@ export async function resolveProfileAt(floristId: string, at: Date): Promise<Res
 }
 
 /**
+ * Действующий PRIMARY-профиль КОНКРЕТНОГО флориста вместе с его именем.
+ *
+ * Нужен экранам, привязанным к одному флористу (дневная закупка цветов у владельца):
+ * `resolveProfileFor` отвечает на вопрос «профиль актора», а здесь вопрос другой —
+ * «профиль вот этого человека». Разница видна, когда владелец открывает адрес кабинета
+ * напрямую: без такой проверки он увидел бы закупку основного флориста под чужим именем.
+ */
+export async function floristPrimaryProfile(
+  floristId: string,
+  at: Date = new Date()
+): Promise<{ id: string; floristId: string; floristName: string } | null> {
+  const row = await prisma.floristFinanceProfile.findFirst({
+    where: {
+      floristId,
+      model: "PRIMARY",
+      active: true,
+      effectiveFrom: { lte: at },
+      OR: [{ effectiveTo: null }, { effectiveTo: { gt: at } }],
+    },
+    orderBy: { effectiveFrom: "desc" },
+    select: { id: true, floristId: true, florist: { select: { user: { select: { name: true } } } } },
+  });
+  if (!row) return null;
+  return { id: row.id, floristId: row.floristId, floristName: row.florist.user.name };
+}
+
+/**
  * Распространяется ли профиль на магазин заказа. При ALL_SITES — да всегда;
  * при SELECTED_SITES список магазинов не может быть пустым (проверяется при записи).
  */
