@@ -8,6 +8,9 @@ import { resolvePaging, outOfRangePageUrl } from "./paging";
 import { indicatorsForOrders } from "@/integrations/quo/communicationsService";
 import { BulkFillCompositions } from "./BulkFillCompositions";
 import { PurchaseListBlock } from "@/components/PurchaseListBlock";
+import Link from "next/link";
+import { Plus } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/ui/misc";
 import { redirect } from "next/navigation";
 import type { OrderStatus } from "@/generated/prisma/enums";
@@ -63,7 +66,18 @@ export default async function OwnerOrdersPage({
             Заказы <span className="text-sm font-normal text-slate-400">{total}</span>
           </span>
         }
-        actions={<BulkFillCompositions />}
+        actions={
+          <>
+            {/* Ручной заказ: по телефону, лично или переносом из другого источника. */}
+            <Button asChild size="sm">
+              <Link href="/dashboard/orders/new">
+                <Plus className="size-4" />
+                Создать заказ
+              </Link>
+            </Button>
+            <BulkFillCompositions />
+          </>
+        }
       />
 
       <PurchaseListBlock />

@@ -125,6 +125,9 @@ export function serializeForOwner(o: OrderWithRelations) {
       id: i.id,
       name: i.name,
       variantName: i.variantName,
+      // NULL — позиция ручного заказа «своим текстом»: каталога у неё нет, и действия,
+      // которые тянут данные из каталога, ей показывать незачем.
+      productId: i.productId,
       // image — основное фото (parent ?? legacy); variantImage — доп. фото вариации,
       // уже отфильтрованное от дублей. Общие списки читают только image.
       image: getOrderItemImages(i).primary,

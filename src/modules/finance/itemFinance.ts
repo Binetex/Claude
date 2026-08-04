@@ -28,7 +28,16 @@ export type ItemFinance = {
  * Резолв целиком делегирован Stage 1 (`resolveVariantFinance`) — второй формулы нет.
  */
 export async function resolveItemsFinance(
-  items: Array<{ id: string; name: string; productId: string | null; variantId: string | null }>
+  items: Array<{
+    id: string;
+    name: string;
+    productId: string | null;
+    variantId: string | null;
+    /** Снимок типа у позиции ручного заказа (каталога у неё нет). */
+    financialTypeSnapshot?: FinancialItemType | null;
+    /** Снимок закупочной стоимости вазы/подарка такой позиции, в центах. */
+    purchaseCostSnapshotCents?: number | null;
+  }>
 ): Promise<Map<string, ItemFinance>> {
   const result = new Map<string, ItemFinance>();
 
@@ -161,15 +170,33 @@ export async function resolveItemsFinance(
       continue;
     }
 
-    // Ни варианта, ни товара: чем является позиция — неизвестно. Знаменатель дня
-    // становится недостоверным, и это отдельная блокирующая проблема.
+    // Позиция ручного заказа со снимком типа: каталога у неё нет и не будет, поэтому
+    // тип и закупка берутся прямо из строки заказа. VasePurchaseCost тут не при чём —
+    // привязывать его не к чему.
+    if (item.financialTypeSnapshot) {
+      const cents = item.purchaseCostSnapshotCents ?? null;
+      result.set(item.id, {
+        isTip: false,
+        financialType: item.financialTypeSnapshot,
+        // Ваза и подарок обязаны иметь стоимость; не указали — день честно встанет,
+        // как и с любой другой неизвестной закупкой.
+        costRequired: item.financialTypeSnapshot !== "FLOWER_PRODUCT",
+        purchaseCostCents: cents,
+        purchaseCostRecordId: null,
+        reasons: [],
+      });
+      continue;
+    }
+
+    // Ни варианта, ни товара, ни снимка: обычная позиция «своим текстом». Считается
+    // цветочным товаром без вазы — закупки у неё нет, и день она не блокирует.
     result.set(item.id, {
       isTip: false,
       financialType: null,
       costRequired: false,
       purchaseCostCents: null,
       purchaseCostRecordId: null,
-      reasons: ["ITEM_NOT_IN_CATALOG"],
+      reasons: [],
     });
   }
 

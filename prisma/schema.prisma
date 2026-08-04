@@ -1253,6 +1253,15 @@ model OrderItem {
   externalPrice              Decimal @db.Decimal(10, 2) // цена покупателю за позицию (только владелец)
   floristItemPrice           Decimal @default(0) @db.Decimal(10, 2) // снимок цены флориста за позицию
 
+  // ── Ручной заказ: позиция БЕЗ каталога ──
+  // У такой позиции productId и variantId = NULL, и вывести финансовый тип неоткуда.
+  // NULL здесь — обычный случай: тип берётся из Product/ProductVariant, как и раньше.
+  // Заполняется только владельцем в форме ручного заказа (блок «Дополнительно»).
+  financialTypeSnapshot      FinancialItemType?
+  /// Закупочная стоимость вазы или подарка этой позиции, в центах. Имеет смысл только
+  /// вместе с financialTypeSnapshot: без каталога VasePurchaseCost привязать не к чему.
+  purchaseCostSnapshotCents  Int?
+
   @@index([orderId])
 }
 

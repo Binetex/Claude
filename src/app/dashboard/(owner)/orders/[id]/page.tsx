@@ -141,7 +141,9 @@ export default async function OwnerOrderPage({ params }: { params: Promise<{ id:
                 { value: it.externalPrice, label: "заказчику" },
                 { value: it.floristItemPrice, label: "флористу" },
               ],
-              action: <UpdateCompositionButton itemId={it.id} />,
+              // Кнопка обновления состава тянет его ИЗ КАТАЛОГА — у позиции ручного
+              // заказа «своим текстом» каталога нет, и жать там нечего.
+              action: it.productId ? <UpdateCompositionButton itemId={it.id} /> : undefined,
             }))}
           />
 

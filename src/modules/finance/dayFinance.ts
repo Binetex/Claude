@@ -60,7 +60,14 @@ export async function gatherDayOrders(
       customerTotal: true,
       acquiringFee: { select: { feeCents: true } },
       consumablesOverride: { select: { amountCents: true } },
-      items: { select: { id: true, name: true, quantity: true, productId: true, variantId: true } },
+      // Снимки типа и закупки нужны позициям ручного заказа: каталога у них нет,
+      // и без них ваза/подарок «своим текстом» считались бы обычным букетом.
+      items: {
+        select: {
+          id: true, name: true, quantity: true, productId: true, variantId: true,
+          financialTypeSnapshot: true, purchaseCostSnapshotCents: true,
+        },
+      },
     },
   });
 
