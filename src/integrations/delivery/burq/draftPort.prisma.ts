@@ -8,6 +8,7 @@ import "server-only";
  */
 import type { PrismaClient } from "@/generated/prisma/client";
 import { mapBurqStatus } from "./statusMap";
+import { publishTelegramNotification } from "@/integrations/telegram/events";
 import { getBurqDimensions } from "./settings";
 import { combineDropoffNotes } from "./dropoffNotes";
 import { resolvePickupForOrder } from "./pickupResolution";
@@ -144,6 +145,30 @@ export function createPrismaDraftPort(prisma: PrismaClient): DraftCreatePort {
           create: { orderId: input.orderId, intentStatus: "DRAFT_CREATED" },
           update: { intentStatus: "DRAFT_CREATED", lastSkipReason: null },
         });
+      });
+    },
+
+    /**
+     * Результат проверки курьеров. Пишется всегда, когда проверка состоялась, — и когда
+     * курьеры есть тоже: иначе «не проверяли» и «проверяли, всё хорошо» неразличимы.
+     *
+     * Тревога поднимается ТОЛЬКО при нуле и только в Telegram владельцу: на экранах баннер
+     * строится из этих же полей и отдельного уведомления не требует.
+     */
+    async recordCourierAvailability(input) {
+      const checkedAt = new Date();
+      await prisma.delivery.updateMany({
+        where: { orderId: input.orderId, attemptNumber: input.attemptNumber },
+        data: { couriersCheckedAt: checkedAt, couriersAvailable: input.count },
+      });
+      if (input.count > 0) return;
+
+      await publishTelegramNotification(prisma, {
+        type: "delivery.no_couriers",
+        orderId: input.orderId,
+        // Попытка в ключе: повторная доставка — это новая проверка и новый повод сказать.
+        occurrenceKey: `${input.orderId}:a${input.attemptNumber}`,
+        context: { checkedAt: checkedAt.toISOString().slice(11, 16) },
       });
     },
   };

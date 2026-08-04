@@ -8,6 +8,7 @@ import { OrdersNavProvider, OrdersPendingArea } from "@/app/dashboard/(owner)/or
 import { OrdersPager } from "@/app/dashboard/(owner)/orders/OrdersPager";
 import { resolvePaging, outOfRangePageUrl } from "@/app/dashboard/(owner)/orders/paging";
 import { PurchaseListBlock } from "@/components/PurchaseListBlock";
+import { NoCouriersBanner } from "@/components/orders/NoCouriersBanner";
 import { PageHeader } from "@/components/ui/misc";
 import { Button } from "@/components/ui/button";
 import type { OrderStatus } from "@/generated/prisma/enums";
@@ -77,6 +78,9 @@ export default async function FloristHome({
       />
 
       {/* Список закупки на сегодня — только назначенные этому флористу заказы */}
+      {/* Только СВОИ заказы. Молчит, когда курьеры есть. */}
+      <NoCouriersBanner floristId={user.floristId} hrefBase="/dashboard/f" />
+
       <PurchaseListBlock floristId={user.floristId} />
 
       <OrdersNavProvider>

@@ -12,6 +12,7 @@ import {
   renderFloristHandedOver,
   renderOwnerCreated,
   renderOwnerDeliveryProblem,
+  renderOwnerNoCouriers,
   renderOwnerPaymentProblem,
   renderOwnerPendingTooLong,
   renderOwnerStatusMismatch,
@@ -245,6 +246,8 @@ function renderFor(type: TelegramNotifyPayload["type"], order: OrderSnapshot, ct
       return renderOwnerPaymentNotFound(order);
     case "delivery.problem":
       return renderOwnerDeliveryProblem(order, ctx.status ?? "PROBLEM", ctx.safeReason ?? null);
+    case "delivery.no_couriers":
+      return renderOwnerNoCouriers(order, ctx.checkedAt ?? null);
   }
 }
 

@@ -8,6 +8,7 @@ import { resolvePaging, outOfRangePageUrl } from "./paging";
 import { indicatorsForOrders } from "@/integrations/quo/communicationsService";
 import { BulkFillCompositions } from "./BulkFillCompositions";
 import { PurchaseListBlock } from "@/components/PurchaseListBlock";
+import { NoCouriersBanner } from "@/components/orders/NoCouriersBanner";
 import Link from "next/link";
 import { Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -79,6 +80,10 @@ export default async function OwnerOrdersPage({
           </>
         }
       />
+
+      {/* Снаружи карточки заказа: узнать про отсутствие курьеров надо ДО того,
+          как зайти в заказ. Молчит, когда всё в порядке. */}
+      <NoCouriersBanner hrefBase="/dashboard/orders" />
 
       <PurchaseListBlock />
 

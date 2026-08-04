@@ -21,6 +21,7 @@ export const TELEGRAM_EVENTS = [
   "payment.status_mismatch",
   "payment.not_found",
   "delivery.problem",
+  "delivery.no_couriers",
 ] as const;
 
 export type TelegramEventType = (typeof TELEGRAM_EVENTS)[number];
@@ -93,6 +94,15 @@ const REGISTRY: Record<TelegramEventType, TelegramEventDef> = {
     perFlorist: false,
     dedupeKey: ({ orderId }) => `order:${orderId}:owner.delivery`,
     description: "Доставка перешла в FAILED / CANCELLED / PROBLEM.",
+  },
+  "delivery.no_couriers": {
+    type: "delivery.no_couriers",
+    audience: "OWNER",
+    perFlorist: false,
+    // Ключ включает попытку: новая попытка доставки — это новая проверка и новый повод
+    // сказать, а не редактирование старого сообщения.
+    dedupeKey: ({ orderId }) => `order:${orderId}:owner.no_couriers`,
+    description: "При создании черновика Burq не вернул ни одного провайдера на маршрут.",
   },
 };
 

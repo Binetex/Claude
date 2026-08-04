@@ -41,6 +41,7 @@ describe("checkout_url не протекает", () => {
       loadContext: vi.fn().mockResolvedValue(makeCtx()),
       markIntent: vi.fn(),
       persistDraft: vi.fn(),
+  recordCourierAvailability: vi.fn(),
     };
     const res = await handleBurqDraftCreate({ client: createMockBurqClient(), port, log }, { orderId: "o1", scheduleVersion: 0 });
     expect(res.outcome).toBe("created");
@@ -55,6 +56,7 @@ describe("checkout_url не протекает", () => {
       loadContext: vi.fn().mockResolvedValue(makeCtx()),
       markIntent: vi.fn(),
       persistDraft: vi.fn(),
+  recordCourierAvailability: vi.fn(),
     };
     await handleBurqDraftCreate({ client: createMockBurqClient(), port }, { orderId: "o1", scheduleVersion: 0 });
     const arg = (port.persistDraft as ReturnType<typeof vi.fn>).mock.calls[0][0];

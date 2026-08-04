@@ -43,7 +43,8 @@ function makePort(ctx: DraftContext | null): DraftCreatePort {
   return {
     loadContext: vi.fn().mockResolvedValue(ctx),
     markIntent: vi.fn().mockResolvedValue(undefined),
-    persistDraft: vi.fn().mockResolvedValue(undefined),
+    persistDraft: vi.fn(),
+  recordCourierAvailability: vi.fn().mockResolvedValue(undefined),
   };
 }
 
@@ -112,7 +113,11 @@ describe("handleBurqDraftCreate", () => {
 
   it("ошибка Burq пробрасывается (для ретрая outbox)", async () => {
     const port = makePort(makeCtx());
-    const client = { mode: "mock" as const, createDraft: vi.fn().mockRejectedValue(new Error("boom")), getOrder: vi.fn(), deleteOrder: vi.fn() };
+    const client = { mode: "mock" as const, createDraft: vi.fn().mockRejectedValue(new Error("boom")), getOrder: vi.fn(), deleteOrder: vi.fn(),
+    createRoute: vi.fn(async () => ({ id: "rt_test" })),
+    requestRouteQuotes: vi.fn(),
+    listRouteQuotes: vi.fn(async () => ({ status: "COMPLETE", data: [] })),
+    deleteRoute: vi.fn() };
     await expect(handleBurqDraftCreate({ client, port }, { orderId: "o1", scheduleVersion: 1 })).rejects.toThrow("boom");
     expect(port.persistDraft).not.toHaveBeenCalled();
   });

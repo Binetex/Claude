@@ -1550,6 +1550,14 @@ model Delivery {
   signatureImageUrl        String? // signature_image_url (если когда-либо запрошен)
   proofOfDeliveryFetchedAt DateTime?
 
+  // ── Проверка наличия курьеров на маршрут (сразу после создания черновика) ──
+  // NULL в couriersAvailable = не проверяли (проверка не запускалась или упала).
+  // 0 = котировок не вернулось вовсе, то есть маршрут никто не берётся везти — это и есть
+  // сигнал, ради которого проверка существует. Котировки Burq живут минуты, поэтому число
+  // всегда читается вместе с couriersCheckedAt: без времени оно ничего не значит.
+  couriersCheckedAt        DateTime?
+  couriersAvailable        Int?
+
   // Переназначение/суперседанс попыток (историю не переписываем).
   supersedesDeliveryId   String?
   supersededByDeliveryId String?

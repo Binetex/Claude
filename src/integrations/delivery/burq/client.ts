@@ -10,6 +10,7 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import type { BurqCreateOrderRequest, BurqOrder, BurqRawOrderResponse } from "./types";
 import { normalizePodUrls, normalizeSignatureUrl } from "./podCapture";
+import type { RouteQuotesResponse } from "./quotes";
 
 export interface BurqClient {
   readonly mode: "real" | "mock";
@@ -17,6 +18,18 @@ export interface BurqClient {
   getOrder(id: string): Promise<BurqOrder>;
   /** DELETE — только НЕинициированный заказ (иначе Burq вернёт 400). */
   deleteOrder(id: string): Promise<void>;
+
+  // ── Котировки: «есть ли курьеры на этот маршрут» ──
+  // Котировки в v2 живут на МАРШРУТЕ, а не на заказе: путь order → route → quotes.
+  // Ничего не диспатчит; Pick Provider / Dispatch мы не вызываем вовсе.
+  /** Создаёт route из уже существующих заказов. */
+  createRoute(orderIds: string[]): Promise<{ id: string }>;
+  /** Запускает асинхронный расчёт котировок. Возвращает job id (нам он не нужен). */
+  requestRouteQuotes(routeId: string): Promise<void>;
+  /** Текущий снимок котировок: status PENDING → COMPLETE, data (пустой массив = никого нет). */
+  listRouteQuotes(routeId: string): Promise<RouteQuotesResponse>;
+  /** DELETE маршрута — убираем за собой, чтобы не копить мусор в аккаунте Burq. */
+  deleteRoute(routeId: string): Promise<void>;
 }
 
 export class BurqApiError extends Error {
@@ -58,6 +71,18 @@ const mockIdempotency = new Map<string, string>(); // idempotencyKey → order i
 
 export function createMockBurqClient(): BurqClient {
   return {
+    async createRoute() {
+      return { id: `rt_mock_${randomUUID()}` };
+    },
+    async requestRouteQuotes() {
+      /* mock считает мгновенно */
+    },
+    async listRouteQuotes() {
+      return mockQuotes;
+    },
+    async deleteRoute() {
+      /* нечего удалять */
+    },
     mode: "mock",
     async createDraft(req, idempotencyKey) {
       const existingId = mockIdempotency.get(idempotencyKey);
@@ -119,6 +144,18 @@ export function __setMockBurqStatus(id: string, status: string): void {
   if (found) mockStore.set(id, { ...found, status });
 }
 
+/**
+ * Только для тестов: чем ответит mock на запрос котировок. По умолчанию — Uber есть, чтобы
+ * обычные прогоны не поднимали тревогу; сценарий «курьеров нет» задаётся явно пустым списком.
+ */
+let mockQuotes: RouteQuotesResponse = {
+  status: "COMPLETE",
+  data: [{ provider: "Uber", cost_of_delivery: 1849, burq_fee: 99 }],
+};
+export function __setMockRouteQuotes(next: RouteQuotesResponse): void {
+  mockQuotes = next;
+}
+
 /** Только для тестов: выставить стоимость/провайдера mock-заказа (эмуляция dispatch). */
 export function __setMockBurqCost(id: string, patch: Partial<BurqOrder>): void {
   const found = mockStore.get(id);
@@ -160,6 +197,28 @@ export function createRealBurqClient(cfg: RealConfig): BurqClient {
     async getOrder(id) {
       const res = await call(`/orders/${encodeURIComponent(id)}?expand=latest_delivery`, { method: "GET" });
       return parseOrThrow(res, "getOrder");
+    },
+    async createRoute(orderIds) {
+      const res = await call("/routes", { method: "POST", body: JSON.stringify({ order_ids: orderIds }) });
+      const text = await res.text();
+      if (!res.ok) throw new BurqApiError(`Burq createRoute failed (${res.status})`, res.status);
+      return { id: (JSON.parse(text) as { id: string }).id };
+    },
+    async requestRouteQuotes(routeId) {
+      // Тело не требуется: параметры (vehicle_type, quote_preference) нам не нужны — спрашиваем
+      // ровно то, что увидит флорист в кабинете при «Any vehicle».
+      const res = await call(`/routes/${encodeURIComponent(routeId)}/quotes`, { method: "POST", body: "{}" });
+      if (!res.ok) throw new BurqApiError(`Burq requestRouteQuotes failed (${res.status})`, res.status);
+    },
+    async listRouteQuotes(routeId) {
+      const res = await call(`/routes/${encodeURIComponent(routeId)}/quotes`, { method: "GET" });
+      const text = await res.text();
+      if (!res.ok) throw new BurqApiError(`Burq listRouteQuotes failed (${res.status})`, res.status);
+      return JSON.parse(text) as RouteQuotesResponse;
+    },
+    async deleteRoute(routeId) {
+      const res = await call(`/routes/${encodeURIComponent(routeId)}`, { method: "DELETE" });
+      if (!res.ok) throw new BurqApiError(`Burq deleteRoute failed (${res.status})`, res.status);
     },
     async deleteOrder(id) {
       const res = await call(`/orders/${encodeURIComponent(id)}`, { method: "DELETE" });
