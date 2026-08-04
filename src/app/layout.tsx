@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { Toaster } from "sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { AppUpdatedBanner } from "@/components/AppUpdatedBanner";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -41,6 +42,10 @@ export default function RootLayout({
       <body className="min-h-full flex flex-col">
         <TooltipProvider delayDuration={300}>{children}</TooltipProvider>
         <Toaster position="top-right" richColors closeButton />
+        {/* Вкладка, открытая до деплоя, теряет свои JS-чанки. Вместо пустого экрана —
+            одна кнопка «Обновить страницу». Автоперезагрузки нет: она зациклилась бы
+            на любой другой сетевой ошибке. */}
+        <AppUpdatedBanner />
       </body>
     </html>
   );
