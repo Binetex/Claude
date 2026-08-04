@@ -6,10 +6,11 @@ import { Card, CardHeader, CardTitle, CardBody } from "@/components/ui/Card";
 import { OrderPageShell } from "@/components/orders/OrderPageShell";
 import { OrderItemsCard } from "@/components/orders/OrderItemsCard";
 import { OrderContactCards } from "@/components/orders/OrderContactCards";
-import { OrderPriceCard } from "@/components/orders/OrderPriceCard";
+import { OrderFloristPayCard, type FloristPayView } from "@/components/orders/OrderFloristPayCard";
 import { OrderQuickActions } from "@/components/orders/OrderQuickActions";
 import { OrderFinanceBreakdown } from "@/components/orders/OrderFinanceBreakdown";
 import { recipientAddressLines, recipientMapsUrl, senderAddressLines } from "@/components/orders/address";
+import { resolveProfileAt } from "@/modules/finance/profile";
 import { OrderStatusBadge, PaymentStatusBadge } from "@/components/StatusBadge";
 import { formatMoney } from "@/lib/money";
 import { fmtDateTime } from "@/lib/format";
@@ -52,6 +53,14 @@ export default async function OwnerOrderPage({ params }: { params: Promise<{ id:
   if (!order) notFound();
 
   const florists = await prisma.florist.findMany({ include: { user: true }, orderBy: { createdAt: "asc" } });
+
+  // Чем оплачивается заказ назначенному флористу. Профиль резолвится НА ДАТУ ДОСТАВКИ, а не
+  // на «сейчас»: модель оплаты меняется во времени, и июльский заказ обязан читаться по
+  // июльским правилам, даже если в августе флориста перевели на другую модель.
+  const pay: FloristPayView = await resolveFloristPay(order.currentFloristId, order.deliveryDate, {
+    floristTotal: order.finance.floristTotal,
+    priceMode: order.priceMode,
+  });
   // Бейдж назначения не показываем вовсе: назначение происходит автоматически, а «нет флориста»
   // видно по самому блоку назначения ниже и по дашборду. Дублировать статус заказа не нужно.
   // Оплату показываем, только когда она НЕ обычная: «Оплачен» рядом со статусом «Оплачен» —
@@ -239,14 +248,15 @@ export default async function OwnerOrderPage({ params }: { params: Promise<{ id:
       }
       right={
         <>
-          {/* Цена флориста — та же плашка, что видит флорист. Правка ручной цены живёт
-              карандашом на ней: отдельная карточка под одно поле занимала треть колонки. */}
-          <OrderPriceCard
-            label="Цена флориста"
-            amount={order.finance.floristTotal}
-            hint={order.priceMode === "MANUAL" ? "задана вручную" : "авто-цена"}
-            action={<OwnerPriceDialog orderId={order.id} current={order.finance.floristTotal} />}
-          />
+          {/* Чем оплачивается заказ флористу — зависит от МОДЕЛИ его профиля на дату
+              доставки. Правка ручной цены живёт карандашом на плашке и появляется только
+              там, где цене есть что менять. */}
+          {order.currentFloristId && (
+            <OrderFloristPayCard
+              pay={pay}
+              priceAction={<OwnerPriceDialog orderId={order.id} current={order.finance.floristTotal} />}
+            />
+          )}
 
           <OrderStatusCard orderId={order.id} updatedAt={order.updatedAt} orderStatus={order.orderStatus} />
 
@@ -266,6 +276,29 @@ export default async function OwnerOrderPage({ params }: { params: Promise<{ id:
       }
     />
   );
+}
+
+/**
+ * Модель оплаты заказа для плашки в колонке управления.
+ *
+ * SECONDARY — фиксированная цена заказа и есть заработок (`balance.ts::secondaryEarned`
+ * складывает именно `Order.floristTotal`). PRIMARY — доля от прибыли ДНЯ, и сумма по
+ * отдельному заказу не существует: `floristTotal` не входит ни в заработок, ни в прибыль
+ * дня. Профиля нет — заказ вообще ни во что не считается, и это надо сказать вслух.
+ */
+async function resolveFloristPay(
+  floristId: string | null,
+  deliveryDate: Date | string,
+  price: { floristTotal: number; priceMode: "AUTO" | "MANUAL" }
+): Promise<FloristPayView> {
+  if (!floristId) return { model: null };
+  // Профиль читается вне основного пути карточки: недоступность финансовых таблиц не должна
+  // ронять страницу заказа — тогда просто не покажем плашку оплаты.
+  const profile = await resolveProfileAt(floristId, new Date(deliveryDate)).catch(() => null);
+  if (!profile) return { model: null };
+  return profile.model === "PRIMARY"
+    ? { model: "PRIMARY", sharePercentBp: profile.sharePercentBp }
+    : { model: "SECONDARY", floristTotal: price.floristTotal, priceMode: price.priceMode };
 }
 
 function stateLabel(state: string): string {
