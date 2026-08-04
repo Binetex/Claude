@@ -97,6 +97,12 @@ export async function connectCustomApp(input: ConnectInput, opts: { allowReconne
           shortName: shortNameFrom(input.name || domain),
           platform: "SHOPIFY",
           connectionStatus: "PENDING",
+          // Автосоздание Burq-черновиков включено с первой минуты. В схеме default(false),
+          // и раньше новый магазин молча оставался без доставок: переключателя в интерфейсе
+          // не было вовсе, а остальным магазинам флаг когда-то проставили руками в БД.
+          // Массового создания по историческому хвосту это не вызывает — заказы с прошедшей
+          // датой доставки отсекает decideDraftEligibility (reason: delivery_date_past).
+          burqDraftAutoCreateEnabled: true,
           ...creds,
         },
         select: { id: true },

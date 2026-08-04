@@ -157,6 +157,37 @@ export async function ownerDisconnectSite(siteId: string): Promise<void> {
 }
 
 /**
+ * Автосоздание черновиков Burq для магазина.
+ *
+ * При включении будущие заказы магазина без активной доставки перепланируются сразу — иначе
+ * флаг «включён», а доставок нет до самого первого нового заказа. Прошедшие даты в план не
+ * попадают: их отсекает decideDraftEligibility, поэтому включение не создаёт лавину черновиков
+ * по историческому хвосту.
+ */
+export async function ownerSetSiteBurqAutoCreate(siteId: string, enabled: boolean): Promise<FormState> {
+  await requireRole("OWNER");
+  await prisma.site.update({ where: { id: siteId }, data: { burqDraftAutoCreateEnabled: enabled } });
+
+  let rescheduled = 0;
+  if (enabled) {
+    try {
+      rescheduled = await rescheduleSiteFutureOrders(prisma, siteId);
+    } catch {
+      // Перепланирование — удобство, а не условие включения: флаг уже сохранён, и новые
+      // заказы всё равно будут планироваться штатно.
+    }
+  }
+
+  revalidatePath("/dashboard/sites");
+  return {
+    ok: true,
+    message: enabled
+      ? `Автосоздание Burq включено${rescheduled > 0 ? `. Запланировано будущих заказов: ${rescheduled}` : ""}.`
+      : "Автосоздание Burq выключено.",
+  };
+}
+
+/**
  * Что произойдёт при полном удалении магазина. Ничего не меняет — диалог подтверждения
  * запрашивает это перед тем, как показать кнопку, чтобы человек видел числа, а не общие
  * слова «будут удалены связанные данные».

@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/Badge";
 import { SiteConnectPanel } from "./SiteConnectPanel";
 import { SiteCardActions } from "./SiteCardActions";
 import { DeleteSiteDialog } from "./DeleteSiteDialog";
+import { SiteBurqAutoCreateSetting } from "./SiteBurqAutoCreateSetting";
 import { SiteNameForm } from "./SiteNameForm";
 import { SiteSyncControls } from "./SiteSyncControls";
 import { WooSiteControls } from "./WooSiteControls";
@@ -40,6 +41,7 @@ export default async function SitesPage() {
   const sites = await prisma.site.findMany({
     select: {
       id: true, name: true, shortName: true, platform: true, colorTag: true,
+      burqDraftAutoCreateEnabled: true,
       connectionStatus: true, shopifyShopDomain: true, timezone: true, burqDefaultDropoffInstructions: true,
       quoPhoneNumberId: true, quoPhoneNumber: true, quoEnabled: true, quoLastCheckAt: true, quoConnectionError: true,
       authMode: true, shopifyConnStatus: true, lastConnectionCheckAt: true, lastSyncAt: true,
@@ -228,6 +230,8 @@ export default async function SitesPage() {
               )}
 
               <SiteTimezoneSetting siteId={s.id} current={s.timezone} />
+
+              <SiteBurqAutoCreateSetting siteId={s.id} enabled={s.burqDraftAutoCreateEnabled} />
 
               <SiteBurqDropoffSetting siteId={s.id} current={s.burqDefaultDropoffInstructions} />
 

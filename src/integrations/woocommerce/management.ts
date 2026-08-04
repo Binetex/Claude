@@ -83,6 +83,9 @@ export async function connectWooCommerce(
           shortName: shortNameFrom(input.name, norm.storeUrl),
           platform: "WOOCOMMERCE",
           connectionStatus: "PENDING",
+          // Автосоздание Burq-черновиков включено сразу — см. тот же комментарий в
+          // shopify/customApp/management.ts.
+          burqDraftAutoCreateEnabled: true,
           wooConnection: {
             create: { ...creds, webhookSecretEncrypted: encryptSecret(webhookSecret) },
           },
