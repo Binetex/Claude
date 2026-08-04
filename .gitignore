@@ -15,6 +15,11 @@
 
 # next.js
 /.next/
+# Каталоги деплоя: сборка в стороне, готовый откат и сохранённая неудачная сборка
+# (см. deploy.sh). Без них `git status` на сервере всегда показывает мусор.
+/.next.build/
+/.next.previous/
+/.next.failed/
 /out/
 
 # production
