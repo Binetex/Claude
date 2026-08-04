@@ -15,18 +15,17 @@ import { OrderCommunications } from "@/app/dashboard/(owner)/orders/[id]/OrderCo
 import { ContactEditDialog } from "@/app/dashboard/(owner)/orders/[id]/ContactEditDialog";
 import { CardNoteCard } from "@/app/dashboard/(owner)/orders/[id]/CardNoteCard";
 import { DeliveryDateDialog } from "@/app/dashboard/(owner)/orders/[id]/DeliveryDateDialog";
-import { OrderStatusCard } from "@/app/dashboard/(owner)/orders/[id]/OrderStatusDateControls";
+import { OrderStatusCard } from "@/app/dashboard/(owner)/orders/[id]/OrderStatusCard";
 import { DeliveryStatusCard } from "@/app/dashboard/(owner)/orders/[id]/DeliveryStatusCard";
 import { OrderPickupCard } from "@/app/dashboard/(owner)/orders/[id]/OrderPickupCard";
 import { OrderPageShell } from "@/components/orders/OrderPageShell";
-import { FloristPriceCard } from "@/components/orders/FloristPriceCard";
-import { Calculator, Contact, MapPin, Package, Phone, UserRound } from "lucide-react";
-import { Card, CardHeader, CardTitle, CardBody } from "@/components/ui/Card";
+import { OrderItemsCard } from "@/components/orders/OrderItemsCard";
+import { OrderContactCards } from "@/components/orders/OrderContactCards";
+import { OrderPriceCard } from "@/components/orders/OrderPriceCard";
+import { OrderQuickActions } from "@/components/orders/OrderQuickActions";
+import { OrderFinanceBreakdown } from "@/components/orders/OrderFinanceBreakdown";
 import { OrderStatusBadge } from "@/components/StatusBadge";
-import { OrderItemImages } from "@/components/OrderItemImages";
-import { formatMoney } from "@/lib/money";
-import { OrderItemComposition } from "@/components/OrderItemComposition";
-import { FloristQuickActions } from "./FloristQuickActions";
+import { recipientMapsUrl, recipientAddressLines } from "@/components/orders/address";
 import { BouquetPhotoButton } from "./BouquetPhotoButton";
 
 export const dynamic = "force-dynamic";
@@ -39,8 +38,9 @@ export const dynamic = "force-dynamic";
  * Справа — цена, статус и быстрые действия; всё, что не требует решения, не занимает
  * отдельную карточку.
  *
- * Своей вёрстки здесь минимум: шапка, карточки контактов и блоки доставки/открытки/SMS
- * общие с владельцем и колл-центром (см. OrderPageShell и соседние компоненты).
+ * Своей вёрстки здесь НЕТ вовсе: шапка, товары, контакты, открытка, SMS, доставка и быстрые
+ * действия — общие компоненты, те же самые у владельца и колл-центра (см. OrderPageShell и
+ * соседние в components/orders). Роль задаёт только НАБОР данных и действий.
  */
 export default async function FloristOrderPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -50,10 +50,6 @@ export default async function FloristOrderPage({ params }: { params: Promise<{ i
 
   const comm = await loadOrderCommunicationsCard(prisma, id).catch(() => ({ communications: [], storeHasQuoNumber: false, storeTimeZone: undefined, unread: { customer: 0, recipient: 0 } }));
   const handoffTargets = await listActiveHandoffTargets(prisma, user.floristId).catch(() => []);
-
-  const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
-    `${order.addressLine}, ${order.city} ${order.zip}`
-  )}`;
 
   // Полная видимость = основной флорист: ему показываем суммы клиента, а не свою цену.
   const showsCustomerPrice = order.financeVisibility === "FULL";
@@ -78,56 +74,33 @@ export default async function FloristOrderPage({ params }: { params: Promise<{ i
       }
       left={
         <>
-          {/* Товары — первое, что нужно флористу. Цены только свои: цена заказчика ему не отдаётся. */}
-          <Card>
-            <CardHeader className="py-2.5"><CardTitle icon={Package}>Товары</CardTitle></CardHeader>
-            <CardBody className="p-0">
-              <ul className="divide-y divide-slate-100">
-                {/* flex-wrap + минимальная ширина текста: на телефоне под название остаётся
-                    всего ~117px, и оно рассыпается по слову на строку. Цена в такой ситуации
-                    переносится на свою строку и прижимается вправо, а название получает всю
-                    ширину карточки. На широком экране строка по-прежнему одна. */}
-                {order.items.map((it) => (
-                  <li key={it.id} className="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-4 py-2.5">
-                    <OrderItemImages image={it.image} variantImage={it.variantImage} size="h-14 w-14" />
-                    <div className="min-w-[10rem] flex-1">
-                      <div className="flex items-center gap-2 text-sm font-medium text-slate-800">
-                        {/* На телефоне название переносится, а не обрезается: обрезка прятала
-                            почти весь букет, а места по вертикали там как раз хватает. */}
-                        <span className="min-w-0 break-words sm:truncate">{it.name}</span>
-                        {/* Количество отдельным чипом: «× 1» в потоке текста сливается с названием. */}
-                        <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[11px] font-semibold text-slate-500 tabular-nums">
-                          ×{it.quantity}
-                        </span>
-                      </div>
-                      {/* Флористу подсказка «состав не указан» не адресована: заполнить каталог
-                          он не может, а строка повторялась бы у каждой позиции. */}
-                      <OrderItemComposition
-                        variantName={it.variantName}
-                        floristComposition={it.floristComposition}
-                        showMissingHint={false}
-                      />
-                    </div>
-                    {/* У основного флориста (полная видимость) в списке товаров стоит цена
-                        КЛИЕНТА: он работает с полной суммой заказа, и «его цена» за позицию
-                        ему ничего не говорит. У второстепенного — по-прежнему своя. */}
-                    <div className="ml-auto text-right whitespace-nowrap">
-                      <div className="text-sm font-medium text-slate-800 tabular-nums">
-                        {formatMoney(showsCustomerPrice ? (it.externalPrice ?? 0) : it.floristItemPrice)}
-                      </div>
-                      <div className="text-[11px] text-slate-400">{showsCustomerPrice ? "клиенту" : "вам"}</div>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            </CardBody>
-          </Card>
+          {/* Товары — первое, что нужно флористу. У основного флориста (полная видимость) в
+              списке стоит цена КЛИЕНТА: он работает с полной суммой заказа, и «его цена» за
+              позицию ему ничего не говорит. У второстепенного — по-прежнему своя. */}
+          <OrderItemsCard
+            showMissingCompositionHint={false}
+            items={order.items.map((it) => ({
+              id: it.id,
+              name: it.name,
+              quantity: it.quantity,
+              image: it.image,
+              variantImage: it.variantImage,
+              variantName: it.variantName,
+              floristComposition: it.floristComposition,
+              prices: [
+                showsCustomerPrice
+                  ? { value: it.externalPrice ?? 0, label: "клиенту" }
+                  : { value: it.floristItemPrice, label: "вам" },
+              ],
+            }))}
+          />
 
-          {/* Получатель / Заказчик — редактируемо (OCC). */}
-          <div className="grid gap-4 md:grid-cols-2">
-            <Card>
-              <CardHeader className="flex items-center justify-between py-2.5">
-                <CardTitle icon={UserRound}>Получатель</CardTitle>
+          <OrderContactCards
+            recipient={{
+              name: order.recipientName,
+              phone: order.recipientPhone,
+              addressLines: recipientAddressLines(order),
+              edit: (
                 <ContactEditDialog
                   kind="recipient"
                   orderId={order.id}
@@ -142,56 +115,25 @@ export default async function FloristOrderPage({ params }: { params: Promise<{ i
                     zip: order.zip,
                   }}
                 />
-              </CardHeader>
-              <CardBody className="space-y-1.5 text-sm">
-                <div className="font-medium text-slate-800">{order.recipientName}</div>
-                {/* Иконки-якоря: телефон и адрес различаются с одного взгляда, без чтения. */}
-                <div className="flex items-center gap-2 text-slate-600">
-                  <Phone aria-hidden className="size-3.5 shrink-0 text-slate-400" />
-                  <span className="tabular-nums">{order.recipientPhone || "—"}</span>
-                </div>
-                <div className="flex items-start gap-2 text-slate-600">
-                  <MapPin aria-hidden className="mt-0.5 size-3.5 shrink-0 text-slate-400" />
-                  <span>{order.addressLine}{order.apartment ? `, ${order.apartment}` : ""}, {order.city} {order.zip}</span>
-                </div>
-              </CardBody>
-            </Card>
-            <Card>
-              <CardHeader className="flex items-center justify-between py-2.5">
-                <CardTitle icon={Contact}>Заказчик</CardTitle>
+              ),
+            }}
+            customer={{
+              // E-mail заказчика флористу не отдаётся — поля нет, и строки не будет.
+              name: order.senderName,
+              phone: order.senderPhone,
+              edit: (
                 <ContactEditDialog
                   kind="sender"
                   orderId={order.id}
                   updatedAt={order.updatedAt}
                   initial={{ senderName: order.senderName, senderPhone: order.senderPhone }}
                 />
-              </CardHeader>
-              <CardBody className="space-y-1.5 text-sm">
-                <div className="font-medium text-slate-800">{order.senderName}</div>
-                <div className="flex items-center gap-2 text-slate-600">
-                  <Phone aria-hidden className="size-3.5 shrink-0 text-slate-400" />
-                  <span className="tabular-nums">{order.senderPhone || "—"}</span>
-                </div>
-              </CardBody>
-            </Card>
-          </div>
+              ),
+            }}
+          />
 
           {/* Полная раскладка — только если владелец включил режим FULL для этого флориста. */}
-          {order.finance && (
-            <Card>
-              <CardHeader className="py-2.5"><CardTitle icon={Calculator}>Полная раскладка заказа</CardTitle></CardHeader>
-              <CardBody>
-                <div className="grid grid-cols-1 gap-x-6 gap-y-1 text-sm sm:grid-cols-2 md:grid-cols-3">
-                  <FinRow label="Сумма товаров" value={formatMoney(order.finance.itemsTotal)} />
-                  <FinRow label="Итог заказчика" value={formatMoney(order.finance.customerTotal)} />
-                  <FinRow label="Налог" value={formatMoney(order.finance.tax)} />
-                  <FinRow label="Доставка (заказчик)" value={formatMoney(order.finance.deliveryCustomerCost)} />
-                  <FinRow label="Чаевые" value={formatMoney(order.finance.tip)} />
-                  <FinRow label="Скидка" value={formatMoney(order.finance.discount)} />
-                </div>
-              </CardBody>
-            </Card>
-          )}
+          {order.finance && <OrderFinanceBreakdown title="Полная раскладка заказа" finance={order.finance} />}
 
           {/* Открытка и заметки — сворачиваемо: пустая открытка не должна занимать экран. */}
           <CardNoteCard
@@ -233,15 +175,15 @@ export default async function FloristOrderPage({ params }: { params: Promise<{ i
           {/* Цена изготовления — только флористу с MAKER_ONLY. При FULL владелец показывает
               суммы заказчика, и собственная себестоимость в карточке не нужна. Данные и права
               не меняются: floristTotal по-прежнему приходит, просто не отображается. */}
-          {!showsCustomerPrice && <FloristPriceCard floristTotal={order.floristTotal} />}
+          {!showsCustomerPrice && <OrderPriceCard label="Ваша цена изготовления" amount={order.floristTotal} />}
 
           <OrderStatusCard orderId={order.id} updatedAt={order.updatedAt} orderStatus={order.orderStatus} />
 
-          <FloristQuickActions
+          <OrderQuickActions
             orderId={order.id}
-            mapsUrl={mapsUrl}
-            handoffTargets={handoffTargets}
-            expenseActions={{ add: addOrderExpenseAction, update: updateOrderExpenseAction, remove: removeOrderExpenseAction }}
+            mapsUrl={recipientMapsUrl(order)}
+            handoff={{ targets: handoffTargets }}
+            expense={{ actions: { add: addOrderExpenseAction, update: updateOrderExpenseAction, remove: removeOrderExpenseAction } }}
           />
 
           {/* Расходы появляются только когда они есть: добавление — в быстрых действиях. */}
@@ -249,14 +191,5 @@ export default async function FloristOrderPage({ params }: { params: Promise<{ i
         </>
       }
     />
-  );
-}
-
-function FinRow({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex items-baseline justify-between gap-2">
-      <span className="text-slate-500">{label}</span>
-      <span className="font-medium text-slate-800">{value}</span>
-    </div>
   );
 }

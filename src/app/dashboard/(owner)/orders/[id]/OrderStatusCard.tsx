@@ -6,44 +6,16 @@ import { manualOrderStatuses, orderStatusMeta, ACCEPTED_ORDER_STATUSES } from "@
 import { Card, CardHeader, CardTitle, CardBody } from "@/components/ui/Card";
 import { Button } from "@/components/ui/button";
 import { Tooltip } from "@/components/ui/tooltip";
-import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
-import { Label } from "@/components/ui/label";
 import type { OrderStatus } from "@/generated/prisma/enums";
 import { useBlockSave, ConflictNotice } from "./orderEditShared";
 
 /**
- * Блоки «Статус заказа» + «Дата и время доставки» — редактируемы для owner/call-center/florist
- * через единый путь с OCC. Финансы/назначение флориста сюда НЕ входят (см. OwnerOrderControls).
- */
-export function OrderStatusDateControls({
-  orderId,
-  updatedAt,
-  orderStatus,
-  deliveryDate,
-  deliveryWindow,
-}: {
-  orderId: string;
-  updatedAt: string;
-  orderStatus: OrderStatus;
-  deliveryDate: string;
-  deliveryWindow: string;
-}) {
-  return (
-    <div className="space-y-4">
-      <OrderStatusCard orderId={orderId} updatedAt={updatedAt} orderStatus={orderStatus} />
-      <Card>
-        <CardHeader><CardTitle>Дата и время доставки</CardTitle></CardHeader>
-        <CardBody><DeliveryForm orderId={orderId} updatedAt={updatedAt} date={deliveryDate} window={deliveryWindow} /></CardBody>
-      </Card>
-    </div>
-  );
-}
-
-/**
- * Только «Статус заказа». Отдельная карточка — потому что у флориста в правой колонке
- * стоит статус БЕЗ даты доставки (дата у него редактируется из шапки), а заводить ради
- * этого вторую копию формы значило бы чинить OCC потом в двух местах.
+ * «Статус заказа» — одна карточка на владельца, колл-центр и флориста, единый путь с OCC.
+ *
+ * Дата и интервал доставки СЮДА НЕ ВХОДЯТ: они уже показаны в шапке заказа, и правятся
+ * оттуда же карандашом (DeliveryDateDialog). Прежняя связка «статус + дата» отдельной
+ * карточкой в колонке управления повторяла те же два поля второй раз.
  */
 export function OrderStatusCard({
   orderId,
@@ -110,38 +82,6 @@ function StatusForm({ orderId, updatedAt, current }: { orderId: string; updatedA
           current={conflict.current}
           labels={[{ k: "orderStatus", label: "Статус" }]}
           onRefresh={() => acceptCurrentVersion((c) => { if (c.orderStatus) setStatus(c.orderStatus as OrderStatus); })}
-        />
-      )}
-    </div>
-  );
-}
-
-function DeliveryForm({ orderId, updatedAt, date, window }: { orderId: string; updatedAt: string; date: string; window: string }) {
-  const [d, setD] = useState(date);
-  const [w, setW] = useState(window);
-  const { pending, conflict, save, acceptCurrentVersion } = useBlockSave(orderId, "delivery", updatedAt);
-  return (
-    <div className="space-y-2.5">
-      <div>
-        <Label>Дата</Label>
-        <Input type="date" value={d} onChange={(e) => setD(e.target.value)} className="mt-1" />
-      </div>
-      <div>
-        <Label>Интервал</Label>
-        <Input value={w} onChange={(e) => setW(e.target.value)} className="mt-1" placeholder="12:00 – 16:00" />
-      </div>
-      <Button
-        className="w-full"
-        disabled={pending}
-        onClick={() => save({ deliveryDate: d, deliveryWindow: w }, { successMessage: "Доставка обновлена" })}
-      >
-        Сохранить
-      </Button>
-      {conflict && (
-        <ConflictNotice
-          current={conflict.current}
-          labels={[{ k: "deliveryDate", label: "Дата" }, { k: "deliveryWindow", label: "Интервал" }]}
-          onRefresh={() => acceptCurrentVersion((c) => { if ("deliveryDate" in c) setD(c.deliveryDate); if ("deliveryWindow" in c) setW(c.deliveryWindow); })}
         />
       )}
     </div>

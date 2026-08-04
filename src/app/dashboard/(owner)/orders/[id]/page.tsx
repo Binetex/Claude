@@ -4,26 +4,48 @@ import { getForOwner } from "@/modules/orders/queries";
 import { prisma } from "@/lib/db";
 import { Card, CardHeader, CardTitle, CardBody } from "@/components/ui/Card";
 import { OrderPageShell } from "@/components/orders/OrderPageShell";
+import { OrderItemsCard } from "@/components/orders/OrderItemsCard";
+import { OrderContactCards } from "@/components/orders/OrderContactCards";
+import { OrderPriceCard } from "@/components/orders/OrderPriceCard";
+import { OrderQuickActions } from "@/components/orders/OrderQuickActions";
+import { OrderFinanceBreakdown } from "@/components/orders/OrderFinanceBreakdown";
+import { recipientAddressLines, recipientMapsUrl, senderAddressLines } from "@/components/orders/address";
 import { OrderStatusBadge, PaymentStatusBadge } from "@/components/StatusBadge";
-import { ZoomableImage } from "@/components/ImageLightbox";
-import { OrderItemImages } from "@/components/OrderItemImages";
-import { Separator } from "@/components/ui/misc";
 import { formatMoney } from "@/lib/money";
 import { fmtDateTime } from "@/lib/format";
-import { OrderItemComposition } from "@/components/OrderItemComposition";
 import { AirwallexPanel } from "./AirwallexPanel";
 import { UpdateCompositionButton } from "../UpdateCompositionButton";
-import { OwnerOrderControls } from "./OwnerOrderControls";
+import { OwnerPriceDialog } from "./OwnerPriceDialog";
 import { ContactEditDialog } from "./ContactEditDialog";
 import { CardNoteCard } from "./CardNoteCard";
-import { BurqDeliveryPanel } from "./BurqDeliveryPanel";
+import { DeliveryDateDialog } from "./DeliveryDateDialog";
+import { OrderStatusCard } from "./OrderStatusCard";
+import { DeliveryStatusCard } from "./DeliveryStatusCard";
 import { OrderPickupCard } from "./OrderPickupCard";
 import { OrderCommunications, type CommItem } from "./OrderCommunications";
 import { OrderExpensesSection } from "@/components/finance/OrderExpensesSection";
+import {
+  addOrderExpenseAction,
+  removeOrderExpenseAction,
+  updateOrderExpenseAction,
+} from "@/app/dashboard/orderExpenseActions";
 import { markOrderCommunicationsRead, countUnreadBySide, parseAttachments } from "@/integrations/quo/communicationsService";
 
 export const dynamic = "force-dynamic";
 
+/**
+ * Заказ у владельца.
+ *
+ * Раскладка — та же, что в кабинете флориста, и собрана из тех же компонентов: своей вёрстки
+ * товаров, контактов и доставки здесь больше нет. Владельческое живёт не в отдельных больших
+ * карточках, а внутри общей компоновки: переназначение флориста — плитка «Быстрых действий»,
+ * ручная цена — карандаш на плашке цены. Внизу страницы, отдельно от блоков заказа, — Airwallex
+ * и история назначений.
+ *
+ * Блока «Финансы» здесь СОЗНАТЕЛЬНО НЕТ: он показывал «≈ Прибыль» по плоской формуле
+ * computeEstimatedProfit, не знающей ни про модели PRIMARY/SECONDARY, ни про резерв налога,
+ * ни про дневной расчёт. Возвращать его нельзя — заработок считает финансовый модуль.
+ */
 export default async function OwnerOrderPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const order = await getForOwner(id);
@@ -72,74 +94,6 @@ export default async function OwnerOrderPage({ params }: { params: Promise<{ id:
     // QUO-таблицы недоступны — блок общения просто не покажет историю.
   }
 
-  // Адрес отправителя (billing) несколькими аккуратными строками. Пусто → блок покажет «не указан».
-  const sa = order.senderAddress;
-  const senderAddressLines = [
-    [sa.addressLine, sa.apartment].filter(Boolean).join(", "),
-    [sa.city, sa.province, sa.zip].filter(Boolean).join(" "),
-    sa.country,
-  ].filter((l): l is string => !!l && l.trim().length > 0);
-
-  // Текущая попытка доставки Burq + интент + окружение Burq (для панели доставки). Обёрнуто в
-  // try/catch: даже если таблицы/БД временно недоступны, карточка заказа не должна падать (500).
-  let currentDelivery = null;
-  let deliveryIntent = null;
-  let deliveryAttempts: import("./BurqDeliveryPanel").DeliveryAttempt[] = [];
-  try {
-    const [d, i, all] = await Promise.all([
-      prisma.delivery.findFirst({
-        where: { orderId: id, isCurrentAttempt: true },
-        select: {
-          id: true, status: true, rawProviderStatus: true, attemptNumber: true, externalDeliveryId: true,
-          finalCost: true, currency: true, providerName: true, finalCostUpdatedAt: true,
-          courierName: true, courierPhone: true, trackingUrl: true,
-          proofOfDeliveryUrls: true, signatureImageUrl: true, deliveredAt: true,
-          // История статусов — чтобы показать «Курьер вызван» (первый активный статус курьера) и «Доставка завершена».
-          statusEvents: { select: { normalizedStatus: true, occurredAt: true, receivedAt: true }, orderBy: { receivedAt: "asc" } },
-        },
-      }),
-      prisma.deliveryIntent.findUnique({
-        where: { orderId: id },
-        select: { intentStatus: true, lastSkipReason: true, scheduledAvailableAt: true },
-      }),
-      prisma.delivery.findMany({
-        where: { orderId: id },
-        orderBy: { attemptNumber: "asc" },
-        select: {
-          attemptNumber: true, status: true, createdAt: true, cancelledAt: true, deliveredAt: true,
-          finalCost: true, currency: true, externalDeliveryId: true, cancellationReason: true,
-          proofOfDeliveryUrls: true,
-          florist: { select: { user: { select: { name: true } } } },
-        },
-      }),
-    ]);
-    currentDelivery = d;
-    deliveryIntent = i;
-    deliveryAttempts = all.map((a) => ({
-      attemptNumber: a.attemptNumber,
-      status: a.status,
-      createdAt: a.createdAt.toISOString(),
-      cancelledAt: a.cancelledAt ? a.cancelledAt.toISOString() : null,
-      deliveredAt: a.deliveredAt ? a.deliveredAt.toISOString() : null,
-      finalCost: a.finalCost != null ? Number(a.finalCost) : null,
-      currency: a.currency,
-      externalDeliveryId: a.externalDeliveryId,
-      floristName: a.florist?.user.name ?? null,
-      cancellationReason: a.cancellationReason,
-      podPresent: Array.isArray(a.proofOfDeliveryUrls) && (a.proofOfDeliveryUrls as unknown[]).length > 0,
-    }));
-  } catch {
-    // Burq-таблицы недоступны — панель доставки просто не покажет данные.
-  }
-
-  // «Курьер вызван» = первый статус, где курьер уже задействован; «Доставка завершена» = deliveredAt / статус DELIVERED.
-  const COURIER_ACTIVE = new Set(["COURIER_ASSIGNED", "COURIER_EN_ROUTE_TO_PICKUP", "AT_PICKUP", "PICKED_UP", "IN_TRANSIT"]);
-  const evts = currentDelivery?.statusEvents ?? [];
-  const startedEvt = evts.find((e) => COURIER_ACTIVE.has(e.normalizedStatus));
-  const deliveredEvt = evts.find((e) => e.normalizedStatus === "DELIVERED");
-  const courierCalledAt: Date | null = startedEvt ? (startedEvt.occurredAt ?? startedEvt.receivedAt) : null;
-  const deliveryCompletedAt: Date | null = deliveredEvt ? (deliveredEvt.occurredAt ?? deliveredEvt.receivedAt) : (currentDelivery?.deliveredAt ?? null);
-
   return (
     <OrderPageShell
       backHref="/dashboard/orders"
@@ -154,71 +108,41 @@ export default async function OwnerOrderPage({ params }: { params: Promise<{ id:
       }
       deliveryDate={order.deliveryDate}
       deliveryWindow={order.deliveryWindow}
+      rightFirstOnMobile
+      deliveryAction={
+        <DeliveryDateDialog
+          orderId={order.id}
+          updatedAt={order.updatedAt}
+          deliveryDate={format(new Date(order.deliveryDate), "yyyy-MM-dd")}
+          deliveryWindow={order.deliveryWindow}
+        />
+      }
       left={
         <>
-          {/* Открытка и заметка — важное, наверху */}
-          <CardNoteCard orderId={order.id} updatedAt={order.updatedAt} cardMessage={order.cardMessage} customerNote={order.customerNote} />
+          <OrderItemsCard
+            items={order.items.map((it) => ({
+              id: it.id,
+              name: it.name,
+              quantity: it.quantity,
+              image: it.image,
+              variantImage: it.variantImage,
+              variantName: it.variantName,
+              floristComposition: it.floristComposition,
+              prices: [
+                { value: it.externalPrice, label: "заказчику" },
+                { value: it.floristItemPrice, label: "флористу" },
+              ],
+              action: <UpdateCompositionButton itemId={it.id} />,
+            }))}
+          />
 
-          {/* Дополнительные расходы по заказу: повторная доставка, переделка, компенсация. */}
-          <OrderExpensesSection orderId={order.id} />
-
-          {/* Товары */}
-          <Card>
-            <CardHeader><CardTitle>Товары</CardTitle></CardHeader>
-            <CardBody className="p-0">
-              <ul className="divide-y divide-slate-100">
-                {/* Строка переносится: на телефоне колонка цен («$249.00 заказчику») занимает
-                    почти всю ширину и оставляла названию товара считанные пиксели. */}
-                {order.items.map((it) => (
-                  <li key={it.id} className="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-4 py-3">
-                    <OrderItemImages image={it.image} variantImage={it.variantImage} size="h-14 w-14" />
-                    <div className="min-w-[10rem] flex-1">
-                      <div className="text-sm font-medium break-words text-slate-800">{it.name} × {it.quantity}</div>
-                      <OrderItemComposition variantName={it.variantName} floristComposition={it.floristComposition} />
-                      <UpdateCompositionButton itemId={it.id} />
-                    </div>
-                    <div className="ml-auto text-right text-sm whitespace-nowrap">
-                      <div className="text-slate-700">{formatMoney(it.externalPrice)} <span className="text-xs text-slate-400">заказчику</span></div>
-                      <div className="text-slate-500">{formatMoney(it.floristItemPrice)} <span className="text-xs text-slate-400">флористу</span></div>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            </CardBody>
-          </Card>
-
-          {/* Отправитель / Получатель с редактированием из карточки.
-              min-w-0 на карточках: без него длинный e-mail (сплошной токен без пробелов)
-              задавал минимальную ширину колонки, и обе карточки раздувались до 523px. */}
-          <div className="grid gap-4 md:grid-cols-2">
-            <Card className="min-w-0">
-              <CardHeader className="flex items-center justify-between">
-                <CardTitle>Отправитель</CardTitle>
-                <ContactEditDialog
-                  kind="sender"
-                  orderId={order.id}
-                  updatedAt={order.updatedAt}
-                  initial={{ senderName: order.senderName, senderPhone: order.senderPhone, senderEmail: order.senderEmail ?? "" }}
-                />
-              </CardHeader>
-              <CardBody className="space-y-0.5 text-sm">
-                <div className="font-medium break-words text-slate-800">{order.senderName}</div>
-                <div className="text-slate-600">{order.senderPhone || "—"}</div>
-                {/* break-all, а не break-words: у адреса почты нет пробелов, и «переносить по
-                    словам» для него равносильно «не переносить». */}
-                <div className="break-all text-slate-500">{order.senderEmail ?? "—"}</div>
-                <div className="pt-1 break-words text-slate-600">
-                  {senderAddressLines.length > 0 ? (
-                    senderAddressLines.map((l, i) => <div key={i}>{l}</div>)
-                  ) : (
-                    <span className="text-slate-400">Адрес отправителя не указан</span>
-                  )}
-                </div>
-              </CardBody>
-            </Card>
-            <Card className="min-w-0">
-              <CardHeader className="flex items-center justify-between">
-                <CardTitle>Получатель</CardTitle>
+          <OrderContactCards
+            recipient={{
+              name: order.recipientName,
+              phone: order.recipientPhone,
+              email: order.recipientEmail ?? "",
+              addressLines: recipientAddressLines(order),
+              edit: (
                 <ContactEditDialog
                   kind="recipient"
                   orderId={order.id}
@@ -233,105 +157,35 @@ export default async function OwnerOrderPage({ params }: { params: Promise<{ id:
                     zip: order.zip,
                   }}
                 />
-              </CardHeader>
-              <CardBody className="space-y-0.5 text-sm">
-                <div className="font-medium break-words text-slate-800">{order.recipientName}</div>
-                <div className="text-slate-600">{order.recipientPhone || "—"}</div>
-                <div className="break-all text-slate-500">{order.recipientEmail ?? "—"}</div>
-                <div className="pt-1 break-words text-slate-600">
-                  {order.addressLine}{order.apartment ? `, ${order.apartment}` : ""}, {order.city} {order.zip}
-                </div>
-              </CardBody>
-            </Card>
-          </div>
+              ),
+            }}
+            customer={{
+              name: order.senderName,
+              phone: order.senderPhone,
+              email: order.senderEmail ?? "",
+              addressLines: senderAddressLines(order.senderAddress),
+              edit: (
+                <ContactEditDialog
+                  kind="sender"
+                  orderId={order.id}
+                  updatedAt={order.updatedAt}
+                  initial={{ senderName: order.senderName, senderPhone: order.senderPhone, senderEmail: order.senderEmail ?? "" }}
+                />
+              ),
+            }}
+          />
 
-          {/* Финансы — ключевые цифры крупно, разбивка ниже */}
-          <Card>
-            <CardHeader><CardTitle>Финансы</CardTitle></CardHeader>
-            <CardBody>
-              {/* На телефоне цифры идут столбиком. В три колонки на 320px под сумму остаётся
-                  77px при нужных 96 — «$221.31» упиралась в край плашки. */}
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                <BigFig label="Итого заказчик" value={formatMoney(order.finance.customerTotal)} />
-                <BigFig label="Флористу" value={formatMoney(order.finance.floristTotal)} />
-                <BigFig label="≈ Прибыль" value={formatMoney(order.finance.estimatedProfit)} tone="text-blue-600" />
-              </div>
-              <Separator className="my-3" />
-              <div className="grid grid-cols-1 gap-x-6 gap-y-1.5 text-sm sm:grid-cols-2 md:grid-cols-3">
-                <FinRow label="Сумма товаров" value={formatMoney(order.finance.itemsTotal)} />
-                <FinRow label="Налог" value={formatMoney(order.finance.tax)} />
-                <FinRow label="Чаевые" value={formatMoney(order.finance.tip)} />
-                <FinRow label="Скидка" value={formatMoney(order.finance.discount)} />
-                <FinRow label="Доставка (заказчик)" value={formatMoney(order.finance.deliveryCustomerCost)} />
-                <FinRow label="Доставка (факт)" value={formatMoney(order.finance.deliveryActualCost)} />
-              </div>
-            </CardBody>
-          </Card>
+          {/* Раскладка счёта клиента. Прибыли здесь нет — см. комментарий к странице. */}
+          <OrderFinanceBreakdown title="Раскладка заказа" finance={order.finance} />
 
-          {/* Доставка — единый блок: статус заказа + инструкции доставки + вся плашка Burq. */}
-          <Card>
-            <CardHeader><CardTitle>Статус доставки</CardTitle></CardHeader>
-            <CardBody className="space-y-3 text-sm">
-              {order.deliveryInstructions?.trim() && (
-                <div className="rounded-md border border-amber-200 bg-amber-50 p-2">
-                  <div className="text-xs font-semibold text-amber-800">Инструкции доставки</div>
-                  <div className="mt-0.5 whitespace-pre-wrap text-slate-800">{order.deliveryInstructions}</div>
-                </div>
-              )}
-              <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
-                <Info label="Курьер вызван" value={fmtLocalDateTime(courierCalledAt, storeTimeZone)} />
-                <Info label="Доставка завершена" value={fmtLocalDateTime(deliveryCompletedAt, storeTimeZone)} />
-                <Info label="Tracking" value={order.trackingUrl ? <a href={order.trackingUrl} className="text-sky-600 underline" target="_blank" rel="noreferrer">Открыть</a> : "—"} />
-                {order.bouquetPhotoUrl && (
-                  <div><div className="mb-1 text-xs text-slate-400">Фото букета</div><ZoomableImage src={order.bouquetPhotoUrl} alt="" className="h-24 w-24 rounded-lg object-cover" /></div>
-                )}
-                {order.deliveryPhotoUrl && (
-                  <div><div className="mb-1 text-xs text-slate-400">Фото доставки</div><ZoomableImage src={order.deliveryPhotoUrl} alt="" className="h-24 w-24 rounded-lg object-cover" /></div>
-                )}
-              </div>
-
-              {/* Откуда курьер забирает заказ; переключение пересоздаёт черновик Burq. */}
-              <OrderPickupCard orderId={order.id} />
-
-              {/* Плашка Burq перенесена сюда целиком (единый блок доставки). */}
-              <BurqDeliveryPanel
-                orderId={order.id}
-                orderStatus={order.orderStatus}
-                attempts={deliveryAttempts}
-                delivery={
-                  currentDelivery
-                    ? {
-                        id: currentDelivery.id,
-                        status: currentDelivery.status,
-                        rawProviderStatus: currentDelivery.rawProviderStatus,
-                        attemptNumber: currentDelivery.attemptNumber,
-                        externalDeliveryId: currentDelivery.externalDeliveryId,
-                        finalCost: currentDelivery.finalCost != null ? Number(currentDelivery.finalCost) : null,
-                        currency: currentDelivery.currency,
-                        providerName: currentDelivery.providerName,
-                        finalCostUpdatedAt: currentDelivery.finalCostUpdatedAt ? currentDelivery.finalCostUpdatedAt.toISOString() : null,
-                        courierName: currentDelivery.courierName,
-                        courierPhone: currentDelivery.courierPhone,
-                        proofOfDeliveryUrls: Array.isArray(currentDelivery.proofOfDeliveryUrls) ? (currentDelivery.proofOfDeliveryUrls as string[]) : [],
-                        signatureImageUrl: currentDelivery.signatureImageUrl,
-                      }
-                    : null
-                }
-                intent={
-                  deliveryIntent
-                    ? {
-                        intentStatus: deliveryIntent.intentStatus,
-                        lastSkipReason: deliveryIntent.lastSkipReason,
-                        scheduledAvailableAt: deliveryIntent.scheduledAvailableAt ? deliveryIntent.scheduledAvailableAt.toISOString() : null,
-                      }
-                    : null
-                }
-              />
-            </CardBody>
-          </Card>
-
-          {/* Сверка платежа с Airwallex — только владельцу */}
-          {order.airwallex && <AirwallexPanel aw={order.airwallex} />}
+          <CardNoteCard
+            orderId={order.id}
+            updatedAt={order.updatedAt}
+            cardMessage={order.cardMessage}
+            customerNote={order.customerNote}
+            showPrint
+            collapsible
+          />
 
           {/* Общение (SMS/звонки) через QUO */}
           <OrderCommunications
@@ -344,81 +198,73 @@ export default async function OwnerOrderPage({ params }: { params: Promise<{ id:
             unread={commUnread}
           />
 
-          {/* Легаси-блок «История сообщений» (модель Message) удалён: он никогда не наполнялся и
-              вводил в заблуждение. Полная переписка теперь в блоке «Общение (SMS)» выше (QUO). */}
+          {/* Доставка целиком: курьер, Burq и точка забора. Раньше владелец имел собственную
+              копию этого блока вместе с копией трёх запросов Burq — теперь блок один. */}
+          <DeliveryStatusCard
+            orderId={order.id}
+            orderStatus={order.orderStatus}
+            deliveryInstructions={order.deliveryInstructions}
+            trackingUrl={order.trackingUrl}
+            bouquetPhotoUrl={order.bouquetPhotoUrl}
+            deliveryPhotoUrl={order.deliveryPhotoUrl}
+            storeTimeZone={storeTimeZone}
+            pickup={<OrderPickupCard orderId={order.id} />}
+          />
 
-          {/* История назначений */}
+          {/* ── Служебное. Держится ОТДЕЛЬНО, в самом низу: к работе с заказом эти два блока
+                 отношения не имеют, и в потоке основных карточек только мешали. ── */}
+          {order.airwallex && <AirwallexPanel aw={order.airwallex} />}
+
+          {/* Пустой истории быть не должно: карточка с заголовком и ничем внутри только
+              занимает экран — у заказов без назначений её просто нет. */}
+          {order.assignments.length > 0 && (
           <Card>
-            <CardHeader><CardTitle>История назначений</CardTitle></CardHeader>
+            <CardHeader className="py-2.5"><CardTitle>История назначений</CardTitle></CardHeader>
             <CardBody className="p-0">
               <ul className="divide-y divide-slate-100">
                 {order.assignments.map((a, i) => (
-                  <li key={i} className="flex items-center justify-between px-4 py-2 text-sm">
-                    <div>
-                      <span className="font-medium text-slate-700">{a.floristName}</span>
+                  <li key={i} className="flex flex-wrap items-center justify-between gap-x-2 gap-y-0.5 px-4 py-2 text-sm">
+                    <div className="min-w-0">
+                      <span className="font-medium break-words text-slate-700">{a.floristName}</span>
                       <span className="ml-2 text-xs text-slate-400">{stateLabel(a.state)} · {a.priceMode === "MANUAL" ? "ручная" : "авто"} {formatMoney(a.floristTotal)}</span>
                     </div>
-                    <span className="text-xs text-slate-400">{fmtDateTime(a.assignedAt)}</span>
+                    <span className="ml-auto text-xs whitespace-nowrap text-slate-400">{fmtDateTime(a.assignedAt)}</span>
                   </li>
                 ))}
               </ul>
             </CardBody>
           </Card>
+          )}
         </>
       }
       right={
-        <OwnerOrderControls
-          orderId={order.id}
-          updatedAt={order.updatedAt}
-          order={{
-            orderStatus: order.orderStatus,
-            deliveryDate: format(new Date(order.deliveryDate), "yyyy-MM-dd"),
-            deliveryWindow: order.deliveryWindow,
-            priceMode: order.priceMode,
-            floristTotal: order.finance.floristTotal,
-            currentFloristId: order.currentFloristId,
-          }}
-          florists={florists.map((f) => ({ id: f.id, name: f.user.name }))}
-        />
+        <>
+          {/* Цена флориста — та же плашка, что видит флорист. Правка ручной цены живёт
+              карандашом на ней: отдельная карточка под одно поле занимала треть колонки. */}
+          <OrderPriceCard
+            label="Цена флориста"
+            amount={order.finance.floristTotal}
+            hint={order.priceMode === "MANUAL" ? "задана вручную" : "авто-цена"}
+            action={<OwnerPriceDialog orderId={order.id} current={order.finance.floristTotal} />}
+          />
+
+          <OrderStatusCard orderId={order.id} updatedAt={order.updatedAt} orderStatus={order.orderStatus} />
+
+          <OrderQuickActions
+            orderId={order.id}
+            mapsUrl={recipientMapsUrl(order)}
+            reassign={{
+              florists: florists.map((f) => ({ id: f.id, name: f.user.name })),
+              currentFloristId: order.currentFloristId,
+              priceMode: order.priceMode,
+            }}
+            expense={{ actions: { add: addOrderExpenseAction, update: updateOrderExpenseAction, remove: removeOrderExpenseAction } }}
+          />
+
+          <OrderExpensesSection orderId={order.id} hideWhenEmpty />
+        </>
       }
     />
-  );
-}
-
-/** Дата/время в местном (для магазина) часовом поясе. "—" если нет значения. */
-function fmtLocalDateTime(d: Date | string | null | undefined, timeZone?: string): string {
-  if (!d) return "—";
-  try {
-    return new Intl.DateTimeFormat("ru-RU", { dateStyle: "short", timeStyle: "short", ...(timeZone ? { timeZone } : {}) }).format(new Date(d));
-  } catch {
-    return new Date(d).toLocaleString("ru-RU");
-  }
-}
-
-function Info({ label, value }: { label: string; value: React.ReactNode }) {
-  return (
-    <div>
-      <div className="text-xs text-slate-400">{label}</div>
-      <div className="text-slate-700">{value}</div>
-    </div>
-  );
-}
-
-function BigFig({ label, value, tone = "text-slate-900" }: { label: string; value: string; tone?: string }) {
-  return (
-    <div className="rounded-lg bg-slate-50 px-3 py-2.5">
-      <div className="text-[11px] tracking-wide text-slate-400 uppercase">{label}</div>
-      <div className={`mt-0.5 text-lg font-semibold tabular-nums ${tone}`}>{value}</div>
-    </div>
-  );
-}
-
-function FinRow({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex items-center justify-between gap-2">
-      <span className="text-slate-500">{label}</span>
-      <span className="tabular-nums text-slate-700">{value}</span>
-    </div>
   );
 }
 
