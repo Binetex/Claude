@@ -3,6 +3,8 @@ import { Card, CardHeader, CardTitle, CardBody } from "@/components/ui/Card";
 import { FinanceVisibilityToggle } from "./FinanceVisibilityToggle";
 import { SitePriorityEditor } from "./SitePriorityEditor";
 import { PickupLocationsEditor } from "./PickupLocationsEditor";
+import { AvailabilityEditor } from "./AvailabilityEditor";
+import { ownerSetFloristWeekends, ownerAddFloristDayOff, ownerRemoveFloristDayOff } from "./floristActions";
 import { AddFloristForm } from "./AddFloristForm";
 import { FloristEditForm } from "./FloristEditForm";
 import { FloristAvatar } from "@/components/FloristAvatar";
@@ -55,6 +57,16 @@ export default async function FloristsPage() {
             <div className="mt-1 text-sm text-slate-500">{f.user.email} · {f.user.phone}</div>
             <div className="mt-2 text-sm text-slate-600">Активных заказов: {f._count.currentOrders}</div>
             <FinanceVisibilityToggle floristId={f.id} current={f.financeVisibility} />
+            <AvailabilityEditor
+              floristId={f.id}
+              weekendDays={f.weekendDays}
+              daysOff={f.daysOff.map((d) => d.toISOString().slice(0, 10)).sort()}
+              actions={{
+                setWeekends: ownerSetFloristWeekends,
+                addDayOff: ownerAddFloristDayOff,
+                removeDayOff: ownerRemoveFloristDayOff,
+              }}
+            />
             <PickupLocationsEditor
               floristId={f.id}
               locations={f.pickupLocations.map((l) => ({

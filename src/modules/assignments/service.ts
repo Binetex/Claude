@@ -2,11 +2,36 @@ import "server-only";
 import { prisma } from "@/lib/db";
 import { Prisma } from "@/generated/prisma/client";
 import { applyAutoPriceSnapshot, clearServiceItemFloristPrices, recomputeEstimatedProfit } from "@/modules/pricing/service";
+import { isFloristAvailable } from "./availability";
 import { notifyFloristAssigned } from "@/integrations/notifications/telegram";
 import { TERMINAL_ORDER_STATUSES } from "@/lib/statuses";
 import { onOrderDeliveryChangeSafe } from "@/integrations/delivery/burq/scheduleService";
 
 /** Активные флористы сайта в порядке приоритета (position ↑). */
+/**
+ * Приоритет флористов сайта, оставляя только доступных на дату доставки.
+ *
+ * Отдельная функция, а не фильтр внутри getSitePriorityFloristIds: приоритет нужен и там,
+ * где даты нет вовсе (настройка очерёдности в кабинете владельца).
+ *
+ * Ручные пути — передача заказа и переназначение владельцем — этим НЕ пользуются: там
+ * выбирает человек, и недоступность не должна мешать назначить кого угодно.
+ */
+export async function getAvailableFloristIds(siteId: string, deliveryDate: Date): Promise<string[]> {
+  const priority = await getSitePriorityFloristIds(siteId);
+  if (priority.length === 0) return [];
+
+  const florists = await prisma.florist.findMany({
+    where: { id: { in: priority } },
+    select: { id: true, weekendDays: true, daysOff: true },
+  });
+  const byId = new Map(florists.map((f) => [f.id, f]));
+  return priority.filter((id) => {
+    const f = byId.get(id);
+    return f ? isFloristAvailable(f, deliveryDate) : false;
+  });
+}
+
 export async function getSitePriorityFloristIds(siteId: string): Promise<string[]> {
   const rows = await prisma.siteFloristPriority.findMany({
     where: { siteId, florist: { active: true, user: { active: true } } },
@@ -139,7 +164,8 @@ export async function assignInitial(orderId: string): Promise<void> {
   // Идемпотентность: не переназначаем, если уже назначен/принят.
   if (order.currentFloristId || order.assignmentStatus !== "UNASSIGNED") return;
 
-  const priority = await getSitePriorityFloristIds(order.siteId);
+  // Недоступные в этот день пропускаются, дальше — прежняя очерёдность.
+  const priority = await getAvailableFloristIds(order.siteId, order.deliveryDate);
   const nextFloristId = priority[0];
 
   if (!nextFloristId) {
@@ -228,7 +254,7 @@ export async function declineOrder(orderId: string, floristId: string): Promise<
   });
   const excluded = new Set(declined.map((d) => d.floristId));
 
-  const priority = await getSitePriorityFloristIds(order.siteId);
+  const priority = await getAvailableFloristIds(order.siteId, order.deliveryDate);
   const nextFloristId = priority.find((id) => !excluded.has(id));
 
   if (!nextFloristId) {

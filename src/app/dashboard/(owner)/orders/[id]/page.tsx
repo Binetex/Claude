@@ -8,6 +8,7 @@ import { OrderItemsCard } from "@/components/orders/OrderItemsCard";
 import { OrderContactCards } from "@/components/orders/OrderContactCards";
 import { OrderFloristPayCard, type FloristPayView } from "@/components/orders/OrderFloristPayCard";
 import { OrderQuickActions } from "@/components/orders/OrderQuickActions";
+import { getAvailableFloristIds, getSitePriorityFloristIds } from "@/modules/assignments/service";
 import { OrderFinanceBreakdown } from "@/components/orders/OrderFinanceBreakdown";
 import { recipientAddressLines, recipientMapsUrl, senderAddressLines } from "@/components/orders/address";
 import { resolveProfileAt } from "@/modules/finance/profile";
@@ -53,6 +54,21 @@ export default async function OwnerOrderPage({ params }: { params: Promise<{ id:
   if (!order) notFound();
 
   const florists = await prisma.florist.findMany({ include: { user: true }, orderBy: { createdAt: "asc" } });
+
+  // Заказ без флориста: отличаем «все заняты в этот день» от «флористов нет вовсе».
+  // Считаем на чтении — хранить нечего, ответ всегда соответствует текущим настройкам.
+  const noFloristReason = order.currentFloristId
+    ? null
+    : await (async () => {
+        // siteId в сериализованном заказе нет, а запрос по первичному ключу дешевле, чем
+        // тащить лишнее поле через общую сериализацию ради одного экрана.
+        const row = await prisma.order.findUnique({ where: { id }, select: { siteId: true, deliveryDate: true } });
+        if (!row) return null;
+        const priority = await getSitePriorityFloristIds(row.siteId);
+        if (priority.length === 0) return "нет активных флористов для этого магазина";
+        const available = await getAvailableFloristIds(row.siteId, row.deliveryDate);
+        return available.length === 0 ? "на эту дату нет доступных флористов — все отмечены выходными" : null;
+      })();
 
   // Чем оплачивается заказ назначенному флористу. Профиль резолвится НА ДАТУ ДОСТАВКИ, а не
   // на «сейчас»: модель оплаты меняется во времени, и июльский заказ обязан читаться по
@@ -258,6 +274,13 @@ export default async function OwnerOrderPage({ params }: { params: Promise<{ id:
               pay={pay}
               priceAction={<OwnerPriceDialog orderId={order.id} current={order.finance.floristTotal} />}
             />
+          )}
+
+          {noFloristReason && (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+              Флорист не назначен: {noFloristReason}. Назначить вручную можно в любом случае — недоступность
+              останавливает только автоматический выбор.
+            </div>
           )}
 
           <OrderStatusCard orderId={order.id} updatedAt={order.updatedAt} orderStatus={order.orderStatus} />

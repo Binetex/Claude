@@ -318,6 +318,14 @@ model Florist {
   active            Boolean                  @default(true)
   financeVisibility FloristFinanceVisibility @default(MAKER_ONLY)
   avatarUrl         String? // ссылка на маленькую аватарку (public/uploads); загружает владелец
+
+  /// Выходные по дням недели: 0 = воскресенье … 6 = суббота (как getUTCDay).
+  /// Массивом, а не таблицей: значений максимум семь, и join ради них дороже пользы.
+  weekendDays Int[] @default([])
+  /// Отдельные даты недоступности (отпуск, больничный). UTC-полночь БИЗНЕС-дня —
+  /// та же конвенция, что у Order.deliveryDate; сравнение идёт день в день, без таймзон.
+  daysOff DateTime[] @default([])
+
   createdAt         DateTime                 @default(now())
 
   sitePriorities SiteFloristPriority[]
