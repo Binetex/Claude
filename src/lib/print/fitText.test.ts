@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { fitFontPt, type MeasureAt } from "./fitText";
+import { fitFontPt, startingFontPt, lineHeightPx, type MeasureAt } from "./fitText";
 
 /**
  * Детерминированный «рендер»: высота = число строк × высота строки.
@@ -91,5 +91,50 @@ describe("подбор размера шрифта открытки", () => {
   it("минимум выше базового не ломает подбор", () => {
     const r = fitFontPt("текст", { basePt: 12, minPt: 16, areaHeightPx: AREA_H }, measure);
     expect(r.fontPt).toBe(12);
+  });
+});
+
+describe("стартовый кегль: 16pt только коротким запискам", () => {
+  // Карточка 2×2: текстовая область 392px в ширину.
+  const CARD_W = 392;
+  const cardMeasure = makeMeasure(CARD_W);
+  const start = (text: string) =>
+    startingFontPt(text, { basePt: 16, crowdedPt: 14, maxLinesAtBase: 4, lineHeightRatio: 1.4 }, cardMeasure);
+
+  /** Текст ровно на N строк при 16pt в этой области. */
+  const linesOf = (n: number) => {
+    const perLine = Math.floor(CARD_W / (16 * 0.5)); // 49 символов
+    return "x".repeat(perLine * (n - 1) + 1);
+  };
+
+  it("до четырёх строк включительно — базовый 16pt", () => {
+    expect(start("С днём рождения!")).toBe(16);
+    expect(start(linesOf(1))).toBe(16);
+    expect(start(linesOf(4))).toBe(16);
+  });
+
+  it("с пятой строки — 14pt, хотя место на карточке ещё есть", () => {
+    const five = linesOf(5);
+    // Именно тот случай, из-за которого правило и появилось: текст ПОМЕЩАЛСЯ базовым.
+    expect(cardMeasure(five, 16)).toBeLessThanOrEqual(260); // высота текстовой области
+    expect(start(five)).toBe(14);
+  });
+
+  it("чем длиннее, тем мельче — стартуем с 14pt и дальше подбор опускает ниже", () => {
+    const long = "Поздравляю и желаю счастья. ".repeat(30);
+    const startPt = start(long);
+    expect(startPt).toBe(14);
+    const r = fitFontPt(long, { basePt: startPt, minPt: 10, areaHeightPx: 260 }, cardMeasure);
+    expect(r.fontPt).toBeLessThanOrEqual(14);
+    expect(r.fontPt).toBeGreaterThanOrEqual(10);
+  });
+
+  it("пустой текст остаётся базовым", () => {
+    expect(start("")).toBe(16);
+  });
+
+  it("высота строки считается от кегля: pt → px и интерлиньяж", () => {
+    expect(lineHeightPx(16, 1.4)).toBeCloseTo((16 * 96) / 72 * 1.4, 5);
+    expect(lineHeightPx(16, 1.4)).toBeCloseTo(29.87, 1);
   });
 });

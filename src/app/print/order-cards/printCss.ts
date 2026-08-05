@@ -43,6 +43,13 @@ export const CARD_PADDING_PX = 44;
 const CUT_LINE_COLOR = "rgba(100, 116, 139, 0.2)";
 
 /**
+ * Межстрочный интервал текста открытки. Отсюда же его берёт подбор кегля, когда считает,
+ * сколько строк займёт записка: разойдись эти два числа — правило «с пятой строки мельче»
+ * начнёт срабатывать не на той строке.
+ */
+export const MSG_LINE_HEIGHT = 1.4;
+
+/**
  * Печатный CSS записок. US Letter АЛЬБОМНО (НЕ A4), 4 карточки на листе сеткой 2×2.
  *
  * Заказ занимает СТОЛБЕЦ: сверху получатель, снизу текст открытки — тот же порядок, что был
@@ -92,7 +99,7 @@ export const PRINT_CSS = `
 .rec-phone { font-size: 12pt; margin-top: 4px; }
 .rec-addr { font-size: 12pt; margin-top: 4px; line-height: 1.3; }
 /* Текст открытки — крупно, по центру, с сохранением переносов */
-.msg { white-space: pre-wrap; line-height: 1.4; max-width: 100%; }
+.msg { white-space: pre-wrap; line-height: ${MSG_LINE_HEIGHT}; max-width: 100%; }
 @media screen { .sheet { box-shadow: 0 1px 6px rgba(0,0,0,.15); margin: 16px auto; } }
 @media print { .no-print { display: none !important; } .doc { background: #fff; } .sheet { margin: 0; box-shadow: none; } }
 `;

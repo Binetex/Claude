@@ -1,7 +1,7 @@
 "use client";
 import { useLayoutEffect, useRef, useState } from "react";
 import { splitCardIntoParts } from "@/lib/print/splitNote";
-import { fitFontPt } from "@/lib/print/fitText";
+import { fitFontPt, startingFontPt } from "@/lib/print/fitText";
 import {
   buildOrderHalves,
   packOrderColumns,
@@ -11,7 +11,7 @@ import {
   type RecipientInfo,
 } from "@/lib/print/packSheets";
 import { escapeHtml, isBlankCardMessage } from "@/lib/print/cardText";
-import { PRINT_CSS, CARD_PADDING_PX, CELL_W_PX, CELL_H_PX } from "./printCss";
+import { PRINT_CSS, CARD_PADDING_PX, CELL_W_PX, CELL_H_PX, MSG_LINE_HEIGHT } from "./printCss";
 import type { PrintOrder } from "@/modules/print/loadPrintable";
 
 // Размеры карточки берутся из printCss — того же модуля, что строит вёрстку. Разойдись они,
@@ -21,14 +21,19 @@ const NOTE_W = CELL_W_PX - 2 * PAD; // ширина текстовой обла�
 const MSG_AREA_H = CELL_H_PX - 2 * PAD - 12; // доступная высота текста открытки в карточке
 
 /**
- * Диапазон кегля текста открытки. Базовый прежний: короткая записка на карточке 5×3.75"
- * читается на 16pt так же, как читалась на половине листа.
+ * Диапазон кегля текста открытки.
+ *
+ * 16pt — только для коротких записок, до четырёх строк включительно. С пятой строки текст
+ * печатается 14pt: место на карточке ещё есть, но 16pt на такой объём выглядит крупно.
+ * Дальше работает обычный подбор — если и 14pt не помещается, кегль опускается ниже.
  *
  * Минимум опущен с 12pt до 10pt намеренно. Площадь карточки теперь около трёх четвертей от
  * прежней половины, и на старом минимуме записки, которые раньше помещались целиком, начали
  * бы рваться на две карточки. 10pt восстанавливает прежний порог «влезает без разрыва».
  */
 const BASE_FONT_PT = 16;
+const CROWDED_FONT_PT = 14;
+const BASE_MAX_LINES = 4;
 const MIN_FONT_PT = 10;
 
 function recipientOf(o: PrintOrder): RecipientInfo {
@@ -58,7 +63,7 @@ export function PrintDocument({ orders }: { orders: PrintOrder[] }) {
     meas.style.width = `${NOTE_W}px`;
     const measure = (text: string, fontPt: number): number => {
       meas.style.fontSize = `${fontPt}pt`;
-      meas.innerHTML = `<div style="white-space:pre-wrap;line-height:1.4">${escapeHtml(text)}</div>`;
+      meas.innerHTML = `<div style="white-space:pre-wrap;line-height:${MSG_LINE_HEIGHT}">${escapeHtml(text)}</div>`;
       return meas.offsetHeight;
     };
 
@@ -68,9 +73,19 @@ export function PrintDocument({ orders }: { orders: PrintOrder[] }) {
 
       // Кегль подбирается ДЛЯ КАЖДОЙ открытки отдельно: короткая записка не должна мельчать
       // из-за того, что в этом же документе печатается длинная.
+      const startPt = startingFontPt(
+        o.cardMessage,
+        {
+          basePt: BASE_FONT_PT,
+          crowdedPt: CROWDED_FONT_PT,
+          maxLinesAtBase: BASE_MAX_LINES,
+          lineHeightRatio: MSG_LINE_HEIGHT,
+        },
+        measure
+      );
       const { fontPt, fits } = fitFontPt(
         o.cardMessage,
-        { basePt: BASE_FONT_PT, minPt: MIN_FONT_PT, areaHeightPx: MSG_AREA_H },
+        { basePt: startPt, minPt: MIN_FONT_PT, areaHeightPx: MSG_AREA_H },
         measure
       );
 

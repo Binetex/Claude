@@ -36,6 +36,31 @@ export type FitResult = {
  * Наибольший размер из диапазона, при котором текст помещается целиком.
  * Если не помещается даже на минимуме — возвращает минимум и fits: false.
  */
+/** Высота одной строки, px: pt → px (96/72) с учётом line-height. */
+export function lineHeightPx(fontPt: number, ratio: number): number {
+  return ((fontPt * 96) / 72) * ratio;
+}
+
+/**
+ * С какого кегля НАЧИНАТЬ подбор.
+ *
+ * Базовый оставляем только коротким запискам: «влезает» и «выглядит хорошо» — не одно и то
+ * же. На пять строк 16pt смотрится крупно и по-плакатному, хотя место на карточке ещё есть,
+ * поэтому с этого объёма текст сразу печатается ступенью мельче. Дальше работает обычный
+ * подбор: если и на этой ступени не помещается, он опускает кегль ещё.
+ */
+export function startingFontPt(
+  text: string,
+  opts: { basePt: number; crowdedPt: number; maxLinesAtBase: number; lineHeightRatio: number },
+  measure: MeasureAt
+): number {
+  const limit = opts.maxLinesAtBase * lineHeightPx(opts.basePt, opts.lineHeightRatio);
+  // Половина строки допуска: браузер округляет высоту, и ровно maxLines строк не должны
+  // случайно перевесить порог.
+  const slack = lineHeightPx(opts.basePt, opts.lineHeightRatio) / 2;
+  return measure(text, opts.basePt) > limit + slack ? opts.crowdedPt : opts.basePt;
+}
+
 export function fitFontPt(text: string, opts: FitOptions, measure: MeasureAt): FitResult {
   const step = opts.stepPt ?? 1;
   const min = Math.min(opts.minPt, opts.basePt);
