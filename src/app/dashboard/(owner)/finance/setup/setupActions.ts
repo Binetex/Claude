@@ -63,6 +63,8 @@ function revalidateSetup() {
   revalidatePath("/dashboard/finance/setup");
   revalidatePath("/dashboard/finance/settings");
   revalidatePath("/dashboard/finance/florists");
+  // Обзор считается из тех же данных — без этого он остался бы со старой прибылью.
+  revalidatePath("/dashboard/finance", "layout");
 }
 
 function done(message: string, r: { days: number; detector: { autoResolved: number } }): SetupResult {
@@ -223,6 +225,8 @@ export async function recomputePrimaryShare(): Promise<SetupResult> {
 
     revalidatePath("/dashboard/finance/florists", "layout");
     revalidatePath("/dashboard/finance/florists");
+  // Обзор считается из тех же данных — без этого он остался бы со старой прибылью.
+  revalidatePath("/dashboard/finance", "layout");
     return {
       ok: true,
       message: `Дней: ${plan.days.length} · посчитано целиком: ${complete} · не хватает данных: ${plan.days.length - complete}`,

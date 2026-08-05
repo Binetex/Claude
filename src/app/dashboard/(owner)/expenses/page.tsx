@@ -63,7 +63,14 @@ export default async function ExpensesPage({
 
   const [summary, history, categories, earliest, todayCents, monthCents, yearCents] = await Promise.all([
     tab === "categories" ? getExpenseMonthSummary(from, to) : Promise.resolve(null),
-    tab === "history" ? getExpenseHistory(sp.q ?? null, Number(sp.page) || 1) : Promise.resolve(null),
+    tab === "history"
+      ? getExpenseHistory(
+          sp.q ?? null,
+          Number(sp.page) || 1,
+          undefined,
+          /^\d{4}-\d{2}-\d{2}$/.test(sp.day ?? "") ? new Date(`${sp.day}T00:00:00.000Z`) : null
+        )
+      : Promise.resolve(null),
     listExpenseCategories(),
     earliestExpenseDay(),
     getExpenseTotal(today, today),

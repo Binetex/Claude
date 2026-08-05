@@ -161,10 +161,12 @@ export const HISTORY_PER_PAGE = 50;
 export async function getExpenseHistory(
   query: string | null,
   page = 1,
-  perPage = HISTORY_PER_PAGE
+  perPage = HISTORY_PER_PAGE,
+  /** Показать только расходы, действовавшие в этот день — переход из разбора дня. */
+  day: Date | null = null
 ): Promise<ExpenseHistoryPage> {
   const q = (query ?? "").trim();
-  const where = q
+  const search = q
     ? {
         OR: [
           { title: { contains: q, mode: "insensitive" as const } },
@@ -173,6 +175,10 @@ export async function getExpenseHistory(
         ],
       }
     : {};
+  // Правило «действовало в этот день» — то же, что и в месячной сводке: началось не позже
+  // и не кончилось раньше. Разовый расход при этом попадает ровно в свой день.
+  const onDay = day ? { startDay: { lte: day }, OR: [{ endDay: null }, { endDay: { gte: day } }] } : {};
+  const where = day && q ? { AND: [search, onDay] } : day ? onDay : search;
 
   const safePage = Math.max(1, Math.floor(page) || 1);
   const [rows, total] = await Promise.all([

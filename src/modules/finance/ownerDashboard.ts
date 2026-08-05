@@ -36,6 +36,10 @@ export type OwnerDay = {
   ordersTotal: number;
   /** Доход бизнеса: сколько заплатили клиенты. */
   revenueCents: number;
+  /** Чаевые — целиком владельца, флористу с них ничего не идёт. */
+  tipsCents: number;
+  /** Все расходы бизнеса за день, включая мои: выручка − расходы − флористы = прибыль. */
+  expensesCents: number;
   /** Доля основного + фиксированные цены второстепенных за этот день. */
   floristEarningsCents: number;
   /** Мои расходы за день из раздела «Мои расходы». */
@@ -47,6 +51,7 @@ export type OwnerDay = {
 export type OwnerMonth = {
   days: OwnerDay[];
   revenueCents: number;
+  expensesCents: number;
   floristEarningsCents: number;
   ownerExpensesCents: number;
   /** Сумма по ГОТОВЫМ дням: неготовые в итог не входят и не занижают его молча. */
@@ -164,10 +169,18 @@ export async function getOwnerMonth(from: Date, to: Date): Promise<OwnerMonth> {
       blockers: calc.blockers,
       ordersTotal: calc.ordersTotal,
       revenueCents: calc.grossRevenueCents,
+      tipsCents: calc.tipsCents,
+      // Выручка минус прибыль до флористов = всё, что съел день, включая мои расходы.
+      // Чаевые в расход не попадают: они вычтены из базы флориста, но остаются у владельца.
+      expensesCents: calc.complete
+        ? calc.grossRevenueCents - calc.tipsCents - calc.distributableCents + ownerExpensesCents
+        : 0,
       floristEarningsCents,
       ownerExpensesCents,
+      // Чаевые прибавляются ЗДЕСЬ, а не в distributableCents: та сумма — база доли
+      // флориста, и трогать её значило бы изменить чужие деньги.
       ownerNetCents: calc.complete
-        ? calc.distributableCents - floristEarningsCents - ownerExpensesCents
+        ? calc.distributableCents + calc.tipsCents - floristEarningsCents - ownerExpensesCents
         : null,
     });
   }
@@ -175,10 +188,180 @@ export async function getOwnerMonth(from: Date, to: Date): Promise<OwnerMonth> {
   return {
     days,
     revenueCents: days.reduce((a, d) => a + d.revenueCents, 0),
+    expensesCents: days.reduce((a, d) => a + d.expensesCents, 0),
     floristEarningsCents: days.reduce((a, d) => a + d.floristEarningsCents, 0),
     ownerExpensesCents: days.reduce((a, d) => a + d.ownerExpensesCents, 0),
     ownerNetCents: days.reduce((a, d) => a + (d.ownerNetCents ?? 0), 0),
     readyDays: days.filter((d) => d.ready).length,
     incompleteDays: days.filter((d) => !d.ready).length,
+  };
+}
+
+export type OwnerDayDetail = {
+  day: string;
+  ready: boolean;
+  blockers: DayBlocker[];
+  ordersTotal: number;
+
+  /** Выручка по магазинам — первый вопрос «откуда деньги». */
+  revenueBySite: { siteId: string; name: string; cents: number }[];
+  revenueCents: number;
+  tipsCents: number;
+
+  /** Расходы бизнеса по видам. Порядок фиксированный, нули не скрываются. */
+  expenses: { label: string; cents: number }[];
+  expensesCents: number;
+  ownerExpensesCents: number;
+
+  /** Заработок флористов с их заказами — чтобы было видно, из чего он сложился. */
+  florists: {
+    floristId: string;
+    name: string;
+    cents: number;
+    orders: { id: string; orderNumber: string; contributionCents: number }[];
+  }[];
+  floristEarningsCents: number;
+
+  ownerNetCents: number | null;
+};
+
+/**
+ * Разбор одного дня: из чего сложилась прибыль.
+ *
+ * Считает тем же способом, что и список дней, — просто не сворачивает результат в три
+ * числа. Отдельной формулы здесь нет и быть не должно: расхождение между списком и
+ * разбором читалось бы как ошибка в деньгах.
+ */
+export async function getOwnerDay(day: Date): Promise<OwnerDayDetail | null> {
+  const month = await getOwnerMonth(day, day);
+  const row = month.days[0];
+  if (!row) return null;
+
+  const shareGate = primaryShareGate();
+  const accrual = accrualGate();
+
+  const [orders, sites, profiles, flowerExpense, dayFinances] = await Promise.all([
+    prisma.order.findMany({
+      where: { orderStatus: "DELIVERED", deliveryDate: day },
+      select: {
+        id: true, orderNumber: true, siteId: true, currentFloristId: true,
+        itemsTotal: true, tax: true, tip: true, deliveryCustomerCost: true,
+        deliveryActualCost: true, deliveryActualCostConfirmedAt: true, customerTotal: true,
+        floristTotal: true,
+        acquiringFee: { select: { feeCents: true } },
+        consumablesOverride: { select: { amountCents: true } },
+        site: { select: { id: true, name: true } },
+        currentFlorist: { select: { id: true, user: { select: { name: true } } } },
+        items: {
+          select: {
+            id: true, name: true, quantity: true, productId: true, variantId: true,
+            financialTypeSnapshot: true, purchaseCostSnapshotCents: true,
+          },
+        },
+      },
+    }),
+    prisma.site.findMany({ select: { id: true, name: true } }),
+    prisma.floristFinanceProfile.findMany({
+      where: { active: true, effectiveTo: null },
+      select: { floristId: true, model: true },
+    }),
+    prisma.dailyFlowerExpense.findFirst({ where: { expenseDay: day }, select: { amountCents: true } }),
+    prisma.dayFinance.findMany({
+      where: { day, complete: true },
+      select: { distributableCents: true, financeProfile: { select: { sharePercentBp: true, floristId: true } } },
+    }),
+  ]);
+
+  const [additional, itemFinance, settings] = await Promise.all([
+    prisma.orderAdditionalExpense.findMany({
+      where: { orderId: { in: orders.map((o) => o.id) }, reversedAt: null },
+      select: { orderId: true, amountCents: true },
+    }),
+    resolveItemsFinance(orders.flatMap((o) => o.items)),
+    loadFinanceSettings([...new Set(orders.map((o) => o.siteId))]),
+  ]);
+
+  const additionalByOrder = new Map<string, number>();
+  for (const a of additional) {
+    additionalByOrder.set(a.orderId, (additionalByOrder.get(a.orderId) ?? 0) + a.amountCents);
+  }
+  const calc = computeDayFinance(
+    toDayOrderInputs(orders, { additionalByOrder, itemFinance, settings }),
+    flowerExpense?.amountCents ?? null
+  );
+  const contributionByOrder = new Map(calc.orders.map((o) => [o.orderId, o.contributionCents]));
+
+  const siteName = new Map(sites.map((s) => [s.id, s.name]));
+  const revenueBySite = new Map<string, number>();
+  for (const o of orders) {
+    const cents =
+      toCents(o.itemsTotal) + toCents(o.tax) + toCents(o.deliveryCustomerCost) + toCents(o.tip);
+    revenueBySite.set(o.siteId, (revenueBySite.get(o.siteId) ?? 0) + cents);
+  }
+
+  const modelByFlorist = new Map(profiles.map((p) => [p.floristId, p.model]));
+  const shareByFlorist = new Map<string, number>();
+  for (const d of dayFinances) {
+    const bp = d.financeProfile.sharePercentBp;
+    if (bp == null) continue;
+    if (shareGate.enabled && day < shareGate.startDate) continue;
+    shareByFlorist.set(d.financeProfile.floristId, dayShareCents(d.distributableCents, bp));
+  }
+
+  const byFlorist = new Map<string, OwnerDayDetail["florists"][number]>();
+  for (const o of orders) {
+    if (!o.currentFloristId || !o.currentFlorist) continue;
+    const entry = byFlorist.get(o.currentFloristId) ?? {
+      floristId: o.currentFloristId,
+      name: o.currentFlorist.user.name ?? "Без имени",
+      cents: 0,
+      orders: [],
+    };
+    entry.orders.push({
+      id: o.id,
+      orderNumber: o.orderNumber,
+      contributionCents: contributionByOrder.get(o.id) ?? 0,
+    });
+    byFlorist.set(o.currentFloristId, entry);
+  }
+  // Гейт проверяется на сам день: заказы внутри дня все одной даты.
+  const beforeAccrual = accrual.enabled && day < accrual.startDate;
+  for (const [floristId, entry] of byFlorist) {
+    if (beforeAccrual) {
+      entry.cents = 0;
+    } else if (modelByFlorist.get(floristId) === "PRIMARY") {
+      entry.cents = shareByFlorist.get(floristId) ?? 0;
+    } else {
+      entry.cents = orders
+        .filter((o) => o.currentFloristId === floristId)
+        .reduce((a, o) => a + Math.max(toCents(o.floristTotal), 0), 0);
+    }
+  }
+
+  return {
+    day: row.day,
+    ready: row.ready,
+    blockers: row.blockers,
+    ordersTotal: row.ordersTotal,
+    revenueBySite: [...revenueBySite.entries()]
+      .map(([siteId, cents]) => ({ siteId, name: siteName.get(siteId) ?? siteId, cents }))
+      .sort((a, b) => b.cents - a.cents),
+    revenueCents: row.revenueCents,
+    tipsCents: row.tipsCents,
+    expenses: [
+      { label: "Цветы", cents: calc.flowerPurchaseCents },
+      { label: "Доставка", cents: calc.deliveryCents },
+      { label: "Комиссии", cents: calc.acquiringFeeCents },
+      { label: "Налог", cents: calc.taxCents },
+      { label: "Вазы и подарки", cents: calc.vaseGiftCostCents },
+      { label: "Расходники", cents: calc.consumablesCents },
+      { label: "Доп. расходы", cents: calc.additionalCents },
+      { label: "Мои расходы", cents: row.ownerExpensesCents },
+    ],
+    expensesCents: row.expensesCents,
+    ownerExpensesCents: row.ownerExpensesCents,
+    florists: [...byFlorist.values()].sort((a, b) => b.cents - a.cents),
+    floristEarningsCents: row.floristEarningsCents,
+    ownerNetCents: row.ownerNetCents,
   };
 }

@@ -15,6 +15,7 @@ import { prisma } from "@/lib/db";
 import { setFinanceProfile } from "./profile";
 import { fixConsumablesRate, fixDailyFlowerExpense, fixDeliveryActualCost, fixSiteFeeModel } from "./fix";
 import { recomputeDay, computeDayShare } from "./dayFinance";
+import { dayShareCents } from "./dayCalc";
 import { getOwnerMonth } from "./ownerDashboard";
 
 const RUN = `own${crypto.randomBytes(3).toString("hex")}`;
@@ -160,7 +161,8 @@ describe("дашборд владельца", () => {
     // Расходов владельца в этом тесте нет, значит чистый = прибыль дня − заработок флористов.
     expect(day.ownerNetCents).toBe(
       day.revenueCents
-        - 2 * 500                       // чаевые
+        // Чаевые НЕ вычитаются: они целиком владельца. Из базы флориста они вычтены,
+        // но в прибыль владельца возвращаются — иначе деньги исчезали бы бесследно.
         - 2 * 1000                      // налог
         - (1000 + 1500)                 // фактическая доставка
         - (Math.round((13500 * 290) / 10000) + 30 + Math.round((33500 * 290) / 10000) + 30) // эквайринг
@@ -168,6 +170,17 @@ describe("дашборд владельца", () => {
         - 6000                          // дневная закупка цветов
         - day.floristEarningsCents
     );
+  });
+
+  it("чаевые целиком у владельца и флористу не достаются", async () => {
+    const m = await getOwnerMonth(FROM, TO);
+    const day = m.days.find((d) => d.day === "2026-07-28")!;
+    const share = await computeDayShare(primaryProfileId, DAY);
+
+    // По $5 чаевых с каждого из двух заказов.
+    expect(day.tipsCents).toBe(1000);
+    // Доля флориста считается от базы БЕЗ чаевых — она их не видит.
+    expect(share!.shareCents).toBe(dayShareCents(share!.distributableCents, 6660));
   });
 
   it("неготовый день не даёт числа и не входит в итог месяца", async () => {

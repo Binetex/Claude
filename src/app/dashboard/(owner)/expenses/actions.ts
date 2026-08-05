@@ -14,9 +14,16 @@ function fail(e: unknown): ExpenseActionResult {
   throw e;
 }
 
-/** Правило влияет на много дней сразу, поэтому обновляем весь раздел, а не одну дату. */
+/**
+ * Правило влияет на много дней сразу, поэтому обновляем весь раздел, а не одну дату.
+ *
+ * Финансовый дашборд обновляем тоже: мои расходы входят в прибыль владельца, и без этого
+ * он показывал бы прежнюю цифру до истечения клиентского кэша — а выглядело бы это как
+ * «добавил расход, прибыль не изменилась, система сломалась».
+ */
 function refresh(): void {
   revalidatePath("/dashboard/expenses", "layout");
+  revalidatePath("/dashboard/finance", "layout");
 }
 
 export async function saveExpenseAction(fd: FormData): Promise<ExpenseActionResult> {
