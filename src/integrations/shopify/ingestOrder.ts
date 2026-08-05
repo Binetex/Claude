@@ -6,6 +6,7 @@ import { assignInitial } from "@/modules/assignments/service";
 import { createProductImageCache, resolveLineItemImages, type ProductImageCache } from "./productImages";
 import { resolveShopifyAccessToken } from "./customApp/credentials";
 import { normalizePhone } from "@/lib/phone";
+import { stripDeliveryTail } from "@/integrations/cardMessageTail";
 import { scheduleDeliveryForNewOrder } from "@/integrations/delivery/burq/scheduleService";
 import { extractShopifyOrderNumber, extractSenderAddress } from "./orderFields";
 import { fetchShopifyDeliveryInstructions } from "./deliveryInstructions";
@@ -125,8 +126,13 @@ function isUniqueConstraintViolation(err: unknown): boolean {
  * deliveryDate/deliveryWindow по-прежнему парсятся из note_attributes отдельно в
  * buildOrderData — то поле Shopify не даёт менять post-creation вообще, поэтому для них
  * push не существует и resync на update не делается.
+ *
+ * Из note срезается служебный хвост приложения доставки («| Delivery Date: … | Delivery
+ * Time: …»): к поздравлению он не относится, а дата и окно и так лежат в своих полях
+ * заказа — см. cardMessageTail.ts. Сырой note сохраняется в originalCardMessage.
  */
 function extractAddressAndCardMessage(payload: ShopifyOrder) {
+  const note = payload.note ?? "";
   return {
     recipientName: fullName(payload.shipping_address) || "—",
     recipientPhone: normalizePhone(payload.shipping_address?.phone),
@@ -134,7 +140,8 @@ function extractAddressAndCardMessage(payload: ShopifyOrder) {
     apartment: payload.shipping_address?.address2 ?? null,
     city: payload.shipping_address?.city ?? "",
     zip: payload.shipping_address?.zip ?? "",
-    cardMessage: payload.note ?? "",
+    cardMessage: stripDeliveryTail(note),
+    rawNote: note,
   };
 }
 
@@ -303,7 +310,8 @@ function buildOrderData(
   deliveryInstructions: string,
   extra?: { isBackfilled?: boolean }
 ) {
-  const { recipientName, recipientPhone, addressLine, apartment, city, zip, cardMessage } = extractAddressAndCardMessage(payload);
+  const { recipientName, recipientPhone, addressLine, apartment, city, zip, cardMessage, rawNote } =
+    extractAddressAndCardMessage(payload);
   const senderAddress = extractSenderAddress(payload.billing_address);
   const customerNote = ""; // у Shopify-заказов открытка всегда в payload.note — отдельного поля под заметку клиента нет
   const deliveryDateRaw = findNoteAttribute(payload, /delivery.*date/i);
@@ -379,7 +387,9 @@ function buildOrderData(
     city,
     zip,
     cardMessage,
-    originalCardMessage: cardMessage,
+    // Сырой note, вместе с хвостом приложения доставки: поле нигде не показывается и служит
+    // следом того, что реально прислал магазин.
+    originalCardMessage: rawNote,
     customerNote,
     originalCustomerNote: customerNote,
     itemsTotal,
