@@ -2,23 +2,34 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import { splitCardIntoParts } from "@/lib/print/splitNote";
 import { fitFontPt } from "@/lib/print/fitText";
-import { buildOrderHalves, packOrderSheets, type Half, type Sheet, type RecipientInfo } from "@/lib/print/packSheets";
+import {
+  buildOrderHalves,
+  packOrderColumns,
+  packColumnsIntoPages,
+  type Half,
+  type Page,
+  type RecipientInfo,
+} from "@/lib/print/packSheets";
 import { escapeHtml, isBlankCardMessage } from "@/lib/print/cardText";
+import { PRINT_CSS, CARD_PADDING_PX, CELL_W_PX, CELL_H_PX } from "./printCss";
 import type { PrintOrder } from "@/modules/print/loadPrintable";
-import { PRINT_CSS, CARD_PADDING_PX } from "./printCss";
 
-const PX = 96; // CSS px на дюйм — экранный замер согласован с печатью
-const HALF_H = 5.5 * PX;
-const PAD = CARD_PADDING_PX; // поле карточки — то же значение, что в CSS (.half padding)
-const NOTE_W = 8.5 * PX - 2 * PAD; // ширина текстовой области
-const MSG_AREA_H = HALF_H - 2 * PAD - 12; // доступная высота текста открытки в половине
+// Размеры карточки берутся из printCss — того же модуля, что строит вёрстку. Разойдись они,
+// подобранный кегль не совпадёт с реальной раскладкой.
+const PAD = CARD_PADDING_PX; // поле карточки — то же значение, что в CSS (.card padding)
+const NOTE_W = CELL_W_PX - 2 * PAD; // ширина текстовой области
+const MSG_AREA_H = CELL_H_PX - 2 * PAD - 12; // доступная высота текста открытки в карточке
 
 /**
- * Диапазон кегля текста открытки. Базовый — как раньше; ниже минимума не опускаемся,
- * дальше уже перенос на следующую половину.
+ * Диапазон кегля текста открытки. Базовый прежний: короткая записка на карточке 5×3.75"
+ * читается на 16pt так же, как читалась на половине листа.
+ *
+ * Минимум опущен с 12pt до 10pt намеренно. Площадь карточки теперь около трёх четвертей от
+ * прежней половины, и на старом минимуме записки, которые раньше помещались целиком, начали
+ * бы рваться на две карточки. 10pt восстанавливает прежний порог «влезает без разрыва».
  */
 const BASE_FONT_PT = 16;
-const MIN_FONT_PT = 12;
+const MIN_FONT_PT = 10;
 
 function recipientOf(o: PrintOrder): RecipientInfo {
   return {
@@ -39,7 +50,7 @@ function cityStateZip(r: RecipientInfo): string {
 
 export function PrintDocument({ orders }: { orders: PrintOrder[] }) {
   const measRef = useRef<HTMLDivElement>(null);
-  const [sheets, setSheets] = useState<Sheet[] | null>(null);
+  const [pages, setPages] = useState<Page[] | null>(null);
 
   useLayoutEffect(() => {
     const meas = measRef.current;
@@ -75,7 +86,7 @@ export function PrintDocument({ orders }: { orders: PrintOrder[] }) {
       return buildOrderHalves(recipient, parts.length ? parts : [o.cardMessage], fontPt);
     });
 
-    setSheets(packOrderSheets(perOrder));
+    setPages(packColumnsIntoPages(packOrderColumns(perOrder)));
   }, [orders]);
 
   return (
@@ -92,11 +103,18 @@ export function PrintDocument({ orders }: { orders: PrintOrder[] }) {
       {orders.length === 0 && <div className="no-print empty">Нет заказов для печати.</div>}
 
       <div className="doc">
-        {(sheets ?? []).map((sheet, i) => (
+        {(pages ?? []).map((page, i) => (
           <div className="sheet" key={i}>
-            <HalfView half={sheet.top} />
-            <div className="cut-line" aria-hidden />
-            <HalfView half={sheet.bottom} />
+            {/* Порядок ячеек — построчный, поэтому столбец = заказ: слева левый заказ
+                (получатель над текстом), справа правый. */}
+            <div className="grid">
+              <CardView half={page.left.top} />
+              <CardView half={page.right?.top ?? EMPTY} />
+              <CardView half={page.left.bottom} />
+              <CardView half={page.right?.bottom ?? EMPTY} />
+              <div className="cut-v" aria-hidden />
+              <div className="cut-h" aria-hidden />
+            </div>
           </div>
         ))}
       </div>
@@ -104,12 +122,14 @@ export function PrintDocument({ orders }: { orders: PrintOrder[] }) {
   );
 }
 
-function HalfView({ half }: { half: Half }) {
-  if (half.kind === "empty") return <div className="half" />;
+const EMPTY: Half = { kind: "empty" };
+
+function CardView({ half }: { half: Half }) {
+  if (half.kind === "empty") return <div className="card" />;
   if (half.kind === "recipient") {
     const r = half.recipient;
     return (
-      <div className="half">
+      <div className="card">
         <div className="rec-name">{r.recipientName}</div>
         <div className="rec-phone">{r.recipientPhone}</div>
         <div className="rec-addr">
@@ -122,7 +142,7 @@ function HalfView({ half }: { half: Half }) {
   }
   // message (может быть пустым — тогда просто пустое поле)
   return (
-    <div className="half">
+    <div className="card">
       {half.body ? (
         <div className="msg" style={{ fontSize: `${half.fontPt}pt` }}>
           {half.body}
