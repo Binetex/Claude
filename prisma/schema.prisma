@@ -2271,3 +2271,78 @@ model SiteEmailTemplate {
   @@unique([siteId, triggerType])
   @@index([siteId])
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Расходы владельца («Мои расходы»). Ежедневный журнал расходов бизнеса — НЕ
+// бухгалтерия: ни проводок, ни счетов, ни валютных курсов.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Категория расхода — верхний уровень месячной сводки.
+model OwnerExpenseCategory {
+  id   String @id @default(cuid())
+  name String @unique
+  /// Встроенную категорию нельзя убрать из списка: она входит в стартовый набор.
+  isBuiltin  Boolean   @default(false)
+  sortOrder  Int       @default(100)
+  archivedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  subcategories OwnerExpenseSubcategory[]
+  expenses      OwnerExpense[]
+
+  @@index([archivedAt, sortOrder])
+}
+
+/// Подкатегория — второй уровень внутри категории («Подписки» → «OpenAI»). В отличие от
+/// свободного поля `title`, переиспользуется и суммируется: «OpenAI» и «Open AI», набранные
+/// руками, были бы разными строками, а подкатегория одна.
+model OwnerExpenseSubcategory {
+  id         String               @id @default(cuid())
+  categoryId String
+  category   OwnerExpenseCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  name       String
+  sortOrder  Int                  @default(100)
+  archivedAt DateTime?
+  createdAt  DateTime             @default(now())
+
+  expenses OwnerExpense[]
+
+  @@unique([categoryId, name])
+  @@index([categoryId, archivedAt, sortOrder])
+}
+
+model OwnerExpense {
+  id         String               @id @default(cuid())
+  categoryId String
+  category   OwnerExpenseCategory @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+
+  /// Необязательный второй уровень. NULL — расход отнесён прямо к категории.
+  subcategoryId String?
+  subcategory   OwnerExpenseSubcategory? @relation(fields: [subcategoryId], references: [id], onDelete: SetNull)
+
+  /// Название конкретного расхода («Подписка OpenAI»). Пусто — показываем имя категории.
+  title String?
+
+  /// Смысл суммы задаёт `kind`: ONE_OFF и DAILY — за день, MONTHLY — за месяц,
+  /// RANGE — за весь срок. По дням она в любом случае размазывается ровно.
+  amountCents Int
+  currency    String @default("USD")
+
+  /// ONE_OFF | DAILY | MONTHLY | RANGE
+  kind String
+
+  /// UTC-полночь локального дня — конвенция Order.deliveryDate и DailyFlowerExpense.
+  startDay DateTime
+  /// NULL у ONE_OFF и у бессрочных DAILY/MONTHLY.
+  endDay DateTime?
+
+  createdBy String
+  createdAt DateTime  @default(now())
+  updatedBy String?
+  updatedAt DateTime  @updatedAt
+
+  @@index([startDay])
+  @@index([endDay])
+  @@index([categoryId])
+  @@index([subcategoryId])
+}

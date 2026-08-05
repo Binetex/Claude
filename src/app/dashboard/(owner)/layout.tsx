@@ -11,6 +11,8 @@ const nav: NavItem[] = [
   // Один пункт на весь раздел: подстраницы живут во вкладках внутри (finance/layout.tsx).
   // Пять финансовых пунктов вперемешку с заказами и товарами топят и то и другое.
   { href: "/dashboard/finance", label: "Финансы" },
+  // Отдельно от «Финансов»: там расчёты с флористами, здесь — расходы самого бизнеса.
+  { href: "/dashboard/expenses", label: "Мои расходы" },
   { href: "/dashboard/burq", label: "Доставка (Burq)" },
   { href: "/dashboard/automations", label: "Автоматизации" },
   { href: "/dashboard/settings/telegram", label: "Telegram" },
