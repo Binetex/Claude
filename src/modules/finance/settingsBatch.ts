@@ -13,6 +13,27 @@ import { prisma } from "@/lib/db";
 import type { ResolvedConsumables, ResolvedFeeModel } from "./settings";
 import type { FinanceSettingsBySite } from "./orderInput";
 
+/**
+ * Доля Order.tax, которая для владельца является РЕАЛЬНЫМ расходом.
+ *
+ * Политики нет — считаем, что налог уплачивается полностью (10000 bp). Это осторожная
+ * сторона: занизить расход значило бы показать прибыль, которой нет.
+ */
+export async function loadTaxPolicies(siteIds: string[]): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
+  if (siteIds.length === 0) return out;
+  const rows = await prisma.ownerTaxPolicy.findMany({
+    where: { OR: [{ siteId: { in: siteIds } }, { siteId: null }] },
+    select: { siteId: true, actualShareBp: true },
+  });
+  const global = rows.find((r) => r.siteId === null);
+  for (const siteId of siteIds) {
+    const own = rows.find((r) => r.siteId === siteId);
+    out.set(siteId, (own ?? global)?.actualShareBp ?? 10000);
+  }
+  return out;
+}
+
 export async function loadFinanceSettings(siteIds: string[]): Promise<FinanceSettingsBySite> {
   const consumables = new Map<string, ResolvedConsumables | null>();
   const feeModels = new Map<string, ResolvedFeeModel | null>();

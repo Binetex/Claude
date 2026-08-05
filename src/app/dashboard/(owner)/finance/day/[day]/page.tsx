@@ -115,6 +115,12 @@ export default async function OwnerFinanceDayPage({ params }: { params: Promise<
             )}
             <LineRow label="Итого" cents={detail.expensesCents} strong />
           </dl>
+          {detail.taxCollectedCents > detail.expenses.find((e) => e.label === "Налог")!.cents && (
+            <p className="border-t border-slate-100 px-4 py-2 text-xs text-slate-400">
+              Собрано налога {formatCents(detail.taxCollectedCents)}, но вашим расходом считается только доля из
+              «Настроек расчёта» — остальное остаётся у вас.
+            </p>
+          )}
         </CardBody>
       </Card>
 

@@ -122,6 +122,7 @@ afterAll(async () => {
   await prisma.dailyFlowerExpense.deleteMany({ where: { financeProfileId: primaryProfileId } });
   await prisma.consumablesRate.deleteMany({ where: { siteId: null } });
   await prisma.siteAcquiringFeeModel.deleteMany({ where: { siteId } });
+  await prisma.ownerTaxPolicy.deleteMany({ where: { siteId } });
   await prisma.orderItem.deleteMany({ where: { order: { siteId } } });
   await prisma.order.deleteMany({ where: { siteId } });
   await prisma.floristFinanceProfile.deleteMany({ where: { floristId: { in: [primaryFloristId, secondaryFloristId] } } });
@@ -181,6 +182,31 @@ describe("дашборд владельца", () => {
     expect(day.tipsCents).toBe(1000);
     // Доля флориста считается от базы БЕЗ чаевых — она их не видит.
     expect(share!.shareCents).toBe(dayShareCents(share!.distributableCents, 6660));
+  });
+
+  it("налог берётся по политике владельца, а база флориста — по полной ставке", async () => {
+    // 25% — значит три четверти собранного налога остаются у владельца.
+    // Политика привязана к СВОЕМУ сайту, а не глобальная: глобальную видят чужие тесты,
+    // и она делала прогон зависимым от порядка файлов.
+    await prisma.ownerTaxPolicy.create({ data: { siteId, actualShareBp: 2500, createdBy: OWNER.userId } });
+    const withPolicy = await getOwnerMonth(FROM, TO);
+    const dayWith = withPolicy.days.find((d) => d.day === "2026-07-28")!;
+
+    // Собрано $10.00 налога с двух заказов, реальный расход владельца — $2.50.
+    expect(dayWith.ownerTaxCents).toBe(500);
+
+    await prisma.ownerTaxPolicy.deleteMany({ where: { siteId } });
+    const without = await getOwnerMonth(FROM, TO);
+    const dayWithout = without.days.find((d) => d.day === "2026-07-28")!;
+
+    // Без политики налог считается уплаченным полностью — осторожная сторона.
+    expect(dayWithout.ownerTaxCents).toBe(2000);
+    // Разница ровно в невыплаченной части и целиком уходит в прибыль владельца.
+    expect(dayWith.ownerNetCents! - dayWithout.ownerNetCents!).toBe(1500);
+
+    // База флориста при этом не сдвинулась ни на цент.
+    const share = await computeDayShare(primaryProfileId, DAY);
+    expect(dayWith.floristEarningsCents).toBe(share!.shareCents + 4500);
   });
 
   it("неготовый день не даёт числа и не входит в итог месяца", async () => {

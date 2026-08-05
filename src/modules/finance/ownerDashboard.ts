@@ -23,7 +23,7 @@ import { prisma } from "@/lib/db";
 import { toNumber } from "@/lib/money";
 import { computeDayFinance, dayShareCents, type DayBlocker } from "./dayCalc";
 import { toDayOrderInputs } from "./orderInput";
-import { loadFinanceSettings } from "./settingsBatch";
+import { loadFinanceSettings, loadTaxPolicies } from "./settingsBatch";
 import { resolveItemsFinance } from "./itemFinance";
 import { primaryShareGate, accrualGate } from "./config";
 import { getExpenseDailyTotals } from "@/modules/expenses/read";
@@ -38,6 +38,8 @@ export type OwnerDay = {
   revenueCents: number;
   /** Чаевые — целиком владельца, флористу с них ничего не идёт. */
   tipsCents: number;
+  /** Налог, реально уходящий у владельца: доля из «Налоговой политики». */
+  ownerTaxCents: number;
   /** Все расходы бизнеса за день, включая мои: выручка − расходы − флористы = прибыль. */
   expensesCents: number;
   /** Доля основного + фиксированные цены второстепенных за этот день. */
@@ -118,6 +120,8 @@ export async function getOwnerMonth(from: Date, to: Date): Promise<OwnerMonth> {
       getExpenseDailyTotals(from, to),
     ]);
 
+  const taxPolicies = await loadTaxPolicies(siteIds);
+
   const additionalByOrder = new Map<string, number>();
   for (const a of additional) {
     additionalByOrder.set(a.orderId, (additionalByOrder.get(a.orderId) ?? 0) + a.amountCents);
@@ -153,6 +157,15 @@ export async function getOwnerMonth(from: Date, to: Date): Promise<OwnerMonth> {
     const inputs = toDayOrderInputs(dayOrders, { additionalByOrder, itemFinance, settings });
     const calc = computeDayFinance(inputs, flowerCents);
 
+    // База флориста вычитает 100% налога — это её правило, и менять его нельзя. Но у
+    // владельца реальный расход равен доле из «Налоговой политики», поэтому невыплаченная
+    // часть возвращается ему, ровно как чаевые.
+    const ownerTaxCents = dayOrders.reduce(
+      (a, o) => a + Math.round((toCents(o.tax) * (taxPolicies.get(o.siteId) ?? 10000)) / 10000),
+      0
+    );
+    const taxReliefCents = calc.taxCents - ownerTaxCents;
+
     // Фиксированные цены второстепенных — их заработок за этот день.
     const secondaryCents = dayOrders.reduce((a, o) => {
       if (!o.currentFloristId || modelByFlorist.get(o.currentFloristId) !== "SECONDARY") return a;
@@ -170,17 +183,18 @@ export async function getOwnerMonth(from: Date, to: Date): Promise<OwnerMonth> {
       ordersTotal: calc.ordersTotal,
       revenueCents: calc.grossRevenueCents,
       tipsCents: calc.tipsCents,
+      ownerTaxCents,
       // Выручка минус прибыль до флористов = всё, что съел день, включая мои расходы.
       // Чаевые в расход не попадают: они вычтены из базы флориста, но остаются у владельца.
       expensesCents: calc.complete
-        ? calc.grossRevenueCents - calc.tipsCents - calc.distributableCents + ownerExpensesCents
+        ? calc.grossRevenueCents - calc.tipsCents - calc.distributableCents - taxReliefCents + ownerExpensesCents
         : 0,
       floristEarningsCents,
       ownerExpensesCents,
       // Чаевые прибавляются ЗДЕСЬ, а не в distributableCents: та сумма — база доли
       // флориста, и трогать её значило бы изменить чужие деньги.
       ownerNetCents: calc.complete
-        ? calc.distributableCents + calc.tipsCents - floristEarningsCents - ownerExpensesCents
+        ? calc.distributableCents + calc.tipsCents + taxReliefCents - floristEarningsCents - ownerExpensesCents
         : null,
     });
   }
@@ -207,6 +221,8 @@ export type OwnerDayDetail = {
   revenueBySite: { siteId: string; name: string; cents: number }[];
   revenueCents: number;
   tipsCents: number;
+  /** Сколько налога собрано с клиентов — для пояснения к строке расхода. */
+  taxCollectedCents: number;
 
   /** Расходы бизнеса по видам. Порядок фиксированный, нули не скрываются. */
   expenses: { label: string; cents: number }[];
@@ -348,11 +364,12 @@ export async function getOwnerDay(day: Date): Promise<OwnerDayDetail | null> {
       .sort((a, b) => b.cents - a.cents),
     revenueCents: row.revenueCents,
     tipsCents: row.tipsCents,
+    taxCollectedCents: calc.taxCents,
     expenses: [
       { label: "Цветы", cents: calc.flowerPurchaseCents },
       { label: "Доставка", cents: calc.deliveryCents },
       { label: "Комиссии", cents: calc.acquiringFeeCents },
-      { label: "Налог", cents: calc.taxCents },
+      { label: "Налог", cents: row.ownerTaxCents },
       { label: "Вазы и подарки", cents: calc.vaseGiftCostCents },
       { label: "Расходники", cents: calc.consumablesCents },
       { label: "Доп. расходы", cents: calc.additionalCents },
