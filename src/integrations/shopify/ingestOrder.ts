@@ -6,7 +6,7 @@ import { assignInitial } from "@/modules/assignments/service";
 import { createProductImageCache, resolveLineItemImages, type ProductImageCache } from "./productImages";
 import { resolveShopifyAccessToken } from "./customApp/credentials";
 import { normalizePhone } from "@/lib/phone";
-import { stripDeliveryTail } from "@/integrations/cardMessageTail";
+import { cleanCardMessage } from "@/integrations/cardMessageTail";
 import { scheduleDeliveryForNewOrder } from "@/integrations/delivery/burq/scheduleService";
 import { extractShopifyOrderNumber, extractSenderAddress } from "./orderFields";
 import { fetchShopifyDeliveryInstructions } from "./deliveryInstructions";
@@ -128,8 +128,9 @@ function isUniqueConstraintViolation(err: unknown): boolean {
  * push не существует и resync на update не делается.
  *
  * Из note срезается служебный хвост приложения доставки («| Delivery Date: … | Delivery
- * Time: …»): к поздравлению он не относится, а дата и окно и так лежат в своих полях
- * заказа — см. cardMessageTail.ts. Сырой note сохраняется в originalCardMessage.
+ * Time: …») и раскрываются HTML-сущности («&amp;» → «&») — см. cardMessageTail.ts. К
+ * поздравлению это не относится: дата и окно и так лежат в своих полях заказа.
+ * Сырой note сохраняется в originalCardMessage.
  */
 function extractAddressAndCardMessage(payload: ShopifyOrder) {
   const note = payload.note ?? "";
@@ -140,7 +141,7 @@ function extractAddressAndCardMessage(payload: ShopifyOrder) {
     apartment: payload.shipping_address?.address2 ?? null,
     city: payload.shipping_address?.city ?? "",
     zip: payload.shipping_address?.zip ?? "",
-    cardMessage: stripDeliveryTail(note),
+    cardMessage: cleanCardMessage(note),
     rawNote: note,
   };
 }

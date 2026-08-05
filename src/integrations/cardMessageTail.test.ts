@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { stripDeliveryTail } from "./cardMessageTail";
+import { stripDeliveryTail, decodeHtmlEntities, cleanCardMessage } from "./cardMessageTail";
 
 describe("срез служебного хвоста с записки", () => {
   it("режет хвост из двух параметров, текст остаётся дословно", () => {
@@ -74,5 +74,47 @@ describe("срез служебного хвоста с записки", () => {
   it("текст с вертикальной чертой, но без ключа, не трогаем", () => {
     const note = "Люблю тебя | всегда";
     expect(stripDeliveryTail(note)).toBe(note);
+  });
+});
+
+describe("HTML-сущности в записке", () => {
+  it("&amp; становится &", () => {
+    expect(decodeHtmlEntities("Nick &amp; Laurel")).toBe("Nick & Laurel");
+  });
+
+  it("двойное экранирование не раскрывается дважды", () => {
+    // «&amp;lt;» — это буквально текст «&lt;», а не «<».
+    expect(decodeHtmlEntities("&amp;lt;")).toBe("&lt;");
+  });
+
+  it("кавычки, апострофы и тире", () => {
+    expect(decodeHtmlEntities("&quot;Люблю&quot; &mdash; мама")).toBe('"Люблю" — мама');
+    expect(decodeHtmlEntities("It&#039;s time")).toBe("It's time");
+    expect(decodeHtmlEntities("It&rsquo;s time")).toBe("It’s time");
+  });
+
+  it("обычный текст с амперсандом не трогаем", () => {
+    expect(decodeHtmlEntities("Tom & Jerry")).toBe("Tom & Jerry");
+  });
+
+  it("произвольные числовые сущности остаются как есть", () => {
+    expect(decodeHtmlEntities("&#1071; &#x41;")).toBe("&#1071; &#x41;");
+  });
+});
+
+describe("полная очистка записки", () => {
+  it("хвост и сущности за один проход", () => {
+    const note = "Nick &amp; Laurel, поздравляем! | Delivery Date: Wed Aug 5 2026 | Delivery Time: 11:30 AM - 5:00 PM";
+    expect(cleanCardMessage(note)).toBe("Nick & Laurel, поздравляем!");
+  });
+
+  it("экранированная черта не создаёт хвост, которого не было", () => {
+    // Срез идёт ДО раскрытия сущностей, поэтому «&#124;» настоящей чертой не становится.
+    const note = "Люблю &#124; Delivery Date: Wed Aug 5 2026";
+    expect(cleanCardMessage(note)).toBe(note);
+  });
+
+  it("чистая записка не меняется", () => {
+    expect(cleanCardMessage("Happy Birthday, Sarah!")).toBe("Happy Birthday, Sarah!");
   });
 });

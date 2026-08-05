@@ -17,6 +17,7 @@ import { parseWooOrder, type WooOrder } from "./orderAdapter";
 import { classifyWooPayment, type WooPaymentConfig, type WooOrderForPayment } from "./payment";
 import { deriveWooOrderState, reconcileOrderState, type OrderState } from "./orderState";
 import { resolveMappedOrderFields, type OrderMetaMapping } from "./orderMeta";
+import { cleanCardMessage } from "@/integrations/cardMessageTail";
 import { scheduleDeliveryForNewOrder } from "@/integrations/delivery/burq/scheduleService";
 import { assignInitial } from "@/modules/assignments/service";
 import {
@@ -218,7 +219,10 @@ export async function ingestWooOrder(
   };
 
   const deliveryDate = mapped.deliveryDate ? new Date(mapped.deliveryDate) : normalized.deliveryDate ? new Date(normalized.deliveryDate) : new Date(normalized.createdAt);
-  const cardMessage = mapped.cardMessage ?? normalized.cardMessage ?? "";
+  // Тот же мусор магазина, что и у Shopify: служебный хвост приложения доставки и
+  // HTML-сущности. См. cardMessageTail.ts. Сырой текст остаётся в originalCardMessage.
+  const rawCardMessage = mapped.cardMessage ?? normalized.cardMessage ?? "";
+  const cardMessage = cleanCardMessage(rawCardMessage);
   const recipientName = mapped.recipientName ?? normalized.recipient.name;
   const recipientPhone = mapped.recipientPhone ?? normalized.recipient.phone ?? "";
   const addr = normalized.shippingAddress;
@@ -249,7 +253,7 @@ export async function ingestWooOrder(
       city: addr?.city ?? "",
       zip: addr?.zip ?? "",
       cardMessage,
-      originalCardMessage: cardMessage,
+      originalCardMessage: rawCardMessage,
       customerNote: mapped.deliveryInstructions ?? "",
       originalCustomerNote: mapped.deliveryInstructions ?? "",
       itemsTotal: dec(normalized.money.itemsTotal),
