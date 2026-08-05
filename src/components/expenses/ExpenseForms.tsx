@@ -31,7 +31,10 @@ export type ExpenseActions = {
 export type ExpenseEditValues = {
   id: string;
   categoryId: string;
+  /** Имена нужны, чтобы показать категорию расхода, даже если её убрали из списка. */
+  categoryName: string;
   subcategoryId: string | null;
+  subcategoryName: string | null;
   title: string | null;
   amountCents: number;
   kind: string;
@@ -93,6 +96,26 @@ export function ExpenseDialog({
   size?: "sm" | "default" | "iconSm";
   className?: string;
 }) {
+  /**
+   * Категорию расхода могли убрать из списка уже после того, как расход завели. Тогда её
+   * нет среди вариантов, `<select>` остаётся без совпадения и сохранение падает с «Выберите
+   * категорию» — то есть отредактировать сумму такого расхода было бы нельзя вовсе.
+   * Поэтому недостающую категорию (и её подкатегорию) подставляем в список сами.
+   */
+  const options = (() => {
+    if (!edit || categories.some((c) => c.id === edit.categoryId)) return categories;
+    return [
+      ...categories,
+      {
+        id: edit.categoryId,
+        name: `${edit.categoryName} (убрана)`,
+        subcategories: edit.subcategoryId && edit.subcategoryName
+          ? [{ id: edit.subcategoryId, name: edit.subcategoryName }]
+          : [],
+      },
+    ];
+  })();
+
   const [openInner, setOpenInner] = useState(false);
   const controlled = openProp != null;
   const open = controlled ? openProp : openInner;
@@ -103,7 +126,7 @@ export function ExpenseDialog({
   const [subcategoryId, setSubcategoryId] = useState(edit?.subcategoryId ?? "");
 
   // Подкатегории принадлежат категории: сменил категорию — прежний выбор больше не к месту.
-  const subcategories = categories.find((c) => c.id === categoryId)?.subcategories ?? [];
+  const subcategories = options.find((c) => c.id === categoryId)?.subcategories ?? [];
   const changeCategory = (id: string) => {
     setCategoryId(id);
     setSubcategoryId("");
@@ -160,7 +183,7 @@ export function ExpenseDialog({
 
           <Field label="Категория">
             <Select name="categoryId" value={categoryId} onChange={(e) => changeCategory(e.target.value)}>
-              {categories.map((c) => (
+              {options.map((c) => (
                 <option key={c.id} value={c.id}>{c.name}</option>
               ))}
               <option value={NEW_CATEGORY}>+ Новая категория…</option>

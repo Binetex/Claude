@@ -3,9 +3,7 @@ import { revalidatePath } from "next/cache";
 import { requireRole } from "@/lib/rbac";
 import {
   connectCustomApp,
-  updateCustomAppCredentials,
   disconnectSite,
-  findSiteByDomain,
   ensureWebhooksBestEffort,
 } from "@/integrations/shopify/customApp/management";
 import { registerWebhooks, REQUIRED_WEBHOOK_TOPICS } from "@/integrations/shopify/customApp/webhookRegistration";
@@ -92,13 +90,6 @@ export async function ownerConnectCustomApp(_prev: FormState, formData: FormData
   };
 }
 
-/** Проверить, подключался ли магазин ранее (для подтверждения восстановления). */
-export async function ownerLookupExistingSite(domain: string) {
-  await requireRole("OWNER");
-  return findSiteByDomain(domain);
-}
-
-/** Проверить подключение существующего Site. */
 export async function ownerCheckConnection(siteId: string): Promise<FormState> {
   await requireRole("OWNER");
   const result = await checkConnection(siteId);
@@ -134,22 +125,6 @@ export async function ownerRegisterWebhooks(siteId: string): Promise<FormState> 
   }
 }
 
-/** Обновить credentials (ротация secret) и перепроверить. */
-export async function ownerUpdateCredentials(_prev: FormState, formData: FormData): Promise<FormState> {
-  await requireRole("OWNER");
-  const cryptoErr = guardCrypto();
-  if (cryptoErr) return { error: cryptoErr };
-  const siteId = String(formData.get("siteId") ?? "");
-  const result = await updateCustomAppCredentials(siteId, {
-    clientId: String(formData.get("clientId") ?? ""),
-    clientSecret: String(formData.get("clientSecret") ?? ""),
-    apiVersion: String(formData.get("apiVersion") ?? ""),
-  });
-  revalidatePath("/dashboard/sites");
-  return result.ok ? { ok: true, message: "Credentials обновлены." } : { error: result.error ?? "Не удалось обновить." };
-}
-
-/** Безопасно отключить магазин (история и товары сохраняются). */
 export async function ownerDisconnectSite(siteId: string): Promise<void> {
   await requireRole("OWNER");
   await disconnectSite(siteId);

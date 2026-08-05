@@ -25,14 +25,16 @@ export async function floristUpdateCardMessage(
   revalidatePath("/dashboard/f/print-notes");
   return { ok: true, message: "Текст открытки сохранён." };
 }
-import {
-  handoffOrder,
-  startWork,
-  markReady,
-  setReadyAt,
-} from "@/modules/assignments/service";
+import { handoffOrder } from "@/modules/assignments/service";
 
 // Заказ авто-принимается при назначении (см. assignAndActivateFlorist) — отдельного «Принять» больше нет.
+//
+// Ручной смены статуса у флориста нет: действия startWork/markReady/setReadyAt убраны как
+// осиротевшие — кнопок, которые их вызывали, в интерфейсе не осталось.
+// ВНИМАНИЕ: статусы IN_PROGRESS и READY после этого не выставляет НИЧТО. Они остаются в enum
+// и в INTERNAL_WORKING_STATUSES (там они нужны для anti-rollback внешних обновлений), но
+// заказ идёт ASSIGNED → … → DELIVERED мимо них. Если эти этапы понадобятся снова — это новая
+// работа, а не восстановление удалённого.
 
 /** Флорист передаёт свой заказ выбранному активному флористу (заменяет простой «Отказаться»). */
 export async function floristHandoff(orderId: string, targetFloristId: string): Promise<{ ok: boolean; reason?: string }> {
@@ -76,32 +78,3 @@ export async function floristUploadBouquetPhoto(
   return { ok: true };
 }
 
-export async function floristStartWork(orderId: string) {
-  const user = await requireFlorist();
-  await startWork(orderId, user.floristId);
-  revalidatePath("/dashboard/f");
-  revalidatePath(`/dashboard/f/${orderId}`);
-}
-
-export async function floristSetReadyTime(orderId: string, isoTime: string) {
-  const user = await requireFlorist();
-  await setReadyAt(orderId, user.floristId, new Date(isoTime));
-  revalidatePath(`/dashboard/f/${orderId}`);
-}
-
-export async function floristMarkReady(orderId: string, photoDataUrl?: string) {
-  const user = await requireFlorist();
-  let photoUrl: string | undefined;
-  if (photoDataUrl) {
-    try {
-      photoUrl = await imageStorage.saveImage(photoDataUrl);
-    } catch (err) {
-      // Фото не обязательно для статуса "Готов" — не блокируем флориста из-за сбоя
-      // хранилища (например, временная проблема с диском), просто логируем и продолжаем без фото.
-      console.error(`[florist] не удалось сохранить фото букета для заказа ${orderId}:`, err);
-    }
-  }
-  await markReady(orderId, user.floristId, photoUrl);
-  revalidatePath("/dashboard/f");
-  revalidatePath(`/dashboard/f/${orderId}`);
-}

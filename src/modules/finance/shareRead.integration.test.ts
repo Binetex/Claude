@@ -15,7 +15,7 @@ import { prisma } from "@/lib/db";
 import { computeDayShare } from "./dayFinance";
 import { setFinanceProfile } from "./profile";
 import { fixConsumablesRate, fixDailyFlowerExpense, fixDeliveryActualCost, fixSiteFeeModel } from "./fix";
-import { listShareDaysRead, readShareDayBreakdown } from "./shareRead";
+import { readShareDayBreakdown } from "./shareRead";
 
 const RUN = `shr${crypto.randomBytes(3).toString("hex")}`;
 const OWNER = { userId: "", role: "OWNER" as const };
@@ -151,34 +151,9 @@ describe("чтение совпадает с расчётом", () => {
     expect(read!.lines[0].cents - expenses).toBe(read!.distributableCents);
   });
 
-  it("список дней даёт те же суммы, что и разбор", async () => {
-    const list = await listShareDaysRead({ page: 1, perPage: 20 }, NOW);
-    for (const row of list.rows.filter((r) => r.status === "COUNTED")) {
-      const read = await readShareDayBreakdown(profileId, new Date(`${row.day}T00:00:00.000Z`));
-      expect(row.distributableCents).toBe(read!.distributableCents);
-      expect(row.shareCents).toBe(read!.shareCents);
-    }
-  });
-
-  it("посчитанный день помечен и его доля входит в долг", async () => {
-    const list = await listShareDaysRead({ page: 1, perPage: 20 }, NOW);
-    const d1 = list.rows.find((r) => r.day === "2026-07-28")!;
-    expect(d1.status).toBe("COUNTED");
-    expect(d1.shareCents).toBeGreaterThan(0);
-    // Отдельных начислений в книге больше нет: долг выводится из строк дней.
-    expect(list.pageShareCents).toBe(
-      list.rows.filter((r) => r.status === "COUNTED").reduce((a, r) => a + r.shareCents, 0)
-    );
-  });
 });
 
 describe("день без опубликованного расчёта", () => {
-  it("день без расчёта в списке не появляется", async () => {
-    const list = await listShareDaysRead({ page: 1, perPage: 20 }, NOW);
-    // Строки дня нет вовсе — расчёт по нему не запускался.
-    expect(list.rows.find((r) => r.day === "2026-07-30")).toBeUndefined();
-  });
-
   it("разбор такого дня честно говорит, что расчёта нет", async () => {
     const read = await readShareDayBreakdown(profileId, D3);
     expect(read!.calculated).toBe(false);
@@ -190,36 +165,11 @@ describe("день без опубликованного расчёта", () => 
     const daysBefore = await prisma.dayFinance.findMany({ select: { day: true, distributableCents: true } });
     const ledgerBefore = await prisma.ledgerEntry.count({ where: { floristId } });
 
-    await listShareDaysRead({ page: 1, perPage: 100 }, NOW);
     await readShareDayBreakdown(profileId, D3);
     await readShareDayBreakdown(profileId, D1);
 
     expect(await prisma.dayFinance.findMany({ select: { day: true, distributableCents: true } })).toEqual(daysBefore);
     expect(await prisma.ledgerEntry.count({ where: { floristId } })).toBe(ledgerBefore);
-  });
-});
-
-describe("пагинация", () => {
-  it("новые дни сверху, total считается по всей истории", async () => {
-    const first = await listShareDaysRead({ page: 1, perPage: 20 }, NOW);
-    // Считанных дней два: третий никогда не пересчитывался, строки у него нет.
-    expect(first.totalDays).toBe(2);
-    expect(first.rows.map((r) => r.day)).toEqual(["2026-07-29", "2026-07-28"]);
-  });
-
-  it("страницы не теряют дни", async () => {
-    const seen: string[] = [];
-    for (const page of [1, 2, 3]) {
-      const p = await listShareDaysRead({ page, perPage: 20 }, NOW);
-      seen.push(...p.rows.map((r) => r.day));
-      expect(p.totalDays).toBe(2);
-    }
-    expect(new Set(seen).size).toBe(2);
-  });
-
-  it("недопустимый размер страницы откатывается к значению по умолчанию", async () => {
-    const p = await listShareDaysRead({ page: 1, perPage: 7 }, NOW);
-    expect(p.perPage).toBe(20);
   });
 });
 

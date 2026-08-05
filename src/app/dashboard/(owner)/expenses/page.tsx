@@ -63,7 +63,7 @@ export default async function ExpensesPage({
 
   const [summary, history, categories, earliest, todayCents, monthCents, yearCents] = await Promise.all([
     tab === "categories" ? getExpenseMonthSummary(from, to) : Promise.resolve(null),
-    tab === "history" ? getExpenseHistory(sp.q ?? null) : Promise.resolve(null),
+    tab === "history" ? getExpenseHistory(sp.q ?? null, Number(sp.page) || 1) : Promise.resolve(null),
     listExpenseCategories(),
     earliestExpenseDay(),
     getExpenseTotal(today, today),
@@ -82,6 +82,15 @@ export default async function ExpensesPage({
     }
     const s = q.toString();
     return s ? `/dashboard/expenses?${s}` : "/dashboard/expenses";
+  };
+
+  const historyPages = history ? Math.max(Math.ceil(history.total / history.perPage), 1) : 1;
+  const historyHref = (n: number) => {
+    const q = new URLSearchParams();
+    q.set("tab", "history");
+    if (sp.q) q.set("q", sp.q);
+    if (n > 1) q.set("page", String(n));
+    return `/dashboard/expenses?${q.toString()}`;
   };
 
   const tabClass = (active: boolean) =>
@@ -150,19 +159,34 @@ export default async function ExpensesPage({
           <CardHeader className="flex flex-wrap items-center justify-between gap-3">
             <HistorySearch />
             <span className="text-sm text-slate-400">
-              {sp.q ? `найдено: ${history.length}` : `всего записей: ${history.length}`}
+              {sp.q ? `найдено: ${history.total}` : `всего записей: ${history.total}`}
             </span>
           </CardHeader>
-          <CardBody className={history.length === 0 ? undefined : "p-0"}>
-            {history.length === 0 ? (
+          <CardBody className={history.entries.length === 0 ? undefined : "p-0"}>
+            {history.entries.length === 0 ? (
               <EmptyState
                 title={sp.q ? "Ничего не нашлось" : "Расходов пока нет"}
                 description={sp.q ? "Попробуйте другое слово — поиск идёт по названию, категории и подкатегории." : "Добавьте первый расход."}
               />
             ) : (
-              <HistoryList entries={history} categoryOptions={categories} actions={actions} />
+              <HistoryList entries={history.entries} categoryOptions={categories} actions={actions} />
             )}
           </CardBody>
+          {historyPages > 1 && (
+            <div className="flex items-center justify-between border-t border-slate-100 px-4 py-3 text-sm">
+              <span className="text-slate-500">
+                Страница {history.page} из {historyPages}
+              </span>
+              <div className="flex gap-2">
+                <Button asChild variant="outline" size="sm" disabled={history.page <= 1}>
+                  <Link href={historyHref(history.page - 1)}>Назад</Link>
+                </Button>
+                <Button asChild variant="outline" size="sm" disabled={history.page >= historyPages}>
+                  <Link href={historyHref(history.page + 1)}>Вперёд</Link>
+                </Button>
+              </div>
+            </div>
+          )}
         </Card>
       )}
     </div>

@@ -47,7 +47,9 @@ export function ExpenseRow({
         edit={{
           id: entry.id,
           categoryId: entry.categoryId,
+          categoryName: entry.categoryName,
           subcategoryId: entry.subcategoryId,
+          subcategoryName: entry.subcategoryName,
           title: entry.title,
           amountCents: entry.amountCents,
           kind: entry.kind,

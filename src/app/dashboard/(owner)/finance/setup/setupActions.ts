@@ -12,14 +12,10 @@ import { usdToCents, CentsParseError } from "@/lib/cents";
 import {
   FinanceFixError,
   confirmBurqDeliveryCosts,
-  dismissIssue,
   fixConsumablesRate,
   fixDailyFlowerExpense,
-  fixDeliveryActualCost,
   fixOwnerTaxPolicy,
   fixSiteFeeModel,
-  fixVaseLink,
-  fixVasePurchaseCost,
   previewBurqDeliveryConfirmation,
 } from "@/modules/finance/fix";
 import { FinanceSettingsError } from "@/modules/finance/settings";
@@ -79,22 +75,6 @@ function done(message: string, r: { days: number; detector: { autoResolved: numb
 
 // ─────────────────────────── Исправления ───────────────────────────
 
-export async function applyDeliveryCost(formData: FormData): Promise<SetupResult> {
-  const user = await requireRole("OWNER");
-  try {
-    const r = await fixDeliveryActualCost({
-      orderId: String(formData.get("orderId") ?? ""),
-      amountCents: requiredCents(formData.get("amount"), "стоимость доставки"),
-      issueId: String(formData.get("issueId") ?? "") || null,
-      comment: String(formData.get("comment") ?? "").trim() || null,
-      actor: { userId: user.id, role: user.role },
-    });
-    return done("Стоимость доставки подтверждена.", r);
-  } catch (err) {
-    return toError(err);
-  }
-}
-
 export async function applyFeeModel(formData: FormData): Promise<SetupResult> {
   const user = await requireRole("OWNER");
   try {
@@ -123,40 +103,6 @@ export async function applyDailyFlowerExpense(formData: FormData): Promise<Setup
       actor: { userId: user.id, role: user.role },
     });
     return done("Расход на цветы сохранён.", r);
-  } catch (err) {
-    return toError(err);
-  }
-}
-
-export async function applyVasePurchaseCost(formData: FormData): Promise<SetupResult> {
-  const user = await requireRole("OWNER");
-  try {
-    const r = await fixVasePurchaseCost({
-      variantId: String(formData.get("variantId") ?? ""),
-      amountCents: requiredCents(formData.get("amount"), "закупочную стоимость"),
-      issueId: String(formData.get("issueId") ?? "") || null,
-      comment: String(formData.get("comment") ?? "").trim() || null,
-      actor: { userId: user.id, role: user.role },
-    });
-    return done("Закупочная стоимость сохранена.", r);
-  } catch (err) {
-    return toError(err);
-  }
-}
-
-export async function applyVaseLink(formData: FormData): Promise<SetupResult> {
-  const user = await requireRole("OWNER");
-  try {
-    const vaseVariantId = String(formData.get("vaseVariantId") ?? "").trim();
-    if (!vaseVariantId) return { error: "Выберите вазу." };
-    const r = await fixVaseLink({
-      variantId: String(formData.get("variantId") ?? ""),
-      selection: { mode: "LINKED_VASE", vaseVariantId },
-      issueId: String(formData.get("issueId") ?? "") || null,
-      comment: String(formData.get("comment") ?? "").trim() || null,
-      actor: { userId: user.id, role: user.role },
-    });
-    return done("Ваза связана с букетом.", r);
   } catch (err) {
     return toError(err);
   }
@@ -286,22 +232,6 @@ export async function recomputePrimaryShare(): Promise<SetupResult> {
   }
 }
 
-export async function dismissFinanceIssue(formData: FormData): Promise<SetupResult> {
-  const user = await requireRole("OWNER");
-  try {
-    await dismissIssue({
-      issueId: String(formData.get("issueId") ?? ""),
-      comment: String(formData.get("comment") ?? ""),
-      actor: { userId: user.id, role: user.role },
-    });
-    revalidateSetup();
-    return { ok: true, message: "Проблема закрыта без исправления." };
-  } catch (err) {
-    return toError(err);
-  }
-}
-
-/** Ручной прогон детектора: владелец хочет обновить очередь прямо сейчас. */
 export async function rescanFinanceIssues(): Promise<SetupResult> {
   await requireRole("OWNER");
   try {

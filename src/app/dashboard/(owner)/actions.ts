@@ -8,7 +8,7 @@ import { CARD_MESSAGE_MAX } from "@/lib/print/cardText";
 import { hashPassword } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { Prisma } from "@/generated/prisma/client";
-import type { OrderStatus, FloristFinanceVisibility, Role, FinancialItemType, VaseCostType } from "@/generated/prisma/enums";
+import type { FloristFinanceVisibility, Role, FinancialItemType, VaseCostType } from "@/generated/prisma/enums";
 import { setProductClassification, setVariantClassification } from "@/modules/catalog/finance/classification";
 import { setVasePurchaseCost, deleteVasePurchaseCost } from "@/modules/catalog/finance/setVasePurchaseCost";
 import { setVariantVase, setProductDefaultVase, type VaseSelection } from "@/modules/catalog/finance/vaseLink";
@@ -27,14 +27,10 @@ import {
   createOAuthState,
   buildAuthorizeUrl,
 } from "@/integrations/shopify/oauth";
-import { syncOrderToShopify } from "@/integrations/shopify/pushUpdate";
 import { startProductSyncInBackground } from "@/modules/catalog/sync";
 import { startOrderSyncInBackground } from "@/modules/orders/sync";
 import { getAppUrl } from "@/lib/appUrl";
 import { TERMINAL_ORDER_STATUSES } from "@/lib/statuses";
-import { normalizePhone } from "@/lib/phone";
-import { onOrderDeliveryChangeSafe } from "@/integrations/delivery/burq/scheduleService";
-import { scheduleDeliveryTodayTrigger } from "@/modules/automations/lifecycle";
 
 async function ownerOnly() {
   await requireRole("OWNER");
@@ -54,102 +50,11 @@ export async function ownerUpdateCardMessage(orderId: string, cardMessage: strin
   return { ok: true, message: "Текст открытки сохранён." };
 }
 
-export async function ownerSetOrderStatus(orderId: string, status: OrderStatus) {
-  await ownerOnly();
-  const before = await prisma.order.findUnique({ where: { id: orderId }, select: { orderStatus: true } });
-  await prisma.order.update({ where: { id: orderId }, data: { orderStatus: status } });
-  // Финансы: ручная отметка «доставлен» — такой же повод начислить, как курьер и платформа.
-  // Публикуем только на ПЕРЕХОДЕ: повторное сохранение того же статуса ничего не запускает.
-  if (status === "DELIVERED" && before?.orderStatus !== "DELIVERED") {
-  }
-  revalidatePath(`/dashboard/orders/${orderId}`);
-  revalidatePath("/dashboard/orders");
-  revalidatePath("/dashboard");
-}
-
-export async function ownerUpdateDelivery(
-  orderId: string,
-  data: { deliveryDate?: string; deliveryWindow?: string }
-) {
-  await ownerOnly();
-  await prisma.order.update({
-    where: { id: orderId },
-    data: {
-      ...(data.deliveryDate ? { deliveryDate: new Date(data.deliveryDate) } : {}),
-      ...(data.deliveryWindow ? { deliveryWindow: data.deliveryWindow } : {}),
-    },
-  });
-  // Дата/окно доставки влияют на availableAt и dropoff_at → пере-планировать/пере-создать draft.
-  await onOrderDeliveryChangeSafe(prisma, orderId);
-  // Дата сменилась → триггер «Доставка сегодня» должен встать на новый день.
-  await scheduleDeliveryTodayTrigger(prisma, orderId);
-  revalidatePath(`/dashboard/orders/${orderId}`);
-}
-
-export async function ownerUpdateContacts(
-  orderId: string,
-  data: {
-    recipientName?: string;
-    recipientPhone?: string;
-    recipientEmail?: string;
-    addressLine?: string;
-    apartment?: string;
-    city?: string;
-    zip?: string;
-  }
-) {
-  await ownerOnly();
-  await prisma.order.update({
-    where: { id: orderId },
-    data: { ...data, ...(data.recipientPhone !== undefined ? { recipientPhone: normalizePhone(data.recipientPhone) } : {}) },
-  });
-  await syncOrderToShopify(orderId);
-  // Адрес/телефон получателя = dropoff → пере-создать неинициированный draft со свежими данными.
-  await onOrderDeliveryChangeSafe(prisma, orderId);
-  revalidatePath(`/dashboard/orders/${orderId}`);
-}
-
-/** Контакты отправителя заказа (правятся вручную из карточки заказа). */
-export async function ownerUpdateSender(
-  orderId: string,
-  data: { senderName?: string; senderPhone?: string; senderEmail?: string }
-) {
-  await ownerOnly();
-  await prisma.order.update({
-    where: { id: orderId },
-    data: {
-      ...(data.senderName !== undefined ? { senderName: data.senderName } : {}),
-      ...(data.senderPhone !== undefined ? { senderPhone: normalizePhone(data.senderPhone) } : {}),
-      ...(data.senderEmail !== undefined ? { senderEmail: data.senderEmail || null } : {}),
-    },
-  });
-  revalidatePath(`/dashboard/orders/${orderId}`);
-}
-
-/**
- * Открытка и заметка меняются ТОЛЬКО по явному действию пользователя.
- * Оригиналы (originalCardMessage/originalCustomerNote) не трогаем.
- *
- * cardMessage дополнительно уходит обратно в Shopify (стандартное поле заказа "note") —
- * у этого магазина открытку клиенты пишут именно туда, см.
- * extractAddressAndCardMessage в ingestOrder.ts. customerNote остаётся только внутри
- * Floremart — ручное поле владельца/колл-центра, Shopify им не управляет.
- */
-export async function ownerUpdateCardAndNote(
-  orderId: string,
-  data: { cardMessage?: string; customerNote?: string }
-) {
-  await ownerOnly();
-  await prisma.order.update({ where: { id: orderId }, data });
-  await syncOrderToShopify(orderId);
-  revalidatePath(`/dashboard/orders/${orderId}`);
-}
-
 export async function ownerSetManualPrice(orderId: string, amount: number) {
-  const user = await requireRole("OWNER");
+  await requireRole("OWNER");
   await setManualFloristPrice(orderId, amount);
-  // Если по заказу уже есть начисление — оно сторнируется и создаётся новое.
-  // Опубликованную запись не правим никогда: история должна объяснять любую сумму.
+  // Сторнировать нечего: начислений в книге нет, долг выводится из строк дней
+  // (modules/finance/balance.ts). Правка цены меняет входные данные — день пересчитается сам.
   revalidatePath(`/dashboard/orders/${orderId}`);
   revalidatePath("/dashboard/finance/florists");
 }
@@ -159,10 +64,11 @@ export async function ownerReassign(
   floristId: string,
   keepManualPrice: boolean
 ) {
-  const user = await requireRole("OWNER");
+  await requireRole("OWNER");
   await reassignManual(orderId, floristId, keepManualPrice);
-  // Переназначение УЖЕ доставленного заказа переносит деньги: начисление прежнего
-  // флориста сторнируется, новому создаётся своё.
+  // Переназначение доставленного заказа переносит деньги само собой: заработок выводится
+  // из текущих данных, поэтому у прежнего флориста заказ просто перестаёт учитываться,
+  // а у нового начинает. Ни сторно, ни корректировок для этого не нужно.
   revalidatePath(`/dashboard/orders/${orderId}`);
   revalidatePath("/dashboard/orders");
   revalidatePath("/dashboard");
@@ -350,15 +256,6 @@ export async function ownerSetProductDefaultVase(
   return { ok: true };
 }
 
-/** Шаблон состава товара (defaultFloristComposition) — только для заполнения вариантов, не для заказа. */
-export async function ownerSetProductDefaultComposition(productId: string, text: string | null) {
-  await ownerOnly();
-  const trimmed = text?.trim() || null;
-  await prisma.product.update({ where: { id: productId }, data: { defaultFloristComposition: trimmed } });
-  revalidatePath(`/dashboard/products/${productId}`);
-}
-
-/** Обновляет snapshot состава КОНКРЕТНОЙ позиции заказа из текущего состава её варианта. */
 export async function ownerUpdateOrderItemComposition(itemId: string) {
   await ownerOnly();
   const item = await prisma.orderItem.findUnique({

@@ -137,30 +137,56 @@ export async function getExpenseMonthSummary(from: Date, to: Date): Promise<Expe
   return { categories, totalCents };
 }
 
+export type ExpenseHistoryPage = {
+  entries: ExpenseEntry[];
+  /** Сколько записей всего подходит под запрос — НЕ размер страницы. */
+  total: number;
+  page: number;
+  perPage: number;
+};
+
+export const HISTORY_PER_PAGE = 50;
+
 /**
- * Лента истории — все записи за всё время, свежие сверху.
+ * Лента истории — записи за всё время, свежие сверху, страницами.
  *
  * Намеренно НЕ ограничена выбранным месяцем: она существует ровно ради вопросов «платил ли
  * я за домен месяц назад» и «когда последний раз платил OpenAI», а они по определению
  * выходят за границы одного месяца.
+ *
+ * Страницы, а не обрезка по лимиту: обрезанный список молча теряет старые записи, и counter
+ * «всего N» показывал бы размер среза вместо настоящего количества — то есть врал бы ровно
+ * в том месте, ради которого лента и заведена.
  */
-export async function getExpenseHistory(query: string | null, limit = 300): Promise<ExpenseEntry[]> {
+export async function getExpenseHistory(
+  query: string | null,
+  page = 1,
+  perPage = HISTORY_PER_PAGE
+): Promise<ExpenseHistoryPage> {
   const q = (query ?? "").trim();
-  const rows = await prisma.ownerExpense.findMany({
-    where: q
-      ? {
-          OR: [
-            { title: { contains: q, mode: "insensitive" } },
-            { category: { name: { contains: q, mode: "insensitive" } } },
-            { subcategory: { name: { contains: q, mode: "insensitive" } } },
-          ],
-        }
-      : undefined,
-    select: RULE_SELECT,
-    orderBy: [{ startDay: "desc" }, { createdAt: "desc" }],
-    take: limit,
-  });
-  return rows.map(toEntry);
+  const where = q
+    ? {
+        OR: [
+          { title: { contains: q, mode: "insensitive" as const } },
+          { category: { name: { contains: q, mode: "insensitive" as const } } },
+          { subcategory: { name: { contains: q, mode: "insensitive" as const } } },
+        ],
+      }
+    : {};
+
+  const safePage = Math.max(1, Math.floor(page) || 1);
+  const [rows, total] = await Promise.all([
+    prisma.ownerExpense.findMany({
+      where,
+      select: RULE_SELECT,
+      orderBy: [{ startDay: "desc" }, { createdAt: "desc" }],
+      skip: (safePage - 1) * perPage,
+      take: perPage,
+    }),
+    prisma.ownerExpense.count({ where }),
+  ]);
+
+  return { entries: rows.map(toEntry), total, page: safePage, perPage };
 }
 
 /** Сумма расходов за произвольное окно — для карточек «сегодня / месяц / год». */
