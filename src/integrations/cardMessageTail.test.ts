@@ -40,6 +40,23 @@ describe("срез служебного хвоста с записки", () => {
     expect(stripDeliveryTail("| Delivery Date: Wed Aug 5 2026 | Delivery Time: 11:30 AM - 5:00 PM")).toBe("");
   });
 
+  it("хвост БЕЗ ведущей черты — клиент не написал ничего", () => {
+    // Реальный случай с прода (FLWBR-91145): поздравления нет, и приложение пишет хвост
+    // с самого начала, поэтому у первого фрагмента черты перед ним нет.
+    expect(stripDeliveryTail("Delivery Date: Sat Jul 11 2026 | Delivery Time: 11:30 AM - 4:00 PM")).toBe("");
+    expect(stripDeliveryTail("Delivery Date: Thu Jul 9 2026")).toBe("");
+  });
+
+  it("одна строка «ключ: значение» с ЧУЖИМ ключом остаётся — это может быть текст клиента", () => {
+    expect(stripDeliveryTail("Note: люблю тебя")).toBe("Note: люблю тебя");
+    expect(stripDeliveryTail("Маме: с юбилеем!")).toBe("Маме: с юбилеем!");
+  });
+
+  it("поздравление, похожее на «ключ: значение», не пропадает", () => {
+    const note = "Дорогая мама: поздравляю тебя | Delivery Date: Sat Jul 11 2026";
+    expect(stripDeliveryTail(note)).toBe("Дорогая мама: поздравляю тебя");
+  });
+
   it("переносы строк внутри поздравления сохраняются", () => {
     const note = "Дорогая Мария!\n\nПоздравляю.\nС любовью,\nИван | Delivery Date: Aug 5 2026";
     expect(stripDeliveryTail(note)).toBe("Дорогая Мария!\n\nПоздравляю.\nС любовью,\nИван");

@@ -21,6 +21,15 @@ const TAIL_KEYS = ["delivery date", "delivery time", "delivery window"];
 const TAIL_SEGMENT = /\s*\|\s*([^|:]+?)\s*:\s*[^|]*$/;
 
 /**
+ * Тот же фрагмент, но БЕЗ ведущей черты и занимающий строку целиком. Когда клиент не написал
+ * поздравления, приложение пишет хвост с самого начала: «Delivery Date: … | Delivery Time: …»,
+ * и у первого фрагмента черты перед ним нет.
+ */
+const WHOLE_SEGMENT = /^\s*([^|:]+?)\s*:\s*[^|]*$/;
+
+const isTailKey = (key: string) => TAIL_KEYS.includes(key.trim().toLowerCase());
+
+/**
  * Убирает с конца записки все служебные фрагменты подряд. Останавливается на первом же
  * фрагменте с незнакомым ключом — дальше начинается текст клиента.
  *
@@ -30,7 +39,11 @@ export function stripDeliveryTail(note: string): string {
   let out = note;
   for (;;) {
     const m = TAIL_SEGMENT.exec(out);
-    if (!m || !TAIL_KEYS.includes(m[1].trim().toLowerCase())) return out.trimEnd();
+    if (!m || !isTailKey(m[1])) break;
     out = out.slice(0, m.index);
   }
+  // Не осталось ли служебным и то, что было перед первой чертой.
+  const whole = WHOLE_SEGMENT.exec(out);
+  if (whole && isTailKey(whole[1])) return "";
+  return out.trimEnd();
 }
