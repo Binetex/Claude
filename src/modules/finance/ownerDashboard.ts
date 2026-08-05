@@ -21,7 +21,7 @@ import "server-only";
  */
 import { prisma } from "@/lib/db";
 import { toNumber } from "@/lib/money";
-import { computeDayFinance, dayShareCents, type DayBlocker } from "./dayCalc";
+import { computeDayFinance, dayShareCents, type DayBlocker, type MissingInput } from "./dayCalc";
 import { toDayOrderInputs } from "./orderInput";
 import { loadFinanceSettings, loadTaxPolicies } from "./settingsBatch";
 import { resolveItemsFinance } from "./itemFinance";
@@ -33,6 +33,8 @@ export type OwnerDay = {
   /** Все данные на месте — итог дня можно показывать. */
   ready: boolean;
   blockers: DayBlocker[];
+  /** Что именно не заполнено по заказам — чтобы список говорил, куда идти чинить. */
+  missing: MissingInput[];
   ordersTotal: number;
   /** Доход бизнеса: сколько заплатили клиенты. */
   revenueCents: number;
@@ -60,6 +62,8 @@ export type OwnerMonth = {
   ownerNetCents: number;
   readyDays: number;
   incompleteDays: number;
+  /** Выручка неготовых дней — она есть, но в итог не попала. Показывается отдельно. */
+  pendingRevenueCents: number;
 };
 
 const dayKey = (d: Date) => d.toISOString().slice(0, 10);
@@ -172,6 +176,7 @@ export async function getOwnerMonth(from: Date, to: Date): Promise<OwnerMonth> {
       day: key,
       ready: calc.complete,
       blockers: calc.blockers,
+      missing: [...new Set(calc.orders.flatMap((o) => o.missing))],
       ordersTotal: calc.ordersTotal,
       revenueCents: calc.grossRevenueCents,
       tipsCents: calc.tipsCents,
@@ -191,15 +196,21 @@ export async function getOwnerMonth(from: Date, to: Date): Promise<OwnerMonth> {
     });
   }
 
+  // Итог считается ТОЛЬКО по готовым дням — по всем четырём колонкам сразу. Иначе строка
+  // итогов не сходится: выручка была бы по всем дням, а прибыль по части, и вычитание
+  // одного из другого давало бы число, которого нет. Выручка неготовых дней не теряется,
+  // она показывается отдельной строкой.
+  const ready = days.filter((d) => d.ready);
   return {
     days,
-    revenueCents: days.reduce((a, d) => a + d.revenueCents, 0),
-    expensesCents: days.reduce((a, d) => a + d.expensesCents, 0),
-    floristEarningsCents: days.reduce((a, d) => a + d.floristEarningsCents, 0),
-    ownerExpensesCents: days.reduce((a, d) => a + d.ownerExpensesCents, 0),
-    ownerNetCents: days.reduce((a, d) => a + (d.ownerNetCents ?? 0), 0),
-    readyDays: days.filter((d) => d.ready).length,
-    incompleteDays: days.filter((d) => !d.ready).length,
+    revenueCents: ready.reduce((a, d) => a + d.revenueCents, 0),
+    expensesCents: ready.reduce((a, d) => a + d.expensesCents, 0),
+    floristEarningsCents: ready.reduce((a, d) => a + d.floristEarningsCents, 0),
+    ownerExpensesCents: ready.reduce((a, d) => a + d.ownerExpensesCents, 0),
+    ownerNetCents: ready.reduce((a, d) => a + (d.ownerNetCents ?? 0), 0),
+    readyDays: ready.length,
+    incompleteDays: days.length - ready.length,
+    pendingRevenueCents: days.filter((d) => !d.ready).reduce((a, d) => a + d.revenueCents, 0),
   };
 }
 
@@ -207,6 +218,8 @@ export type OwnerDayDetail = {
   day: string;
   ready: boolean;
   blockers: DayBlocker[];
+  /** Что именно не заполнено по заказам — чтобы список говорил, куда идти чинить. */
+  missing: MissingInput[];
   ordersTotal: number;
 
   /** Выручка по магазинам — первый вопрос «откуда деньги». */
@@ -353,6 +366,7 @@ export async function getOwnerDay(day: Date): Promise<OwnerDayDetail | null> {
     day: row.day,
     ready: row.ready,
     blockers: row.blockers,
+    missing: row.missing,
     ordersTotal: row.ordersTotal,
     revenueBySite: [...revenueBySite.entries()]
       .map(([siteId, cents]) => ({ siteId, name: siteName.get(siteId) ?? siteId, cents }))
