@@ -73,6 +73,15 @@ export function toDayOrderInputs(
     additionalByOrder: Map<string, number>;
     itemFinance: Map<string, ItemFinance>;
     settings: FinanceSettingsBySite;
+    /**
+     * Доля Order.tax, считающаяся РЕАЛЬНЫМ расходом (базисные пункты). Задаёт её только
+     * дашборд владельца: у него налог уходит частично, по «Налоговой политике».
+     *
+     * База флориста этот параметр НЕ передаёт и продолжает вычитать 100% налога — это её
+     * правило. Разные входы дают разные ответы из ОДНОЙ формулы; поправлять её результат
+     * снаружи не нужно.
+     */
+    taxShareBp?: Map<string, number>;
   }
 ): DayOrderInput[] {
   return orders.map((order) => {
@@ -100,7 +109,7 @@ export function toDayOrderInputs(
         toCents(order.itemsTotal) + toCents(order.tax) + toCents(order.deliveryCustomerCost) + toCents(order.tip),
       customerTotalCents: toCents(order.customerTotal),
       tipCents: toCents(order.tip),
-      taxCents: toCents(order.tax),
+      taxCents: Math.round((toCents(order.tax) * (deps.taxShareBp?.get(order.siteId) ?? 10000)) / 10000),
       deliveryActualCents,
       acquiringFeeCents,
       vaseGiftCostCents: vaseGiftCostFor(order.items, deps.itemFinance),

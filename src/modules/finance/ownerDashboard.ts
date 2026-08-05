@@ -38,7 +38,7 @@ export type OwnerDay = {
   revenueCents: number;
   /** Чаевые — целиком владельца, флористу с них ничего не идёт. */
   tipsCents: number;
-  /** Налог, реально уходящий у владельца: доля из «Налоговой политики». */
+  /** Налог, реально уходящий у владельца: уже по доле из «Налоговой политики». */
   ownerTaxCents: number;
   /** Все расходы бизнеса за день, включая мои: выручка − расходы − флористы = прибыль. */
   expensesCents: number;
@@ -154,17 +154,9 @@ export async function getOwnerMonth(from: Date, to: Date): Promise<OwnerMonth> {
     const hasPrimary = dayOrders.some((o) => o.currentFloristId && modelByFlorist.get(o.currentFloristId) === "PRIMARY");
     const flowerCents = flowerByDay.get(key) ?? (hasPrimary ? null : 0);
 
-    const inputs = toDayOrderInputs(dayOrders, { additionalByOrder, itemFinance, settings });
+    // Налог здесь сразу по доле владельца: формула одна, вход у неё другой.
+    const inputs = toDayOrderInputs(dayOrders, { additionalByOrder, itemFinance, settings, taxShareBp: taxPolicies });
     const calc = computeDayFinance(inputs, flowerCents);
-
-    // База флориста вычитает 100% налога — это её правило, и менять его нельзя. Но у
-    // владельца реальный расход равен доле из «Налоговой политики», поэтому невыплаченная
-    // часть возвращается ему, ровно как чаевые.
-    const ownerTaxCents = dayOrders.reduce(
-      (a, o) => a + Math.round((toCents(o.tax) * (taxPolicies.get(o.siteId) ?? 10000)) / 10000),
-      0
-    );
-    const taxReliefCents = calc.taxCents - ownerTaxCents;
 
     // Фиксированные цены второстепенных — их заработок за этот день.
     const secondaryCents = dayOrders.reduce((a, o) => {
@@ -183,18 +175,18 @@ export async function getOwnerMonth(from: Date, to: Date): Promise<OwnerMonth> {
       ordersTotal: calc.ordersTotal,
       revenueCents: calc.grossRevenueCents,
       tipsCents: calc.tipsCents,
-      ownerTaxCents,
+      ownerTaxCents: calc.taxCents,
       // Выручка минус прибыль до флористов = всё, что съел день, включая мои расходы.
       // Чаевые в расход не попадают: они вычтены из базы флориста, но остаются у владельца.
       expensesCents: calc.complete
-        ? calc.grossRevenueCents - calc.tipsCents - calc.distributableCents - taxReliefCents + ownerExpensesCents
+        ? calc.grossRevenueCents - calc.tipsCents - calc.distributableCents + ownerExpensesCents
         : 0,
       floristEarningsCents,
       ownerExpensesCents,
       // Чаевые прибавляются ЗДЕСЬ, а не в distributableCents: та сумма — база доли
       // флориста, и трогать её значило бы изменить чужие деньги.
       ownerNetCents: calc.complete
-        ? calc.distributableCents + calc.tipsCents + taxReliefCents - floristEarningsCents - ownerExpensesCents
+        ? calc.distributableCents + calc.tipsCents - floristEarningsCents - ownerExpensesCents
         : null,
     });
   }
@@ -301,10 +293,13 @@ export async function getOwnerDay(day: Date): Promise<OwnerDayDetail | null> {
   for (const a of additional) {
     additionalByOrder.set(a.orderId, (additionalByOrder.get(a.orderId) ?? 0) + a.amountCents);
   }
+  const taxPolicies = await loadTaxPolicies([...new Set(orders.map((o) => o.siteId))]);
   const calc = computeDayFinance(
-    toDayOrderInputs(orders, { additionalByOrder, itemFinance, settings }),
+    toDayOrderInputs(orders, { additionalByOrder, itemFinance, settings, taxShareBp: taxPolicies }),
     flowerExpense?.amountCents ?? null
   );
+  // Сколько налога собрали с клиентов — это уже не расход, а пояснение к нему.
+  const taxCollectedCents = orders.reduce((a, o) => a + toCents(o.tax), 0);
   const contributionByOrder = new Map(calc.orders.map((o) => [o.orderId, o.contributionCents]));
 
   const siteName = new Map(sites.map((s) => [s.id, s.name]));
@@ -364,7 +359,7 @@ export async function getOwnerDay(day: Date): Promise<OwnerDayDetail | null> {
       .sort((a, b) => b.cents - a.cents),
     revenueCents: row.revenueCents,
     tipsCents: row.tipsCents,
-    taxCollectedCents: calc.taxCents,
+    taxCollectedCents,
     expenses: [
       { label: "Цветы", cents: calc.flowerPurchaseCents },
       { label: "Доставка", cents: calc.deliveryCents },
