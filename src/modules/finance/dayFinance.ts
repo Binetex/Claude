@@ -12,17 +12,18 @@ import "server-only";
  * день, если у неё нет закупочной стоимости.
  *
  * Позиции всего дня резолвятся ОДНИМ вызовом, а не по заказу: раньше это был честный N+1,
- * из-за которого сборка дня стоила сотни запросов.
+ * из-за которого сборка дня стоила сотни запросов. По той же причине настройки магазинов
+ * грузятся пакетом (settingsBatch), а отображение заказа во вход расчёта живёт в orderInput
+ * и общее с дашбордом владельца — двух формул прибыли быть не должно.
  */
 import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
-import { toNumber } from "@/lib/money";
 import { computeDayFinance, dayShareCents, type DayBlocker, type DayFinanceResult, type DayOrderInput, type DayOrderResult } from "./dayCalc";
 import { resolveItemsFinance } from "./itemFinance";
-import { estimateFeeCents, resolveConsumablesRate, resolveDailyFlowerExpense, resolveFeeModel } from "./settings";
+import { estimateFeeCents, resolveDailyFlowerExpense } from "./settings";
+import { loadFinanceSettings } from "./settingsBatch";
+import { toDayOrderInputs } from "./orderInput";
 import { primaryShareGate } from "./config";
-
-const toCents = (v: unknown) => Math.round(toNumber(v as never) * 100);
 
 /** UTC-календарный день как строка. deliveryDate — уже UTC-полночь локального дня. */
 export function dayKey(d: Date): string {
@@ -86,57 +87,10 @@ export async function gatherDayOrders(
     additionalByOrder.set(a.orderId, (additionalByOrder.get(a.orderId) ?? 0) + a.amountCents);
   }
 
-  const result: DayOrderInput[] = [];
-  for (const order of orders) {
-    // Закупка ваз и подарков: если хоть у одной позиции она неизвестна — неизвестна вся
-    // сумма, а не «сколько нашли».
-    let vaseGiftCostCents: number | null = 0;
-    for (const item of order.items) {
-      const fin = itemFinance.get(item.id);
-      if (!fin || fin.isTip) continue;
-      if (fin.costRequired && fin.purchaseCostCents == null) {
-        vaseGiftCostCents = null;
-        break;
-      }
-      if (fin.purchaseCostCents != null) {
-        vaseGiftCostCents = (vaseGiftCostCents ?? 0) + fin.purchaseCostCents * item.quantity;
-      }
-    }
-
-    // Подтверждённый ноль — валидная стоимость, неподтверждённый — неизвестность.
-    const deliveryCents = toCents(order.deliveryActualCost);
-    const deliveryActualCents =
-      order.deliveryActualCostConfirmedAt != null || deliveryCents > 0 ? deliveryCents : null;
-
-    // Фактическая комиссия приоритетнее модели магазина.
-    const feeModel = order.acquiringFee ? null : await resolveFeeModel(order.siteId);
-    const acquiringFeeCents = order.acquiringFee
-      ? order.acquiringFee.feeCents
-      : feeModel
-        ? estimateFeeCents(feeModel, toCents(order.customerTotal))
-        : null;
-
-    const rate = order.consumablesOverride ? null : await resolveConsumablesRate(order.siteId);
-    const consumablesCents = order.consumablesOverride ? order.consumablesOverride.amountCents : (rate?.amountCents ?? null);
-
-    result.push({
-      orderId: order.id,
-      orderNumber: order.orderNumber,
-      siteId: order.siteId,
-      grossRevenueCents:
-        toCents(order.itemsTotal) + toCents(order.tax) + toCents(order.deliveryCustomerCost) + toCents(order.tip),
-      customerTotalCents: toCents(order.customerTotal),
-      tipCents: toCents(order.tip),
-      taxCents: toCents(order.tax),
-      deliveryActualCents,
-      acquiringFeeCents,
-      vaseGiftCostCents,
-      consumablesCents,
-      additionalCents: additionalByOrder.get(order.id) ?? 0,
-      feeFromActual: order.acquiringFee != null,
-      consumablesFromOverride: order.consumablesOverride != null,
-    });
-  }
+  // Настройки магазинов — один раз на всю выборку. Раньше они резолвились внутри цикла по
+  // заказам: по два запроса на заказ при шести магазинах во всей системе.
+  const settings = await loadFinanceSettings([...new Set(orders.map((o) => o.siteId))]);
+  const result = toDayOrderInputs(orders, { additionalByOrder, itemFinance, settings });
 
   return { orders: result, flowerPurchaseCents: flowerExpense?.amountCents ?? null };
 }

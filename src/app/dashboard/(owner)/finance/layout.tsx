@@ -25,6 +25,9 @@ export default async function FinanceLayout({ children }: { children: React.Reac
   // три его причины — нет флориста, нет цены, нет модели оплаты — видны прямо в карточке
   // заказа, где их и исправляют.
   const tabs: FinanceTab[] = [
+    // Первым — обзор всего бизнеса: с вопроса «как идут дела» в раздел и заходят.
+    // Раньше /dashboard/finance просто перенаправлял на список флористов.
+    { href: "/dashboard/finance", label: "Обзор" },
     { href: "/dashboard/finance/florists", label: "Флористы" },
     {
       href: "/dashboard/finance/setup",

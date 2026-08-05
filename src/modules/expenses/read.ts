@@ -189,6 +189,24 @@ export async function getExpenseHistory(
   return { entries: rows.map(toEntry), total, page: safePage, perPage };
 }
 
+/**
+ * Мои расходы по дням окна — для дашборда владельца. Ключ — ISO-день.
+ *
+ * Дни без расходов в карту не попадают: вызывающему нужен ноль по умолчанию, а не запись
+ * о его отсутствии.
+ */
+export async function getExpenseDailyTotals(from: Date, to: Date): Promise<Map<string, number>> {
+  const rules = await loadRules(from, to);
+  const byDay = new Map<string, number>();
+  for (const r of rules) {
+    for (const portion of allocateRule(asRule(r), from, to)) {
+      if (portion.cents === 0) continue;
+      byDay.set(portion.day, (byDay.get(portion.day) ?? 0) + portion.cents);
+    }
+  }
+  return byDay;
+}
+
 /** Сумма расходов за произвольное окно — для карточек «сегодня / месяц / год». */
 export async function getExpenseTotal(from: Date, to: Date): Promise<number> {
   const rules = await loadRules(from, to);
