@@ -8,8 +8,10 @@
  * Итогов внизу нет: они переехали в карточки над списком, где на них смотрят в первую
  * очередь. Дублировать их ещё и в подвале значило бы показать одно число дважды.
  *
- * Неготовый день не показывает нули. Вместо них — что именно не заполнено, конкретными
- * пунктами: это единственное, что владелец может с этим днём сделать.
+ * Неготовый день показывает то, что УЖЕ известно (выручка), и прочерк там, где посчитать
+ * нечем. Прятать известное было неправильно: заказы в этот день были, деньги пришли, и
+ * скрывать это из-за незаполненной комиссии — значит терять картину. А нули вместо
+ * неизвестного врали бы, поэтому там прочерк и список того, что нужно заполнить.
  */
 import Link from "next/link";
 import { ChevronRight } from "lucide-react";
@@ -43,16 +45,23 @@ function missingList(day: OwnerDay): string[] {
   return out;
 }
 
-function Metric({ label, cents, accent = false }: { label: string; cents: number; accent?: boolean }) {
+/** `cents = null` — величину посчитать нечем; прочерк честнее нуля. */
+function Metric({ label, cents, accent = false }: { label: string; cents: number | null; accent?: boolean }) {
   return (
     <div className="min-w-0">
       <div className="truncate text-xs text-slate-400">{label}</div>
       <div
         className={`mt-0.5 truncate text-sm font-semibold tabular-nums ${
-          accent ? (cents < 0 ? "text-red-600" : "text-emerald-600") : "text-slate-900"
+          cents == null
+            ? "text-slate-300"
+            : accent
+              ? cents < 0
+                ? "text-red-600"
+                : "text-emerald-600"
+              : "text-slate-900"
         }`}
       >
-        {formatCents(cents)}
+        {cents == null ? "—" : formatCents(cents)}
       </div>
     </div>
   );
@@ -85,25 +94,24 @@ export function OwnerDayList({ days }: { days: OwnerDay[] }) {
                   {ordersLabel(d.ordersTotal)}
                 </div>
 
-                {d.ownerNetCents == null ? (
-                  <div className="min-w-0 flex-1">
-                    <Badge className="border-amber-200 bg-amber-50 text-amber-800">Не готов к расчёту</Badge>
-                    <div className="mt-1.5 text-xs text-slate-600">Не хватает данных</div>
-                    <ul className="mt-0.5 list-disc pl-5 text-xs text-slate-500">
-                      {missing.map((m) => (
-                        <li key={m}>{m}</li>
-                      ))}
-                    </ul>
-                    <div className="mt-1 text-xs text-slate-400 sm:hidden">{ordersLabel(d.ordersTotal)}</div>
-                  </div>
-                ) : (
-                  <div className="grid min-w-0 flex-1 grid-cols-2 gap-x-4 gap-y-2.5 sm:grid-cols-4 sm:gap-x-6">
+                <div className="min-w-0 flex-1">
+                  <div className="grid grid-cols-2 gap-x-4 gap-y-2.5 sm:grid-cols-4 sm:gap-x-6">
+                    {/* Выручка известна всегда: заказы состоялись, сколько заплатили — видно. */}
                     <Metric label="Выручка" cents={d.revenueCents} />
-                    <Metric label="Расходы" cents={d.expensesCents} />
-                    <Metric label="Флористы" cents={d.floristEarningsCents} />
+                    <Metric label="Расходы" cents={d.ready ? d.expensesCents : null} />
+                    <Metric label="Флористы" cents={d.ready ? d.floristEarningsCents : null} />
                     <Metric label="Моя прибыль" cents={d.ownerNetCents} accent />
                   </div>
-                )}
+
+                  {d.ownerNetCents == null && (
+                    <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1">
+                      <Badge className="border-amber-200 bg-amber-50 text-amber-800">Не готов к расчёту</Badge>
+                      <span className="text-xs text-slate-500">не хватает: {missing.join(", ")}</span>
+                    </div>
+                  )}
+
+                  <div className="mt-1 text-xs text-slate-400 sm:hidden">{ordersLabel(d.ordersTotal)}</div>
+                </div>
 
                 <ChevronRight aria-hidden className="size-4 shrink-0 text-slate-300" />
               </Link>

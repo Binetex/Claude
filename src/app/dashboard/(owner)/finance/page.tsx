@@ -1,6 +1,6 @@
 import { requireRole } from "@/lib/rbac";
 import { PageHeader, StatCard } from "@/components/ui/misc";
-import { Card, CardBody, CardHeader } from "@/components/ui/Card";
+import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/Card";
 import { EmptyState } from "@/components/ui/states";
 import { formatCents } from "@/lib/cents";
 import { ExpenseFilters } from "@/components/expenses/ExpenseFilters";
@@ -88,7 +88,8 @@ export default async function FinanceDashboardPage({
       </div>
 
       <Card>
-        <CardHeader className="flex flex-wrap items-center justify-end gap-3">
+        <CardHeader className="flex flex-wrap items-center justify-between gap-3">
+          <CardTitle>Итог</CardTitle>
           <ExpenseFilters years={yearOptions(earliest?.deliveryDate ?? null)} />
         </CardHeader>
         <CardBody className={selected.days.length === 0 ? undefined : "p-0"}>
