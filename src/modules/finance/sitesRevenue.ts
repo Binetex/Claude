@@ -14,6 +14,7 @@ import "server-only";
 import { prisma } from "@/lib/db";
 import { toNumber } from "@/lib/money";
 import type { OrderStatus } from "@/generated/prisma/enums";
+import { formatDayLabel } from "@/components/charts/theme";
 
 /**
  * Что считаем заказом магазина.
@@ -54,11 +55,35 @@ export type SiteRevenueRow = {
   avgCents: number;
 };
 
+/** Магазин на графике: цвет закрепляется за siteId, а не за местом в списке. */
+export type SiteSeries = { siteId: string; name: string };
+
+/**
+ * Один КАЛЕНДАРНЫЙ день диапазона. Выручка магазина лежит под ключом-siteId — так столбец
+ * собирается из сегментов без второго справочника, а имена магазинов (они могут совпадать)
+ * ключами не работают.
+ *
+ * Дни без заказов присутствуют с нулями: иначе ось времени рвётся и «провал продаж»
+ * выглядит как «этого дня не было».
+ */
+export type SiteDailyPoint = {
+  day: string;
+  /** Подпись оси: «1 авг». */
+  label: string;
+  /** Вся выручка дня по всем магазинам. */
+  total: number;
+  /** Сколько заказов в этот день — для тултипа. */
+  orders: number;
+} & Record<string, number | string>;
+
 export type SitesRevenue = {
   rows: SiteRevenueRow[];
   ordersTotal: number;
   revenueCents: number;
   avgCents: number;
+  /** Магазины с заказами за период, по алфавиту — порядок задаёт цвета и стопку. */
+  series: SiteSeries[];
+  points: SiteDailyPoint[];
 };
 
 const where = (from: Date, to: Date, siteId?: string) => ({
@@ -67,16 +92,29 @@ const where = (from: Date, to: Date, siteId?: string) => ({
   ...(siteId ? { siteId } : {}),
 });
 
+/** Все календарные дни диапазона включительно. UTC — как и сам deliveryDate. */
+function eachDay(from: Date, to: Date): string[] {
+  const out: string[] = [];
+  for (let t = from.getTime(); t <= to.getTime(); t += 24 * 60 * 60 * 1000) {
+    out.push(new Date(t).toISOString().slice(0, 10));
+  }
+  return out;
+}
+
 /**
- * Строки таблицы магазинов за период. `from`/`to` — UTC-полночь первого и последнего дня
- * (та же конвенция, что у `Order.deliveryDate`).
+ * Всё, что нужно странице магазинов, ОДНИМ запросом: и таблица итогов, и дневная динамика.
  *
- * Магазины без заказов за период не показываются: строка из нулей ничего не сообщает.
+ * Группировка одна — день × магазин. Итог магазина за период получается сложением его дней,
+ * поэтому второй формулы не возникает, а таблица и график физически не могут разойтись.
+ *
+ * `from`/`to` — UTC-полночь первого и последнего дня (конвенция `Order.deliveryDate`).
+ * Магазины без заказов за период не показываются нигде: строка и сегмент из нулей ничего
+ * не сообщают. А вот ДНИ без заказов остаются — ось времени должна быть непрерывной.
  */
 export async function getSitesRevenue(from: Date, to: Date): Promise<SitesRevenue> {
   const [grouped, sites] = await Promise.all([
     prisma.order.groupBy({
-      by: ["siteId"],
+      by: ["deliveryDate", "siteId"],
       where: where(from, to),
       _count: { _all: true },
       _sum: { customerTotal: true },
@@ -86,18 +124,52 @@ export async function getSitesRevenue(from: Date, to: Date): Promise<SitesRevenu
 
   const nameById = new Map(sites.map((s) => [s.id, s.name]));
 
-  const rows: SiteRevenueRow[] = grouped
-    .map((g) => {
-      const revenueCents = revenueOf(g._sum);
-      return {
-        siteId: g.siteId,
-        name: nameById.get(g.siteId) ?? g.siteId,
-        ordersTotal: g._count._all,
-        revenueCents,
-        avgCents: avgOf(revenueCents, g._count._all),
-      };
-    })
+  // Итоги магазина = сумма его дней. Отдельного запроса под таблицу нет.
+  const bySite = new Map<string, { ordersTotal: number; revenueCents: number }>();
+  const byDay = new Map<string, Map<string, { orders: number; revenue: number }>>();
+
+  for (const g of grouped) {
+    const revenue = revenueOf(g._sum);
+    const orders = g._count._all;
+
+    const site = bySite.get(g.siteId) ?? { ordersTotal: 0, revenueCents: 0 };
+    site.ordersTotal += orders;
+    site.revenueCents += revenue;
+    bySite.set(g.siteId, site);
+
+    const key = g.deliveryDate.toISOString().slice(0, 10);
+    const day = byDay.get(key) ?? new Map();
+    day.set(g.siteId, { orders, revenue });
+    byDay.set(key, day);
+  }
+
+  const rows: SiteRevenueRow[] = [...bySite.entries()]
+    .map(([siteId, v]) => ({
+      siteId,
+      name: nameById.get(siteId) ?? siteId,
+      ordersTotal: v.ordersTotal,
+      revenueCents: v.revenueCents,
+      avgCents: avgOf(v.revenueCents, v.ordersTotal),
+    }))
     .sort((a, b) => b.revenueCents - a.revenueCents);
+
+  // Порядок серий — по имени, а не по выручке: цвет магазина не должен меняться от того,
+  // что в этом месяце он продал меньше.
+  const series: SiteSeries[] = rows
+    .map((r) => ({ siteId: r.siteId, name: r.name }))
+    .sort((a, b) => a.name.localeCompare(b.name, "ru"));
+
+  const points: SiteDailyPoint[] = eachDay(from, to).map((day) => {
+    const cells = byDay.get(day);
+    const point: SiteDailyPoint = { day, label: formatDayLabel(day), total: 0, orders: 0 };
+    for (const s of series) {
+      const cell = cells?.get(s.siteId);
+      point[s.siteId] = cell?.revenue ?? 0;
+      point.total += cell?.revenue ?? 0;
+      point.orders += cell?.orders ?? 0;
+    }
+    return point;
+  });
 
   const ordersTotal = rows.reduce((a, r) => a + r.ordersTotal, 0);
   const revenueCents = rows.reduce((a, r) => a + r.revenueCents, 0);
@@ -107,6 +179,8 @@ export async function getSitesRevenue(from: Date, to: Date): Promise<SitesRevenu
     ordersTotal,
     revenueCents,
     avgCents: avgOf(revenueCents, ordersTotal),
+    series,
+    points,
   };
 }
 

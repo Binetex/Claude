@@ -51,12 +51,16 @@ export default async function FinanceSitesPage({
         <StatCard label="Средний чек" value={formatCents(data.avgCents)} />
       </div>
 
-      {/* График показывает сравнение, таблица под ним — точные цифры. Оба читают один и
-          тот же data.rows. */}
+      {/* График — как шли дни и из чего складывался каждый; таблица под ним — итоги за
+          весь период. Оба из одного серверного результата. */}
       {data.rows.length > 0 && (
         <Card>
+          <CardHeader className="flex flex-wrap items-center justify-between gap-3">
+            <CardTitle>Выручка по дням</CardTitle>
+            <span className="text-xs text-slate-400">{period.label}</span>
+          </CardHeader>
           <CardBody>
-            <SitesChart rows={data.rows} hrefQuery={q} />
+            <SitesChart points={data.points} series={data.series} />
           </CardBody>
         </Card>
       )}

@@ -37,7 +37,7 @@ const utcDay = (iso: string) => new Date(`${iso}T00:00:00.000Z`);
 const shift = (d: Date, days: number) => new Date(d.getTime() + days * DAY_MS);
 
 /** «1 августа 2026» — календарная дата, без пересчёта через таймзону. */
-const dayLabel = (d: Date) => `${d.getUTCDate()} ${MONTHS_GENITIVE[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
+export const dayLabel = (d: Date) => `${d.getUTCDate()} ${MONTHS_GENITIVE[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
 
 function parseIsoDay(value: string | undefined): Date | null {
   if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
@@ -101,4 +101,9 @@ export function resolveSitesPeriod(
     to,
     label: `${MONTHS[from.getUTCMonth()]} ${from.getUTCFullYear()}`,
   };
+}
+
+/** «2026-08-01» → «1 августа 2026». Для заголовка тултипа, где сокращение уже мешает. */
+export function fullDayLabel(iso: string): string {
+  return dayLabel(utcDay(iso));
 }

@@ -1,40 +1,31 @@
 "use client";
 /**
- * График сравнения магазинов. Переключатель показателя живёт здесь, потому что это
- * единственное состояние экрана: всё остальное приходит с сервера и меняется вместе с
- * периодом.
+ * Динамика выручки магазинов по дням выбранного периода.
  *
- * `rows` — ТОТ ЖЕ массив, что уходит в таблицу под графиком, без преобразований. Отдельного
- * запроса ради картинки нет и быть не должно: тогда график и таблица однажды разойдутся.
+ * Отвечает на другой вопрос, чем таблица под ним: таблица говорит «сколько всего за
+ * период», график — «как шли дни и из чего складывался каждый». Повторять итоги ещё и
+ * картинкой смысла нет, поэтому рейтинга магазинов здесь больше не рисуем.
+ *
+ * `points` и `rows` приходят из ОДНОГО серверного результата (`getSitesRevenue`): там одна
+ * группировка «день × магазин», а итоги таблицы — сумма тех же дней. Разойтись им нечем.
+ *
+ * Переключателя показателя тут нет намеренно: складывать в стопку средний чек нельзя (это
+ * среднее, а не величина), а «заказы» отдельным графиком никто не просил.
  */
-import { useState } from "react";
-import { BarChart } from "@/components/charts/BarChart";
-import { MetricSelector } from "@/components/charts/MetricSelector";
-import type { ChartMetric } from "@/components/charts/theme";
-import type { SiteRevenueRow } from "@/modules/finance/sitesRevenue";
+import { StackedBarChart } from "@/components/charts/StackedBarChart";
+import { fullDayLabel } from "@/modules/finance/sitesPeriod";
+import { pluralOrders } from "@/modules/finance/earningsFormat";
+import type { SiteDailyPoint, SiteSeries } from "@/modules/finance/sitesRevenue";
 
-/** Ключи совпадают с полями SiteRevenueRow — график читает строку напрямую. */
-const METRICS: ChartMetric[] = [
-  { key: "revenueCents", label: "Выручка", format: "money" },
-  { key: "ordersTotal", label: "Заказы", format: "number" },
-  { key: "avgCents", label: "Средний чек", format: "money" },
-];
-
-export function SitesChart({ rows, hrefQuery }: { rows: SiteRevenueRow[]; hrefQuery?: string }) {
-  const [key, setKey] = useState(METRICS[0].key);
-  const metric = METRICS.find((m) => m.key === key) ?? METRICS[0];
-
+export function SitesChart({ points, series }: { points: SiteDailyPoint[]; series: SiteSeries[] }) {
   return (
-    <div className="space-y-3">
-      <MetricSelector metrics={METRICS} current={metric.key} onChange={setKey} />
-      <BarChart
-        data={rows}
-        index="name"
-        metric={metric}
-        hrefKey="siteId"
-        hrefBase="/dashboard/finance/sites"
-        hrefQuery={hrefQuery}
-      />
-    </div>
+    <StackedBarChart
+      data={points}
+      index="label"
+      series={series.map((s) => ({ key: s.siteId, name: s.name }))}
+      titleOf={(row) => fullDayLabel(String(row.day))}
+      subtitleOf={(row) => pluralOrders(Number(row.orders) || 0)}
+      totalLabel="за день"
+    />
   );
 }
