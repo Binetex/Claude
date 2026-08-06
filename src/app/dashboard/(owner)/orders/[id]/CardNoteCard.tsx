@@ -25,8 +25,8 @@ export function CardNoteCard({
       колл-центра блок остаётся прежним. */
   showPrint?: boolean;
   /**
-   * Сворачивать блок. Начальное состояние определяется СОДЕРЖИМЫМ: с текстом открытки
-   * раскрыт, пустой — свёрнут. Хранить выбор между заходами (localStorage) нельзя без
+   * Сворачивать блок. Начальное состояние определяется СОДЕРЖИМЫМ: есть что показать —
+   * раскрыт, пусто — свёрнут. Хранить выбор между заходами (localStorage) нельзя без
    * применения в эффекте, а это прыжок вёрстки после гидрации.
    *
    * Заодно это признак плотной компоновки: копирование и печать становятся иконками.
@@ -37,6 +37,13 @@ export function CardNoteCard({
   const [card, setCard] = useState(cardMessage);
   const [note, setNote] = useState(customerNote);
   const [showNote, setShowNote] = useState(customerNote.trim() !== "");
+
+  /**
+   * Свёрнутый блок должен молчать только когда в нём ПУСТО. Заметка заказчика считается
+   * наравне с открыткой: раньше учитывалась одна открытка, и заказ с заметкой открывался
+   * свёрнутым — заметку было видно, только если знать, что её надо развернуть.
+   */
+  const hasContent = cardMessage.trim() !== "" || customerNote.trim() !== "";
   const { pending, conflict, save, acceptCurrentVersion } = useBlockSave(orderId, "cardNote", updatedAt);
   const dirty = card !== cardMessage || note !== customerNote;
 
@@ -111,7 +118,7 @@ export function CardNoteCard({
   // переключает details, и «Сохранить» рядом с заголовком схлопывал бы блок.
   return (
     <Card>
-      <details open={cardMessage.trim() !== ""} className="group">
+      <details open={hasContent} className="group">
         <summary className="flex cursor-pointer list-none items-center gap-1.5 rounded-t-xl px-4 py-2.5 transition-colors hover:bg-slate-50">
           <ChevronRight
             aria-hidden
