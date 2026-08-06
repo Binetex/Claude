@@ -78,12 +78,22 @@ async function main() {
     }
 
     for (const o of siteOrders) {
+      await new Promise((res) => setTimeout(res, 550)); // лимит Shopify — 2 запроса в секунду
       const r = await fetch(`https://${creds.shopDomain}/admin/api/2025-01/orders/${o.externalId}.json`, {
         headers: { "X-Shopify-Access-Token": creds.accessToken },
       });
       if (!r.ok) {
-        // 404 у Shopify — заказ старше 60 дней без scope read_all_orders. Не чиним.
-        skipped.push({ orderNumber: o.orderNumber, reason: `Shopify ${r.status} (старше 60 дней — нет доступа)` });
+        // 404 — заказ старше 60 дней, без scope read_all_orders его не отдают.
+        // 429 — троттлинг Shopify: доступ есть, просто мы частим. Это разные причины, и
+        // сваливать их в одну подпись нельзя: по первой чинить нечего, вторая лечится
+        // повторным запуском.
+        const reason =
+          r.status === 404
+            ? "Shopify 404 — заказ старше 60 дней, нет scope read_all_orders"
+            : r.status === 429
+              ? "Shopify 429 — троттлинг, поможет повторный запуск"
+              : `Shopify ${r.status}`;
+        skipped.push({ orderNumber: o.orderNumber, reason });
         continue;
       }
       const { order } = (await r.json()) as { order: ShopifyOrderPayload };
