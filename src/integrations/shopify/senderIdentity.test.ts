@@ -77,3 +77,83 @@ describe("заказчик Shopify-заказа", () => {
     expect(r.senderName).toBe("Jamella");
   });
 });
+
+/**
+ * Главное правило: если в заказе вообще есть два разных номера, они обязаны разойтись по
+ * заказчику и получателю. Одинаковый номер в обоих полях допустим ТОЛЬКО когда другого в
+ * заказе нет.
+ */
+describe("два разных номера не дублируются", () => {
+  const A = "+14211111111";
+  const B = "+13333333333";
+
+  it("три поля с одним номером, четвёртое с другим — второй достаётся заказчику", () => {
+    const r = extractSenderIdentity({
+      shipping_address: { phone: A },
+      phone: A,
+      customer: { first_name: "J", phone: A },
+      billing_address: { name: "B", phone: B },
+    });
+    expect(r.senderPhone).toBe(B); // не A — иначе оба поля были бы одинаковыми
+    expect(r.senderPhoneSource).toBe("billing");
+  });
+
+  it("лишний номер в заказе — он и достаётся заказчику (случай PAR-41318)", () => {
+    const r = extractSenderIdentity({
+      shipping_address: { phone: A },
+      phone: B,
+      customer: { first_name: "J", phone: B },
+      billing_address: { name: "B", phone: A },
+    });
+    expect(r.senderPhone).toBe(B);
+    expect(r.senderPhoneSource).toBe("order");
+  });
+
+  it("лишний номер в учётной записи", () => {
+    const r = extractSenderIdentity({
+      shipping_address: { phone: A },
+      phone: A,
+      customer: { first_name: "J", phone: B },
+      billing_address: { name: "B", phone: A },
+    });
+    expect(r.senderPhone).toBe(B);
+    expect(r.senderPhoneSource).toBe("customer");
+  });
+
+  it("формат не мешает: тот же номер в другом написании не считается вторым", () => {
+    const r = extractSenderIdentity({
+      shipping_address: { phone: "(421) 111-1111" },
+      phone: "+14211111111",
+      billing_address: { name: "B", phone: B },
+    });
+    expect(r.senderPhone).toBe(B);
+  });
+
+  it("в заказе один номер на всех — он и остаётся у обоих", () => {
+    const r = extractSenderIdentity({
+      shipping_address: { phone: A },
+      phone: A,
+      customer: { first_name: "J", phone: A },
+      billing_address: { name: "B", phone: A },
+    });
+    expect(r.senderPhone).toBe(A);
+  });
+
+  it("приоритет сохраняется среди ОТЛИЧАЮЩИХСЯ: заказ важнее учётной записи", () => {
+    const C = "+15555555555";
+    const r = extractSenderIdentity({
+      shipping_address: { phone: A },
+      phone: B,
+      customer: { first_name: "J", phone: C },
+      billing_address: { name: "B", phone: C },
+    });
+    expect(r.senderPhone).toBe(B);
+    expect(r.senderPhoneSource).toBe("order");
+  });
+
+  it("нет телефона доставки — берём первый по приоритету, сравнивать не с чем", () => {
+    const r = extractSenderIdentity({ phone: A, billing_address: { name: "B", phone: B } });
+    expect(r.senderPhone).toBe(A);
+    expect(r.senderPhoneSource).toBe("order");
+  });
+});

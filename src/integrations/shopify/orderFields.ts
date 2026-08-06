@@ -3,7 +3,7 @@
  * Разделение источников: номер = name; адрес отправителя = billing_address;
  * инструкции доставки = GraphQL deliveryMethod (native Local Delivery). См. orderFields.test.ts.
  */
-import { normalizePhone } from "@/lib/phone";
+import { normalizePhone, toE164 } from "@/lib/phone";
 
 export type ShopifyBillingAddress =
   | {
@@ -55,6 +55,8 @@ export type SenderIdentitySource = {
   phone?: string | null;
   customer?: { first_name?: string; last_name?: string; phone?: string } | null;
   billing_address?: { name?: string; first_name?: string; last_name?: string; phone?: string } | null;
+  /** Нужен, чтобы не записать заказчику тот же номер, что уже у получателя. */
+  shipping_address?: { phone?: string } | null;
 };
 
 /**
@@ -67,10 +69,14 @@ export type SenderIdentitySource = {
  * записался Aspen с номером +1 864…, и связаться с заказчицей было не по чему).
  *
  * Теперь личность берётся из `customer` — это учётная запись, оформившая заказ, — а
- * billing остаётся последним запасным. Телефон: сначала телефон ЗАКАЗА (что клиент ввёл на
- * оформлении), потом телефон учётной записи, и только потом платёжный адрес.
+ * billing остаётся последним запасным.
  *
- * Получателя это не касается: его имя и телефон по-прежнему из shipping_address.
+ * Телефон выбирается с оглядкой на получателя: приоритет тот же (заказ → учётная запись →
+ * платёжный адрес), но пропускаются варианты, СОВПАДАЮЩИЕ с телефоном доставки. Есть в
+ * заказе два разных номера — они обязаны разойтись по двум сторонам, а не продублироваться.
+ * Совпадают все — значит номер в заказе один, и он честно один на двоих.
+ *
+ * Имя и телефон ПОЛУЧАТЕЛЯ по-прежнему берутся только из shipping_address.
  */
 export function extractSenderIdentity(payload: SenderIdentitySource): {
   senderName: string;
@@ -90,13 +96,28 @@ export function extractSenderIdentity(payload: SenderIdentitySource): {
     joined(billing?.first_name, billing?.last_name) ||
     "—";
 
-  const fromOrder = t(payload.phone);
-  const fromCustomer = t(payload.customer?.phone);
-  const fromBilling = t(billing?.phone);
-  const raw = fromOrder || fromCustomer || fromBilling;
-  const senderPhoneSource = fromOrder ? "order" : fromCustomer ? "customer" : fromBilling ? "billing" : "none";
+  // Телефон получателя занят: он всегда из адреса доставки. Заказчику ищем ДРУГОЙ номер.
+  const recipient = toE164(t(payload.shipping_address?.phone));
 
-  return { senderName, senderPhone: normalizePhone(raw), senderPhoneSource };
+  const candidates: { source: "order" | "customer" | "billing"; value: string }[] = [
+    { source: "order", value: t(payload.phone) },
+    { source: "customer", value: t(payload.customer?.phone) },
+    { source: "billing", value: t(billing?.phone) },
+  ].filter((c): c is { source: "order" | "customer" | "billing"; value: string } => !!c.value);
+
+  // ГЛАВНОЕ ПРАВИЛО: если в заказе вообще есть второй номер, он должен достаться заказчику.
+  // Магазины раскладывают телефоны как попало — один и тот же номер приезжает и в адрес
+  // доставки, и в заказ, и в платёжный адрес, а настоящий второй лежит в оставшемся поле.
+  // Поэтому берём первый по приоритету, который ОТЛИЧАЕТСЯ от номера получателя, и только
+  // если все совпали — значит номер в заказе действительно один на двоих.
+  const chosen =
+    candidates.find((c) => recipient == null || toE164(c.value) !== recipient) ?? candidates[0] ?? null;
+
+  return {
+    senderName,
+    senderPhone: normalizePhone(chosen?.value),
+    senderPhoneSource: chosen?.source ?? "none",
+  };
 }
 
 /** Есть ли у отправителя адрес (для UI: показывать адрес или «не указан»). */
