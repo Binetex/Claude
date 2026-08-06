@@ -1,4 +1,5 @@
 import { Card, CardHeader, CardTitle, CardBody } from "@/components/ui/Card";
+import type { RefundSummary } from "@/integrations/airwallex/refund";
 
 /**
  * Состояние сверки платежа с Airwallex. Только для владельца — флористам и колл-центру этот
@@ -53,7 +54,16 @@ function Row({ label, value }: { label: string; value: React.ReactNode }) {
   );
 }
 
-export function AirwallexPanel({ aw }: { aw: AirwallexView }) {
+/**
+ * Панель платежа. `refund` — сводка возвратов из Airwallex, best-effort: не пришла — панель
+ * рисуется как раньше.
+ *
+ * ВАЖНО про статус: `payment_intent` после возврата остаётся SUCCEEDED — возврат у Airwallex
+ * это ОТДЕЛЬНЫЙ объект, и статус платежа он не меняет. Поэтому «Оплачено» здесь — правда про
+ * платёж и одновременно ложь про деньги. Возврат показываем рядом отдельной плашкой, а не
+ * подменяем ею статус: подмена скрыла бы, что списание было и прошло успешно.
+ */
+export function AirwallexPanel({ aw, refund }: { aw: AirwallexView; refund?: RefundSummary | null }) {
   const norm = aw.normalizedStatus ?? "UNKNOWN";
   return (
     <Card>
@@ -63,6 +73,11 @@ export function AirwallexPanel({ aw }: { aw: AirwallexView }) {
           <span className={`rounded border px-1.5 py-px text-[11px] font-medium ${TONE[norm] ?? TONE.UNKNOWN}`}>
             {LABEL[norm] ?? norm}
           </span>
+          {refund && (
+            <span className="rounded border border-rose-200 bg-rose-50 px-1.5 py-px text-[11px] font-medium text-rose-800">
+              Возврат {refund.amount} {refund.currency}
+            </span>
+          )}
           {!aw.monitoringActive && (
             <span className="rounded border border-slate-200 bg-slate-50 px-1.5 py-px text-[11px] text-slate-500">сверка завершена</span>
           )}
@@ -75,6 +90,21 @@ export function AirwallexPanel({ aw }: { aw: AirwallexView }) {
         <Row label="В ожидании" value={aw.pendingSinceMinutes != null ? `${aw.pendingSinceMinutes} мин` : "—"} />
         <Row label="Проверено" value={fmt(aw.lastCheckedAt)} />
         <Row label="Следующая проверка" value={aw.monitoringActive ? fmt(aw.nextCheckAt) : "—"} />
+
+        {refund && (
+          <>
+            <Row
+              label={refund.count > 1 ? `Возвращено (возвратов: ${refund.count})` : "Возвращено"}
+              value={
+                <span className="font-medium text-rose-700 tabular-nums">
+                  {refund.amount} {refund.currency}
+                </span>
+              }
+            />
+            <Row label="Дата возврата" value={fmt(refund.lastAt)} />
+            <Row label="Статус возврата" value={refund.lastStatus} />
+          </>
+        )}
 
         {aw.safeError && <p className="rounded-md bg-amber-50 p-2 text-[11px] text-amber-800">{aw.safeError}</p>}
         <p className="text-[11px] text-slate-400">

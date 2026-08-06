@@ -99,6 +99,50 @@ export async function getRefundState(orderId: string): Promise<RefundState> {
   };
 }
 
+/** Короткая сводка возвратов для панели заказа. */
+export type RefundSummary = {
+  /** Сколько возвращено (идущие возвраты считаются — см. computeRefundAmounts). */
+  amount: number;
+  currency: string;
+  /** Когда прошёл последний возврат. */
+  lastAt: string | null;
+  /** Статус последнего возврата, как его называет Airwallex. */
+  lastStatus: string;
+  count: number;
+};
+
+/**
+ * Возвраты по заказу для ПОКАЗА в панели Airwallex. Best-effort: ошибка и отсутствие ключей
+ * дают null, и панель просто рисуется как раньше — платёж важнее, чем сводка по нему.
+ *
+ * Один запрос, а не два: статус платежа панель уже знает из своей таблицы, а
+ * `payment_intent` после возврата всё равно остаётся SUCCEEDED — возврат у Airwallex это
+ * отдельный объект, и без этого списка о нём никак не узнать.
+ */
+export async function getRefundSummary(orderId: string): Promise<RefundSummary | null> {
+  const pay = await loadPayment(orderId);
+  if (!pay?.paymentIntentId) return null;
+
+  const creds = await resolveAirwallexCreds(prisma, pay.siteId);
+  if (!creds) return null;
+
+  const list = await new AirwallexClient(creds).listRefunds(pay.paymentIntentId);
+  if (!list.ok || list.refunds.length === 0) return null;
+
+  const { refundedAmount } = computeRefundAmounts(0, list.refunds);
+  if (refundedAmount <= 0) return null;
+
+  // Последний по времени: Airwallex отдаёт список без гарантии порядка.
+  const sorted = [...list.refunds].sort((a, b) => (b.createdAt ?? "").localeCompare(a.createdAt ?? ""));
+  return {
+    amount: refundedAmount,
+    currency: sorted[0].currency || "USD",
+    lastAt: sorted[0].createdAt,
+    lastStatus: sorted[0].status,
+    count: list.refunds.length,
+  };
+}
+
 export type CreateRefundOutcome =
   | { ok: true; refund: AirwallexRefund }
   /** Возврат точно НЕ создан — можно спокойно повторить. */

@@ -17,6 +17,7 @@ import { formatMoney } from "@/lib/money";
 import { fmtDateTime } from "@/lib/format";
 import { AirwallexPanel } from "./AirwallexPanel";
 import { RefundDialog } from "./RefundDialog";
+import { getRefundSummary } from "@/integrations/airwallex/refund";
 import { UpdateCompositionButton } from "../UpdateCompositionButton";
 import { OwnerPriceDialog } from "./OwnerPriceDialog";
 import { ContactEditDialog } from "./ContactEditDialog";
@@ -56,6 +57,10 @@ export default async function OwnerOrderPage({ params }: { params: Promise<{ id:
   if (!order) notFound();
 
   const florists = await prisma.florist.findMany({ include: { user: true }, orderBy: { createdAt: "asc" } });
+
+  // Сводка возвратов — best-effort и только когда есть что показывать: платёж Airwallex.
+  // Ошибка или недоступность Airwallex не должна ронять карточку заказа, поэтому catch.
+  const refundSummary = order.airwallex ? await getRefundSummary(order.id).catch(() => null) : null;
 
   // Заказ без флориста: отличаем «все заняты в этот день» от «флористов нет вовсе».
   // Считаем на чтении — хранить нечего, ответ всегда соответствует текущим настройкам.
@@ -253,7 +258,7 @@ export default async function OwnerOrderPage({ params }: { params: Promise<{ id:
                  отношения не имеют, и в потоке основных карточек только мешали. ── */}
           {order.airwallex && (
             <div className="space-y-2">
-              <AirwallexPanel aw={order.airwallex} />
+              <AirwallexPanel aw={order.airwallex} refund={refundSummary} />
               {/* Возврат живёт рядом с платежом, а не среди «быстрых действий»: он необратим
                   и не должен стоять в одном ряду с картой и переназначением флориста.
                   Доступность и суммы модалка спрашивает у Airwallex при открытии. */}
