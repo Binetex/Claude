@@ -10,6 +10,7 @@ import { formatCents } from "@/lib/cents";
 import { getSiteDetail } from "@/modules/finance/sitesRevenue";
 import { resolveSitesPeriod } from "@/modules/finance/sitesPeriod";
 import { SitesPeriodBar } from "../SitesPeriodBar";
+import { SiteDaysChart } from "./SiteDaysChart";
 
 export const dynamic = "force-dynamic";
 
@@ -53,11 +54,21 @@ export default async function FinanceSiteDetailPage({
 
       <SitesPeriodBar current={period.kind} />
 
-      <div className="grid grid-cols-3 gap-3">
+      {/* На телефоне три колонки режут суммы — карточки идут в столбик. */}
+      <div className="grid gap-3 sm:grid-cols-3">
         <StatCard label="Заказов" value={site.ordersTotal} />
         <StatCard label="Выручка" value={formatCents(site.revenueCents)} />
         <StatCard label="Средний чек" value={formatCents(site.avgCents)} />
       </div>
+
+      {/* График динамики и список дней читают один и тот же site.days. */}
+      {site.days.length > 1 && (
+        <Card>
+          <CardBody>
+            <SiteDaysChart days={site.days} />
+          </CardBody>
+        </Card>
+      )}
 
       <Card>
         <CardHeader className="flex flex-wrap items-center justify-between gap-3">
