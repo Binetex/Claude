@@ -37,7 +37,6 @@ export async function ownerSetSiteTimezone(siteId: string, timezone: string): Pr
     console.error(`[burq] reschedule site future orders failed (${siteId}):`, err instanceof Error ? err.message : String(err));
   }
   revalidatePath("/dashboard/sites");
-  revalidatePath("/dashboard");
   return { ok: true, message: `Часовой пояс: ${timezone}` };
 }
 
@@ -183,9 +182,8 @@ export async function ownerDeleteSite(siteId: string): Promise<FormState> {
   try {
     const removed = await deleteSiteCompletely(siteId);
     revalidatePath("/dashboard/sites");
-    // Магазин исчезает из списков заказов, дашборда и финансов — обновляем и их.
+    // Магазин исчезает из списков заказов и финансов — обновляем и их.
     revalidatePath("/dashboard/orders");
-    revalidatePath("/dashboard");
     return {
       ok: true,
       message: `Магазин «${removed.name}»${removed.domain ? ` (${removed.domain})` : ""} удалён.`,

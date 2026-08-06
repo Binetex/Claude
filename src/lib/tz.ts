@@ -82,7 +82,7 @@ export function zonedLocalTimeToUtc(dateStr: string, timeHHmm: string, tz: strin
  * Чистый строительный блок для БУДУЩЕГО per-site расчёта метрик «Сегодня/Завтра»: когда магазины
  * окажутся в разных часовых поясах, счётчики нужно считать по `Site.timezone` КАЖДОГО магазина
  * (сгруппировать заказы по зоне → классифицировать → просуммировать), а не по одному глобальному tz.
- * См. TODO в modules/orders/metrics.ts. Сейчас в проде это не используется (все магазины — LA).
+ * Сейчас в проде это не используется (все магазины — LA).
  */
 export function deliveryDayBucket(
   deliveryDate: Date,

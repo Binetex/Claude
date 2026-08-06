@@ -2,7 +2,6 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
-  LayoutDashboard,
   ClipboardList,
   Store,
   Package,
@@ -19,7 +18,6 @@ import { cn } from "@/lib/cn";
 import type { NavItem } from "./AppShell";
 
 function iconFor(href: string) {
-  if (href === "/dashboard") return LayoutDashboard;
   if (href.endsWith("/cc")) return Headphones;
   if (href.includes("/orders") || href.endsWith("/f")) return ClipboardList;
   if (href.includes("/sites")) return Store;
@@ -45,7 +43,6 @@ function iconFor(href: string) {
  * «начинается с» они выигрывали на каждой вкладке.
  */
 function isActive(pathname: string, href: string, nav: NavItem[]) {
-  if (href === "/dashboard") return pathname === "/dashboard";
   if (pathname === href) return true;
   if (!pathname.startsWith(href + "/")) return false;
 

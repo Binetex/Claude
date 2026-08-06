@@ -71,7 +71,6 @@ export async function ownerReassign(
   // а у нового начинает. Ни сторно, ни корректировок для этого не нужно.
   revalidatePath(`/dashboard/orders/${orderId}`);
   revalidatePath("/dashboard/orders");
-  revalidatePath("/dashboard");
   revalidatePath("/dashboard/finance/florists");
 }
 
@@ -407,7 +406,6 @@ export async function ownerUpdateSiteName(siteId: string, name: string) {
   await prisma.site.update({ where: { id: siteId }, data: { name: trimmed } });
   revalidatePath("/dashboard/sites");
   revalidatePath("/dashboard/orders");
-  revalidatePath("/dashboard");
 }
 
 export async function ownerAddSitePriority(siteId: string, floristId: string) {

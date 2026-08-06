@@ -43,7 +43,6 @@ function revalidateOrder(orderId: string) {
   // Один заказ виден на трёх дашбордах — обновляем все, чтобы не было рассинхрона.
   revalidatePath(`/dashboard/orders/${orderId}`);
   revalidatePath("/dashboard/orders");
-  revalidatePath("/dashboard");
   revalidatePath(`/dashboard/cc/${orderId}`);
   revalidatePath("/dashboard/cc");
   revalidatePath(`/dashboard/f/${orderId}`);

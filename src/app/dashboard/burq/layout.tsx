@@ -8,7 +8,7 @@ import { AppShell, type NavItem } from "@/components/AppShell";
 export default async function BurqLayout({ children }: { children: React.ReactNode }) {
   const user = await requireUser();
   const nav: NavItem[] = [
-    { href: homePathFor(user.role), label: "← Дашборд" },
+    { href: homePathFor(user.role), label: "← Заказы" },
     { href: "/dashboard/burq", label: "Burq" },
   ];
   return (

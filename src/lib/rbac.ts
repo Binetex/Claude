@@ -38,7 +38,7 @@ export async function requireOrderEditor(): Promise<CurrentUser> {
 export function homePathFor(role: Role): string {
   switch (role) {
     case "OWNER":
-      return "/dashboard";
+      return "/dashboard/orders";
     case "FLORIST":
       return "/dashboard/f";
     case "CALL_CENTER":

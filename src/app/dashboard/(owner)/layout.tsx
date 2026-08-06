@@ -2,7 +2,6 @@ import { requireRole } from "@/lib/rbac";
 import { AppShell, type NavItem } from "@/components/AppShell";
 
 const nav: NavItem[] = [
-  { href: "/dashboard", label: "Дашборд" },
   { href: "/dashboard/orders", label: "Заказы" },
   { href: "/dashboard/print-cards", label: "Печать записок" },
   { href: "/dashboard/sites", label: "Сайты" },
