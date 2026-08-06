@@ -78,13 +78,7 @@ export type SenderIdentitySource = {
  *
  * Имя и телефон ПОЛУЧАТЕЛЯ по-прежнему берутся только из shipping_address.
  */
-export function extractSenderIdentity(payload: SenderIdentitySource): {
-  senderName: string;
-  senderPhone: string;
-  /** Откуда взялся телефон. Нужен разовым правкам данных: чинить можно только те заказы,
-      где номер пришёл от самого заказчика, а не из платёжного адреса. */
-  senderPhoneSource: "order" | "customer" | "billing" | "none";
-} {
+export function extractSenderIdentity(payload: SenderIdentitySource): { senderName: string; senderPhone: string } {
   const t = (v: string | null | undefined) => (typeof v === "string" ? v.trim() : "");
   const joined = (a: string | null | undefined, b: string | null | undefined) =>
     [t(a), t(b)].filter(Boolean).join(" ");
@@ -99,25 +93,16 @@ export function extractSenderIdentity(payload: SenderIdentitySource): {
   // Телефон получателя занят: он всегда из адреса доставки. Заказчику ищем ДРУГОЙ номер.
   const recipient = toE164(t(payload.shipping_address?.phone));
 
-  const candidates: { source: "order" | "customer" | "billing"; value: string }[] = [
-    { source: "order", value: t(payload.phone) },
-    { source: "customer", value: t(payload.customer?.phone) },
-    { source: "billing", value: t(billing?.phone) },
-  ].filter((c): c is { source: "order" | "customer" | "billing"; value: string } => !!c.value);
+  const candidates = [t(payload.phone), t(payload.customer?.phone), t(billing?.phone)].filter(Boolean);
 
   // ГЛАВНОЕ ПРАВИЛО: если в заказе вообще есть второй номер, он должен достаться заказчику.
   // Магазины раскладывают телефоны как попало — один и тот же номер приезжает и в адрес
   // доставки, и в заказ, и в платёжный адрес, а настоящий второй лежит в оставшемся поле.
   // Поэтому берём первый по приоритету, который ОТЛИЧАЕТСЯ от номера получателя, и только
   // если все совпали — значит номер в заказе действительно один на двоих.
-  const chosen =
-    candidates.find((c) => recipient == null || toE164(c.value) !== recipient) ?? candidates[0] ?? null;
+  const chosen = candidates.find((c) => recipient == null || toE164(c) !== recipient) ?? candidates[0];
 
-  return {
-    senderName,
-    senderPhone: normalizePhone(chosen?.value),
-    senderPhoneSource: chosen?.source ?? "none",
-  };
+  return { senderName, senderPhone: normalizePhone(chosen) };
 }
 
 /** Есть ли у отправителя адрес (для UI: показывать адрес или «не указан»). */

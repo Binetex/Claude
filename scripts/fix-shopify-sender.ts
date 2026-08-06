@@ -47,7 +47,6 @@ type Candidate = {
   oldPhone: string;
   newPhone: string;
   recipientPhone: string;
-  source: string;
 };
 
 const fingerprint = (o: Record<string, unknown>) =>
@@ -104,12 +103,7 @@ async function main() {
         if (next.senderName !== o.senderName) skipped.push({ orderNumber: o.orderNumber, reason: "телефон тот же — имя одно не правим" });
         continue;
       }
-      // 2) источник — только сам заказчик, платёжный адрес не основание
-      if (next.senderPhoneSource !== "order" && next.senderPhoneSource !== "customer") {
-        skipped.push({ orderNumber: o.orderNumber, reason: `источник телефона «${next.senderPhoneSource}», а не order/customer` });
-        continue;
-      }
-      // 3) пустым номером затирать нельзя
+      // 2) пустым номером затирать нельзя
       if (!next.senderPhone.trim()) {
         skipped.push({ orderNumber: o.orderNumber, reason: "новый телефон пустой" });
         continue;
@@ -124,7 +118,6 @@ async function main() {
         oldPhone: o.senderPhone || "—",
         newPhone: next.senderPhone,
         recipientPhone: o.recipientPhone || "—",
-        source: next.senderPhoneSource,
       });
     }
   }
@@ -134,7 +127,7 @@ async function main() {
     const nameChanged = p.oldName !== p.newName;
     console.log(`  ${p.orderNumber}${nameChanged ? "   ★ меняется и имя" : ""}`);
     console.log(`    имя заказчика:      ${p.oldName}  →  ${p.newName}`);
-    console.log(`    телефон заказчика:  ${p.oldPhone}  →  ${p.newPhone}   (источник: ${p.source})`);
+    console.log(`    телефон заказчика:  ${p.oldPhone}  →  ${p.newPhone}`);
     console.log(`    телефон получателя: ${p.recipientPhone}   (не меняется)`);
   }
 
