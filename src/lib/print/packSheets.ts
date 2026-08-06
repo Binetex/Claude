@@ -59,11 +59,17 @@ export function packOrderColumns(orders: Half[][]): Column[] {
   return columns;
 }
 
-/** Раскладывает готовые столбцы по листам, по два на лист. Порядок сохраняется. */
-export function packColumnsIntoPages(columns: Column[]): Page[] {
+/**
+ * Раскладывает готовые столбцы по листам. Порядок сохраняется.
+ *
+ * `perPage = 2` — альбомный лист: два заказа рядом. `perPage = 1` — портретный: лист и есть
+ * заказ, получатель сверху, текст снизу. Ширина сетки — единственное, чем эти раскладки
+ * отличаются, поэтому упаковка одна на обе.
+ */
+export function packColumnsIntoPages(columns: Column[], perPage: 1 | 2 = 2): Page[] {
   const pages: Page[] = [];
-  for (let i = 0; i < columns.length; i += 2) {
-    pages.push({ left: columns[i], right: columns[i + 1] ?? null });
+  for (let i = 0; i < columns.length; i += perPage) {
+    pages.push({ left: columns[i], right: perPage === 2 ? (columns[i + 1] ?? null) : null });
   }
   return pages;
 }

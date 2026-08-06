@@ -226,7 +226,6 @@ export default async function OwnerOrderPage({ params }: { params: Promise<{ id:
             updatedAt={order.updatedAt}
             cardMessage={order.cardMessage}
             customerNote={order.customerNote}
-            showPrint
             collapsible
           />
 

@@ -3,7 +3,6 @@ import { AppShell, type NavItem } from "@/components/AppShell";
 
 const nav: NavItem[] = [
   { href: "/dashboard/orders", label: "Заказы" },
-  { href: "/dashboard/print-cards", label: "Печать записок" },
   { href: "/dashboard/sites", label: "Сайты" },
   { href: "/dashboard/products", label: "Товары" },
   { href: "/dashboard/florists", label: "Флористы" },

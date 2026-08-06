@@ -127,7 +127,6 @@ export default async function CallCenterOrderPage({ params }: { params: Promise<
             updatedAt={order.updatedAt}
             cardMessage={order.cardMessage}
             customerNote={order.customerNote}
-            showPrint
             collapsible
           />
 

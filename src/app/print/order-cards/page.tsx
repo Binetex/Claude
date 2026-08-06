@@ -1,6 +1,8 @@
 import { requireUser } from "@/lib/rbac";
 import { loadPrintableCards, type PrintDay } from "@/modules/print/loadPrintable";
 import { PrintDocument } from "./PrintDocument";
+import { prisma } from "@/lib/db";
+import type { PrintLayout } from "./printCss";
 
 /**
  * Печатный документ открыток. Маршрут вне dashboard-layout (без chrome). Доступ проверяется
@@ -27,5 +29,13 @@ export default async function PrintOrderCardsPage({
     { ids: ids.length ? ids : undefined, day, siteId }
   );
 
-  return <PrintDocument orders={orders} />;
+  // Раскладку выбирает настройка флориста «Полная цена» / «Только своя цена»
+  // (`financeVisibility`). Печатает всегда сам флорист и только свои заказы, поэтому
+  // документ целиком в одной раскладке — двух ориентаций листа на принтер не отправить.
+  const florist = user.floristId
+    ? await prisma.florist.findUnique({ where: { id: user.floristId }, select: { financeVisibility: true } })
+    : null;
+  const layout: PrintLayout = florist?.financeVisibility === "FULL" ? "tall" : "wide";
+
+  return <PrintDocument orders={orders} layout={layout} />;
 }

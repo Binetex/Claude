@@ -11,14 +11,17 @@ import {
   type RecipientInfo,
 } from "@/lib/print/packSheets";
 import { escapeHtml, isBlankCardMessage } from "@/lib/print/cardText";
-import { PRINT_CSS, CARD_PADDING_PX, CELL_W_PX, CELL_H_PX, MSG_LINE_HEIGHT } from "./printCss";
+import { printCss, cellSize, CARD_PADDING_PX, MSG_LINE_HEIGHT, type PrintLayout } from "./printCss";
 import type { PrintOrder } from "@/modules/print/loadPrintable";
 
 // Размеры карточки берутся из printCss — того же модуля, что строит вёрстку. Разойдись они,
-// подобранный кегль не совпадёт с реальной раскладкой.
+// подобранный кегль не совпадёт с реальной раскладкой. У портретной раскладки карточка
+// вчетверо больше, поэтому и область текста считается по ней, а не по одной константе.
 const PAD = CARD_PADDING_PX; // поле карточки — то же значение, что в CSS (.card padding)
-const NOTE_W = CELL_W_PX - 2 * PAD; // ширина текстовой области
-const MSG_AREA_H = CELL_H_PX - 2 * PAD - 12; // доступная высота текста открытки в карточке
+const textArea = (layout: PrintLayout) => {
+  const cell = cellSize(layout);
+  return { width: cell.w - 2 * PAD, height: cell.h - 2 * PAD - 12 };
+};
 
 /**
  * Диапазон кегля текста открытки.
@@ -53,14 +56,16 @@ function cityStateZip(r: RecipientInfo): string {
   return [r.city, sz].filter(Boolean).join(", ");
 }
 
-export function PrintDocument({ orders }: { orders: PrintOrder[] }) {
+export function PrintDocument({ orders, layout }: { orders: PrintOrder[]; layout: PrintLayout }) {
+  const wide = layout === "wide";
   const measRef = useRef<HTMLDivElement>(null);
   const [pages, setPages] = useState<Page[] | null>(null);
 
   useLayoutEffect(() => {
     const meas = measRef.current;
     if (!meas) return;
-    meas.style.width = `${NOTE_W}px`;
+    const area = textArea(layout);
+    meas.style.width = `${area.width}px`;
     const measure = (text: string, fontPt: number): number => {
       meas.style.fontSize = `${fontPt}pt`;
       meas.innerHTML = `<div style="white-space:pre-wrap;line-height:${MSG_LINE_HEIGHT}">${escapeHtml(text)}</div>`;
@@ -85,7 +90,7 @@ export function PrintDocument({ orders }: { orders: PrintOrder[] }) {
       );
       const { fontPt, fits } = fitFontPt(
         o.cardMessage,
-        { basePt: startPt, minPt: MIN_FONT_PT, areaHeightPx: MSG_AREA_H },
+        { basePt: startPt, minPt: MIN_FONT_PT, areaHeightPx: area.height },
         measure
       );
 
@@ -95,18 +100,18 @@ export function PrintDocument({ orders }: { orders: PrintOrder[] }) {
         ? [o.cardMessage]
         : splitCardIntoParts(
             o.cardMessage,
-            { firstHeightPx: MSG_AREA_H, contHeightPx: MSG_AREA_H },
+            { firstHeightPx: area.height, contHeightPx: area.height },
             (t) => measure(t, fontPt)
           );
       return buildOrderHalves(recipient, parts.length ? parts : [o.cardMessage], fontPt);
     });
 
-    setPages(packColumnsIntoPages(packOrderColumns(perOrder)));
-  }, [orders]);
+    setPages(packColumnsIntoPages(packOrderColumns(perOrder), layout === "wide" ? 2 : 1));
+  }, [orders, layout]);
 
   return (
     <>
-      <style>{PRINT_CSS}</style>
+      <style>{printCss(layout)}</style>
       <div ref={measRef} className="no-print measurer" aria-hidden />
 
       <div className="no-print toolbar">
@@ -121,13 +126,14 @@ export function PrintDocument({ orders }: { orders: PrintOrder[] }) {
         {(pages ?? []).map((page, i) => (
           <div className="sheet" key={i}>
             {/* Порядок ячеек — построчный, поэтому столбец = заказ: слева левый заказ
-                (получатель над текстом), справа правый. */}
+                (получатель над текстом), справа правый. В портретной раскладке столбец
+                один — второй ячейки в строке нет, и вертикального реза тоже. */}
             <div className="grid">
               <CardView half={page.left.top} />
-              <CardView half={page.right?.top ?? EMPTY} />
+              {wide && <CardView half={page.right?.top ?? EMPTY} />}
               <CardView half={page.left.bottom} />
-              <CardView half={page.right?.bottom ?? EMPTY} />
-              <div className="cut-v" aria-hidden />
+              {wide && <CardView half={page.right?.bottom ?? EMPTY} />}
+              {wide && <div className="cut-v" aria-hidden />}
               <div className="cut-h" aria-hidden />
             </div>
           </div>

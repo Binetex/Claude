@@ -18,17 +18,32 @@ const PX = 96;
  */
 export const SAFE_MARGIN_IN = 0.5;
 
-/** Лист US Letter АЛЬБОМНО: 11" в ширину, 8.5" в высоту. */
-export const SHEET_W_IN = 11;
-export const SHEET_H_IN = 8.5;
+/**
+ * Раскладок две, и выбирает её НАСТРОЙКА ФЛОРИСТА (`financeVisibility`):
+ *
+ *  - `wide` — альбомный лист, 4 карточки сеткой 2×2. Экономит бумагу вдвое.
+ *  - `tall` — портретный лист, 2 карточки одна над другой: получатель сверху, текст снизу.
+ *    Карточка вчетверо крупнее, и записка получается «на полстраницы».
+ *
+ * Печатает только флорист и только свои заказы, поэтому в одном документе всегда одна
+ * раскладка — двух ориентаций листа на один принтер не отправить.
+ */
+export type PrintLayout = "wide" | "tall";
 
-/** Печатная область: лист минус безопасные поля. */
-const CONTENT_W_IN = SHEET_W_IN - 2 * SAFE_MARGIN_IN;
-const CONTENT_H_IN = SHEET_H_IN - 2 * SAFE_MARGIN_IN;
+/** Лист US Letter: альбомно 11×8.5", портретно 8.5×11". */
+export const SHEET_IN = {
+  wide: { w: 11, h: 8.5, cols: 2, rows: 2 },
+  tall: { w: 8.5, h: 11, cols: 1, rows: 2 },
+} as const;
 
-/** Карточка — четверть печатной области: сетка 2×2, все четыре одного размера. */
-export const CELL_W_PX = (CONTENT_W_IN / 2) * PX; // 480 = 5"
-export const CELL_H_PX = (CONTENT_H_IN / 2) * PX; // 360 = 3.75"
+/** Размер карточки в px при 96 dpi — лист минус поля, поделённый на сетку. */
+export function cellSize(layout: PrintLayout): { w: number; h: number } {
+  const s = SHEET_IN[layout];
+  return {
+    w: ((s.w - 2 * SAFE_MARGIN_IN) / s.cols) * PX,
+    h: ((s.h - 2 * SAFE_MARGIN_IN) / s.rows) * PX,
+  };
+}
 
 /**
  * Внутреннее поле карточки, px. Оно же — расстояние от линии реза до текста, поэтому мелким
@@ -50,14 +65,16 @@ const CUT_LINE_COLOR = "rgba(100, 116, 139, 0.2)";
 export const MSG_LINE_HEIGHT = 1.4;
 
 /**
- * Печатный CSS записок. US Letter АЛЬБОМНО (НЕ A4), 4 карточки на листе сеткой 2×2.
+ * Печатный CSS записок. US Letter (НЕ A4), ориентация и сетка — по раскладке.
  *
- * Заказ занимает СТОЛБЕЦ: сверху получатель, снизу текст открытки — тот же порядок, что был
- * на половинах листа. Один вертикальный рез посередине отделяет заказы друг от друга,
- * горизонтальный — получателя от текста.
+ * Заказ занимает СТОЛБЕЦ: сверху получатель, снизу текст открытки. В альбомной раскладке
+ * столбцов два, и вертикальный рез посередине отделяет заказы друг от друга; в портретной
+ * столбец один — лист и есть заказ, как было до перехода на 2×2.
  */
-export const PRINT_CSS = `
-@page { size: Letter landscape; margin: 0; }
+export function printCss(layout: PrintLayout): string {
+  const sheet = SHEET_IN[layout];
+  return `
+@page { size: Letter ${layout === "wide" ? "landscape" : "portrait"}; margin: 0; }
 /* Замерочный элемент обязан переносить текст ТОЧНО так же, как .card — иначе подобранный
    кегль не совпадёт с реальной вёрсткой (особенно на длинных словах и ссылках). */
 .measurer { position: absolute; left: -99999px; top: 0; visibility: hidden; box-sizing: border-box; font-family: var(--font-lora), Georgia, serif; text-align: center; overflow-wrap: anywhere; }
@@ -68,7 +85,7 @@ export const PRINT_CSS = `
 .empty { padding: 40px; text-align: center; color: #64748b; font: 14px system-ui, sans-serif; }
 .doc { background: #e2e8f0; }
 .sheet {
-  width: ${SHEET_W_IN}in; height: ${SHEET_H_IN}in; margin: 0 auto; background: #fff; box-sizing: border-box;
+  width: ${sheet.w}in; height: ${sheet.h}in; margin: 0 auto; background: #fff; box-sizing: border-box;
   /* Безопасное поле — здесь, а не в @page: см. SAFE_MARGIN_IN. */
   padding: ${SAFE_MARGIN_IN}in;
   page-break-after: always; break-after: page;
@@ -79,10 +96,13 @@ export const PRINT_CSS = `
 .sheet:last-child { page-break-after: auto; break-after: auto; }
 .grid {
   position: relative; width: 100%; height: 100%;
-  display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr;
+  display: grid;
+  grid-template-columns: ${"1fr ".repeat(sheet.cols).trim()};
+  grid-template-rows: ${"1fr ".repeat(sheet.rows).trim()};
 }
 /* Линии реза — абсолютные, поверх сетки: они не занимают ячейку и не сдвигают ни одну
-   карточку, поэтому все четыре остаются строго одного размера. */
+   карточку, поэтому все карточки остаются строго одного размера. Вертикальной в портретной
+   раскладке нет: там столбец один, и резать по середине нечего. */
 .cut-v { position: absolute; top: 0; bottom: 0; left: 50%; border-left: 1px dashed ${CUT_LINE_COLOR}; }
 .cut-h { position: absolute; left: 0; right: 0; top: 50%; border-top: 1px dashed ${CUT_LINE_COLOR}; }
 .card {
@@ -103,3 +123,4 @@ export const PRINT_CSS = `
 @media screen { .sheet { box-shadow: 0 1px 6px rgba(0,0,0,.15); margin: 16px auto; } }
 @media print { .no-print { display: none !important; } .doc { background: #fff; } .sheet { margin: 0; box-shadow: none; } }
 `;
+}

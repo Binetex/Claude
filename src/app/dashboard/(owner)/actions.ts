@@ -46,7 +46,6 @@ export async function ownerUpdateCardMessage(orderId: string, cardMessage: strin
   if (cardMessage.length > CARD_MESSAGE_MAX + 1000) return { error: `Текст слишком длинный (максимум ${CARD_MESSAGE_MAX}).` };
   const { ok } = await ownerSetCardMessage(orderId, cardMessage);
   if (!ok) return { error: "Заказ не найден." };
-  revalidatePath("/dashboard/print-cards");
   return { ok: true, message: "Текст открытки сохранён." };
 }
 

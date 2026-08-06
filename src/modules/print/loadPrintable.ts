@@ -83,13 +83,12 @@ export async function loadPrintableCards(
   user: PrintAccessUser,
   opts: { ids?: string[]; todayAll?: boolean; day?: PrintDay; siteId?: string }
 ): Promise<PrintOrder[]> {
+  // Печатает ТОЛЬКО флорист и только свои заказы. У владельца печати нет: он всё равно
+  // печатал бы пачку из заказов разных флористов, а раскладка записки зависит от флориста
+  // (см. printCss.ts) — в одном документе двух ориентаций листа не бывает.
   const where: Prisma.OrderWhereInput = {};
-  if (user.role === "FLORIST") {
-    if (!user.floristId) return [];
-    where.currentFloristId = user.floristId; // только свои
-  } else if (user.role !== "OWNER") {
-    return []; // CALL_CENTER и прочие — нет массовой печати
-  }
+  if (user.role !== "FLORIST" || !user.floristId) return [];
+  where.currentFloristId = user.floristId;
   if (opts.siteId) where.siteId = opts.siteId;
 
   if (opts.ids && opts.ids.length) {

@@ -111,3 +111,42 @@ describe("packColumnsIntoPages — 2 столбца на лист (сетка 2�
     expect(pages[1].right).toBeNull();
   });
 });
+
+/**
+ * Портретная раскладка — та, что была до перехода на 2×2: лист и есть заказ.
+ * Проверяется отдельно, потому что от неё зависит, влезет ли записка «на полстраницы».
+ */
+describe("packColumnsIntoPages — по одному заказу на лист (портрет)", () => {
+  it("каждый столбец получает свой лист, правого нет", () => {
+    const a = buildOrderHalves(rec("A"), ["hi a"], 16);
+    const b = buildOrderHalves(rec("B"), ["hi b"], 16);
+    const pages = packColumnsIntoPages(packOrderColumns([a, b]), 1);
+    expect(pages).toHaveLength(2);
+    expect(nameOf(pages[0].left.top)).toBe("A");
+    expect(nameOf(pages[1].left.top)).toBe("B");
+    expect(pages.every((p) => p.right === null)).toBe(true);
+  });
+
+  it("верх листа — получатель, низ — текст открытки", () => {
+    const pages = packColumnsIntoPages(packOrderColumns([buildOrderHalves(rec("A"), ["Поздравляю"], 16)]), 1);
+    expect(pages[0].left.top.kind).toBe("recipient");
+    expect(pages[0].left.bottom).toMatchObject({ kind: "message", body: "Поздравляю" });
+  });
+
+  it("длинный текст добавляет листы того же заказа, а не смешивает заказы", () => {
+    const a = buildOrderHalves(rec("A"), ["p1", "p2"], 12); // 2 столбца
+    const b = buildOrderHalves(rec("B"), ["b1"], 16);
+    const pages = packColumnsIntoPages(packOrderColumns([a, b]), 1);
+    expect(pages).toHaveLength(3);
+    expect(nameOf(pages[0].left.top)).toBe("A");
+    expect(pages[1].left.top).toMatchObject({ kind: "message", body: "p2" }); // продолжение A
+    expect(nameOf(pages[2].left.top)).toBe("B");
+  });
+
+  it("та же выборка на альбомном листе занимает вдвое меньше листов", () => {
+    const orders = ["A", "B", "C", "D"].map((n) => buildOrderHalves(rec(n), [`hi ${n}`], 16));
+    const cols = packOrderColumns(orders);
+    expect(packColumnsIntoPages(cols, 1)).toHaveLength(4);
+    expect(packColumnsIntoPages(cols, 2)).toHaveLength(2);
+  });
+});
