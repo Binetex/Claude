@@ -9,7 +9,9 @@
  * права, разбор формы и подтверждение. Второго места, где создаётся возврат, быть не должно.
  */
 import { revalidatePath } from "next/cache";
+import bcrypt from "bcryptjs";
 import { requireRole } from "@/lib/rbac";
+import { prisma } from "@/lib/db";
 import { createOrderRefund, getRefundState } from "@/integrations/airwallex/refund";
 
 export type RefundFormState = { error?: string; ok?: boolean; message?: string; unknown?: boolean } | null;
@@ -23,12 +25,17 @@ export async function loadRefundState(orderId: string) {
 /**
  * Создать возврат.
  *
- * Подтверждение обязательно и проверяется НА СЕРВЕРЕ, а не только в модалке: владелец должен
- * ввести номер заказа. Проверка на клиенте защищает от случайного клика, серверная — от
- * запроса, отправленного мимо интерфейса.
+ * Подтверждений два, и оба проверяются НА СЕРВЕРЕ: номер заказа и пароль от учётной записи.
+ *
+ * Номер заказа защищает от случайного клика. Пароль — от чужих рук: живой сессии владельца
+ * недостаточно, а значит открытый ноутбук больше не даёт вернуть деньги. Пароль хранится
+ * только хешем, поэтому подставить его, зная содержимое базы, нельзя.
+ *
+ * Пароль НИКУДА не пишется: ни в логи, ни в текст ошибки, ни в revalidate. Из формы он
+ * читается один раз и остаётся в этой функции.
  */
 export async function createRefundAction(_prev: RefundFormState, formData: FormData): Promise<RefundFormState> {
-  await requireRole("OWNER");
+  const user = await requireRole("OWNER");
 
   const orderId = String(formData.get("orderId") ?? "");
   const orderNumber = String(formData.get("orderNumber") ?? "").trim();
@@ -44,6 +51,15 @@ export async function createRefundAction(_prev: RefundFormState, formData: FormD
 
   const amount = Number(amountRaw.replace(",", "."));
   if (!Number.isFinite(amount) || amount <= 0) return { error: "Сумма возврата должна быть больше нуля." };
+
+  // Пароль проверяется ПОСЛЕДНИМ из проверок формы, но ДО обращения к Airwallex: неверный
+  // пароль не должен приводить даже к запросу состояния платежа.
+  const password = String(formData.get("password") ?? "");
+  if (!password) return { error: "Введите пароль." };
+  const account = await prisma.user.findUnique({ where: { id: user.id }, select: { passwordHash: true } });
+  if (!account || !(await bcrypt.compare(password, account.passwordHash))) {
+    return { error: "Неверный пароль." };
+  }
 
   const res = await createOrderRefund({ orderId, amount, reason, requestId });
 

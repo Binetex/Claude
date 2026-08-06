@@ -3,8 +3,11 @@
  * Возврат денег клиенту. Кнопка + модалка.
  *
  * Операция необратима, поэтому интерфейс намеренно неудобный: состояние подгружается с
- * Airwallex при открытии (сколько оплачено и сколько уже вернули), сумму видно, и до кнопки
- * «Вернуть» нужно вручную набрать номер заказа. Одного клика недостаточно.
+ * Airwallex при открытии (сколько оплачено и сколько уже вернули), сумму видно, а до кнопки
+ * «Вернуть» нужно набрать номер заказа И пароль от учётной записи. Одного клика мало.
+ *
+ * Пароль здесь не хранится нигде, кроме поля ввода до отправки: в состояние он не кладётся,
+ * между открытиями не переживает и в адрес не попадает.
  *
  * `requestId` создаётся ОДИН РАЗ при открытии модалки и не меняется между попытками отправки:
  * это ключ идемпотентности Airwallex, и именно он не даёт вернуть деньги дважды, если форму
@@ -28,6 +31,7 @@ export function RefundDialog({ orderId, orderNumber }: { orderId: string; orderN
   const [loading, setLoading] = useState(false);
   const [amount, setAmount] = useState("");
   const [confirmation, setConfirmation] = useState("");
+  const [password, setPassword] = useState("");
   const [requestId, setRequestId] = useState(newRequestId);
   const [result, formAction, pending] = useActionState<RefundFormState, FormData>(createRefundAction, null);
 
@@ -39,6 +43,7 @@ export function RefundDialog({ orderId, orderNumber }: { orderId: string; orderN
     setOpen(true);
     setLoading(true);
     setConfirmation("");
+    setPassword("");
     setRequestId(newRequestId());
     try {
       const s = await loadRefundState(orderId);
@@ -136,6 +141,18 @@ export function RefundDialog({ orderId, orderNumber }: { orderId: string; orderN
                   placeholder={orderNumber}
                   autoComplete="off"
                 />
+
+                <Label htmlFor="refund-password" className="mt-2 block text-xs text-red-900">
+                  Пароль вашей учётной записи
+                </Label>
+                <Input
+                  id="refund-password"
+                  name="password"
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  autoComplete="current-password"
+                />
               </div>
 
               {result?.error && (
@@ -149,7 +166,11 @@ export function RefundDialog({ orderId, orderNumber }: { orderId: string; orderN
                 <Button type="button" variant="outline" size="sm" onClick={() => setOpen(false)}>
                   Закрыть
                 </Button>
-                <Button type="submit" size="sm" disabled={pending || !confirmed || !amountValid || !!result?.ok}>
+                <Button
+                  type="submit"
+                  size="sm"
+                  disabled={pending || !confirmed || !password || !amountValid || !!result?.ok}
+                >
                   {pending ? "Возвращаем…" : "Вернуть деньги"}
                 </Button>
               </div>
