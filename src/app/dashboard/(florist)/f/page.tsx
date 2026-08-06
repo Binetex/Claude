@@ -8,6 +8,7 @@ import { OrdersNavProvider, OrdersPendingArea } from "@/app/dashboard/(owner)/or
 import { OrdersPager } from "@/app/dashboard/(owner)/orders/OrdersPager";
 import { resolvePaging, outOfRangePageUrl } from "@/app/dashboard/(owner)/orders/paging";
 import { PurchaseListBlock } from "@/components/PurchaseListBlock";
+import { purchaseDayFor } from "@/modules/purchase/list";
 import { NoCouriersBanner } from "@/components/orders/NoCouriersBanner";
 import { PageHeader } from "@/components/ui/misc";
 import { Button } from "@/components/ui/button";
@@ -77,11 +78,11 @@ export default async function FloristHome({
         }
       />
 
-      {/* Список закупки на сегодня — только назначенные этому флористу заказы */}
       {/* Только СВОИ заказы. Молчит, когда курьеры есть. */}
       <NoCouriersBanner floristId={user.floristId} hrefBase="/dashboard/f" />
 
-      <PurchaseListBlock floristId={user.floristId} />
+      {/* Закупка по активной вкладке — только назначенные этому флористу заказы */}
+      <PurchaseListBlock floristId={user.floristId} day={purchaseDayFor(filters.preset)} />
 
       <OrdersNavProvider>
         <OrderFiltersBar

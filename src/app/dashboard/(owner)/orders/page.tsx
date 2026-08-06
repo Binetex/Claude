@@ -8,6 +8,7 @@ import { resolvePaging, outOfRangePageUrl } from "./paging";
 import { indicatorsForOrders } from "@/integrations/quo/communicationsService";
 import { BulkFillCompositions } from "./BulkFillCompositions";
 import { PurchaseListBlock } from "@/components/PurchaseListBlock";
+import { purchaseDayFor } from "@/modules/purchase/list";
 import { NoCouriersBanner } from "@/components/orders/NoCouriersBanner";
 import Link from "next/link";
 import { Plus } from "lucide-react";
@@ -85,7 +86,7 @@ export default async function OwnerOrdersPage({
           как зайти в заказ. Молчит, когда всё в порядке. */}
       <NoCouriersBanner hrefBase="/dashboard/orders" />
 
-      <PurchaseListBlock />
+      <PurchaseListBlock day={purchaseDayFor(filters.preset)} />
 
       <OrdersNavProvider>
         <OrderFiltersBar

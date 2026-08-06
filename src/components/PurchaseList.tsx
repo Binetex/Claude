@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { ChevronRight, ChevronDown, Copy, Check, RefreshCw } from "lucide-react";
 import { Tooltip } from "@/components/ui/tooltip";
 import { ZoomableImage } from "@/components/ImageLightbox";
-import type { PurchaseItem } from "@/modules/purchase/list";
+import type { PurchaseItem, PurchaseDay } from "@/modules/purchase/list";
 
 const NOT_SET = "Состав варианта не указан";
 
@@ -15,7 +15,7 @@ function compositionLines(c: string | null): string[] {
 
 const iconBtn = "rounded p-1 text-slate-500 hover:bg-white hover:text-slate-800";
 
-export function PurchaseList({ items, text }: { items: PurchaseItem[]; text: string }) {
+export function PurchaseList({ items, text, day }: { items: PurchaseItem[]; text: string; day: PurchaseDay }) {
   const [mode, setMode] = useState<"compact" | "detailed">("compact");
   const [copied, setCopied] = useState(false);
   const router = useRouter();
@@ -43,7 +43,8 @@ export function PurchaseList({ items, text }: { items: PurchaseItem[]; text: str
             </button>
           </Tooltip>
           <span className="text-sm font-semibold text-slate-800">
-            Сегодня нужно купить <span className="font-normal text-slate-500">({items.length})</span>
+            {day === "tomorrow" ? "Завтра" : "Сегодня"} нужно купить{" "}
+            <span className="font-normal text-slate-500">({items.length})</span>
           </span>
         </div>
         <div className="flex items-center gap-0.5">

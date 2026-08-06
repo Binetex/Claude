@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { purchaseListToText, type PurchaseItem } from "@/modules/purchase/list";
+import { purchaseListToText, purchaseDayFor, type PurchaseItem } from "@/modules/purchase/list";
 
 describe("purchaseListToText — формат списка закупки", () => {
   const items: PurchaseItem[] = [
@@ -25,5 +25,29 @@ describe("purchaseListToText — формат списка закупки", () =
   it("не объединяет одинаковые строки разных товаров (оба заказа присутствуют отдельно)", () => {
     expect(text).toContain("O'HARA-1054");
     expect(text).toContain("Peony Dream — Large × 1");
+  });
+
+  it("заголовок называет день — иначе скопированные списки не отличить", () => {
+    expect(purchaseListToText(items)).toContain("TODAY PURCHASE LIST");
+    expect(purchaseListToText(items, "tomorrow")).toContain("TOMORROW PURCHASE LIST");
+    expect(purchaseListToText(items, "tomorrow")).not.toContain("TODAY");
+  });
+});
+
+describe("purchaseDayFor — вкладка списка заказов → день закупки", () => {
+  it("«Сегодня» и «Завтра» дают свой день", () => {
+    expect(purchaseDayFor("today")).toBe("today");
+    expect(purchaseDayFor("tomorrow")).toBe("tomorrow");
+  });
+
+  it("«Все» и «Готовые» дня не дают — там заказы за разные даты", () => {
+    expect(purchaseDayFor("all")).toBeUndefined();
+    expect(purchaseDayFor("done")).toBeUndefined();
+  });
+
+  it("отсутствие вкладки и неизвестное значение тоже не дают дня", () => {
+    // Вкладки нет, когда владелец задал свой диапазон дат или сузил фильтрами.
+    expect(purchaseDayFor(undefined)).toBeUndefined();
+    expect(purchaseDayFor("week")).toBeUndefined();
   });
 });

@@ -1,6 +1,6 @@
 import "server-only";
 import { prisma } from "@/lib/db";
-import { localDateStr, todayStrInTz } from "@/lib/tz";
+import { deliveryDayBucket } from "@/lib/tz";
 import { TERMINAL_ORDER_STATUSES } from "@/lib/statuses";
 import { getOrderItemImages } from "@/modules/orders/images";
 import { isTipItem } from "@/modules/pricing/serviceItems";
@@ -14,10 +14,21 @@ export type PurchaseItem = {
   image: string | null; // основное (родительское) фото: parentImageUrl ?? legacy image
 };
 
+/** День, на который собирается закупка. Дальше «завтра» не заглядываем: смысла нет. */
+export type PurchaseDay = "today" | "tomorrow";
+
 /**
- * Список закупки на сегодня. Источник — OrderItem.floristCompositionSnapshot (не live-состав).
+ * Вкладка списка заказов → день закупки. «Все» и «Готовые» дают undefined: там заказы за
+ * разные даты, и одного списка закупки для них не существует — блок не показывается вовсе.
+ */
+export function purchaseDayFor(preset: string | undefined): PurchaseDay | undefined {
+  return preset === "today" || preset === "tomorrow" ? preset : undefined;
+}
+
+/**
+ * Список закупки на день. Источник — OrderItem.floristCompositionSnapshot (не live-состав).
  * Учитываются только заказы, которые ещё нужно изготовить:
- *  - доставка сегодня по ТАЙМЗОНЕ МАГАЗИНА (не UTC);
+ *  - доставка в этот день по ТАЙМЗОНЕ МАГАЗИНА (не UTC);
  *  - статус не терминальный (DELIVERED/CANCELLED) и не «ожидает оплаты» (AWAITING_PAYMENT);
  *  - оплата не REFUNDED (PARTIALLY_REFUNDED остаётся — частичный возврат не отменяет заказ).
  * Для флориста — только назначенные ему заказы; для владельца — все.
@@ -30,7 +41,7 @@ export type PurchaseItem = {
  * Служебные позиции-чаевые (isTipItem) в список не попадают вовсе: это не товар, а строка
  * платежа, и флористу она ничего не говорит.
  */
-export async function getTodayPurchaseList(opts: { floristId?: string } = {}): Promise<PurchaseItem[]> {
+export async function getPurchaseList(opts: { floristId?: string; day: PurchaseDay }): Promise<PurchaseItem[]> {
   const orders = await prisma.order.findMany({
     where: {
       orderStatus: { notIn: [...TERMINAL_ORDER_STATUSES, "AWAITING_PAYMENT"] },
@@ -50,10 +61,9 @@ export async function getTodayPurchaseList(opts: { floristId?: string } = {}): P
 
   const result: PurchaseItem[] = [];
   for (const o of orders) {
-    // «Сегодня» — по календарной дате в таймзоне магазина. deliveryDate хранится как день (UTC-полночь).
-    const today = todayStrInTz(o.site.timezone);
-    const deliveryDay = localDateStr(o.deliveryDate, "UTC");
-    if (deliveryDay !== today) continue;
+    // День — по таймзоне магазина. deliveryDate хранится как UTC-полночь ЛОКАЛЬНОГО дня,
+    // и deliveryDayBucket сравнивает именно так; свой разбор дат здесь заводить не нужно.
+    if (deliveryDayBucket(o.deliveryDate, o.site.timezone) !== opts.day) continue;
     for (const it of o.items) {
       // Чаевые Shopify присылает отдельной строкой line_items — флористу в закупке она не нужна.
       if (isTipItem(it)) continue;
@@ -95,8 +105,8 @@ async function buildFlowerLookup(items: { productId: string | null; variantId: s
 }
 
 /** Текст для «Копировать список» / печати. Одинаковые строки НЕ объединяются. */
-export function purchaseListToText(items: PurchaseItem[]): string {
-  const lines = ["TODAY PURCHASE LIST", ""];
+export function purchaseListToText(items: PurchaseItem[], day: PurchaseDay = "today"): string {
+  const lines = [day === "tomorrow" ? "TOMORROW PURCHASE LIST" : "TODAY PURCHASE LIST", ""];
   for (const it of items) {
     const variant = it.variantName ? ` — ${it.variantName}` : "";
     lines.push(`${it.orderNumber}`);
