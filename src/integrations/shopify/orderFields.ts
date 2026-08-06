@@ -72,7 +72,13 @@ export type SenderIdentitySource = {
  *
  * Получателя это не касается: его имя и телефон по-прежнему из shipping_address.
  */
-export function extractSenderIdentity(payload: SenderIdentitySource): { senderName: string; senderPhone: string } {
+export function extractSenderIdentity(payload: SenderIdentitySource): {
+  senderName: string;
+  senderPhone: string;
+  /** Откуда взялся телефон. Нужен разовым правкам данных: чинить можно только те заказы,
+      где номер пришёл от самого заказчика, а не из платёжного адреса. */
+  senderPhoneSource: "order" | "customer" | "billing" | "none";
+} {
   const t = (v: string | null | undefined) => (typeof v === "string" ? v.trim() : "");
   const joined = (a: string | null | undefined, b: string | null | undefined) =>
     [t(a), t(b)].filter(Boolean).join(" ");
@@ -84,9 +90,13 @@ export function extractSenderIdentity(payload: SenderIdentitySource): { senderNa
     joined(billing?.first_name, billing?.last_name) ||
     "—";
 
-  const senderPhone = normalizePhone(t(payload.phone) || t(payload.customer?.phone) || t(billing?.phone));
+  const fromOrder = t(payload.phone);
+  const fromCustomer = t(payload.customer?.phone);
+  const fromBilling = t(billing?.phone);
+  const raw = fromOrder || fromCustomer || fromBilling;
+  const senderPhoneSource = fromOrder ? "order" : fromCustomer ? "customer" : fromBilling ? "billing" : "none";
 
-  return { senderName, senderPhone };
+  return { senderName, senderPhone: normalizePhone(raw), senderPhoneSource };
 }
 
 /** Есть ли у отправителя адрес (для UI: показывать адрес или «не указан»). */

@@ -65,6 +65,13 @@ describe("заказчик Shopify-заказа", () => {
     expect(r.senderPhone).toBe("");
   });
 
+  it("источник телефона называется явно — по нему решают, можно ли чинить старые заказы", () => {
+    expect(extractSenderIdentity({ phone: "+1347", customer: { phone: "+1999" } }).senderPhoneSource).toBe("order");
+    expect(extractSenderIdentity({ customer: { phone: "+1999" } }).senderPhoneSource).toBe("customer");
+    expect(extractSenderIdentity({ billing_address: { phone: "+1864" } }).senderPhoneSource).toBe("billing");
+    expect(extractSenderIdentity({}).senderPhoneSource).toBe("none");
+  });
+
   it("только имя без фамилии не даёт висячего пробела", () => {
     const r = extractSenderIdentity({ customer: { first_name: "Jamella", phone: "+13472607553" } });
     expect(r.senderName).toBe("Jamella");
