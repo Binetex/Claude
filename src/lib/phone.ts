@@ -28,3 +28,16 @@ export function toE164(raw: string | null | undefined): string | null {
   if (digits.length < 8 || digits.length > 15) return null; // E.164: макс. 15 цифр
   return `+${digits}`;
 }
+
+/**
+ * Один и тот же ли это номер. Сравниваются НОРМАЛИЗОВАННЫЕ значения, поэтому
+ * «+1 347-260-7553» и «(347) 260-7553» — один номер, а не два.
+ *
+ * Нераспознанные строки одинаковыми не считаются: два «—» не должны схлопнуться в один
+ * контакт и спрятать чей-то телефон.
+ */
+export function samePhone(a: string | null | undefined, b: string | null | undefined): boolean {
+  const x = toE164(a);
+  const y = toE164(b);
+  return x != null && y != null && x === y;
+}

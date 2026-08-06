@@ -3,6 +3,7 @@
  * Разделение источников: номер = name; адрес отправителя = billing_address;
  * инструкции доставки = GraphQL deliveryMethod (native Local Delivery). См. orderFields.test.ts.
  */
+import { normalizePhone } from "@/lib/phone";
 
 export type ShopifyBillingAddress =
   | {
@@ -47,6 +48,46 @@ export function extractSenderAddress(billing: ShopifyBillingAddress) {
 }
 
 export type SenderAddress = ReturnType<typeof extractSenderAddress>;
+
+/** Ровно те части заказа Shopify, из которых складывается личность заказчика. */
+export type SenderIdentitySource = {
+  /** Телефон уровня ЗАКАЗА — тот, что клиент указал на оформлении. */
+  phone?: string | null;
+  customer?: { first_name?: string; last_name?: string; phone?: string } | null;
+  billing_address?: { name?: string; first_name?: string; last_name?: string; phone?: string } | null;
+};
+
+/**
+ * Имя и телефон ЗАКАЗЧИКА — того, кто оформил заказ.
+ *
+ * Раньше и то и другое брали из billing_address, а `customer` шёл лишь запасным вариантом
+ * через `||`. Платёжный адрес почти всегда заполнен, поэтому до `customer` дело не доходило
+ * никогда, и в заказах, где клиент подставил в платёжный адрес данные ПОЛУЧАТЕЛЯ, телефон
+ * заказчика терялся молча (PAR-41318: заказывала Jamella с номером +1 347…, а у нас
+ * записался Aspen с номером +1 864…, и связаться с заказчицей было не по чему).
+ *
+ * Теперь личность берётся из `customer` — это учётная запись, оформившая заказ, — а
+ * billing остаётся последним запасным. Телефон: сначала телефон ЗАКАЗА (что клиент ввёл на
+ * оформлении), потом телефон учётной записи, и только потом платёжный адрес.
+ *
+ * Получателя это не касается: его имя и телефон по-прежнему из shipping_address.
+ */
+export function extractSenderIdentity(payload: SenderIdentitySource): { senderName: string; senderPhone: string } {
+  const t = (v: string | null | undefined) => (typeof v === "string" ? v.trim() : "");
+  const joined = (a: string | null | undefined, b: string | null | undefined) =>
+    [t(a), t(b)].filter(Boolean).join(" ");
+
+  const billing = payload.billing_address;
+  const senderName =
+    joined(payload.customer?.first_name, payload.customer?.last_name) ||
+    t(billing?.name) ||
+    joined(billing?.first_name, billing?.last_name) ||
+    "—";
+
+  const senderPhone = normalizePhone(t(payload.phone) || t(payload.customer?.phone) || t(billing?.phone));
+
+  return { senderName, senderPhone };
+}
 
 /** Есть ли у отправителя адрес (для UI: показывать адрес или «не указан»). */
 export function hasSenderAddress(a: SenderAddress): boolean {

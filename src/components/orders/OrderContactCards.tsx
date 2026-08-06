@@ -1,6 +1,7 @@
 import type { LucideIcon } from "lucide-react";
 import { Contact, Mail, MapPin, Phone, UserRound } from "lucide-react";
 import { Card, CardHeader, CardTitle, CardBody } from "@/components/ui/Card";
+import { samePhone } from "@/lib/phone";
 
 /**
  * Карточки «Получатель» и «Заказчик». Один блок на владельца, колл-центр и флориста.
@@ -36,10 +37,13 @@ function ContactCard({
   title,
   icon,
   contact,
+  /** Номер совпал с соседней карточкой и показан там — здесь вместо него пояснение. */
+  phoneShownElsewhere,
 }: {
   title: string;
   icon: LucideIcon;
   contact: ContactView;
+  phoneShownElsewhere?: string;
 }) {
   const address = (contact.addressLines ?? []).filter((l) => l.trim().length > 0);
   return (
@@ -53,7 +57,13 @@ function ContactCard({
       <CardBody className="space-y-1.5 text-sm">
         <div className="font-medium break-words text-slate-800">{contact.name}</div>
         <Line icon={Phone}>
-          <span className="tabular-nums">{contact.phone || "—"}</span>
+          {phoneShownElsewhere ? (
+            // Не прочерк: прочерк читался бы как «телефона нет», а он есть — просто один
+            // на двоих, и повторять его дважды значит делать вид, что номеров два.
+            <span className="text-slate-400">тот же, что у {phoneShownElsewhere}</span>
+          ) : (
+            <span className="tabular-nums">{contact.phone || "—"}</span>
+          )}
         </Line>
         {contact.email !== undefined && (
           /* break-all: у адреса почты нет пробелов, «переносить по словам» для него
@@ -87,10 +97,24 @@ export function OrderContactCards({
   recipient: ContactView;
   customer: ContactView;
 }) {
+  // Один номер на двоих — обычное дело: заказчик оформляет доставку самому себе или
+  // подставляет свой телефон в оба поля. Тогда он показывается ОДИН раз, у получателя:
+  // это номер, по которому едут, и оставлять его карточку без телефона нельзя.
+  //
+  // Сравниваются нормализованные значения, поэтому «+1 347-260-7553» и «(347) 260-7553» —
+  // один номер. Разные номера не схлопываются никогда: именно на этом и потерялся телефон
+  // заказчицы в PAR-41318.
+  const duplicate = samePhone(recipient.phone, customer.phone);
+
   return (
     <div className="grid gap-4 md:grid-cols-2">
       <ContactCard title="Получатель" icon={UserRound} contact={recipient} />
-      <ContactCard title="Заказчик" icon={Contact} contact={customer} />
+      <ContactCard
+        title="Заказчик"
+        icon={Contact}
+        contact={customer}
+        phoneShownElsewhere={duplicate ? "получателя" : undefined}
+      />
     </div>
   );
 }

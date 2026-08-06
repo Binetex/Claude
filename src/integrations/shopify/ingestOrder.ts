@@ -8,7 +8,7 @@ import { resolveShopifyAccessToken } from "./customApp/credentials";
 import { normalizePhone } from "@/lib/phone";
 import { cleanCardMessage } from "@/integrations/cardMessageTail";
 import { scheduleDeliveryForNewOrder } from "@/integrations/delivery/burq/scheduleService";
-import { extractShopifyOrderNumber, extractSenderAddress } from "./orderFields";
+import { extractShopifyOrderNumber, extractSenderAddress, extractSenderIdentity } from "./orderFields";
 import { fetchShopifyDeliveryInstructions } from "./deliveryInstructions";
 import {
   publishOrderCreatedTrigger,
@@ -63,6 +63,8 @@ export type ShopifyOrder = {
   name?: string;
   email?: string | null;
   contact_email?: string | null;
+  /** Телефон уровня заказа — то, что клиент ввёл на оформлении. Приоритетный для заказчика. */
+  phone?: string | null;
   note?: string | null;
   note_attributes?: ShopifyNoteAttribute[];
   financial_status?: string | null;
@@ -169,6 +171,10 @@ async function applyUpdateFromShopify(
   // адрес получателя, это неручные поля из Shopify; при resync их НЕ обнуляем (billing пустой → null,
   // но Shopify его почти всегда присылает). deliveryInstructions best-effort (см. createNewOrder).
   const senderAddress = extractSenderAddress(payload.billing_address);
+  // Имя и телефон заказчика подтягиваем заново вместе с его адресом: это такие же неручные
+  // поля Shopify, и без них повторный вебхук не исправил бы заказ, принятый по старому
+  // правилу «billing важнее customer».
+  const senderIdentity = extractSenderIdentity(payload);
   const deliveryInstructions = await fetchShopifyDeliveryInstructions(site.id, externalId);
   // Возврат — платформо-независимый переход (financial_status=refunded → paymentStatus REFUNDED),
   // в отличие от pending/failed, которые Shopify не различает. Публикуем строго на ПЕРЕХОДЕ.
@@ -192,6 +198,7 @@ async function applyUpdateFromShopify(
       city,
       zip,
       cardMessage,
+      ...senderIdentity,
       ...senderAddress,
       ...(deliveryInstructions ? { deliveryInstructions } : {}),
     },
@@ -375,8 +382,9 @@ function buildOrderData(
     externalUpdatedAt: payload.updated_at ? new Date(payload.updated_at) : null,
     deliveryDate,
     deliveryWindow,
-    senderName: fullName(payload.billing_address) || [payload.customer?.first_name, payload.customer?.last_name].filter(Boolean).join(" ") || "—",
-    senderPhone: normalizePhone(payload.billing_address?.phone || payload.customer?.phone),
+    // Личность заказчика — из customer, телефон по приоритету order.phone → customer.phone →
+    // billing. Раньше здесь выигрывал billing и терял телефон заказчика (см. orderFields.ts).
+    ...extractSenderIdentity(payload),
     senderEmail: payload.email ?? payload.contact_email ?? null,
     ...senderAddress,
     deliveryInstructions,
