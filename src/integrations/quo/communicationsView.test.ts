@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isUnreadComm, computeIndicators, isLongText, sortTimelineDesc, buildCommTabs, type CommForIndicator } from "./communicationsView";
+import { isUnreadComm, computeIndicators, isLongText, sortTimelineDesc, buildCommTabs, commGroupOf, type CommForIndicator } from "./communicationsView";
 
 describe("isUnreadComm — только входящие SMS и пропущенные звонки (§7)", () => {
   it("входящее SMS без readAt → unread", () => {
@@ -69,19 +69,80 @@ describe("buildCommTabs — вкладки по стороне заказа", ()
   it("разные номера → две вкладки: Получатель первым (слева), Заказчик справа", () => {
     const tabs = buildCommTabs("+13105550001", "+13105550002");
     expect(tabs.map((t) => t.label)).toEqual(["Получатель", "Заказчик"]);
-    expect(tabs.map((t) => t.role)).toEqual(["RECIPIENT", "CUSTOMER"]);
+    expect(tabs.map((t) => t.target)).toEqual(["RECIPIENT", "CUSTOMER"]);
     expect(tabs[0].target).toBe("RECIPIENT");
     expect(tabs[0].phone).toBe("+13105550002"); // номер получателя
   });
 
-  it("одинаковый номер (в разных форматах) → одна вкладка «Заказчик», role=null (показать все)", () => {
+  it("одинаковый номер (в разных форматах) → одна вкладка «Заказчик»", () => {
     const tabs = buildCommTabs("(310) 555-0001", "+13105550001");
     expect(tabs).toHaveLength(1);
-    expect(tabs[0]).toMatchObject({ key: "SAME", label: "Заказчик", role: null });
+    expect(tabs[0]).toMatchObject({ key: "SAME", label: "Заказчик", target: "CUSTOMER" });
   });
 
   it("матчинг по последним 10 цифрам (игнор +1/форматирования)", () => {
     expect(buildCommTabs("13105550001", "3105550001")).toHaveLength(1); // тот же номер
     expect(buildCommTabs("3105550001", "3105550009")).toHaveLength(2); // разные
+  });
+});
+
+/**
+ * Разбор переписки по вкладкам. Решает ФАКТИЧЕСКИЙ номер сообщения: сохранённая роль
+ * ставится один раз при приёме и устаревает, когда телефон заказа исправляют.
+ */
+describe("commGroupOf — в какую вкладку попадает сообщение", () => {
+  const CUST = "+13472607553";
+  const RECIP = "+18646427700";
+  const msg = (externalPhone: string, partyRole: "CUSTOMER" | "RECIPIENT" | "UNKNOWN" = "UNKNOWN") =>
+    ({ externalPhone, partyRole }) as const;
+
+  it("номер получателя → «Получатель», номер заказчика → «Заказчик»", () => {
+    expect(commGroupOf(msg(RECIP), CUST, RECIP)).toBe("RECIPIENT");
+    expect(commGroupOf(msg(CUST), CUST, RECIP)).toBe("CUSTOMER");
+  });
+
+  it("фактический номер важнее сохранённой роли", () => {
+    // Ровно случай PAR-41318: переписка шла с получателем, но роль CUSTOMER проставилась,
+    // когда оба телефона заказа были одинаковыми.
+    expect(commGroupOf(msg(RECIP, "CUSTOMER"), CUST, RECIP)).toBe("RECIPIENT");
+    expect(commGroupOf(msg(CUST, "RECIPIENT"), CUST, RECIP)).toBe("CUSTOMER");
+  });
+
+  it("формат номера не важен — сравниваются последние 10 цифр", () => {
+    expect(commGroupOf(msg("(864) 642-7700"), CUST, RECIP)).toBe("RECIPIENT");
+    expect(commGroupOf(msg("1 347 260 7553"), CUST, RECIP)).toBe("CUSTOMER");
+  });
+
+  it("номер, не совпавший ни с одной стороной, остаётся по сохранённой роли — вкладок всего две", () => {
+    expect(commGroupOf(msg("+15551234567", "CUSTOMER"), CUST, RECIP)).toBe("CUSTOMER");
+    expect(commGroupOf(msg("+15551234567", "RECIPIENT"), CUST, RECIP)).toBe("RECIPIENT");
+  });
+
+  it("одинаковые телефоны заказа → всё в одной вкладке, включая чужие номера", () => {
+    expect(commGroupOf(msg(RECIP, "CUSTOMER"), RECIP, RECIP)).toBe("SAME");
+    expect(commGroupOf(msg(RECIP, "RECIPIENT"), RECIP, RECIP)).toBe("SAME");
+    expect(commGroupOf(msg("+15551234567"), RECIP, RECIP)).toBe("SAME");
+  });
+
+  it("нет номера — решает сохранённая роль, и сообщение всё равно видно", () => {
+    expect(commGroupOf(msg("", "RECIPIENT"), CUST, RECIP)).toBe("RECIPIENT");
+    expect(commGroupOf(msg("", "CUSTOMER"), CUST, RECIP)).toBe("CUSTOMER");
+    // UNKNOWN не прячем: показываем у заказчика, а не теряем.
+    expect(commGroupOf(msg("", "UNKNOWN"), CUST, RECIP)).toBe("CUSTOMER");
+  });
+
+  it("вкладок ровно две — третьей группы нет", () => {
+    expect(buildCommTabs(CUST, RECIP).map((t) => t.key)).toEqual(["RECIPIENT", "CUSTOMER"]);
+    expect(buildCommTabs(RECIP, RECIP).map((t) => t.key)).toEqual(["SAME"]);
+  });
+
+  it("отправка из каждой вкладки уходит на её собственный номер", () => {
+    const tabs = buildCommTabs(CUST, RECIP);
+    const recip = tabs.find((t) => t.key === "RECIPIENT")!;
+    const cust = tabs.find((t) => t.key === "CUSTOMER")!;
+    expect(recip.phone).toBe(RECIP);
+    expect(recip.target).toBe("RECIPIENT");
+    expect(cust.phone).toBe(CUST);
+    expect(cust.target).toBe("CUSTOMER");
   });
 });

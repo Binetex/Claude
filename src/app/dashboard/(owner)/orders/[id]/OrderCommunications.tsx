@@ -5,7 +5,7 @@ import { Card, CardHeader, CardTitle, CardBody } from "@/components/ui/Card";
 import { Button } from "@/components/ui/button";
 import { sendOrderSmsAction } from "./commActions";
 import { CommunicationTimeline, type TimelineItem } from "./CommunicationTimeline";
-import { buildCommTabs, type CommTab } from "@/integrations/quo/communicationsView";
+import { buildCommTabs, commGroupOf, type CommTab } from "@/integrations/quo/communicationsView";
 
 const SMS_MAX = 1600;
 export type CommItem = TimelineItem;
@@ -42,9 +42,16 @@ export function OrderCommunications({
   const [result, setResult] = useState<{ ok?: boolean; error?: string; status?: string } | null>(null);
 
   const active = tabs.find((t) => t.key === activeKey) ?? tabs[0];
-  const items = active.role === null ? communications : communications.filter((c) => c.partyRole === active.role);
+  // Разбор по ФАКТИЧЕСКОМУ номеру сообщения, а не по сохранённой роли: роль ставится один раз
+  // при приёме и устаревает, когда телефон заказа исправляют (см. commGroupOf).
+  const groupOf = (c: CommItem) => commGroupOf(c, customerPhone, recipientPhone);
+  const items = communications.filter((c) => groupOf(c) === active.key);
+  // Счётчик приходит с сервера, разобранный ПО ТЕМ ЖЕ группам, что и вкладки
+  // (countUnreadBySide вызывает тот же commGroupOf). Иначе значок висел бы на пустой вкладке.
   const unreadFor = (t: CommTab): number =>
-    t.key === "CUSTOMER" ? unread?.customer ?? 0 : t.key === "RECIPIENT" ? unread?.recipient ?? 0 : (unread?.customer ?? 0) + (unread?.recipient ?? 0);
+    t.key === "CUSTOMER" ? unread?.customer ?? 0
+    : t.key === "RECIPIENT" ? unread?.recipient ?? 0
+    : (unread?.customer ?? 0) + (unread?.recipient ?? 0);
 
   const tooLong = text.length > SMS_MAX;
   const disabled = pending || !text.trim() || tooLong || !storeHasQuoNumber;
@@ -56,7 +63,7 @@ export function OrderCommunications({
     setResult(null);
     const fd = new FormData();
     fd.set("orderId", orderId);
-    fd.set("target", active.target);
+    fd.set("target", active.target); // сервер резолвит номер из того же поля заказа
     fd.set("text", text);
     fd.set("idempotencyKey", idem);
     try {
@@ -105,7 +112,11 @@ export function OrderCommunications({
         )}
 
         <form onSubmit={onSubmit} className="space-y-2">
-          <div className="text-xs text-slate-500">Номер: <span className="font-medium text-slate-700">{active.phone || "—"}</span></div>
+          {/* Подпись говорит, КУДА уйдёт сообщение, а не «номер этой переписки»: рядом форма
+              отправки, и путать эти две вещи опасно. */}
+          <div className="text-xs text-slate-500">
+            Отправить на: <span className="font-medium tabular-nums text-slate-700">{active.phone || "—"}</span>
+          </div>
           <textarea
             value={text} onChange={(e) => setText(e.target.value)} rows={3}
             placeholder="Текст сообщения…" disabled={pending}

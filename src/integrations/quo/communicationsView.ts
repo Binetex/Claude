@@ -63,29 +63,63 @@ export function isLongText(text: string | null | undefined, threshold = COLLAPSE
 }
 
 /**
- * Вкладки блока общения по стороне заказа. Порядок: Получатель первым (слева), Заказчик справа.
- * Если номер заказчика и получателя совпадает — одна вкладка «Заказчик» (без дублей). `role` — по чему
- * фильтровать историю (null = показать все, для совпадающего номера). `target` — куда слать SMS.
+ * Вкладки блока общения. Порядок: Получатель слева, Заказчик справа; при совпадающих
+ * номерах — одна вкладка. `target` — куда уйдёт SMS; `null` означает, что отправка отсюда
+ * невозможна (вкладка «Другой номер»).
  */
+export type CommTabKey = "RECIPIENT" | "CUSTOMER" | "SAME";
+
 export type CommTab = {
-  key: "RECIPIENT" | "CUSTOMER" | "SAME";
+  key: CommTabKey;
   label: string;
   phone: string;
   target: "CUSTOMER" | "RECIPIENT";
-  role: "CUSTOMER" | "RECIPIENT" | null;
 };
 
 const last10 = (p: string | null | undefined): string => (p ?? "").replace(/\D/g, "").slice(-10);
 
+/** Что нужно знать о сообщении, чтобы положить его во вкладку. */
+export type CommForGrouping = {
+  externalPhone: string;
+  /** Роль, проставленная при приёме. Используется, только если номера нет вовсе. */
+  partyRole: "CUSTOMER" | "RECIPIENT" | "UNKNOWN";
+};
+
+/**
+ * В какую вкладку попадает сообщение. Сторон ровно две — получатель и заказчик; третьей
+ * группы нет, каждое сообщение видно под одной из них.
+ *
+ * РЕШАЕТ ФАКТИЧЕСКИЙ НОМЕР. Сохранённая роль проставляется один раз, при приёме, и потом
+ * устаревает: у заказа PAR-41318 телефоны заказчика и получателя сперва совпадали,
+ * сопоставитель выбрал CUSTOMER наугад, а когда телефон заказчика исправили на настоящий,
+ * вся переписка с получателем осталась висеть во вкладке «Заказчик» — с номером, на который
+ * никто никогда не писал. Ответ из этой вкладки ушёл бы не тому человеку.
+ *
+ * Роль остаётся запасным вариантом: номера нет или он не совпал ни с одной стороной. Это
+ * не хуже прежнего поведения — раньше роль решала всегда, — и ничего не прячет.
+ */
+export function commGroupOf(c: CommForGrouping, customerPhone: string, recipientPhone: string): CommTabKey {
+  const cust = last10(customerPhone);
+  const recip = last10(recipientPhone);
+  if (cust && cust === recip) return "SAME"; // одна вкладка на оба номера
+
+  const phone = last10(c.externalPhone);
+  if (phone && phone === recip) return "RECIPIENT";
+  if (phone && phone === cust) return "CUSTOMER";
+  // Номер ничего не сказал — верим тому, что записал приём.
+  return c.partyRole === "RECIPIENT" ? "RECIPIENT" : "CUSTOMER";
+}
+
+/** Вкладки блока: две стороны заказа, либо одна при совпадающих номерах. */
 export function buildCommTabs(customerPhone: string, recipientPhone: string): CommTab[] {
   const cust = last10(customerPhone);
   const recip = last10(recipientPhone);
   if (cust && cust === recip) {
-    return [{ key: "SAME", label: "Заказчик", phone: customerPhone || recipientPhone, target: "CUSTOMER", role: null }];
+    return [{ key: "SAME", label: "Заказчик", phone: customerPhone || recipientPhone, target: "CUSTOMER" }];
   }
   return [
-    { key: "RECIPIENT", label: "Получатель", phone: recipientPhone, target: "RECIPIENT", role: "RECIPIENT" },
-    { key: "CUSTOMER", label: "Заказчик", phone: customerPhone, target: "CUSTOMER", role: "CUSTOMER" },
+    { key: "RECIPIENT", label: "Получатель", phone: recipientPhone, target: "RECIPIENT" },
+    { key: "CUSTOMER", label: "Заказчик", phone: customerPhone, target: "CUSTOMER" },
   ];
 }
 

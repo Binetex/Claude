@@ -1,3 +1,4 @@
+import { commGroupOf } from "./communicationsView";
 import "server-only";
 /**
  * Серверные операции истории коммуникаций (чтение из локальной БД, не из QUO):
@@ -98,17 +99,34 @@ export function parseAttachments(json: Prisma.JsonValue | null | undefined): Com
  * ПОМЕЧАЕТ входящие/пропущенные прочитанными при открытии. История — из локальной БД. Best-effort:
  * недоступность QUO-таблиц не должна ронять карточку (вызывающий оборачивает в try/catch).
  */
-/** Непрочитанные (входящие SMS / пропущенные звонки) по стороне заказа — считать ДО пометки прочитанным. */
-export async function countUnreadBySide(prisma: PrismaClient, orderId: string): Promise<{ customer: number; recipient: number }> {
-  const rows = await prisma.orderCommunication.groupBy({
-    by: ["partyRole"],
-    where: { orderId, readAt: null, OR: [{ type: "SMS", direction: "INBOUND" }, { type: { in: ["CALL", "VOICEMAIL"] }, status: "MISSED" }] },
-    _count: true,
-  });
+/**
+ * Непрочитанные (входящие SMS / пропущенные звонки) по стороне заказа — считать ДО пометки
+ * прочитанным.
+ *
+ * Разбор идёт по ФАКТИЧЕСКОМУ номеру сообщения, тем же `commGroupOf`, что и вкладки. Раньше
+ * считалось по сохранённой роли, и на заказе с исправленным телефоном заказчика значок «2»
+ * висел на вкладке, под которой уже ничего не было: роль говорила «CUSTOMER», а номер — что
+ * это переписка с получателем.
+ */
+export async function countUnreadBySide(
+  prisma: PrismaClient,
+  orderId: string
+): Promise<{ customer: number; recipient: number }> {
+  const [order, rows] = await Promise.all([
+    prisma.order.findUnique({ where: { id: orderId }, select: { senderPhone: true, recipientPhone: true } }),
+    prisma.orderCommunication.findMany({
+      where: { orderId, readAt: null, OR: [{ type: "SMS", direction: "INBOUND" }, { type: { in: ["CALL", "VOICEMAIL"] }, status: "MISSED" }] },
+      select: { externalPhone: true, partyRole: true },
+    }),
+  ]);
+
   const out = { customer: 0, recipient: 0 };
+  if (!order) return out;
+
   for (const r of rows) {
-    if (r.partyRole === "CUSTOMER") out.customer = r._count;
-    else if (r.partyRole === "RECIPIENT") out.recipient = r._count;
+    // SAME — одна вкладка на оба номера; её значок компонент складывает из двух чисел.
+    if (commGroupOf(r, order.senderPhone, order.recipientPhone) === "RECIPIENT") out.recipient += 1;
+    else out.customer += 1;
   }
   return out;
 }
