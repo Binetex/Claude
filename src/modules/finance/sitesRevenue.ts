@@ -59,8 +59,6 @@ export type SitesRevenue = {
   ordersTotal: number;
   revenueCents: number;
   avgCents: number;
-  /** Лучший по выручке. NULL — заказов за период не было. */
-  topSite: { name: string; revenueCents: number } | null;
 };
 
 const where = (from: Date, to: Date, siteId?: string) => ({
@@ -109,8 +107,6 @@ export async function getSitesRevenue(from: Date, to: Date): Promise<SitesRevenu
     ordersTotal,
     revenueCents,
     avgCents: avgOf(revenueCents, ordersTotal),
-    // Строки уже отсортированы по выручке — лучший это первая.
-    topSite: rows[0] ? { name: rows[0].name, revenueCents: rows[0].revenueCents } : null,
   };
 }
 

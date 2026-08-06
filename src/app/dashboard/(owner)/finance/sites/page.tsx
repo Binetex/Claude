@@ -43,25 +43,10 @@ export default async function FinanceSitesPage({
 
       <SitesPeriodBar current={period.kind} />
 
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <div className="grid grid-cols-3 gap-3">
         <StatCard label="Заказов" value={data.ordersTotal} />
         <StatCard label="Выручка" value={formatCents(data.revenueCents)} />
         <StatCard label="Средний чек" value={formatCents(data.avgCents)} />
-        <StatCard
-          label="Лучший магазин"
-          value={
-            data.topSite ? (
-              <span className="flex flex-wrap items-baseline gap-2">
-                {data.topSite.name}
-                <span className="text-xs font-normal text-slate-400">
-                  {formatCents(data.topSite.revenueCents)}
-                </span>
-              </span>
-            ) : (
-              "—"
-            )
-          }
-        />
       </div>
 
       <Card>
