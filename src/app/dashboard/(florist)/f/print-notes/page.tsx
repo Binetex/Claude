@@ -16,11 +16,9 @@ export default async function FloristPrintNotes({
   const siteId = sp.siteId?.trim() || undefined;
   const day = parsePrintDay(sp.day);
 
-  // includeBlank: показываем и заказы без текста, чтобы флорист мог его добавить.
-  // Массовая печать при этом берёт только заказы с текстом (см. loadPrintableCards).
   const orders = await loadPrintableCards(
     { role: user.role, floristId: user.floristId },
-    { day, includeBlank: true, siteId }
+    { day, siteId }
   );
 
   return (

@@ -98,14 +98,20 @@ describe("loadPrintableCards — доступ (§14: 9,10,11)", () => {
     expect(await loadPrintableCards({ role: "CALL_CENTER" }, { ids: [ids.o1] })).toHaveLength(0);
   });
 
-  it("todayAll: исключает пустой текст, CANCELLED и полностью REFUNDED", async () => {
+  it("todayAll: исключает CANCELLED и полностью REFUNDED", async () => {
     const cards = await loadPrintableCards({ role: "FLORIST", floristId: floristA }, { todayAll: true });
-    expect(cards.map((c) => c.orderId)).toEqual([ids.o1]); // только o1 (o2 пустой, o4 cancelled, o5 refunded)
+    expect(cards.map((c) => c.orderId).sort()).toEqual([ids.o1, ids.o2].sort()); // o4 cancelled, o5 refunded
   });
 
-  it("todayAll includeBlank: показывает и пустые (для списка вкладки), но не чужие/cancelled/refunded", async () => {
-    const cards = await loadPrintableCards({ role: "FLORIST", floristId: floristA }, { todayAll: true, includeBlank: true });
-    expect(cards.map((c) => c.orderId).sort()).toEqual([ids.o1, ids.o2].sort());
+  it("заказ БЕЗ текста открытки печатается: на карточке получателя имя и адрес", async () => {
+    // Раньше такой заказ отсеивался целиком, и вместе с несуществующей запиской пропадал
+    // адрес, по которому везут букет.
+    const cards = await loadPrintableCards({ role: "FLORIST", floristId: floristA }, { todayAll: true });
+    const blank = cards.find((c) => c.orderId === ids.o2);
+    expect(blank).toBeDefined();
+    expect(blank!.hasCardMessage).toBe(false);
+    expect(blank!.recipientName).toBeTruthy();
+    expect(blank!.addressLine).toBeTruthy();
   });
 
   it("day=tomorrow: берёт завтрашние заказы и не берёт сегодняшние", async () => {
@@ -127,7 +133,6 @@ describe("loadPrintableCards — доступ (§14: 9,10,11)", () => {
 
     const tom = await loadPrintableCards({ role: "FLORIST", floristId: floristA }, { day: "tomorrow" });
     expect(tom.map((c) => c.orderId)).not.toContain(foreign);
-    expect(tom.every((c) => c.hasCardMessage)).toBe(true);
   });
 
   it("без day и без todayAll поведение прежнее (по умолчанию сегодня)", async () => {

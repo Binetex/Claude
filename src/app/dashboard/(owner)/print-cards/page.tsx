@@ -16,8 +16,7 @@ export default async function OwnerPrintCards({
   const siteId = sp.siteId?.trim() || undefined;
   const day = parsePrintDay(sp.day);
 
-  // includeBlank: в списке видны и заказы без текста — чтобы его можно было дописать.
-  const orders = await loadPrintableCards({ role: user.role }, { day, includeBlank: true, siteId });
+  const orders = await loadPrintableCards({ role: user.role }, { day, siteId });
 
   return (
     <PrintNotesPage

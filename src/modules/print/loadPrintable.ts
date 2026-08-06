@@ -81,7 +81,7 @@ export type PrintDay = "today" | "tomorrow";
 /** Заказы для печати с учётом прав. Пустой массив — если доступа нет / выбор пуст. */
 export async function loadPrintableCards(
   user: PrintAccessUser,
-  opts: { ids?: string[]; todayAll?: boolean; day?: PrintDay; siteId?: string; includeBlank?: boolean }
+  opts: { ids?: string[]; todayAll?: boolean; day?: PrintDay; siteId?: string }
 ): Promise<PrintOrder[]> {
   const where: Prisma.OrderWhereInput = {};
   if (user.role === "FLORIST") {
@@ -109,13 +109,10 @@ export async function loadPrintableCards(
     where.orderStatus = { notIn: ["CANCELLED", "DELIVERED"] };
     where.paymentStatus = { not: "REFUNDED" }; // полностью возвращённые исключаем (PARTIALLY_REFUNDED остаётся)
     const rows = await prisma.order.findMany({ where, select: SELECT, orderBy: { deliveryDate: "asc" } });
-    return rows
-      .filter(
-        (o) =>
-          deliveryDayBucket(o.deliveryDate, o.site.timezone) === day &&
-          (opts.includeBlank || !isBlankCardMessage(o.cardMessage)) // список вкладки показывает и пустые
-      )
-      .map(toPrintOrder);
+    // Заказы БЕЗ текста открытки тоже печатаются. Раньше они отсеивались, и вместе с
+    // несуществующей запиской пропадала карточка получателя — а на ней имя и адрес, по
+    // которым везут букет. Пустая половина листа дешевле поездки не туда.
+    return rows.filter((o) => deliveryDayBucket(o.deliveryDate, o.site.timezone) === day).map(toPrintOrder);
   }
 
   return [];
