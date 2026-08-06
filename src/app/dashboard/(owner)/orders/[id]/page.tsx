@@ -16,6 +16,7 @@ import { OrderStatusBadge, PaymentStatusBadge } from "@/components/StatusBadge";
 import { formatMoney } from "@/lib/money";
 import { fmtDateTime } from "@/lib/format";
 import { AirwallexPanel } from "./AirwallexPanel";
+import { RefundDialog } from "./RefundDialog";
 import { UpdateCompositionButton } from "../UpdateCompositionButton";
 import { OwnerPriceDialog } from "./OwnerPriceDialog";
 import { ContactEditDialog } from "./ContactEditDialog";
@@ -250,7 +251,17 @@ export default async function OwnerOrderPage({ params }: { params: Promise<{ id:
 
           {/* ── Служебное. Держится ОТДЕЛЬНО, в самом низу: к работе с заказом эти два блока
                  отношения не имеют, и в потоке основных карточек только мешали. ── */}
-          {order.airwallex && <AirwallexPanel aw={order.airwallex} />}
+          {order.airwallex && (
+            <div className="space-y-2">
+              <AirwallexPanel aw={order.airwallex} />
+              {/* Возврат живёт рядом с платежом, а не среди «быстрых действий»: он необратим
+                  и не должен стоять в одном ряду с картой и переназначением флориста.
+                  Доступность и суммы модалка спрашивает у Airwallex при открытии. */}
+              <div className="flex justify-end">
+                <RefundDialog orderId={order.id} orderNumber={order.orderNumber} />
+              </div>
+            </div>
+          )}
 
           {/* Пустой истории быть не должно: карточка с заголовком и ничем внутри только
               занимает экран — у заказов без назначений её просто нет. */}

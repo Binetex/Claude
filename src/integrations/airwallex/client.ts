@@ -34,6 +34,24 @@ export type PaymentIntentResult =
 
 export type VerifyResult = { ok: true; accountName: string | null } | { ok: false; code: string };
 
+/** Возврат по платежу. Суммы у Airwallex в единицах валюты (доллары), а не в центах. */
+export type AirwallexRefund = {
+  id: string;
+  status: string;
+  amount: number;
+  currency: string;
+  reason: string | null;
+  createdAt: string | null;
+};
+
+export type ListRefundsResult =
+  | { ok: true; refunds: AirwallexRefund[] }
+  | { ok: false; retryable: boolean; code: string };
+
+export type CreateRefundResult =
+  | { ok: true; refund: AirwallexRefund }
+  | { ok: false; retryable: boolean; code: string; message: string | null };
+
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /** Известные статусы приводим к типу, незнакомое → UNKNOWN (не гадаем). */
@@ -94,6 +112,100 @@ export class AirwallexClient {
     const t = await this.ensureToken(true);
     if (!t.ok) return { ok: false, code: t.code };
     return { ok: true, accountName: null };
+  }
+
+  /** Разбор объекта возврата Airwallex в наш вид. */
+  private static toRefund(o: Record<string, unknown>): AirwallexRefund {
+    return {
+      id: String(o.id ?? ""),
+      status: String(o.status ?? ""),
+      amount: typeof o.amount === "number" ? o.amount : 0,
+      currency: String(o.currency ?? ""),
+      reason: typeof o.reason === "string" ? o.reason : null,
+      createdAt: typeof o.created_at === "string" ? o.created_at : null,
+    };
+  }
+
+  /**
+   * Возвраты по платежу. Нужны, чтобы показать владельцу, сколько уже возвращено, и не дать
+   * вернуть больше оплаченного. Берём их у Airwallex, а не из своей таблицы: возврат могли
+   * сделать и мимо нас — из кабинета Airwallex или из WooCommerce.
+   */
+  async listRefunds(paymentIntentId: string, attempt = 0): Promise<ListRefundsResult> {
+    const t = await this.ensureToken();
+    if (!t.ok) return { ok: false, retryable: t.code.startsWith("network"), code: t.code };
+
+    const q = `?payment_intent_id=${encodeURIComponent(paymentIntentId)}&page_num=0&page_size=50`;
+    const { status, json, networkError } = await this.fetchJson(`/api/v1/pa/refunds${q}`, {
+      method: "GET",
+      headers: { authorization: `Bearer ${this.token}` },
+    });
+
+    if (networkError) return { ok: false, retryable: true, code: `network:${networkError}` };
+    if (status === 401 && attempt === 0) {
+      await this.ensureToken(true);
+      return this.listRefunds(paymentIntentId, attempt + 1);
+    }
+    if (status === 401 || status === 403) return { ok: false, retryable: false, code: "unauthorized" };
+    if (status === 429) {
+      if (attempt < 2) { await sleep((attempt + 1) * 1000); return this.listRefunds(paymentIntentId, attempt + 1); }
+      return { ok: false, retryable: true, code: "rate_limited" };
+    }
+    if (status >= 500) return { ok: false, retryable: true, code: `http_${status}` };
+    if (status !== 200 || !json) return { ok: false, retryable: false, code: `http_${status}` };
+
+    const items = (json as { items?: Record<string, unknown>[] }).items ?? [];
+    return { ok: true, refunds: items.map((i) => AirwallexClient.toRefund(i)) };
+  }
+
+  /**
+   * СОЗДАНИЕ ВОЗВРАТА — единственный метод этого клиента, который двигает деньги.
+   *
+   * `requestId` обязателен и задаётся вызывающим: это ключ идемпотентности Airwallex. Один и
+   * тот же ключ не создаст второй возврат, поэтому повторная отправка формы, ретрай сети или
+   * двойной клик не вернут деньги дважды.
+   *
+   * Повторов здесь НЕТ намеренно — ни на 429, ни на 5xx, ни на разрыв сети. Ответ мог не
+   * дойти уже после того, как возврат создан; молча повторять денежную операцию нельзя.
+   * Владельцу возвращается честное «неизвестно», и он сверяется со списком возвратов.
+   */
+  async createRefund(input: {
+    paymentIntentId: string;
+    amount: number;
+    currency: string;
+    reason: string;
+    requestId: string;
+  }): Promise<CreateRefundResult> {
+    const t = await this.ensureToken();
+    if (!t.ok) return { ok: false, retryable: false, code: t.code, message: null };
+
+    const { status, json, networkError } = await this.fetchJson("/api/v1/pa/refunds/create", {
+      method: "POST",
+      headers: { authorization: `Bearer ${this.token}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        request_id: input.requestId,
+        payment_intent_id: input.paymentIntentId,
+        amount: input.amount,
+        currency: input.currency,
+        reason: input.reason,
+      }),
+    });
+
+    // Сеть оборвалась — возврат МОГ пройти. Не повторяем и говорим об этом прямо.
+    if (networkError) return { ok: false, retryable: false, code: "network_unknown", message: null };
+    if (status === 401 || status === 403) return { ok: false, retryable: false, code: "unauthorized", message: null };
+    if (status === 201 || status === 200) {
+      if (!json) return { ok: false, retryable: false, code: "empty_response", message: null };
+      return { ok: true, refund: AirwallexClient.toRefund(json as Record<string, unknown>) };
+    }
+
+    const body = json as { code?: string; message?: string; source?: string } | null;
+    return {
+      ok: false,
+      retryable: false,
+      code: body?.code ? String(body.code) : `http_${status}`,
+      message: body?.message ? String(body.message) : null,
+    };
   }
 
   /**
