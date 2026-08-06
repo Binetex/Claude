@@ -63,8 +63,17 @@ export function SyncProductsBar({ initial }: { initial: ProductsSyncSummary }) {
                 : `обработано ${summary.processed}`}
             </>
           ) : summary.status === "ERROR" ? (
+            // Магазины перечисляем поимённо с причиной: раньше строка сообщала «с ошибками,
+            // ошибок: 0» и не давала понять ни какой магазин упал, ни что делать. Ноль в
+            // счётчике — это отдельные товары; у оборвавшегося магазина до них дело не
+            // дошло, а причина всё это время лежала в errorMessage и никуда не выводилась.
             <span className="text-red-600">
-              ✕ Синхронизация с ошибками — новых: {summary.created}, обновлено: {summary.updated}, ошибок: {summary.errors}
+              ✕ Не синхронизированы: {summary.failed.map((f) => f.site).join(", ")}
+              {summary.failed[0] && <> — {summary.failed[0].message}</>}
+              <span className="text-slate-500">
+                {" "}
+                · остальные магазины обновлены: {summary.updated}, новых: {summary.created}
+              </span>
             </span>
           ) : (
             <span className="text-emerald-700">

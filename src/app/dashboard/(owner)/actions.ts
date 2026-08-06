@@ -331,7 +331,10 @@ export async function ownerSyncAllProducts() {
 /** Агрегированный прогресс синхронизации товаров по всем сайтам (для кнопки на /dashboard/products). */
 export async function ownerGetProductsSyncSummary() {
   await ownerOnly();
-  const rows = await prisma.siteSync.findMany({ where: { kind: "PRODUCTS" } });
+  const rows = await prisma.siteSync.findMany({
+    where: { kind: "PRODUCTS" },
+    include: { site: { select: { shortName: true } } },
+  });
   if (!rows.length) return null;
   const anyRunning = rows.some((r) => r.status === "RUNNING");
   const anyError = rows.some((r) => r.status === "ERROR");
@@ -345,6 +348,16 @@ export async function ownerGetProductsSyncSummary() {
     updated: sum((r) => r.updated),
     skipped: sum((r) => r.skipped),
     errors: sum((r) => r.errors),
+    // Какие магазины упали и почему. Без этого сводка получалась бессмысленной: «с
+    // ошибками, ошибок: 0» — счётчик считает отдельные товары, а статус ERROR означает,
+    // что у магазина оборвался весь прогон и до товаров дело не дошло.
+    failed: rows
+      .filter((r) => r.status === "ERROR")
+      .map((r) => ({
+        site: r.site.shortName,
+        message: r.errorMessage ?? "причина не сохранена",
+        at: r.finishedAt?.toISOString() ?? null,
+      })),
   } as const;
 }
 export type ProductsSyncSummary = Awaited<ReturnType<typeof ownerGetProductsSyncSummary>>;
