@@ -14,7 +14,7 @@ import "server-only";
 import { prisma } from "@/lib/db";
 import { toNumber } from "@/lib/money";
 import type { OrderStatus } from "@/generated/prisma/enums";
-import { formatDayLabel } from "@/components/charts/theme";
+import { formatDayLabel, seriesColor } from "@/components/charts/theme";
 
 /**
  * Что считаем заказом магазина.
@@ -55,8 +55,16 @@ export type SiteRevenueRow = {
   avgCents: number;
 };
 
-/** Магазин на графике: цвет закрепляется за siteId, а не за местом в списке. */
-export type SiteSeries = { siteId: string; name: string };
+/**
+ * Магазин на графике. Цвет приходит С СЕРВЕРА и закреплён за магазином навсегда: он берётся
+ * из позиции в ПОЛНОМ списке магазинов по дате создания. Считать цвет на клиенте по месту в
+ * серии нельзя — магазин без заказов за период из серии выпадает и перекрашивает всех
+ * следующих, из-за чего при смене дат цвета «скачут».
+ *
+ * Порядок по дате создания, а не по имени: новый магазин получает следующий свободный цвет
+ * и никого не сдвигает, а переименование ничего не меняет.
+ */
+export type SiteSeries = { siteId: string; name: string; color: string };
 
 /**
  * Один КАЛЕНДАРНЫЙ день диапазона. Выручка магазина лежит под ключом-siteId — так столбец
@@ -119,10 +127,12 @@ export async function getSitesRevenue(from: Date, to: Date): Promise<SitesRevenu
       _count: { _all: true },
       _sum: { customerTotal: true },
     }),
-    prisma.site.findMany({ select: { id: true, name: true } }),
+    prisma.site.findMany({ select: { id: true, name: true }, orderBy: { createdAt: "asc" } }),
   ]);
 
   const nameById = new Map(sites.map((s) => [s.id, s.name]));
+  // Цвет — по месту в полном списке магазинов, поэтому от выбранного периода не зависит.
+  const colorById = new Map(sites.map((s, i) => [s.id, seriesColor(i)]));
 
   // Итоги магазина = сумма его дней. Отдельного запроса под таблицу нет.
   const bySite = new Map<string, { ordersTotal: number; revenueCents: number }>();
@@ -153,10 +163,10 @@ export async function getSitesRevenue(from: Date, to: Date): Promise<SitesRevenu
     }))
     .sort((a, b) => b.revenueCents - a.revenueCents);
 
-  // Порядок серий — по имени, а не по выручке: цвет магазина не должен меняться от того,
-  // что в этом месяце он продал меньше.
+  // В серии попадают только магазины с заказами за период — пустой сегмент ничего не
+  // сообщает. Порядок по имени: он задаёт порядок стопки и легенды, но НЕ цвет.
   const series: SiteSeries[] = rows
-    .map((r) => ({ siteId: r.siteId, name: r.name }))
+    .map((r) => ({ siteId: r.siteId, name: r.name, color: colorById.get(r.siteId) ?? seriesColor(0) }))
     .sort((a, b) => a.name.localeCompare(b.name, "ru"));
 
   const points: SiteDailyPoint[] = eachDay(from, to).map((day) => {

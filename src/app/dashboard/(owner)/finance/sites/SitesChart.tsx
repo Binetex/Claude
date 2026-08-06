@@ -22,7 +22,7 @@ export function SitesChart({ points, series }: { points: SiteDailyPoint[]; serie
     <StackedBarChart
       data={points}
       index="label"
-      series={series.map((s) => ({ key: s.siteId, name: s.name }))}
+      series={series.map((s) => ({ key: s.siteId, name: s.name, color: s.color }))}
       titleOf={(row) => fullDayLabel(String(row.day))}
       subtitleOf={(row) => pluralOrders(Number(row.orders) || 0)}
       totalLabel="за день"

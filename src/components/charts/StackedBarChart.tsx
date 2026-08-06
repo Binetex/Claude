@@ -6,8 +6,11 @@
  * дни и из чего складывался каждый». Итог за период показывает таблица под графиком.
  *
  * Все Bar в одном `stackId`, поэтому высота столбца — сумма дня, а высота сегмента —
- * вклад магазина. Цвет закреплён за местом серии в списке (список отсортирован по имени),
- * а не за её величиной: иначе магазин менял бы цвет от месяца к месяцу.
+ * вклад магазина.
+ *
+ * Цвет НЕ вычисляется здесь: он приходит вместе с серией. Считать его по месту в массиве
+ * было ошибкой — сущность без данных за период из массива выпадает и перекрашивает всех
+ * следующих, из-за чего цвета «скачут» при смене дат.
  */
 import { useState } from "react";
 import {
@@ -27,11 +30,11 @@ import {
   CHART_GRID,
   CHART_HEIGHT,
   formatAxisValue,
-  seriesColor,
   type ChartRow,
 } from "./theme";
 
-export type StackedSeries = { key: string; name: string };
+/** Цвет задаёт вызывающий код: он закреплён за сущностью, а не за местом в серии. */
+export type StackedSeries = { key: string; name: string; color: string };
 
 export function StackedBarChart({
   data,
@@ -63,8 +66,7 @@ export function StackedBarChart({
       return next;
     });
 
-  const colored = series.map((s, i) => ({ ...s, color: seriesColor(i) }));
-  const visible = colored.filter((s) => !hidden.has(s.key));
+  const visible = series.filter((s) => !hidden.has(s.key));
 
   // Строку под курсором ищем по подписи: тултипу нужны поля, которых нет в payload Recharts.
   const rowByIndex = new Map(data.map((r) => [String(r[index]), r]));
@@ -99,17 +101,10 @@ export function StackedBarChart({
                 );
               }}
             />
-            {visible.map((s, i) => (
-              <Bar
-                key={s.key}
-                dataKey={s.key}
-                stackId="total"
-                fill={s.color}
-                // Скругляется только верхний сегмент стопки — иначе между сегментами
-                // появляются щели, и столбец разваливается на плитки.
-                radius={i === visible.length - 1 ? [4, 4, 0, 0] : undefined}
-                maxBarSize={48}
-              />
+            {visible.map((s) => (
+              // Углы прямые: на стопке скругление режет верхний сегмент и оставляет щели
+              // между соседними.
+              <Bar key={s.key} dataKey={s.key} stackId="total" fill={s.color} maxBarSize={48} />
             ))}
           </RechartsBarChart>
         </ResponsiveContainer>
@@ -117,7 +112,7 @@ export function StackedBarChart({
 
       {/* Легенда без рамки и заголовка: это подпись к графику, а не отдельный блок. */}
       <ul className="flex flex-wrap gap-x-4 gap-y-1.5">
-        {colored.map((s) => {
+        {series.map((s) => {
           const off = hidden.has(s.key);
           return (
             <li key={s.key}>
