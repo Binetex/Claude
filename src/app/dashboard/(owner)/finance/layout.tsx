@@ -28,6 +28,8 @@ export default async function FinanceLayout({ children }: { children: React.Reac
     // Первым — обзор всего бизнеса: с вопроса «как идут дела» в раздел и заходят.
     // Раньше /dashboard/finance просто перенаправлял на список флористов.
     { href: "/dashboard/finance", label: "Обзор" },
+    // «Магазины» — только выручка, без прибыли: см. modules/finance/sitesRevenue.ts.
+    { href: "/dashboard/finance/sites", label: "Магазины" },
     { href: "/dashboard/finance/florists", label: "Флористы" },
     {
       href: "/dashboard/finance/setup",
