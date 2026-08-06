@@ -22,6 +22,7 @@ const BASE_PATH = "/dashboard/f";
 const FLORIST_PRESETS = [
   { key: "today", label: "Сегодня" },
   { key: "tomorrow", label: "Завтра" },
+  { key: "yesterday", label: "Вчера" },
   { key: "all", label: "Все" },
   { key: "done", label: "Готовые" },
 ];

@@ -45,6 +45,10 @@ describe("purchaseDayFor — вкладка списка заказов → де
     expect(purchaseDayFor("done")).toBeUndefined();
   });
 
+  it("«Вчера» закупку не показывает — покупать уже нечего", () => {
+    expect(purchaseDayFor("yesterday")).toBeUndefined();
+  });
+
   it("отсутствие вкладки и неизвестное значение тоже не дают дня", () => {
     // Вкладки нет, когда владелец задал свой диапазон дат или сузил фильтрами.
     expect(purchaseDayFor(undefined)).toBeUndefined();

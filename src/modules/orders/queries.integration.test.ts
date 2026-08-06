@@ -156,6 +156,28 @@ describe("вкладки «Сегодня» и «Завтра» — по дню 
     expect(tomorrow.map((x) => x.orderNumber)).not.toContain(o.orderNumber);
   });
 
+  it("заказ на вчерашний день магазина виден в «Вчера» и не виден в «Сегодня»", async () => {
+    const yesterdayLa = laDay(new Date(Date.now() - 86400000));
+    const o = await makeOrder(`YESTERDAY-${suffix}`, yesterdayLa);
+    expect(o.deliveryDate.getTime()).toBe(new Date(`${yesterdayLa}T00:00:00.000Z`).getTime());
+
+    const yesterday = mine(await listForOwner({ siteId, preset: "yesterday" }));
+    expect(yesterday.map((x) => x.orderNumber)).toContain(o.orderNumber);
+
+    const today = mine(await listForOwner({ siteId, preset: "today" }));
+    expect(today.map((x) => x.orderNumber)).not.toContain(o.orderNumber);
+  });
+
+  it("«Вчера» берёт ровно один день магазина, а не всё прошлое", async () => {
+    const yesterdayLa = laDay(new Date(Date.now() - 86400000));
+    await makeOrder(`OLD-${suffix}`, laDay(new Date(Date.now() - 5 * 86400000)));
+
+    const rows = mine(await listForOwner({ siteId, preset: "yesterday" }));
+    for (const r of rows) {
+      expect(new Date(r.deliveryDate).toISOString().slice(0, 10)).toBe(yesterdayLa);
+    }
+  });
+
   it("вкладка и список закупки сходятся в определении «сегодня»", async () => {
     // Обе стороны должны считать один и тот же календарный день магазина.
     const todayLa = laDay(new Date());

@@ -11,9 +11,12 @@ import { Select } from "@/components/ui/select";
 import { cn } from "@/lib/cn";
 import type { OrderFilters } from "@/modules/orders/queries";
 
+// «Вчера» стоит после «Завтра», а не перед «Сегодня»: привычные вкладки не должны
+// переезжать под курсором из-за того, что рядом появилась новая.
 const DEFAULT_PRESETS = [
   { key: "today", label: "Сегодня" },
   { key: "tomorrow", label: "Завтра" },
+  { key: "yesterday", label: "Вчера" },
   { key: "all", label: "Все" },
 ];
 

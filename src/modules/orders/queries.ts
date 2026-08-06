@@ -12,7 +12,7 @@ import {
 } from "./serialize";
 
 export type OrderFilters = {
-  preset?: "today" | "tomorrow" | "all" | "done";
+  preset?: "today" | "yesterday" | "tomorrow" | "all" | "done";
   date?: string; // YYYY-MM-DD
   from?: string;
   to?: string;
@@ -51,13 +51,14 @@ function buildWhere(f: OrderFilters): Prisma.OrderWhereInput {
       ...(f.from ? { gte: utcDayStart(f.from) } : {}),
       ...(f.to ? { lte: utcDayEnd(f.to) } : {}),
     };
-  } else if (f.preset === "today" || f.preset === "tomorrow") {
-    // «Сегодня»/«Завтра» — по календарному дню в таймзоне магазина, как считают дашборд и
-    // список закупки. Раньше здесь брался день ПРОЦЕССА (сервер в UTC), и каждый вечер после
-    // 17:00 по Лос-Анджелесу вкладки показывали на сутки вперёд: UTC уже перешёл на новый
-    // день, а у магазина он ещё не наступил.
+  } else if (f.preset === "today" || f.preset === "tomorrow" || f.preset === "yesterday") {
+    // «Вчера»/«Сегодня»/«Завтра» — по календарному дню в таймзоне магазина, как считают
+    // дашборд и список закупки. Раньше здесь брался день ПРОЦЕССА (сервер в UTC), и каждый
+    // вечер после 17:00 по Лос-Анджелесу вкладки показывали на сутки вперёд: UTC уже перешёл
+    // на новый день, а у магазина он ещё не наступил.
     const { gte, lt } = utcDayRangeForLocalToday(DEFAULT_STORE_TZ);
-    const shift = f.preset === "tomorrow" ? 24 * 60 * 60 * 1000 : 0;
+    const DAY = 24 * 60 * 60 * 1000;
+    const shift = f.preset === "tomorrow" ? DAY : f.preset === "yesterday" ? -DAY : 0;
     where.deliveryDate = { gte: new Date(gte.getTime() + shift), lt: new Date(lt.getTime() + shift) };
   }
 

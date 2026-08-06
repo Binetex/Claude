@@ -32,6 +32,7 @@ import {
   updateOrderExpenseAction,
 } from "@/app/dashboard/orderExpenseActions";
 import { markOrderCommunicationsRead, countUnreadBySide, parseAttachments } from "@/integrations/quo/communicationsService";
+import { FloristAvatar } from "@/components/FloristAvatar";
 
 export const dynamic = "force-dynamic";
 
@@ -129,6 +130,15 @@ export default async function OwnerOrderPage({ params }: { params: Promise<{ id:
         <>
           <OrderStatusBadge status={order.orderStatus} paymentFailed={order.paymentFailed} />
           {showPayment && <PaymentStatusBadge status={order.paymentStatus} />}
+          {/* Кто делает букет — вопрос того же порядка, что и статус, поэтому стоит рядом,
+              а не в блоке назначения ниже по странице. Только у владельца: флорист и
+              колл-центр назначение не видят (см. serializeForOwner). */}
+          {order.currentFloristName && (
+            <span className="flex items-center gap-1.5 rounded-full border border-slate-200 bg-white py-0.5 pr-2.5 pl-0.5 text-xs font-medium text-slate-700">
+              <FloristAvatar name={order.currentFloristName} avatarUrl={order.currentFloristAvatarUrl} size={18} />
+              {order.currentFloristName}
+            </span>
+          )}
         </>
       }
       deliveryDate={order.deliveryDate}
