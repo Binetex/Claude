@@ -40,7 +40,7 @@ async function main() {
       siteId: true,
       currentFlorist: { select: { user: { select: { name: true } } } },
       items: {
-        select: { id: true, name: true, productId: true, variantId: true, externalPrice: true, floristItemPrice: true },
+        select: { id: true, name: true, quantity: true, productId: true, variantId: true, externalPrice: true, floristItemPrice: true },
       },
     },
     orderBy: { deliveryDate: "asc" },
@@ -104,8 +104,9 @@ async function main() {
             // Состав букета — снимок на момент назначения; у удалённой записи его не было.
             ...(live.floristComposition ? { floristCompositionSnapshot: live.floristComposition } : {}),
             // Цена позиции выправляется всегда: именно она показывается флористу строкой
-            // «вам», и сейчас там стоит цена клиента.
-            ...(newPrice != null ? { floristItemPrice: newPrice } : {}),
+            // «вам», и сейчас там стоит цена клиента. В поле лежит цена СТРОКИ, то есть
+            // уже умноженная на количество (см. applyAutoPriceSnapshot).
+            ...(newPrice != null ? { floristItemPrice: new Prisma.Decimal(newPrice).mul(item.quantity) } : {}),
           },
         });
 
@@ -114,10 +115,11 @@ async function main() {
         if (auto && newPrice != null) {
           const items = await tx.orderItem.findMany({
             where: { orderId: order.id },
-            select: { floristItemPrice: true, quantity: true },
+            select: { floristItemPrice: true },
           });
+          // Умножать на количество ВТОРОЙ раз нельзя: в снимке позиции оно уже учтено.
           const total = items.reduce(
-            (acc, i) => acc.add(new Prisma.Decimal(i.floristItemPrice).mul(i.quantity)),
+            (acc, i) => acc.add(new Prisma.Decimal(i.floristItemPrice)),
             new Prisma.Decimal(0)
           );
           await tx.order.update({ where: { id: order.id }, data: { floristTotal: total } });
