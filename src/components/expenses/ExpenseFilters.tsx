@@ -7,7 +7,8 @@
  * раздела по устройству месячная (строка = день месяца), и в годовом окне она превратилась
  * бы в 365 строк, отвечающих уже на другой вопрос.
  */
-import { useRouter, useSearchParams, usePathname } from "next/navigation";
+import { useSearchParams, usePathname } from "next/navigation";
+import { useOrdersNav, NavSpinner } from "@/app/dashboard/(owner)/orders/OrdersNav";
 import { Select } from "@/components/ui/select";
 
 const MONTHS = [
@@ -16,9 +17,11 @@ const MONTHS = [
 ];
 
 export function ExpenseFilters({ years }: { years: number[] }) {
-  const router = useRouter();
   const pathname = usePathname();
   const sp = useSearchParams();
+  // Месяц пересчитывает всю страницу на сервере: без видимого ожидания выбор из списка
+  // выглядит как зависание.
+  const { pending, go } = useOrdersNav();
 
   const now = new Date();
   const year = sp.get("year") ?? String(now.getUTCFullYear());
@@ -27,21 +30,22 @@ export function ExpenseFilters({ years }: { years: number[] }) {
   const update = (patch: Record<string, string>) => {
     const next = new URLSearchParams(sp.toString());
     for (const [k, v] of Object.entries(patch)) next.set(k, v);
-    router.push(`${pathname}?${next.toString()}`);
+    go(`${pathname}?${next.toString()}`);
   };
 
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <Select aria-label="Месяц" wrapperClassName="w-36" value={month} onChange={(e) => update({ month: e.target.value })}>
+      <Select aria-label="Месяц" disabled={pending} wrapperClassName="w-36" value={month} onChange={(e) => update({ month: e.target.value })}>
         {MONTHS.map((m, i) => (
           <option key={m} value={i + 1}>{m}</option>
         ))}
       </Select>
-      <Select aria-label="Год" wrapperClassName="w-24" value={year} onChange={(e) => update({ year: e.target.value })}>
+      <Select aria-label="Год" disabled={pending} wrapperClassName="w-24" value={year} onChange={(e) => update({ year: e.target.value })}>
         {years.map((y) => (
           <option key={y} value={y}>{y}</option>
         ))}
       </Select>
+      <NavSpinner />
     </div>
   );
 }

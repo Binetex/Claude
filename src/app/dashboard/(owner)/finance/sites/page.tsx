@@ -8,6 +8,7 @@ import { formatDollars } from "@/lib/cents";
 import { getSitesRevenue } from "@/modules/finance/sitesRevenue";
 import { resolvePeriod } from "@/modules/finance/period";
 import { FinancePeriodBar } from "@/components/finance/PeriodBar";
+import { OrdersNavProvider, OrdersPendingArea } from "@/app/dashboard/(owner)/orders/OrdersNav";
 import { SitesChart } from "./SitesChart";
 
 export const dynamic = "force-dynamic";
@@ -42,72 +43,81 @@ export default async function FinanceSitesPage({
     <div className="space-y-4">
       <PageHeader title="Магазины" />
 
-      <FinancePeriodBar current={period.kind} />
+      {/* Провайдер связывает панель периода с приглушением содержимого: страница
+          force-dynamic, и без видимого ожидания смена дат выглядит как зависание —
+          браузер молча ждёт сервер. loading.tsx здесь не помогает, он срабатывает на
+          входе в раздел, а не на смене searchParams внутри открытого маршрута. */}
+      <OrdersNavProvider>
+        <FinancePeriodBar current={period.kind} />
+        <OrdersPendingArea>
+          <div className="mt-4 space-y-4">
+          {/* На телефоне три колонки режут суммы — карточки идут в столбик. */}
+          <div className="grid gap-3 sm:grid-cols-3">
+            <StatCard label="Заказов" value={data.ordersTotal} />
+            <StatCard label="Выручка" value={formatDollars(data.revenueCents)} />
+            <StatCard label="Средний чек" value={formatDollars(data.avgCents)} />
+          </div>
 
-      {/* На телефоне три колонки режут суммы — карточки идут в столбик. */}
-      <div className="grid gap-3 sm:grid-cols-3">
-        <StatCard label="Заказов" value={data.ordersTotal} />
-        <StatCard label="Выручка" value={formatDollars(data.revenueCents)} />
-        <StatCard label="Средний чек" value={formatDollars(data.avgCents)} />
-      </div>
-
-      {/* График — как шли дни и из чего складывался каждый; таблица под ним — итоги за
-          весь период. Оба из одного серверного результата. */}
-      {data.rows.length > 0 && (
-        <Card>
-          <CardHeader className="flex flex-wrap items-center justify-between gap-3">
-            <CardTitle>Выручка по дням</CardTitle>
-            <span className="text-xs text-slate-400">{period.label}</span>
-          </CardHeader>
-          <CardBody>
-            <SitesChart points={data.points} series={data.series} />
-          </CardBody>
-        </Card>
-      )}
-
-      <Card>
-        <CardHeader className="flex flex-wrap items-center justify-between gap-3">
-          <CardTitle>Выручка по магазинам</CardTitle>
-          <span className="text-xs text-slate-400">{period.label}</span>
-        </CardHeader>
-        <CardBody className={data.rows.length === 0 ? undefined : "p-0"}>
-          {data.rows.length === 0 ? (
-            <EmptyState
-              title="За этот период заказов нет"
-              description="Заказы считаются по дате доставки. Отменённые и ожидающие оплаты не в счёт."
-            />
-          ) : (
-            <ul className="divide-y divide-slate-100">
-              {data.rows.map((r) => (
-                <li key={r.siteId}>
-                  <Link
-                    href={`/dashboard/finance/sites/${r.siteId}${q ? `?${q}` : ""}`}
-                    // Прозрачная рамка слева заранее: на hover она красится, и строка не
-                    // дёргается от появления границы.
-                    className="flex items-center gap-3 border-l-2 border-transparent px-4 py-3 transition-colors hover:border-emerald-500 hover:bg-slate-100/70 sm:gap-4"
-                  >
-                    {/* На узком экране — короткий код магазина в фиксированной колонке:
-                        полное имя забирало половину строки, и все суммы обрезались до «$3…».
-                        Код у магазина свой (Site.shortName), а не произвольные три буквы. */}
-                    <div className="w-16 shrink-0 truncate text-xs font-semibold text-slate-900 sm:w-auto sm:min-w-0 sm:flex-1 sm:text-sm">
-                      <span className="sm:hidden">{r.shortName}</span>
-                      <span className="hidden sm:inline">{r.name}</span>
-                    </div>
-                    <div className="grid flex-1 grid-cols-3 gap-x-2 text-right sm:gap-x-6">
-                      <Metric label="Заказов" value={String(r.ordersTotal)} />
-                      <Metric label="Выручка" value={formatDollars(r.revenueCents)} />
-                      <Metric label="Средний чек" shortLabel="Ср. чек" value={formatDollars(r.avgCents)} />
-                    </div>
-                    {/* Стрелка только на большом экране: на телефоне она отбирала у цифр
-                        последние 30px, а что по строке можно нажать — и так понятно. */}
-                    <ChevronRight aria-hidden className="hidden size-4 shrink-0 text-slate-300 sm:block" />
-                  </Link>
-                </li>
-              ))}
-            </ul>
+          {/* График — как шли дни и из чего складывался каждый; таблица под ним — итоги за
+              весь период. Оба из одного серверного результата. */}
+          {data.rows.length > 0 && (
+            <Card>
+              <CardHeader className="flex flex-wrap items-center justify-between gap-3">
+                <CardTitle>Выручка по дням</CardTitle>
+                <span className="text-xs text-slate-400">{period.label}</span>
+              </CardHeader>
+              <CardBody>
+                <SitesChart points={data.points} series={data.series} />
+              </CardBody>
+            </Card>
           )}
-        </CardBody>
-      </Card>
+
+          <Card>
+            <CardHeader className="flex flex-wrap items-center justify-between gap-3">
+              <CardTitle>Выручка по магазинам</CardTitle>
+              <span className="text-xs text-slate-400">{period.label}</span>
+            </CardHeader>
+            <CardBody className={data.rows.length === 0 ? undefined : "p-0"}>
+              {data.rows.length === 0 ? (
+                <EmptyState
+                  title="За этот период заказов нет"
+                  description="Заказы считаются по дате доставки. Отменённые и ожидающие оплаты не в счёт."
+                />
+              ) : (
+                <ul className="divide-y divide-slate-100">
+                  {data.rows.map((r) => (
+                    <li key={r.siteId}>
+                      <Link
+                        href={`/dashboard/finance/sites/${r.siteId}${q ? `?${q}` : ""}`}
+                        // Прозрачная рамка слева заранее: на hover она красится, и строка не
+                        // дёргается от появления границы.
+                        className="flex items-center gap-3 border-l-2 border-transparent px-4 py-3 transition-colors hover:border-emerald-500 hover:bg-slate-100/70 sm:gap-4"
+                      >
+                        {/* На узком экране — короткий код магазина в фиксированной колонке:
+                            полное имя забирало половину строки, и все суммы обрезались до «$3…».
+                            Код у магазина свой (Site.shortName), а не произвольные три буквы. */}
+                        <div className="w-16 shrink-0 truncate text-xs font-semibold text-slate-900 sm:w-auto sm:min-w-0 sm:flex-1 sm:text-sm">
+                          <span className="sm:hidden">{r.shortName}</span>
+                          <span className="hidden sm:inline">{r.name}</span>
+                        </div>
+                        <div className="grid flex-1 grid-cols-3 gap-x-2 text-right sm:gap-x-6">
+                          <Metric label="Заказов" value={String(r.ordersTotal)} />
+                          <Metric label="Выручка" value={formatDollars(r.revenueCents)} />
+                          <Metric label="Средний чек" shortLabel="Ср. чек" value={formatDollars(r.avgCents)} />
+                        </div>
+                        {/* Стрелка только на большом экране: на телефоне она отбирала у цифр
+                            последние 30px, а что по строке можно нажать — и так понятно. */}
+                        <ChevronRight aria-hidden className="hidden size-4 shrink-0 text-slate-300 sm:block" />
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </CardBody>
+          </Card>
+          </div>
+        </OrdersPendingArea>
+      </OrdersNavProvider>
 
       <p className="text-xs text-slate-400">
         Только выручка. Прибыль по магазинам не считается: общая закупка цветов и доля

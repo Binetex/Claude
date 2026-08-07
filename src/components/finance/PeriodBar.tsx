@@ -4,16 +4,22 @@
  *
  * Период живёт в адресе, а не в состоянии: ссылку на «неделю по THEFLOW» можно отправить
  * себе же, и обновление страницы её не теряет.
+ *
+ * Переход обёрнут в useOrdersNav — тот же механизм, что у фильтров заказов и у периода в
+ * кабинете флориста. Страницы force-dynamic, и без видимого ожидания клик по вкладке
+ * выглядит как зависание: браузер молча ждёт ответ сервера. loading.tsx здесь не помогает —
+ * он срабатывает на входе в раздел, а не на смене searchParams внутри открытого маршрута.
  */
-import { useRouter, usePathname, useSearchParams } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
+import { useOrdersNav, NavSpinner } from "@/app/dashboard/(owner)/orders/OrdersNav";
 import { DateRangePicker } from "@/components/ui/date-range-picker";
 import { PERIOD_TABS, type PeriodKind } from "@/modules/finance/period";
 import { cn } from "@/lib/cn";
 
 export function FinancePeriodBar({ current }: { current: PeriodKind }) {
-  const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
+  const { pending, go: navigate } = useOrdersNav();
 
   const go = (next: Record<string, string | undefined>) => {
     const p = new URLSearchParams(params.toString());
@@ -21,7 +27,7 @@ export function FinancePeriodBar({ current }: { current: PeriodKind }) {
       if (v) p.set(k, v);
       else p.delete(k);
     }
-    router.push(`${pathname}?${p.toString()}`);
+    navigate(`${pathname}?${p.toString()}`);
   };
 
   return (
@@ -31,10 +37,11 @@ export function FinancePeriodBar({ current }: { current: PeriodKind }) {
           <button
             key={t.key}
             type="button"
+            disabled={pending}
             // Диапазон сбрасываем: иначе вкладка подсвечена одна, а показан период другой.
             onClick={() => go({ period: t.key, from: undefined, to: undefined })}
             className={cn(
-              "rounded-md px-3 py-1 text-sm font-medium transition-colors",
+              "rounded-md px-3 py-1 text-sm font-medium transition-colors disabled:cursor-not-allowed",
               current === t.key ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-800"
             )}
           >
@@ -42,9 +49,11 @@ export function FinancePeriodBar({ current }: { current: PeriodKind }) {
           </button>
         ))}
       </div>
+      <NavSpinner />
 
       <DateRangePicker
         value={{ from: params.get("from") ?? undefined, to: params.get("to") ?? undefined }}
+        disabled={pending}
         placeholder="Выбрать даты"
         onChange={(next) => go({ period: "range", from: next.from, to: next.to })}
       />

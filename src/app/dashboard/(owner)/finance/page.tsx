@@ -5,6 +5,7 @@ import { EmptyState } from "@/components/ui/states";
 import { formatDollars } from "@/lib/cents";
 import { ExpenseFilters } from "@/components/expenses/ExpenseFilters";
 import { OwnerDayList } from "@/components/finance/OwnerDayList";
+import { OrdersNavProvider, OrdersPendingArea } from "@/app/dashboard/(owner)/orders/OrdersNav";
 import { OwnerMonthChart } from "./OwnerMonthChart";
 import { getOwnerMonth } from "@/modules/finance/ownerDashboard";
 import { yearOptions } from "@/modules/finance/expensePeriod";
@@ -68,62 +69,73 @@ export default async function FinanceDashboardPage({
     <div className="space-y-4">
       <PageHeader title="Финансы" />
 
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <StatCard label="Выручка" value={formatDollars(selected.revenueCents)} />
-        <StatCard label="Расходы" value={formatDollars(selected.expensesCents)} />
-        <StatCard label="Флористы" value={formatDollars(selected.floristEarningsCents)} />
-        <StatCard
-          label="Моя прибыль"
-          tone={selected.ownerNetCents < 0 ? "danger" : "success"}
-          value={
-            <span className="flex flex-wrap items-baseline gap-2">
-              {formatDollars(selected.ownerNetCents)}
-              {delta && (
-                <span className={`text-xs font-normal ${delta.positive ? "text-emerald-600" : "text-red-600"}`}>
-                  {delta.text}
+      {/* Выбор месяца стоит НАД содержимым, а не в шапке карточки «Итог»: он
+          пересчитывает всю страницу, и на время пересчёта содержимое приглушается —
+          вместе с карточкой пропал бы и сам переключатель. Заодно это тот же порядок,
+          что на «Магазинах» и «Флористах»: период сверху, данные под ним. */}
+      <OrdersNavProvider>
+        <ExpenseFilters years={yearOptions(earliest?.deliveryDate ?? null)} />
+        <OrdersPendingArea>
+          <div className="mt-4 space-y-4">
+
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+            <StatCard label="Выручка" value={formatDollars(selected.revenueCents)} />
+            <StatCard label="Расходы" value={formatDollars(selected.expensesCents)} />
+            <StatCard label="Флористы" value={formatDollars(selected.floristEarningsCents)} />
+            <StatCard
+              label="Моя прибыль"
+              tone={selected.ownerNetCents < 0 ? "danger" : "success"}
+              value={
+                <span className="flex flex-wrap items-baseline gap-2">
+                  {formatDollars(selected.ownerNetCents)}
+                  {delta && (
+                    <span className={`text-xs font-normal ${delta.positive ? "text-emerald-600" : "text-red-600"}`}>
+                      {delta.text}
+                    </span>
+                  )}
                 </span>
-              )}
-            </span>
-          }
-        />
-      </div>
-
-      {/* График и список — про один и тот же месяц и одни и те же числа: график берёт
-          `selected.days`, из которых сложены карточки сверху. Второго источника нет.
-          Расходов на нём намеренно нет: он про то, как заработок делится между мной и
-          флористами, а не про то, из чего складывается выручка. */}
-      {selected.days.length > 0 && (
-        <Card>
-          <CardHeader className="flex flex-wrap items-center justify-between gap-3">
-            <CardTitle>Прибыль по дням</CardTitle>
-            <span className="text-xs text-slate-400">Моя прибыль и заработок флористов</span>
-          </CardHeader>
-          <CardBody>
-            <OwnerMonthChart
-              days={selected.days}
-              from={from.toISOString().slice(0, 10)}
-              to={to.toISOString().slice(0, 10)}
+              }
             />
-          </CardBody>
-        </Card>
-      )}
+          </div>
 
-      <Card>
-        <CardHeader className="flex flex-wrap items-center justify-between gap-3">
-          <CardTitle>Итог</CardTitle>
-          <ExpenseFilters years={yearOptions(earliest?.deliveryDate ?? null)} />
-        </CardHeader>
-        <CardBody className={selected.days.length === 0 ? undefined : "p-0"}>
-          {selected.days.length === 0 ? (
-            <EmptyState
-              title="За этот месяц доставленных заказов нет"
-              description="Дни появляются здесь, когда заказ переходит в «Доставлен»."
-            />
-          ) : (
-            <OwnerDayList days={selected.days} />
+          {/* График и список — про один и тот же месяц и одни и те же числа: график берёт
+              `selected.days`, из которых сложены карточки сверху. Второго источника нет.
+              Расходов на нём намеренно нет: он про то, как заработок делится между мной и
+              флористами, а не про то, из чего складывается выручка. */}
+          {selected.days.length > 0 && (
+            <Card>
+              <CardHeader className="flex flex-wrap items-center justify-between gap-3">
+                <CardTitle>Прибыль по дням</CardTitle>
+                <span className="text-xs text-slate-400">Моя прибыль и заработок флористов</span>
+              </CardHeader>
+              <CardBody>
+                <OwnerMonthChart
+                  days={selected.days}
+                  from={from.toISOString().slice(0, 10)}
+                  to={to.toISOString().slice(0, 10)}
+                />
+              </CardBody>
+            </Card>
           )}
-        </CardBody>
-      </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Итог</CardTitle>
+            </CardHeader>
+            <CardBody className={selected.days.length === 0 ? undefined : "p-0"}>
+              {selected.days.length === 0 ? (
+                <EmptyState
+                  title="За этот месяц доставленных заказов нет"
+                  description="Дни появляются здесь, когда заказ переходит в «Доставлен»."
+                />
+              ) : (
+                <OwnerDayList days={selected.days} />
+              )}
+            </CardBody>
+          </Card>
+          </div>
+        </OrdersPendingArea>
+      </OrdersNavProvider>
     </div>
   );
 }
