@@ -321,20 +321,20 @@ model Florist {
 
   /// Выходные по дням недели: 0 = воскресенье … 6 = суббота (как getUTCDay).
   /// Массивом, а не таблицей: значений максимум семь, и join ради них дороже пользы.
-  weekendDays Int[] @default([])
+  weekendDays Int[]      @default([])
   /// Отдельные даты недоступности (отпуск, больничный). UTC-полночь БИЗНЕС-дня —
   /// та же конвенция, что у Order.deliveryDate; сравнение идёт день в день, без таймзон.
-  daysOff DateTime[] @default([])
+  daysOff     DateTime[] @default([])
 
-  createdAt         DateTime                 @default(now())
+  createdAt DateTime @default(now())
 
-  sitePriorities SiteFloristPriority[]
-  productPrices  FloristProductPrice[]
-  currentOrders  Order[]                @relation("CurrentFlorist")
-  assignments    OrderAssignment[]
+  sitePriorities  SiteFloristPriority[]
+  productPrices   FloristProductPrice[]
+  currentOrders   Order[]                 @relation("CurrentFlorist")
+  assignments     OrderAssignment[]
   pickupLocations FloristPickupLocation[]
-  telegramBot    TelegramBot?
-  deliveries     Delivery[]             @relation("DeliveryFlorist")
+  telegramBot     TelegramBot?
+  deliveries      Delivery[]              @relation("DeliveryFlorist")
 
   // ── Финансы (Stage 2) ──
   ledgerEntries      LedgerEntry[]
@@ -1265,10 +1265,10 @@ model OrderItem {
   // У такой позиции productId и variantId = NULL, и вывести финансовый тип неоткуда.
   // NULL здесь — обычный случай: тип берётся из Product/ProductVariant, как и раньше.
   // Заполняется только владельцем в форме ручного заказа (блок «Дополнительно»).
-  financialTypeSnapshot      FinancialItemType?
+  financialTypeSnapshot     FinancialItemType?
   /// Закупочная стоимость вазы или подарка этой позиции, в центах. Имеет смысл только
   /// вместе с financialTypeSnapshot: без каталога VasePurchaseCost привязать не к чему.
-  purchaseCostSnapshotCents  Int?
+  purchaseCostSnapshotCents Int?
 
   @@index([orderId])
 }
@@ -1567,8 +1567,8 @@ model Delivery {
   // 0 = котировок не вернулось вовсе, то есть маршрут никто не берётся везти — это и есть
   // сигнал, ради которого проверка существует. Котировки Burq живут минуты, поэтому число
   // всегда читается вместе с couriersCheckedAt: без времени оно ничего не значит.
-  couriersCheckedAt        DateTime?
-  couriersAvailable        Int?
+  couriersCheckedAt DateTime?
+  couriersAvailable Int?
 
   // Переназначение/суперседанс попыток (историю не переписываем).
   supersedesDeliveryId   String?
@@ -2287,8 +2287,8 @@ model SiteEmailTemplate {
 
 /// Категория расхода — верхний уровень месячной сводки.
 model OwnerExpenseCategory {
-  id   String @id @default(cuid())
-  name String @unique
+  id         String    @id @default(cuid())
+  name       String    @unique
   /// Встроенную категорию нельзя убрать из списка: она входит в стартовый набор.
   isBuiltin  Boolean   @default(false)
   sortOrder  Int       @default(100)
@@ -2342,15 +2342,60 @@ model OwnerExpense {
   /// UTC-полночь локального дня — конвенция Order.deliveryDate и DailyFlowerExpense.
   startDay DateTime
   /// NULL у ONE_OFF и у бессрочных DAILY/MONTHLY.
-  endDay DateTime?
+  endDay   DateTime?
 
   createdBy String
-  createdAt DateTime  @default(now())
+  createdAt DateTime @default(now())
   updatedBy String?
-  updatedAt DateTime  @updatedAt
+  updatedAt DateTime @updatedAt
 
   @@index([startDay])
   @@index([endDay])
   @@index([categoryId])
   @@index([subcategoryId])
+}
+
+/// Раскладка печатного листа записок. Выбирается настройкой флориста `financeVisibility`:
+/// FULL → TALL, MAKER_ONLY → WIDE (см. print/order-cards/page.tsx).
+enum PrintLayoutKind {
+  /// Альбомный лист, 4 карточки сеткой 2×2.
+  WIDE
+  /// Портретный лист, 2 карточки одна над другой.
+  TALL
+}
+
+/// Настройки печати записок для ОДНОЙ раскладки. Ровно две строки — WIDE и TALL.
+///
+/// Здесь только тюнинг: размер листа, ориентация и сетка сюда не входят, это сам формат и
+/// живёт он в коде (`SHEET_FORMAT`). Строки может не быть — тогда работают значения по
+/// умолчанию из `PRINT_DEFAULTS`, поэтому печать не зависит от того, заходил ли владелец
+/// в настройки.
+///
+/// Дробных чисел нет намеренно: поле листа в тысячных дюйма (500 = 0.5in), интерлиньяж в
+/// процентах (140 = 1.4). Целые не накапливают ошибку округления и одинаково выглядят в
+/// форме, в БД и в CSS.
+model PrintLayoutSettings {
+  layout PrintLayoutKind @id
+
+  /// Непечатаемая кромка принтера, тысячные дюйма. Уменьшает карточку со всех сторон.
+  safeMarginMils Int
+  /// Поле для текста записки, px при 96dpi. Отступы карточки — то же число с другой
+  /// стороны: (карточка − поле) / 2. Крутится одно, показываются оба.
+  textWidthPx    Int
+  textHeightPx   Int
+
+  /// Кегль записки: потолок, пол, с какой строки мельчает и на сколько.
+  basePt        Int
+  minPt         Int
+  baseMaxLines  Int
+  crowdedStepPt Int
+  /// Интерлиньяж записки, проценты (140 = 1.4).
+  lineHeightPct Int
+
+  /// Блок получателя: кегль и подъём над серединой карточки, px.
+  recipientPt     Int
+  recipientLiftPx Int
+
+  updatedBy String?
+  updatedAt DateTime @updatedAt
 }

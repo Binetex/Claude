@@ -11,19 +11,9 @@ import {
   type RecipientInfo,
 } from "@/lib/print/packSheets";
 import { escapeHtml, isBlankCardMessage } from "@/lib/print/cardText";
-import { printCss, textArea, sheetWidthPx, SHEET_IN, MSG_LINE_HEIGHT, type PrintLayout } from "./printCss";
+import { geometry, sheetWidthPx, type PrintLayout, type PrintSettings } from "@/modules/print/settings";
+import { printCss } from "./printCss";
 import type { PrintOrder } from "@/modules/print/loadPrintable";
-
-/**
- * Диапазон кегля берётся из раскладки (см. SHEET_IN): у портретной карточки потолок ниже,
- * потому что она сама крупнее, и пол ниже, чтобы длинная записка помещалась одним куском.
- *
- * Базовый кегль достаётся только коротким запискам — до четырёх строк включительно. С пятой
- * строки текст сразу печатается на ступень мельче: место ещё есть, но крупный шрифт на
- * такой объём выглядит по-плакатному. Дальше работает обычный подбор до пола раскладки.
- */
-const BASE_MAX_LINES = 4;
-const CROWDED_STEP_PT = 2;
 
 function recipientOf(o: PrintOrder): RecipientInfo {
   return {
@@ -42,13 +32,22 @@ function cityStateZip(r: RecipientInfo): string {
   return [r.city, sz].filter(Boolean).join(", ");
 }
 
-export function PrintDocument({ orders, layout }: { orders: PrintOrder[]; layout: PrintLayout }) {
+export function PrintDocument({
+  orders,
+  layout,
+  settings,
+}: {
+  orders: PrintOrder[];
+  layout: PrintLayout;
+  settings: PrintSettings;
+}) {
   const wide = layout === "wide";
   const measRef = useRef<HTMLDivElement>(null);
   const [pages, setPages] = useState<Page[] | null>(null);
+  const g = geometry(layout, settings);
 
-  // Экранный масштаб листа. Лист задан в дюймах, поэтому альбомные 11" (1056px) в окно уже
-  // этого не влезали и обрезались по правому краю. Уменьшаем ТОЛЬКО показ; печать берёт
+  // Экранный масштаб листа. Лист задан в дюймах, поэтому альбомные 11in (1056px) в окно уже
+  // не влезали и обрезались по правому краю. Уменьшаем ТОЛЬКО показ; печать берёт
   // настоящие размеры, потому что правило с --fit живёт внутри @media screen.
   // 1 — потолок: растягивать лист больше натуральной величины незачем.
   const [fit, setFit] = useState(1);
@@ -59,15 +58,16 @@ export function PrintDocument({ orders, layout }: { orders: PrintOrder[]; layout
     return () => window.removeEventListener("resize", update);
   }, [layout]);
 
+  const { textWidthPx, textHeightPx, basePt, minPt, baseMaxLines, crowdedStepPt } = g.settings;
+  const lineHeight = g.lineHeight;
+
   useLayoutEffect(() => {
     const meas = measRef.current;
     if (!meas) return;
-    const area = textArea(layout);
-    const { basePt, minPt } = SHEET_IN[layout];
-    meas.style.width = `${area.width}px`;
+    meas.style.width = `${textWidthPx}px`;
     const measure = (text: string, fontPt: number): number => {
       meas.style.fontSize = `${fontPt}pt`;
-      meas.innerHTML = `<div style="white-space:pre-wrap;line-height:${MSG_LINE_HEIGHT}">${escapeHtml(text)}</div>`;
+      meas.innerHTML = `<div style="white-space:pre-wrap;line-height:${lineHeight}">${escapeHtml(text)}</div>`;
       return meas.offsetHeight;
     };
 
@@ -76,20 +76,22 @@ export function PrintDocument({ orders, layout }: { orders: PrintOrder[]; layout
       if (isBlankCardMessage(o.cardMessage)) return buildOrderHalves(recipient, [], basePt);
 
       // Кегль подбирается ДЛЯ КАЖДОЙ открытки отдельно: короткая записка не должна мельчать
-      // из-за того, что в этом же документе печатается длинная.
+      // из-за того, что в этом же документе печатается длинная. Базовый кегль достаётся
+      // только коротким — с (baseMaxLines + 1)-й строки текст сразу печатается на ступень
+      // мельче: место ещё есть, но крупный шрифт на такой объём выглядит по-плакатному.
       const startPt = startingFontPt(
         o.cardMessage,
         {
           basePt,
-          crowdedPt: Math.max(basePt - CROWDED_STEP_PT, minPt),
-          maxLinesAtBase: BASE_MAX_LINES,
-          lineHeightRatio: MSG_LINE_HEIGHT,
+          crowdedPt: Math.max(basePt - crowdedStepPt, minPt),
+          maxLinesAtBase: baseMaxLines,
+          lineHeightRatio: lineHeight,
         },
         measure
       );
       const { fontPt, fits } = fitFontPt(
         o.cardMessage,
-        { basePt: startPt, minPt, areaHeightPx: area.height },
+        { basePt: startPt, minPt, areaHeightPx: textHeightPx },
         measure
       );
 
@@ -99,18 +101,18 @@ export function PrintDocument({ orders, layout }: { orders: PrintOrder[]; layout
         ? [o.cardMessage]
         : splitCardIntoParts(
             o.cardMessage,
-            { firstHeightPx: area.height, contHeightPx: area.height },
+            { firstHeightPx: textHeightPx, contHeightPx: textHeightPx },
             (t) => measure(t, fontPt)
           );
       return buildOrderHalves(recipient, parts.length ? parts : [o.cardMessage], fontPt);
     });
 
     setPages(packColumnsIntoPages(packOrderColumns(perOrder), layout === "wide" ? 2 : 1));
-  }, [orders, layout]);
+  }, [orders, layout, textWidthPx, textHeightPx, basePt, minPt, baseMaxLines, crowdedStepPt, lineHeight]);
 
   return (
     <>
-      <style>{printCss(layout)}</style>
+      <style>{printCss(g)}</style>
       <div ref={measRef} className="no-print measurer" aria-hidden />
 
       <div className="no-print toolbar">

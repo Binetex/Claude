@@ -89,9 +89,12 @@ describe("loadPrintableCards — доступ (§14: 9,10,11)", () => {
     expect(cards).toHaveLength(0);
   });
 
-  it("10) владелец видит все заказы", async () => {
+  it("10) владелец НЕ печатает — печать только у флориста", async () => {
+    // Пачка владельца собралась бы из заказов разных флористов, а раскладка записки
+    // зависит от флориста: двух ориентаций листа на один принтер не отправить. Владелец
+    // настраивает печать (/dashboard/settings/print) и смотрит образец, а не печатает.
     const cards = await loadPrintableCards({ role: "OWNER" }, { ids: [ids.o1, ids.o3] });
-    expect(cards.map((c) => c.orderId).sort()).toEqual([ids.o1, ids.o3].sort());
+    expect(cards).toHaveLength(0);
   });
 
   it("CALL_CENTER не имеет доступа к массовой печати", async () => {

@@ -2,7 +2,8 @@ import { requireUser } from "@/lib/rbac";
 import { loadPrintableCards, type PrintDay } from "@/modules/print/loadPrintable";
 import { PrintDocument } from "./PrintDocument";
 import { prisma } from "@/lib/db";
-import type { PrintLayout } from "./printCss";
+import type { PrintLayout } from "@/modules/print/settings";
+import { loadPrintSettings } from "@/modules/print/settingsStore";
 
 /**
  * Печатный документ открыток. Маршрут вне dashboard-layout (без chrome). Доступ проверяется
@@ -36,6 +37,9 @@ export default async function PrintOrderCardsPage({
     ? await prisma.florist.findUnique({ where: { id: user.floristId }, select: { financeVisibility: true } })
     : null;
   const layout: PrintLayout = florist?.financeVisibility === "FULL" ? "tall" : "wide";
+  // Поля и кегли настраивает владелец (/dashboard/settings/print). Строки в БД может не
+  // быть — тогда печатается по умолчанию, см. PRINT_DEFAULTS.
+  const settings = await loadPrintSettings(layout);
 
-  return <PrintDocument orders={orders} layout={layout} />;
+  return <PrintDocument orders={orders} layout={layout} settings={settings} />;
 }
