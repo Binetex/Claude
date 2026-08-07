@@ -84,17 +84,23 @@ export default async function FinanceSitesPage({
                     href={`/dashboard/finance/sites/${r.siteId}${q ? `?${q}` : ""}`}
                     // Прозрачная рамка слева заранее: на hover она красится, и строка не
                     // дёргается от появления границы.
-                    className="flex items-center gap-4 border-l-2 border-transparent px-4 py-3 transition-colors hover:border-emerald-500 hover:bg-slate-50/60"
+                    className="flex items-center gap-3 border-l-2 border-transparent px-4 py-3 transition-colors hover:border-emerald-500 hover:bg-slate-100/70 sm:gap-4"
                   >
-                    <div className="min-w-0 flex-1 truncate text-sm font-semibold text-slate-900">
-                      {r.name}
+                    {/* На узком экране — короткий код магазина в фиксированной колонке:
+                        полное имя забирало половину строки, и все суммы обрезались до «$3…».
+                        Код у магазина свой (Site.shortName), а не произвольные три буквы. */}
+                    <div className="w-16 shrink-0 truncate text-xs font-semibold text-slate-900 sm:w-auto sm:min-w-0 sm:flex-1 sm:text-sm">
+                      <span className="sm:hidden">{r.shortName}</span>
+                      <span className="hidden sm:inline">{r.name}</span>
                     </div>
-                    <div className="grid flex-1 grid-cols-3 gap-x-4 text-right sm:gap-x-6">
+                    <div className="grid flex-1 grid-cols-3 gap-x-2 text-right sm:gap-x-6">
                       <Metric label="Заказов" value={String(r.ordersTotal)} />
                       <Metric label="Выручка" value={formatCents(r.revenueCents)} />
-                      <Metric label="Средний чек" value={formatCents(r.avgCents)} />
+                      <Metric label="Средний чек" shortLabel="Ср. чек" value={formatCents(r.avgCents)} />
                     </div>
-                    <ChevronRight aria-hidden className="size-4 shrink-0 text-slate-300" />
+                    {/* Стрелка только на большом экране: на телефоне она отбирала у цифр
+                        последние 30px, а что по строке можно нажать — и так понятно. */}
+                    <ChevronRight aria-hidden className="hidden size-4 shrink-0 text-slate-300 sm:block" />
                   </Link>
                 </li>
               ))}
@@ -111,10 +117,20 @@ export default async function FinanceSitesPage({
   );
 }
 
-function Metric({ label, value }: { label: string; value: string }) {
+/** `shortLabel` — для узкого экрана, где полная подпись обрезается многоточием. */
+function Metric({ label, shortLabel, value }: { label: string; shortLabel?: string; value: string }) {
   return (
     <div className="min-w-0">
-      <div className="truncate text-xs text-slate-400">{label}</div>
+      <div className="truncate text-xs text-slate-400">
+        {shortLabel ? (
+          <>
+            <span className="sm:hidden">{shortLabel}</span>
+            <span className="hidden sm:inline">{label}</span>
+          </>
+        ) : (
+          label
+        )}
+      </div>
       <div className="mt-0.5 truncate text-sm font-semibold tabular-nums text-slate-900">{value}</div>
     </div>
   );

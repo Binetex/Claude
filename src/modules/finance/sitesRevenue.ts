@@ -51,6 +51,8 @@ const avgOf = (revenueCents: number, orders: number): number =>
 export type SiteRevenueRow = {
   siteId: string;
   name: string;
+  /** Короткий код магазина. На узком экране полное имя съедает место у цифр. */
+  shortName: string;
   ordersTotal: number;
   revenueCents: number;
   avgCents: number;
@@ -119,10 +121,11 @@ export async function getSitesRevenue(from: Date, to: Date): Promise<SitesRevenu
       _count: { _all: true },
       _sum: { customerTotal: true },
     }),
-    prisma.site.findMany({ select: { id: true, name: true }, orderBy: { createdAt: "asc" } }),
+    prisma.site.findMany({ select: { id: true, name: true, shortName: true }, orderBy: { createdAt: "asc" } }),
   ]);
 
   const nameById = new Map(sites.map((s) => [s.id, s.name]));
+  const shortById = new Map(sites.map((s) => [s.id, s.shortName]));
   // Цвет — по месту в полном списке магазинов, поэтому от выбранного периода не зависит.
   const colorById = new Map(sites.map((s, i) => [s.id, seriesColor(i)]));
 
@@ -149,6 +152,7 @@ export async function getSitesRevenue(from: Date, to: Date): Promise<SitesRevenu
     .map(([siteId, v]) => ({
       siteId,
       name: nameById.get(siteId) ?? siteId,
+      shortName: shortById.get(siteId) ?? siteId,
       ordersTotal: v.ordersTotal,
       revenueCents: v.revenueCents,
       avgCents: avgOf(v.revenueCents, v.ordersTotal),

@@ -5,6 +5,10 @@
  * выписка, которая была раньше, растягивала строку на четыре этажа — четыре дня уже не
  * помещались на экран, а сравнить их между собой можно только видя рядом.
  *
+ * Дни разделены чередующейся заливкой, а не линиями: на телефоне строка занимает четыре
+ * этажа, и тонкая линия между ними теряется — глаз перестаёт понимать, где кончается один
+ * день и начинается следующий. Заливка держит границу без единого лишнего пикселя.
+ *
  * Итогов внизу нет: они переехали в карточки над списком, где на них смотрят в первую
  * очередь. Дублировать их ещё и в подвале значило бы показать одно число дважды.
  *
@@ -73,17 +77,17 @@ export function OwnerDayList({ days }: { days: OwnerDay[] }) {
 
   return (
     <div>
-      <ul className="divide-y divide-slate-100">
+      <ul>
         {days.map((d) => {
           const date = new Date(`${d.day}T00:00:00.000Z`);
           const missing = missingList(d);
           return (
-            <li key={d.day}>
+            <li key={d.day} className="even:bg-slate-50/70">
               <Link
                 href={`/dashboard/finance/day/${d.day}`}
                 // Прозрачная рамка слева заранее: на hover она красится, и строка не
                 // дёргается от появления границы.
-                className="flex items-center gap-4 border-l-2 border-transparent px-4 py-3 transition-colors hover:border-emerald-500 hover:bg-slate-50/60"
+                className="flex items-center gap-3 border-l-2 border-transparent px-4 py-3 transition-colors hover:border-emerald-500 hover:bg-slate-100/70 sm:gap-4"
               >
                 <div className="w-9 shrink-0 text-center">
                   <div className="text-lg leading-none font-semibold text-slate-900">{date.getUTCDate()}</div>
@@ -113,7 +117,9 @@ export function OwnerDayList({ days }: { days: OwnerDay[] }) {
                   <div className="mt-1 text-xs text-slate-400 sm:hidden">{ordersLabel(d.ordersTotal)}</div>
                 </div>
 
-                <ChevronRight aria-hidden className="size-4 shrink-0 text-slate-300" />
+                {/* Стрелка только на большом экране: на телефоне она вместе с отступом
+                    отбирала у цифр почти 50px, из-за чего правая колонка липла к краю. */}
+                <ChevronRight aria-hidden className="hidden size-4 shrink-0 text-slate-300 sm:block" />
               </Link>
             </li>
           );
