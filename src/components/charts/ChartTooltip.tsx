@@ -62,9 +62,12 @@ export function StackedChartTooltip({
     return typeof hit?.value === "number" ? hit.value : 0;
   };
 
+  // Отсеиваются только НУЛИ: они забивали бы список, ничего не сообщая. Отрицательные
+  // остаются — на убыточном дне спрятать минус значило бы показать итог больше настоящего,
+  // потому что итог здесь складывается из тех же сегментов.
   const parts = series
     .map((s) => ({ ...s, value: valueOf(s.key) }))
-    .filter((s) => s.value > 0)
+    .filter((s) => s.value !== 0)
     .sort((a, b) => b.value - a.value);
 
   const total = parts.reduce((a, s) => a + s.value, 0);

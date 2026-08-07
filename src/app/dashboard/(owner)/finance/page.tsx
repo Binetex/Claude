@@ -5,6 +5,7 @@ import { EmptyState } from "@/components/ui/states";
 import { formatCents } from "@/lib/cents";
 import { ExpenseFilters } from "@/components/expenses/ExpenseFilters";
 import { OwnerDayList } from "@/components/finance/OwnerDayList";
+import { OwnerMonthChart } from "./OwnerMonthChart";
 import { getOwnerMonth } from "@/modules/finance/ownerDashboard";
 import { yearOptions } from "@/modules/finance/expensePeriod";
 import { prisma } from "@/lib/db";
@@ -86,6 +87,26 @@ export default async function FinanceDashboardPage({
           }
         />
       </div>
+
+      {/* График и список — про один и тот же месяц и одни и те же числа: график берёт
+          `selected.days`, из которых сложены карточки сверху. Второго источника нет. */}
+      {selected.days.length > 0 && (
+        <Card>
+          <CardHeader className="flex flex-wrap items-center justify-between gap-3">
+            <CardTitle>Куда уходит выручка</CardTitle>
+            <span className="text-xs text-slate-400">
+              Высота столбца — выручка дня: флористы + расходы + прибыль
+            </span>
+          </CardHeader>
+          <CardBody>
+            <OwnerMonthChart
+              days={selected.days}
+              from={from.toISOString().slice(0, 10)}
+              to={to.toISOString().slice(0, 10)}
+            />
+          </CardBody>
+        </Card>
+      )}
 
       <Card>
         <CardHeader className="flex flex-wrap items-center justify-between gap-3">
