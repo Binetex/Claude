@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { printCss, cellSize, CARD_PADDING_PX, SAFE_MARGIN_IN, SHEET_IN } from "./printCss";
+import { printCss, cellSize, textArea, SAFE_MARGIN_IN, SHEET_IN } from "./printCss";
 
 /**
  * Раскладок две, и выбирает её настройка флориста:
@@ -94,31 +94,34 @@ describe("безопасные поля печати", () => {
   });
 });
 
-describe("поле карточки", () => {
-  it("одним значением со всех сторон, а не по сторонам", () => {
-    expect(CARD_PADDING_PX).toBe(44);
-    expect(printCss("wide")).toMatch(/\.card\s*\{[^}]*padding:\s*44px;/);
+describe("поля карточки", () => {
+  it("альбомная — 44px со всех сторон", () => {
+    expect(printCss("wide")).toMatch(/\.card\s*\{[^}]*padding:\s*44px 44px;/);
+  });
+
+  it("портретная — по бокам ВДВОЕ шире, сверху и снизу столько же", () => {
+    expect(printCss("tall")).toMatch(/\.card\s*\{[^}]*padding:\s*44px 88px;/);
+    expect(SHEET_IN.tall.padX).toBe(2 * SHEET_IN.wide.padX);
+    expect(SHEET_IN.tall.padY).toBe(SHEET_IN.wide.padY);
   });
 
   it("текст не упирается в линию реза", () => {
     // Ножницы редко идут точно по линии — нужен заметный зазор, около полусантиметра.
-    expect(CARD_PADDING_PX).toBeGreaterThanOrEqual(40);
+    for (const l of ["wide", "tall"] as const) {
+      expect(SHEET_IN[l].padX).toBeGreaterThanOrEqual(40);
+      expect(SHEET_IN[l].padY).toBeGreaterThanOrEqual(40);
+    }
   });
 
   it("текста помещается больше на портретной карточке, чем на альбомной", () => {
-    const area = (l: "wide" | "tall") => {
-      const c = cellSize(l);
-      return (c.w - 2 * CARD_PADDING_PX) * (c.h - 2 * CARD_PADDING_PX - 12);
-    };
+    const a = (l: "wide" | "tall") => textArea(l).width * textArea(l).height;
     // Ради этого портретную раскладку и вернули: записка получается «на полстраницы».
-    expect(area("tall")).toBeGreaterThan(area("wide") * 2);
+    expect(a("tall")).toBeGreaterThan(a("wide") * 1.5);
   });
 
   it("даже на альбомной карточке остаётся место на несколько строк", () => {
-    const c = cellSize("wide");
-    const msgAreaH = c.h - 2 * CARD_PADDING_PX - 12;
     // Самым крупным шрифтом (16pt ≈ 21.3px, line-height 1.4).
-    expect(msgAreaH).toBeGreaterThan(21.3 * 1.4 * 6);
+    expect(textArea("wide").height).toBeGreaterThan(21.3 * 1.4 * 6);
   });
 
   it("лист и карточка защищены от разрыва между страницами принтера", () => {
@@ -136,5 +139,39 @@ describe("поле карточки", () => {
     const css = printCss("wide");
     expect(css).toMatch(/\.measurer\s*\{[^}]*overflow-wrap:\s*anywhere/);
     expect(css).toMatch(/\.card\s*\{[^}]*overflow-wrap:\s*anywhere/);
+  });
+});
+
+/**
+ * Кегль записки. У портретной карточки он ниже с обеих сторон: сверху — чтобы текст не
+ * выглядел плакатом на большом листе, снизу — чтобы длинная записка помещалась ОДНИМ куском.
+ * Именно пол решает, поедет ли продолжение на второй лист.
+ */
+describe("диапазон кегля", () => {
+  it("портретная: потолок 14pt, пол 8pt", () => {
+    expect(SHEET_IN.tall.basePt).toBe(14);
+    expect(SHEET_IN.tall.minPt).toBe(8);
+  });
+
+  it("альбомная не меняется: потолок 16pt, пол 10pt", () => {
+    expect(SHEET_IN.wide.basePt).toBe(16);
+    expect(SHEET_IN.wide.minPt).toBe(10);
+  });
+
+  it("у портретной обе границы ниже, чем у альбомной", () => {
+    expect(SHEET_IN.tall.basePt).toBeLessThan(SHEET_IN.wide.basePt);
+    expect(SHEET_IN.tall.minPt).toBeLessThan(SHEET_IN.wide.minPt);
+  });
+
+  it("на минимальном кегле в портрет влезает БОЛЬШЕ, чем в альбом", () => {
+    // То, ради чего пол и опущен: разрыв записки на второй лист должен стать реже, а не чаще.
+    const capacity = (l: "wide" | "tall") => {
+      const a = textArea(l);
+      const px = (SHEET_IN[l].minPt * 96) / 72;
+      const lines = Math.floor(a.height / (px * 1.4));
+      const perLine = Math.floor(a.width / (px * 0.5)); // грубая оценка ширины символа
+      return lines * perLine;
+    };
+    expect(capacity("tall")).toBeGreaterThan(capacity("wide"));
   });
 });

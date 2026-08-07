@@ -30,10 +30,21 @@ export const SAFE_MARGIN_IN = 0.5;
  */
 export type PrintLayout = "wide" | "tall";
 
-/** Лист US Letter: альбомно 11×8.5", портретно 8.5×11". */
+/**
+ * Всё, чем отличаются раскладки: размер листа, сетка, поля карточки и диапазон кегля.
+ * Одна таблица вместо россыпи констант — иначе половину значений однажды поправят, а
+ * половину забудут.
+ *
+ * У портретной карточки поля по бокам ВДВОЕ шире: она вчетверо крупнее, и текст, начатый
+ * у самого края семидюймового листа, читается как объявление, а не как записка.
+ *
+ * Кегль там же ниже: потолок 14pt вместо 16 и пол 8pt вместо 10. Низкий пол важнее, чем
+ * кажется — именно он решает, поместится длинная записка целиком или уедет продолжением на
+ * второй лист. Мельче, но одним куском, лучше, чем крупно и разорванно.
+ */
 export const SHEET_IN = {
-  wide: { w: 11, h: 8.5, cols: 2, rows: 2 },
-  tall: { w: 8.5, h: 11, cols: 1, rows: 2 },
+  wide: { w: 11, h: 8.5, cols: 2, rows: 2, padX: 44, padY: 44, basePt: 16, minPt: 10 },
+  tall: { w: 8.5, h: 11, cols: 1, rows: 2, padX: 88, padY: 44, basePt: 14, minPt: 8 },
 } as const;
 
 /** Размер карточки в px при 96 dpi — лист минус поля, поделённый на сетку. */
@@ -46,10 +57,14 @@ export function cellSize(layout: PrintLayout): { w: number; h: number } {
 }
 
 /**
- * Внутреннее поле карточки, px. Оно же — расстояние от линии реза до текста, поэтому мелким
- * его брать нельзя: ножницы редко идут точно по линии.
+ * Область под текст записки: карточка минус поля. Двенадцать пикселей запаса снизу — чтобы
+ * последняя строка не липла к краю обрезки.
  */
-export const CARD_PADDING_PX = 44;
+export function textArea(layout: PrintLayout): { width: number; height: number } {
+  const s = SHEET_IN[layout];
+  const cell = cellSize(layout);
+  return { width: cell.w - 2 * s.padX, height: cell.h - 2 * s.padY - 12 };
+}
 
 /**
  * Линии реза — вспомогательные, а не часть открытки: их видно ровно настолько, чтобы попасть
@@ -106,7 +121,7 @@ export function printCss(layout: PrintLayout): string {
 .cut-v { position: absolute; top: 0; bottom: 0; left: 50%; border-left: 1px dashed ${CUT_LINE_COLOR}; }
 .cut-h { position: absolute; left: 0; right: 0; top: 50%; border-top: 1px dashed ${CUT_LINE_COLOR}; }
 .card {
-  box-sizing: border-box; padding: ${CARD_PADDING_PX}px; overflow: hidden;
+  box-sizing: border-box; padding: ${sheet.padY}px ${sheet.padX}px; overflow: hidden;
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   text-align: center;
   page-break-inside: avoid; break-inside: avoid;

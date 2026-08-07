@@ -11,33 +11,19 @@ import {
   type RecipientInfo,
 } from "@/lib/print/packSheets";
 import { escapeHtml, isBlankCardMessage } from "@/lib/print/cardText";
-import { printCss, cellSize, CARD_PADDING_PX, MSG_LINE_HEIGHT, type PrintLayout } from "./printCss";
+import { printCss, textArea, SHEET_IN, MSG_LINE_HEIGHT, type PrintLayout } from "./printCss";
 import type { PrintOrder } from "@/modules/print/loadPrintable";
 
-// Размеры карточки берутся из printCss — того же модуля, что строит вёрстку. Разойдись они,
-// подобранный кегль не совпадёт с реальной раскладкой. У портретной раскладки карточка
-// вчетверо больше, поэтому и область текста считается по ней, а не по одной константе.
-const PAD = CARD_PADDING_PX; // поле карточки — то же значение, что в CSS (.card padding)
-const textArea = (layout: PrintLayout) => {
-  const cell = cellSize(layout);
-  return { width: cell.w - 2 * PAD, height: cell.h - 2 * PAD - 12 };
-};
-
 /**
- * Диапазон кегля текста открытки.
+ * Диапазон кегля берётся из раскладки (см. SHEET_IN): у портретной карточки потолок ниже,
+ * потому что она сама крупнее, и пол ниже, чтобы длинная записка помещалась одним куском.
  *
- * 16pt — только для коротких записок, до четырёх строк включительно. С пятой строки текст
- * печатается 14pt: место на карточке ещё есть, но 16pt на такой объём выглядит крупно.
- * Дальше работает обычный подбор — если и 14pt не помещается, кегль опускается ниже.
- *
- * Минимум опущен с 12pt до 10pt намеренно. Площадь карточки теперь около трёх четвертей от
- * прежней половины, и на старом минимуме записки, которые раньше помещались целиком, начали
- * бы рваться на две карточки. 10pt восстанавливает прежний порог «влезает без разрыва».
+ * Базовый кегль достаётся только коротким запискам — до четырёх строк включительно. С пятой
+ * строки текст сразу печатается на ступень мельче: место ещё есть, но крупный шрифт на
+ * такой объём выглядит по-плакатному. Дальше работает обычный подбор до пола раскладки.
  */
-const BASE_FONT_PT = 16;
-const CROWDED_FONT_PT = 14;
 const BASE_MAX_LINES = 4;
-const MIN_FONT_PT = 10;
+const CROWDED_STEP_PT = 2;
 
 function recipientOf(o: PrintOrder): RecipientInfo {
   return {
@@ -65,6 +51,7 @@ export function PrintDocument({ orders, layout }: { orders: PrintOrder[]; layout
     const meas = measRef.current;
     if (!meas) return;
     const area = textArea(layout);
+    const { basePt, minPt } = SHEET_IN[layout];
     meas.style.width = `${area.width}px`;
     const measure = (text: string, fontPt: number): number => {
       meas.style.fontSize = `${fontPt}pt`;
@@ -74,15 +61,15 @@ export function PrintDocument({ orders, layout }: { orders: PrintOrder[]; layout
 
     const perOrder: Half[][] = orders.map((o) => {
       const recipient = recipientOf(o);
-      if (isBlankCardMessage(o.cardMessage)) return buildOrderHalves(recipient, [], BASE_FONT_PT);
+      if (isBlankCardMessage(o.cardMessage)) return buildOrderHalves(recipient, [], basePt);
 
       // Кегль подбирается ДЛЯ КАЖДОЙ открытки отдельно: короткая записка не должна мельчать
       // из-за того, что в этом же документе печатается длинная.
       const startPt = startingFontPt(
         o.cardMessage,
         {
-          basePt: BASE_FONT_PT,
-          crowdedPt: CROWDED_FONT_PT,
+          basePt,
+          crowdedPt: Math.max(basePt - CROWDED_STEP_PT, minPt),
           maxLinesAtBase: BASE_MAX_LINES,
           lineHeightRatio: MSG_LINE_HEIGHT,
         },
@@ -90,7 +77,7 @@ export function PrintDocument({ orders, layout }: { orders: PrintOrder[]; layout
       );
       const { fontPt, fits } = fitFontPt(
         o.cardMessage,
-        { basePt: startPt, minPt: MIN_FONT_PT, areaHeightPx: area.height },
+        { basePt: startPt, minPt, areaHeightPx: area.height },
         measure
       );
 
