@@ -1,5 +1,5 @@
 "use client";
-import { useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { splitCardIntoParts } from "@/lib/print/splitNote";
 import { fitFontPt, startingFontPt } from "@/lib/print/fitText";
 import {
@@ -11,7 +11,7 @@ import {
   type RecipientInfo,
 } from "@/lib/print/packSheets";
 import { escapeHtml, isBlankCardMessage } from "@/lib/print/cardText";
-import { printCss, textArea, SHEET_IN, MSG_LINE_HEIGHT, type PrintLayout } from "./printCss";
+import { printCss, textArea, sheetWidthPx, SHEET_IN, MSG_LINE_HEIGHT, type PrintLayout } from "./printCss";
 import type { PrintOrder } from "@/modules/print/loadPrintable";
 
 /**
@@ -46,6 +46,18 @@ export function PrintDocument({ orders, layout }: { orders: PrintOrder[]; layout
   const wide = layout === "wide";
   const measRef = useRef<HTMLDivElement>(null);
   const [pages, setPages] = useState<Page[] | null>(null);
+
+  // Экранный масштаб листа. Лист задан в дюймах, поэтому альбомные 11" (1056px) в окно уже
+  // этого не влезали и обрезались по правому краю. Уменьшаем ТОЛЬКО показ; печать берёт
+  // настоящие размеры, потому что правило с --fit живёт внутри @media screen.
+  // 1 — потолок: растягивать лист больше натуральной величины незачем.
+  const [fit, setFit] = useState(1);
+  useEffect(() => {
+    const update = () => setFit(Math.min(1, (window.innerWidth - 32) / sheetWidthPx(layout)));
+    update();
+    window.addEventListener("resize", update);
+    return () => window.removeEventListener("resize", update);
+  }, [layout]);
 
   useLayoutEffect(() => {
     const meas = measRef.current;
@@ -109,7 +121,7 @@ export function PrintDocument({ orders, layout }: { orders: PrintOrder[]; layout
 
       {orders.length === 0 && <div className="no-print empty">Нет заказов для печати.</div>}
 
-      <div className="doc">
+      <div className="doc" style={{ "--fit": fit } as React.CSSProperties}>
         {(pages ?? []).map((page, i) => (
           <div className="sheet" key={i}>
             {/* Порядок ячеек — построчный, поэтому столбец = заказ: слева левый заказ
@@ -137,7 +149,7 @@ function CardView({ half }: { half: Half }) {
   if (half.kind === "recipient") {
     const r = half.recipient;
     return (
-      <div className="card">
+      <div className="card recipient">
         <div className="rec-name">{r.recipientName}</div>
         <div className="rec-phone">{r.recipientPhone}</div>
         <div className="rec-addr">

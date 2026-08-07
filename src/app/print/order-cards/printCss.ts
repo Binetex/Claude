@@ -35,17 +35,28 @@ export type PrintLayout = "wide" | "tall";
  * Одна таблица вместо россыпи констант — иначе половину значений однажды поправят, а
  * половину забудут.
  *
- * У портретной карточки поля по бокам ВДВОЕ шире: она вчетверо крупнее, и текст, начатый
- * у самого края семидюймового листа, читается как объявление, а не как записка.
+ * У портретной карточки поля по бокам заметно шире: она вчетверо крупнее, и текст во всю
+ * ширину семидюймового листа читается как объявление, а не как записка. 120px с каждой
+ * стороны дают колонку ровно 480px — на такой ширине строка не «разъезжается» глазами.
  *
  * Кегль там же ниже: потолок 14pt вместо 16 и пол 8pt вместо 10. Низкий пол важнее, чем
  * кажется — именно он решает, поместится длинная записка целиком или уедет продолжением на
  * второй лист. Мельче, но одним куском, лучше, чем крупно и разорванно.
  */
 export const SHEET_IN = {
-  wide: { w: 11, h: 8.5, cols: 2, rows: 2, padX: 44, padY: 44, basePt: 16, minPt: 10 },
-  tall: { w: 8.5, h: 11, cols: 1, rows: 2, padX: 88, padY: 44, basePt: 14, minPt: 8 },
+  wide: { w: 11, h: 8.5, cols: 2, rows: 2, padX: 44, padY: 44, basePt: 16, minPt: 10, recipientLiftPx: 0 },
+  tall: { w: 8.5, h: 11, cols: 1, rows: 2, padX: 120, padY: 44, basePt: 14, minPt: 8, recipientLiftPx: 80 },
 } as const;
+
+/**
+ * Насколько поднять блок получателя на портретной карточке.
+ *
+ * Содержимое карточки центрируется по вертикали, поэтому лишнее поле СНИЗУ сдвигает его
+ * вверх ровно на половину: чтобы поднять на 80px, снизу добавляется 160px. Отсюда и
+ * умножение — «поднять на N» и «добавить снизу N» это не одно и то же.
+ */
+const recipientPadBottom = (layout: PrintLayout): number =>
+  SHEET_IN[layout].padY + 2 * SHEET_IN[layout].recipientLiftPx;
 
 /** Размер карточки в px при 96 dpi — лист минус поля, поделённый на сетку. */
 export function cellSize(layout: PrintLayout): { w: number; h: number } {
@@ -55,6 +66,9 @@ export function cellSize(layout: PrintLayout): { w: number; h: number } {
     h: ((s.h - 2 * SAFE_MARGIN_IN) / s.rows) * PX,
   };
 }
+
+/** Ширина листа в px при 96 dpi — по ней считается экранный масштаб. */
+export const sheetWidthPx = (layout: PrintLayout): number => SHEET_IN[layout].w * PX;
 
 /**
  * Область под текст записки: карточка минус поля. Двенадцать пикселей запаса снизу — чтобы
@@ -129,13 +143,24 @@ export function printCss(layout: PrintLayout): string {
   overflow-wrap: anywhere;
   font-family: var(--font-lora), Georgia, serif; color: #111;
 }
+/* Блок получателя приподнят: на портретной карточке он висел ровно посередине большого
+   листа и смотрелся потерянным. Механика — в recipientPadBottom. */
+.card.recipient { padding-bottom: ${recipientPadBottom(layout)}px; }
 /* Получатель — по центру, ФИО обычного размера (как основной текст) */
 .rec-name { font-size: 12pt; font-weight: 400; line-height: 1.3; }
 .rec-phone { font-size: 12pt; margin-top: 4px; }
 .rec-addr { font-size: 12pt; margin-top: 4px; line-height: 1.3; }
 /* Текст открытки — крупно, по центру, с сохранением переносов */
 .msg { white-space: pre-wrap; line-height: ${MSG_LINE_HEIGHT}; max-width: 100%; }
-@media screen { .sheet { box-shadow: 0 1px 6px rgba(0,0,0,.15); margin: 16px auto; } }
+/* На ЭКРАНЕ лист ужимается под ширину окна: он задан в дюймах, и альбомные 11" (1056px)
+   в окно уже этого просто не влезали — браузер обрезал правый край без всякой прокрутки.
+   Масштаб считает PrintDocument и кладёт в --fit; zoom, а не transform, потому что transform
+   не сжимает место под элементом и между листами оставались бы пустые провалы.
+   Печати это не касается: правило внутри @media screen. */
+@media screen {
+  .doc { zoom: var(--fit, 1); }
+  .sheet { box-shadow: 0 1px 6px rgba(0,0,0,.15); margin: 16px auto; }
+}
 @media print { .no-print { display: none !important; } .doc { background: #fff; } .sheet { margin: 0; box-shadow: none; } }
 `;
 }

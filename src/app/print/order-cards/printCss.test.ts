@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { printCss, cellSize, textArea, SAFE_MARGIN_IN, SHEET_IN } from "./printCss";
+import { printCss, cellSize, textArea, sheetWidthPx, SAFE_MARGIN_IN, SHEET_IN } from "./printCss";
 
 /**
  * Раскладок две, и выбирает её настройка флориста:
@@ -99,9 +99,11 @@ describe("поля карточки", () => {
     expect(printCss("wide")).toMatch(/\.card\s*\{[^}]*padding:\s*44px 44px;/);
   });
 
-  it("портретная — по бокам ВДВОЕ шире, сверху и снизу столько же", () => {
-    expect(printCss("tall")).toMatch(/\.card\s*\{[^}]*padding:\s*44px 88px;/);
-    expect(SHEET_IN.tall.padX).toBe(2 * SHEET_IN.wide.padX);
+  it("портретная — поля по бокам дают колонку текста ровно 480px", () => {
+    // Ширина строки, а не поле, — то, что задавали: длинная строка во всю ширину
+    // семидюймового листа читается как объявление.
+    expect(printCss("tall")).toMatch(/\.card\s*\{[^}]*padding:\s*44px 120px;/);
+    expect(textArea("tall").width).toBe(480);
     expect(SHEET_IN.tall.padY).toBe(SHEET_IN.wide.padY);
   });
 
@@ -139,6 +141,55 @@ describe("поля карточки", () => {
     const css = printCss("wide");
     expect(css).toMatch(/\.measurer\s*\{[^}]*overflow-wrap:\s*anywhere/);
     expect(css).toMatch(/\.card\s*\{[^}]*overflow-wrap:\s*anywhere/);
+  });
+});
+
+/**
+ * Блок получателя приподнят над серединой карточки. Содержимое центрируется, поэтому
+ * поле снизу работает вполовину: «поднять на 80px» = «добавить снизу 160px».
+ */
+describe("положение блока получателя", () => {
+  it("портретная — поле снизу вдвое больше подъёма", () => {
+    const lift = SHEET_IN.tall.recipientLiftPx;
+    expect(lift).toBe(80);
+    expect(printCss("tall")).toMatch(
+      new RegExp(`\\.card\\.recipient\\s*\\{[^}]*padding-bottom:\\s*${SHEET_IN.tall.padY + 2 * lift}px`)
+    );
+  });
+
+  it("альбомная не трогается — получатель остаётся по центру", () => {
+    expect(SHEET_IN.wide.recipientLiftPx).toBe(0);
+    expect(printCss("wide")).toMatch(
+      new RegExp(`\\.card\\.recipient\\s*\\{[^}]*padding-bottom:\\s*${SHEET_IN.wide.padY}px`)
+    );
+  });
+
+  it("подъём не съедает карточку — место под адрес остаётся", () => {
+    // Четыре строки по 12pt (16px, интерлиньяж 1.3) с отступами — около 100px.
+    const s = SHEET_IN.tall;
+    expect(cellSize("tall").h - s.padY - (s.padY + 2 * s.recipientLiftPx)).toBeGreaterThan(150);
+  });
+});
+
+/**
+ * Экранный показ. Лист задан в дюймах, и альбомные 11in (1056px) в окно уже не влезали —
+ * правый край обрезался без прокрутки. Печати это касаться не должно.
+ */
+describe("масштаб листа на экране", () => {
+  it("масштаб живёт только в @media screen", () => {
+    for (const l of ["wide", "tall"] as const) {
+      const css = printCss(l);
+      expect(css).toMatch(/@media screen\s*\{[^}]*\.doc\s*\{\s*zoom:\s*var\(--fit, 1\)/);
+      expect(css).not.toMatch(/@media print\s*\{[^}]*zoom:/);
+    }
+  });
+
+  it("ширина листа для расчёта масштаба совпадает с вёрсткой", () => {
+    expect(sheetWidthPx("wide")).toBe(1056);
+    expect(sheetWidthPx("tall")).toBe(816);
+    for (const l of ["wide", "tall"] as const) {
+      expect(printCss(l)).toMatch(new RegExp(`\\.sheet\\s*\\{[^}]*width:\\s*${SHEET_IN[l].w}in`));
+    }
   });
 });
 
