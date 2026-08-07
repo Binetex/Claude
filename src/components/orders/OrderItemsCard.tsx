@@ -16,6 +16,12 @@ export type OrderItemPrice = {
   value: number;
   /** Подпись под суммой: «вам», «клиенту», «заказчику», «флористу». */
   label: string;
+  /**
+   * Цена не задана в каталоге. Показываем словами, а не «$0.00»: ноль читается как
+   * «бесплатно» и прячет незаполненный прайс. Заметить это должен владелец — до того,
+   * как заказ уйдёт в расчёт.
+   */
+  missing?: boolean;
 };
 
 export type OrderItemView = {
@@ -75,12 +81,14 @@ export function OrderItemsCard({
                     <div key={p.label}>
                       <span
                         className={
-                          i === 0
-                            ? "text-sm font-medium text-slate-800 tabular-nums"
-                            : "text-sm text-slate-500 tabular-nums"
+                          p.missing
+                            ? "text-sm font-medium text-amber-700"
+                            : i === 0
+                              ? "text-sm font-medium text-slate-800 tabular-nums"
+                              : "text-sm text-slate-500 tabular-nums"
                         }
                       >
-                        {formatMoney(p.value)}
+                        {p.missing ? "не задана" : formatMoney(p.value)}
                       </span>
                       <div className="text-[11px] text-slate-400">{p.label}</div>
                     </div>

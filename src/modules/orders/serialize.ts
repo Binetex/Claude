@@ -19,6 +19,16 @@ function floristMoney(o: OrderWithRelations) {
   return {
     total: effectiveFloristTotal(toNumber(o.floristTotal), items),
     itemPrice: (i: OrderWithRelations["items"][number]) => (isTipItem(i) ? 0 : toNumber(i.floristItemPrice)),
+    /**
+     * Цена флориста НЕ ЗАДАНА в каталоге. Ноль сам по себе валиден («делаем бесплатно»),
+     * но у оплаченной позиции он почти всегда означает незаполненный прайс — и молчаливый
+     * «$0.00» это скрывает. Раньше на его месте стояла цена КЛИЕНТА, что было хуже: число
+     * выглядело настоящим (см. фолбэк в modules/pricing/service.ts).
+     *
+     * Служебные позиции (чаевые) обнуляются намеренно и признаком не считаются.
+     */
+    priceMissing: (i: OrderWithRelations["items"][number]) =>
+      !isTipItem(i) && toNumber(i.floristItemPrice) === 0 && toNumber(i.externalPrice) > 0,
   };
 }
 
@@ -138,6 +148,7 @@ export function serializeForOwner(o: OrderWithRelations) {
       externalPrice: toNumber(i.externalPrice),
       // У чаевых цены флориста быть не может — строка остаётся видимой, но с нулём.
       floristItemPrice: florist.itemPrice(i),
+      floristPriceMissing: florist.priceMissing(i),
     })),
     finance: {
       itemsTotal: toNumber(o.itemsTotal),
@@ -232,6 +243,7 @@ export function serializeForFlorist(o: OrderWithRelations) {
       quantity: i.quantity,
       options: i.options,
       floristItemPrice: florist.itemPrice(i), // его цена за позицию (чаевые — ноль)
+      floristPriceMissing: florist.priceMissing(i),
       // Цена клиента — ТОЛЬКО при FULL. У MAKER_ONLY её нет по определению режима, и
       // null здесь означает «не положено видеть», а не «ноль».
       externalPrice: isFull ? toNumber(i.externalPrice) : null,

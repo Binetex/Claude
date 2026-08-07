@@ -171,7 +171,7 @@ export default async function OwnerOrderPage({ params }: { params: Promise<{ id:
               floristComposition: it.floristComposition,
               prices: [
                 { value: it.externalPrice, label: "заказчику" },
-                { value: it.floristItemPrice, label: "флористу" },
+                { value: it.floristItemPrice, label: "флористу", missing: it.floristPriceMissing },
               ],
               // Кнопка обновления состава тянет его ИЗ КАТАЛОГА — у позиции ручного
               // заказа «своим текстом» каталога нет, и жать там нечего.

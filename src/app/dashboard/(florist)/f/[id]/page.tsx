@@ -90,7 +90,7 @@ export default async function FloristOrderPage({ params }: { params: Promise<{ i
               prices: [
                 showsCustomerPrice
                   ? { value: it.externalPrice ?? 0, label: "клиенту" }
-                  : { value: it.floristItemPrice, label: "вам" },
+                  : { value: it.floristItemPrice, label: "вам", missing: it.floristPriceMissing },
               ],
             }))}
           />
