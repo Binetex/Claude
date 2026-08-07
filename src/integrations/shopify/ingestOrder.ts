@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { Prisma } from "@/generated/prisma/client";
 import type { PaymentStatus } from "@/generated/prisma/enums";
 import { assignInitial } from "@/modules/assignments/service";
+import { indexByExternalId } from "@/modules/catalog/matchIndex";
 import { createProductImageCache, resolveLineItemImages, type ProductImageCache } from "./productImages";
 import { resolveShopifyAccessToken } from "./customApp/credentials";
 import { normalizePhone } from "@/lib/phone";
@@ -474,6 +475,8 @@ async function matchCatalog(siteId: string, payload: ShopifyOrder): Promise<Cata
             sku: true,
             image: true,
             floristComposition: true,
+            remoteDeleted: true,
+            lastSyncedAt: true,
             product: { select: { id: true, image: true } },
           },
         })
@@ -481,14 +484,16 @@ async function matchCatalog(siteId: string, payload: ShopifyOrder): Promise<Cata
     productExtIds.length
       ? prisma.product.findMany({
           where: { siteId, externalId: { in: productExtIds } },
-          select: { id: true, externalId: true, image: true },
+          select: { id: true, externalId: true, image: true, remoteDeleted: true, lastSyncedAt: true },
         })
       : Promise.resolve([]),
   ]);
 
+  // Дубли по одному внешнему id разрешает indexByExternalId: живая запись важнее
+  // удалённой. Простая карта брала последнюю строку выборки — то есть случайную.
   return {
-    variantByExt: new Map(variants.map((v) => [v.externalId, v])),
-    productByExt: new Map(products.map((p) => [p.externalId, { id: p.id, image: p.image }])),
+    variantByExt: indexByExternalId(variants),
+    productByExt: indexByExternalId(products),
   };
 }
 

@@ -12,6 +12,7 @@ import "server-only";
  * особенностей WooCommerce (payment classification, meta mapping).
  */
 import { prisma } from "@/lib/db";
+import { indexByExternalId } from "@/modules/catalog/matchIndex";
 import { Prisma } from "@/generated/prisma/client";
 import { parseWooOrder, type WooOrder } from "./orderAdapter";
 import { classifyWooPayment, type WooPaymentConfig, type WooOrderForPayment } from "./payment";
@@ -99,22 +100,44 @@ function parseGmt(iso: string | undefined | null): Date | null {
   return Number.isFinite(t) ? new Date(t) : null;
 }
 
-/** Строит карту каталога сайта: вариант по externalId и товар по externalId. */
+/**
+ * Строит карту каталога сайта: вариант по externalId и товар по externalId.
+ *
+ * Дубли по одному внешнему id разрешает `indexByExternalId` — живая запись важнее
+ * удалённой. Простая карта брала последнюю строку выборки, и заказ мог связаться с
+ * удалённым дублем без цены флориста (см. matchIndex.ts).
+ */
 async function loadCatalogMatch(siteId: string) {
   const products = await prisma.product.findMany({
     where: { siteId },
-    select: { id: true, externalId: true, image: true, variants: { select: { id: true, externalId: true, image: true, floristComposition: true } } },
+    select: {
+      id: true,
+      externalId: true,
+      image: true,
+      remoteDeleted: true,
+      lastSyncedAt: true,
+      variants: {
+        select: {
+          id: true,
+          externalId: true,
+          image: true,
+          floristComposition: true,
+          remoteDeleted: true,
+          lastSyncedAt: true,
+        },
+      },
+    },
   });
-  const productByExt = new Map<string, { id: string; image: string | null }>();
+
+  const productByExt = indexByExternalId(products);
   // Товар по нашему id — чтобы при ненайденном product_id взять РОДИТЕЛЬСКОЕ фото товара
   // варианта, а не фото самого варианта.
-  const productById = new Map<string, { id: string; image: string | null }>();
-  const variantByExt = new Map<string, { id: string; image: string | null; floristComposition: string | null; productId: string }>();
-  for (const p of products) {
-    productByExt.set(p.externalId, { id: p.id, image: p.image });
-    productById.set(p.id, { id: p.id, image: p.image });
-    for (const v of p.variants) variantByExt.set(v.externalId, { id: v.id, image: v.image, floristComposition: v.floristComposition, productId: p.id });
-  }
+  const productById = new Map(products.map((p) => [p.id, { id: p.id, image: p.image }]));
+  // Вариант несёт productId родителя: он нужен позиции заказа вместе с самим вариантом.
+  const variantByExt = indexByExternalId(
+    products.flatMap((p) => p.variants.map((v) => ({ ...v, productId: p.id })))
+  );
+
   return { productByExt, productById, variantByExt };
 }
 
