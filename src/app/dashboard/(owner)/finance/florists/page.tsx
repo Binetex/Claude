@@ -1,16 +1,20 @@
 import Link from "next/link";
 import { requireRole } from "@/lib/rbac";
 import { prisma } from "@/lib/db";
-import { PageHeader } from "@/components/ui/misc";
-import { Card, CardBody } from "@/components/ui/Card";
+import { PageHeader, StatCard } from "@/components/ui/misc";
+import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { EmptyState } from "@/components/ui/states";
 import { FloristAvatar } from "@/components/FloristAvatar";
+import { FinancePeriodBar } from "@/components/finance/PeriodBar";
 import { formatCents } from "@/lib/cents";
 import { floristBalances } from "@/modules/finance/balance";
 import { listCurrentProfiles } from "@/modules/finance/profile";
 import { countDeliveredByFlorist } from "@/modules/finance/review";
 import { accrualGate } from "@/modules/finance/config";
+import { resolvePeriod } from "@/modules/finance/period";
+import { getFloristsEarnings } from "@/modules/finance/floristsEarnings";
+import { FloristsChart } from "./FloristsChart";
 
 export const dynamic = "force-dynamic";
 
@@ -19,8 +23,27 @@ const modelMeta = {
   SECONDARY: { label: "Второстепенный", className: "bg-sky-50 text-sky-700 border-sky-200" },
 } as const;
 
-export default async function FinanceFloristsPage() {
+const th = "px-3 py-2.5 text-right font-medium";
+
+/**
+ * «Флористы» — обзор заработка всех сразу и вход в каждого по отдельности.
+ *
+ * ЗДЕСЬ НЕ LEDGER. Начислено/выплачено/удержано — это разбор расчётов с конкретным
+ * человеком, и живёт он внутри флориста. Наверху только то, ради чего на страницу заходят:
+ * сколько заработали, за сколько заказов и как это распределилось по дням.
+ *
+ * Колонки таблицы делятся на две группы, и путать их нельзя: «за период» отвечают на выбор
+ * дат сверху, «за всё время» — нет. Долг периодом не измеряется: он складывается из всей
+ * истории заработка и выплат, и «К выплате за неделю» было бы числом ни о чём.
+ */
+export default async function FinanceFloristsPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | undefined>>;
+}) {
   await requireRole("OWNER");
+  const sp = await searchParams;
+  const period = resolvePeriod(sp);
 
   const florists = await prisma.florist.findMany({
     include: { user: { select: { name: true, email: true } } },
@@ -28,10 +51,11 @@ export default async function FinanceFloristsPage() {
   });
   const ids = florists.map((f) => f.id);
 
-  const [balances, profiles, delivered] = await Promise.all([
+  const [balances, profiles, delivered, earnings] = await Promise.all([
     floristBalances(ids),
     listCurrentProfiles(),
     countDeliveredByFlorist(ids),
+    getFloristsEarnings(period.from, period.to),
   ]);
 
   const gate = accrualGate();
@@ -42,6 +66,8 @@ export default async function FinanceFloristsPage() {
         title="Финансы — флористы"
         description="Заработок считается из данных, выплаты — из книги операций. Отдельного хранимого «сколько должны» не существует."
       />
+
+      <FinancePeriodBar current={period.kind} />
 
       {!gate.enabled && (
         <Card>
@@ -55,7 +81,62 @@ export default async function FinanceFloristsPage() {
         </Card>
       )}
 
+      {/* На телефоне три колонки режут суммы — карточки идут в столбик. */}
+      <div className="grid gap-3 sm:grid-cols-3">
+        <StatCard label="Заработали флористы" value={formatCents(earnings.earnedCents)} />
+        <StatCard label="Выполнено заказов" value={earnings.ordersTotal} />
+        <StatCard label="Средний заработок на заказ" value={formatCents(earnings.avgCents)} />
+      </div>
+
+      {/* Молчать об этом нельзя: и то и другое занижает все три числа выше, а причина не
+          видна. Ссылка ведёт туда, где это чинится. */}
+      {(earnings.pending.days > 0 || earnings.pending.orders > 0) && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+          В расчёт не вошло:{" "}
+          {[
+            earnings.pending.days > 0 && `${earnings.pending.days} дн. без полных данных`,
+            earnings.pending.orders > 0 && `${earnings.pending.orders} заказ(ов) без цены флориста`,
+          ]
+            .filter(Boolean)
+            .join(", ")}
+          .{" "}
+          <Link href="/dashboard/finance/setup" className="font-medium underline">
+            Требует заполнения
+          </Link>
+        </div>
+      )}
+
       <Card>
+        <CardHeader className="flex flex-wrap items-center justify-between gap-3">
+          <CardTitle>Заработок по дням</CardTitle>
+          <span className="text-xs text-slate-400">{period.label}</span>
+        </CardHeader>
+        <CardBody>
+          {earnings.series.length === 0 ? (
+            <EmptyState
+              title="За этот период заработка нет"
+              description="Заработок появляется по дате доставки заказа: у основного флориста — за посчитанные дни, у второстепенного — за доставленные заказы с заданной ценой."
+            />
+          ) : earnings.points.length < 2 ? (
+            // График динамики на одном дне — две точки в пустоте: динамики в одном дне нет.
+            // Всё, что он мог бы сказать, уже стоит в карточках сверху и в таблице ниже.
+            <EmptyState
+              title="Выбран один день"
+              description="Динамика показывается от двух дней. Кто сколько заработал в этот день — в таблице ниже."
+            />
+          ) : (
+            <FloristsChart points={earnings.points} series={earnings.series} />
+          )}
+        </CardBody>
+      </Card>
+
+      <Card>
+        <CardHeader className="flex flex-wrap items-center justify-between gap-3">
+          <CardTitle>Флористы</CardTitle>
+          <span className="text-xs text-slate-400">
+            Первые две суммы — за {period.label.toLowerCase()}, остальные — за всё время
+          </span>
+        </CardHeader>
         <CardBody className="p-0">
           {florists.length === 0 ? (
             <EmptyState title="Флористов нет" />
@@ -66,11 +147,11 @@ export default async function FinanceFloristsPage() {
                   <tr className="border-b border-slate-100 text-left text-[11px] tracking-wide text-slate-400 uppercase">
                     <th className="px-4 py-2.5 font-medium">Флорист</th>
                     <th className="px-3 py-2.5 font-medium">Модель</th>
-                    <th className="px-3 py-2.5 text-right font-medium">Доставлено</th>
-                    <th className="px-3 py-2.5 text-right font-medium">Начислено</th>
-                    <th className="px-3 py-2.5 text-right font-medium">Бонусы</th>
-                    <th className="px-3 py-2.5 text-right font-medium">Удержания</th>
-                    <th className="px-3 py-2.5 text-right font-medium">Выплачено</th>
+                    <th className={th}>Заработал</th>
+                    <th className={`${th} border-r border-slate-100`}>Заказов</th>
+                    <th className={th}>Доставлено</th>
+                    <th className={th}>Начислено</th>
+                    <th className={th}>Выплачено</th>
                     <th className="px-4 py-2.5 text-right font-medium">К выплате</th>
                   </tr>
                 </thead>
@@ -78,6 +159,7 @@ export default async function FinanceFloristsPage() {
                   {florists.map((f) => {
                     const b = balances.get(f.id)!;
                     const profile = profiles.get(f.id);
+                    const inPeriod = earnings.byFlorist.get(f.id);
                     return (
                       <tr key={f.id} className="border-b border-slate-50 last:border-0 hover:bg-slate-50/60">
                         <td className="px-4 py-3">
@@ -96,10 +178,14 @@ export default async function FinanceFloristsPage() {
                             <Badge className="border-amber-200 bg-amber-50 text-amber-800">не задана</Badge>
                           )}
                         </td>
+                        <td className="px-3 py-3 text-right font-medium tabular-nums text-slate-800">
+                          {formatCents(inPeriod?.earnedCents ?? 0)}
+                        </td>
+                        <td className="border-r border-slate-100 px-3 py-3 text-right tabular-nums text-slate-600">
+                          {inPeriod?.orders ?? 0}
+                        </td>
                         <td className="px-3 py-3 text-right tabular-nums text-slate-600">{delivered.get(f.id) ?? 0}</td>
-                        <td className="px-3 py-3 text-right tabular-nums">{formatCents(b.earnedCents)}</td>
-                        <td className="px-3 py-3 text-right tabular-nums text-slate-600">{formatCents(b.bonusCents)}</td>
-                        <td className="px-3 py-3 text-right tabular-nums text-slate-600">{formatCents(b.deductionCents)}</td>
+                        <td className="px-3 py-3 text-right tabular-nums text-slate-600">{formatCents(b.earnedCents)}</td>
                         <td className="px-3 py-3 text-right tabular-nums text-slate-600">{formatCents(b.paidCents)}</td>
                         <td
                           className={`px-4 py-3 text-right font-semibold tabular-nums ${

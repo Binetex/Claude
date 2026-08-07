@@ -6,8 +6,8 @@ import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/Card";
 import { EmptyState } from "@/components/ui/states";
 import { formatCents } from "@/lib/cents";
 import { getSitesRevenue } from "@/modules/finance/sitesRevenue";
-import { resolveSitesPeriod } from "@/modules/finance/sitesPeriod";
-import { SitesPeriodBar } from "./SitesPeriodBar";
+import { resolvePeriod } from "@/modules/finance/period";
+import { FinancePeriodBar } from "@/components/finance/PeriodBar";
 import { SitesChart } from "./SitesChart";
 
 export const dynamic = "force-dynamic";
@@ -28,7 +28,7 @@ export default async function FinanceSitesPage({
 }) {
   await requireRole("OWNER");
   const sp = await searchParams;
-  const period = resolveSitesPeriod(sp);
+  const period = resolvePeriod(sp);
   const data = await getSitesRevenue(period.from, period.to);
 
   // Период переносится в ссылку магазина: иначе клик по строке за «вчера» открывал бы месяц.
@@ -42,7 +42,7 @@ export default async function FinanceSitesPage({
     <div className="space-y-4">
       <PageHeader title="Магазины" />
 
-      <SitesPeriodBar current={period.kind} />
+      <FinancePeriodBar current={period.kind} />
 
       {/* На телефоне три колонки режут суммы — карточки идут в столбик. */}
       <div className="grid gap-3 sm:grid-cols-3">

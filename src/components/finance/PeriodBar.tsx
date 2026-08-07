@@ -7,10 +7,10 @@
  */
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { DateRangePicker } from "@/components/ui/date-range-picker";
-import { SITES_PERIOD_TABS, type SitesPeriodKind } from "@/modules/finance/sitesPeriod";
+import { PERIOD_TABS, type PeriodKind } from "@/modules/finance/period";
 import { cn } from "@/lib/cn";
 
-export function SitesPeriodBar({ current }: { current: SitesPeriodKind }) {
+export function FinancePeriodBar({ current }: { current: PeriodKind }) {
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
@@ -27,7 +27,7 @@ export function SitesPeriodBar({ current }: { current: SitesPeriodKind }) {
   return (
     <div className="flex flex-wrap items-center gap-2">
       <div className="flex gap-1 rounded-lg bg-slate-100 p-1">
-        {SITES_PERIOD_TABS.map((t) => (
+        {PERIOD_TABS.map((t) => (
           <button
             key={t.key}
             type="button"

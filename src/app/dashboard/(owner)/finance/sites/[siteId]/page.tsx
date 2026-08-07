@@ -8,8 +8,8 @@ import { EmptyState } from "@/components/ui/states";
 import { Button } from "@/components/ui/button";
 import { formatCents } from "@/lib/cents";
 import { getSiteDetail } from "@/modules/finance/sitesRevenue";
-import { resolveSitesPeriod } from "@/modules/finance/sitesPeriod";
-import { SitesPeriodBar } from "../SitesPeriodBar";
+import { resolvePeriod } from "@/modules/finance/period";
+import { FinancePeriodBar } from "@/components/finance/PeriodBar";
 import { SiteDaysChart } from "./SiteDaysChart";
 
 export const dynamic = "force-dynamic";
@@ -33,7 +33,7 @@ export default async function FinanceSiteDetailPage({
   await requireRole("OWNER");
   const { siteId } = await params;
   const sp = await searchParams;
-  const period = resolveSitesPeriod(sp);
+  const period = resolvePeriod(sp);
 
   const site = await getSiteDetail(siteId, period.from, period.to);
   if (!site) notFound();
@@ -52,7 +52,7 @@ export default async function FinanceSiteDetailPage({
         }
       />
 
-      <SitesPeriodBar current={period.kind} />
+      <FinancePeriodBar current={period.kind} />
 
       {/* На телефоне три колонки режут суммы — карточки идут в столбик. */}
       <div className="grid gap-3 sm:grid-cols-3">

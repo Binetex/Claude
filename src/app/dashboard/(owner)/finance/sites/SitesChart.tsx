@@ -13,7 +13,7 @@
  * среднее, а не величина), а «заказы» отдельным графиком никто не просил.
  */
 import { StackedBarChart } from "@/components/charts/StackedBarChart";
-import { fullDayLabel } from "@/modules/finance/sitesPeriod";
+import { fullDayLabel } from "@/modules/finance/period";
 import { pluralOrders } from "@/modules/finance/earningsFormat";
 import type { SiteDailyPoint, SiteSeries } from "@/modules/finance/sitesRevenue";
 

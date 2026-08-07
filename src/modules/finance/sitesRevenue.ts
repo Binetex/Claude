@@ -15,6 +15,7 @@ import { prisma } from "@/lib/db";
 import { toNumber } from "@/lib/money";
 import type { OrderStatus } from "@/generated/prisma/enums";
 import { formatDayLabel, seriesColor } from "@/components/charts/theme";
+import { eachDay } from "./period";
 
 /**
  * Что считаем заказом магазина.
@@ -99,15 +100,6 @@ const where = (from: Date, to: Date, siteId?: string) => ({
   orderStatus: { notIn: COUNTED_STATUSES },
   ...(siteId ? { siteId } : {}),
 });
-
-/** Все календарные дни диапазона включительно. UTC — как и сам deliveryDate. */
-function eachDay(from: Date, to: Date): string[] {
-  const out: string[] = [];
-  for (let t = from.getTime(); t <= to.getTime(); t += 24 * 60 * 60 * 1000) {
-    out.push(new Date(t).toISOString().slice(0, 10));
-  }
-  return out;
-}
 
 /**
  * Всё, что нужно странице магазинов, ОДНИМ запросом: и таблица итогов, и дневная динамика.
