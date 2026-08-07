@@ -16,12 +16,17 @@ const SERIES = [
   { key: "profit", name: "Моя прибыль", color: "#14b8a6" },
 ];
 
-/** Значения в центах, как их отдаёт Recharts. */
+type Payload = NonNullable<React.ComponentProps<typeof StackedChartTooltip>["payload"]>;
+
+/**
+ * Значения в центах, как их отдаёт Recharts. Приведение типа нужно потому, что в его
+ * payload лежит десяток служебных полей, из которых тултип читает ровно два.
+ */
 const render = (values: Record<string, number>) =>
   renderToStaticMarkup(
     <StackedChartTooltip
       active
-      payload={Object.entries(values).map(([dataKey, value]) => ({ dataKey, value }))}
+      payload={Object.entries(values).map(([dataKey, value]) => ({ dataKey, value })) as unknown as Payload}
       series={SERIES}
       title="6 августа 2026"
       subtitle="5 заказов"
@@ -75,7 +80,7 @@ describe("тултип стопки", () => {
   it("без наведения ничего не рисуется", () => {
     expect(
       renderToStaticMarkup(
-        <StackedChartTooltip active={false} payload={[]} series={SERIES} title="x" totalLabel="y" />
+        <StackedChartTooltip active={false} payload={[] as unknown as Payload} series={SERIES} title="x" totalLabel="y" />
       )
     ).toBe("");
   });

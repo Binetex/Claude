@@ -89,14 +89,14 @@ export default async function FinanceDashboardPage({
       </div>
 
       {/* График и список — про один и тот же месяц и одни и те же числа: график берёт
-          `selected.days`, из которых сложены карточки сверху. Второго источника нет. */}
+          `selected.days`, из которых сложены карточки сверху. Второго источника нет.
+          Расходов на нём намеренно нет: он про то, как заработок делится между мной и
+          флористами, а не про то, из чего складывается выручка. */}
       {selected.days.length > 0 && (
         <Card>
           <CardHeader className="flex flex-wrap items-center justify-between gap-3">
-            <CardTitle>Куда уходит выручка</CardTitle>
-            <span className="text-xs text-slate-400">
-              Высота столбца — выручка дня: флористы + расходы + прибыль
-            </span>
+            <CardTitle>Прибыль по дням</CardTitle>
+            <span className="text-xs text-slate-400">Моя прибыль и заработок флористов</span>
           </CardHeader>
           <CardBody>
             <OwnerMonthChart

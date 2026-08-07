@@ -9,14 +9,14 @@
  * `points` и `series` приходят из ОДНОГО серверного результата (`getFloristsEarnings`):
  * итоги сверху — сумма тех же дней, поэтому разойтись им нечем.
  */
-import { StackedChart } from "@/components/charts/StackedChart";
+import { DailyChart } from "@/components/charts/DailyChart";
 import { fullDayLabel } from "@/modules/finance/period";
 import { pluralOrders } from "@/modules/finance/earningsFormat";
 import type { FloristDailyPoint, FloristSeries } from "@/modules/finance/floristsEarnings";
 
 export function FloristsChart({ points, series }: { points: FloristDailyPoint[]; series: FloristSeries[] }) {
   return (
-    <StackedChart
+    <DailyChart
       kind="area"
       data={points}
       index="label"

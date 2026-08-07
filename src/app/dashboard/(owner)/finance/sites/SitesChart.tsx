@@ -12,14 +12,14 @@
  * Переключателя показателя тут нет намеренно: складывать в стопку средний чек нельзя (это
  * среднее, а не величина), а «заказы» отдельным графиком никто не просил.
  */
-import { StackedChart } from "@/components/charts/StackedChart";
+import { DailyChart } from "@/components/charts/DailyChart";
 import { fullDayLabel } from "@/modules/finance/period";
 import { pluralOrders } from "@/modules/finance/earningsFormat";
 import type { SiteDailyPoint, SiteSeries } from "@/modules/finance/sitesRevenue";
 
 export function SitesChart({ points, series }: { points: SiteDailyPoint[]; series: SiteSeries[] }) {
   return (
-    <StackedChart
+    <DailyChart
       data={points}
       index="label"
       series={series.map((s) => ({ key: s.siteId, name: s.name, color: s.color }))}

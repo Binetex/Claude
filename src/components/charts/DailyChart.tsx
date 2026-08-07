@@ -1,18 +1,20 @@
 "use client";
 /**
- * День, собранный из сегментов по сущностям: магазинам, флористам — кому угодно.
+ * Несколько величин по дням: столбцами или областями, стопкой или порознь.
  *
- * Отвечает не на вопрос «кто больше за период» (на него отвечает таблица под графиком), а
- * «как шли дни и из чего складывался каждый». Все серии в одном `stackId`, поэтому верхняя
- * граница — сумма дня, а сегмент — вклад одной сущности.
+ * Оси, сетка, тултип и легенда у всех наших дневных графиков одни и те же, поэтому
+ * компонент один, а различия — параметрами:
  *
- * Рисоваться это может столбцами или областями (`kind`) — разница чисто визуальная, и
- * держать под неё два компонента незачем: оси, сетка, тултип и легенда у них одни и те же.
- * Столбцы лучше читаются на коротком периоде, области — на длинном, где столбцы вырождаются
- * в частокол.
+ *  - `kind` — столбцы или области. Столбцы лучше читаются на коротком периоде, области на
+ *    длинном, где столбцы вырождаются в частокол.
+ *  - `stack` — СКЛАДЫВАТЬ ли серии. Складывать можно только то, что осмысленно суммируется:
+ *    выручка магазинов даёт выручку дня, заработки флористов — общий заработок. Величины,
+ *    которые сравнивают друг с другом, складывать нельзя — верхняя линия окажется суммой, а
+ *    не значением, и читаться будет как «у него сильно больше».
  *
- * Области именно СЛОЖЕНЫ, а не наложены: наложенные полупрозрачные заливки смешиваются в
- * цвета, которых нет в легенде, и по ним нельзя прочитать ни одну серию.
+ * Стопка из областей именно СЛОЖЕНА, а не наложена: наложенные полупрозрачные заливки
+ * смешиваются в цвета, которых нет в легенде. Поэтому у несложенных областей заливка
+ * заметно бледнее — там важны линии, а не объём под ними.
  *
  * Цвет НЕ вычисляется здесь: он приходит вместе с серией. Считать его по месту в массиве
  * было ошибкой — сущность без данных за период из массива выпадает и перекрашивает всех
@@ -42,13 +44,14 @@ import {
 } from "./theme";
 
 /** Цвет задаёт вызывающий код: он закреплён за сущностью, а не за местом в серии. */
-export type StackedSeries = { key: string; name: string; color: string };
+export type DailySeries = { key: string; name: string; color: string };
 
-export function StackedChart({
+export function DailyChart({
   data,
   index,
   series,
   kind = "bar",
+  stack = true,
   /** Полная подпись дня для тултипа: строка данных → человеческая дата. */
   titleOf,
   subtitleOf,
@@ -57,8 +60,9 @@ export function StackedChart({
 }: {
   data: ChartRow[];
   index: string;
-  series: StackedSeries[];
+  series: DailySeries[];
   kind?: "bar" | "area";
+  stack?: boolean;
   titleOf: (row: ChartRow) => string;
   subtitleOf?: (row: ChartRow) => string;
   totalLabel: string;
@@ -113,9 +117,9 @@ export function StackedChart({
               <defs>
                 {visible.map((s) => (
                   // id завязан на ключ серии: иначе два графика на странице делят заливку.
-                  <linearGradient key={s.key} id={`stacked-${s.key}`} x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor={s.color} stopOpacity={0.35} />
-                    <stop offset="100%" stopColor={s.color} stopOpacity={0.04} />
+                  <linearGradient key={s.key} id={`daily-${s.key}`} x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor={s.color} stopOpacity={stack ? 0.35 : 0.14} />
+                    <stop offset="100%" stopColor={s.color} stopOpacity={0.02} />
                   </linearGradient>
                 ))}
               </defs>
@@ -133,10 +137,10 @@ export function StackedChart({
                   type="monotone"
                   dataKey={s.key}
                   name={s.name}
-                  stackId="total"
+                  stackId={stack ? "total" : undefined}
                   stroke={s.color}
                   strokeWidth={2}
-                  fill={`url(#stacked-${s.key})`}
+                  fill={`url(#daily-${s.key})`}
                   // Точка на каждом дне превращает месяц в бусы; при наведении она есть.
                   dot={false}
                   activeDot={{ r: 4, strokeWidth: 0, fill: s.color }}
@@ -145,7 +149,7 @@ export function StackedChart({
               ) : (
                 // Углы прямые: на стопке скругление режет верхний сегмент и оставляет щели
                 // между соседними.
-                <Bar key={s.key} dataKey={s.key} stackId="total" fill={s.color} maxBarSize={48} />
+                <Bar key={s.key} dataKey={s.key} stackId={stack ? "total" : undefined} fill={s.color} maxBarSize={48} />
               )
             )}
           </Chart>
