@@ -9,7 +9,7 @@
  * своих линий и засечек, скруглённые сверху столбцы, приглушённый slate у подписей и один
  * акцентный цвет на серию. Разноцветье здесь ничего не объясняет: серия всё равно одна.
  */
-import { formatCents } from "@/lib/cents";
+import { formatDollars } from "@/lib/cents";
 
 /**
  * Акцент одиночных графиков — голова той же палитры. Emerald интерфейса рядом с индиго
@@ -74,7 +74,7 @@ export type ChartMetric = {
 
 /** Полное значение — для тултипа. */
 export function formatChartValue(value: number, format: ChartFormat): string {
-  return format === "money" ? formatCents(value) : new Intl.NumberFormat("ru-RU").format(value);
+  return format === "money" ? formatDollars(value) : new Intl.NumberFormat("ru-RU").format(value);
 }
 
 /**

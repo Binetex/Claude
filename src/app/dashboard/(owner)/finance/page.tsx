@@ -2,7 +2,7 @@ import { requireRole } from "@/lib/rbac";
 import { PageHeader, StatCard } from "@/components/ui/misc";
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/Card";
 import { EmptyState } from "@/components/ui/states";
-import { formatCents } from "@/lib/cents";
+import { formatDollars } from "@/lib/cents";
 import { ExpenseFilters } from "@/components/expenses/ExpenseFilters";
 import { OwnerDayList } from "@/components/finance/OwnerDayList";
 import { OwnerMonthChart } from "./OwnerMonthChart";
@@ -69,15 +69,15 @@ export default async function FinanceDashboardPage({
       <PageHeader title="Финансы" />
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <StatCard label="Выручка" value={formatCents(selected.revenueCents)} />
-        <StatCard label="Расходы" value={formatCents(selected.expensesCents)} />
-        <StatCard label="Флористы" value={formatCents(selected.floristEarningsCents)} />
+        <StatCard label="Выручка" value={formatDollars(selected.revenueCents)} />
+        <StatCard label="Расходы" value={formatDollars(selected.expensesCents)} />
+        <StatCard label="Флористы" value={formatDollars(selected.floristEarningsCents)} />
         <StatCard
           label="Моя прибыль"
           tone={selected.ownerNetCents < 0 ? "danger" : "success"}
           value={
             <span className="flex flex-wrap items-baseline gap-2">
-              {formatCents(selected.ownerNetCents)}
+              {formatDollars(selected.ownerNetCents)}
               {delta && (
                 <span className={`text-xs font-normal ${delta.positive ? "text-emerald-600" : "text-red-600"}`}>
                   {delta.text}

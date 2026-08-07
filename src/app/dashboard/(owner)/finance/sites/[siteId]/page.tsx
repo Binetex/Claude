@@ -6,7 +6,7 @@ import { PageHeader, StatCard } from "@/components/ui/misc";
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/Card";
 import { EmptyState } from "@/components/ui/states";
 import { Button } from "@/components/ui/button";
-import { formatCents } from "@/lib/cents";
+import { formatDollars } from "@/lib/cents";
 import { getSiteDetail } from "@/modules/finance/sitesRevenue";
 import { resolvePeriod } from "@/modules/finance/period";
 import { FinancePeriodBar } from "@/components/finance/PeriodBar";
@@ -57,8 +57,8 @@ export default async function FinanceSiteDetailPage({
       {/* На телефоне три колонки режут суммы — карточки идут в столбик. */}
       <div className="grid gap-3 sm:grid-cols-3">
         <StatCard label="Заказов" value={site.ordersTotal} />
-        <StatCard label="Выручка" value={formatCents(site.revenueCents)} />
-        <StatCard label="Средний чек" value={formatCents(site.avgCents)} />
+        <StatCard label="Выручка" value={formatDollars(site.revenueCents)} />
+        <StatCard label="Средний чек" value={formatDollars(site.avgCents)} />
       </div>
 
       {/* График динамики и список дней читают один и тот же site.days. */}
@@ -109,7 +109,7 @@ export default async function FinanceSiteDetailPage({
                         <div className="min-w-0">
                           <div className="truncate text-xs text-slate-400">Выручка</div>
                           <div className="mt-0.5 truncate text-sm font-semibold tabular-nums text-slate-900">
-                            {formatCents(d.revenueCents)}
+                            {formatDollars(d.revenueCents)}
                           </div>
                         </div>
                       </div>

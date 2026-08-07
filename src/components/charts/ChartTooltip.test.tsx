@@ -45,8 +45,9 @@ describe("тултип стопки", () => {
   });
 
   it("итог — сумма сегментов", () => {
-    const html = render({ florists: 39950, expenses: 30000, profit: 20000 });
-    expect(html).toContain("$899.50"); // 399.50 + 300 + 200
+    // Суммы на графиках показываются без копеек: они там для сравнения, а не для выплаты.
+    const html = render({ florists: 40000, expenses: 30000, profit: 20000 });
+    expect(html).toContain("$900"); // 400 + 300 + 200
   });
 
   it("ОТРИЦАТЕЛЬНЫЙ сегмент показан и уменьшает итог", () => {
@@ -54,20 +55,20 @@ describe("тултип стопки", () => {
     // больше настоящего — и это была бы ложь в самом дорогом месте.
     const html = render({ florists: 30000, expenses: 50000, profit: -20000 });
     expect(html).toContain("Моя прибыль");
-    expect(html).toContain("-$200.00");
-    expect(html).toContain("$600.00"); // 300 + 500 − 200, а не 800
+    expect(html).toContain("-$200");
+    expect(html).toContain("$600"); // 300 + 500 − 200, а не 800
   });
 
   it("нулевые сегменты не показываются — они ничего не сообщают", () => {
     const html = render({ florists: 30000, expenses: 20000, profit: 0 });
     expect(html).not.toContain("Моя прибыль");
-    expect(html).toContain("$500.00");
+    expect(html).toContain("$500");
   });
 
   it("день без данных — карточка без списка сегментов", () => {
     const html = render({ florists: 0, expenses: 0, profit: 0 });
     expect(html).toContain("6 августа 2026");
-    expect(html).toContain("$0.00");
+    expect(html).toContain("$0");
     expect(html).not.toContain("Флористы");
   });
 

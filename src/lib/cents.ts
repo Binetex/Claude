@@ -39,3 +39,25 @@ export function formatCents(cents: number | null | undefined): string {
   if (cents == null) return "—";
   return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(cents / 100);
 }
+
+const DOLLARS = new Intl.NumberFormat("en-US", {
+  style: "currency",
+  currency: "USD",
+  maximumFractionDigits: 0,
+});
+
+/**
+ * Центы → доллары без копеек: 113695 → "$1,137".
+ *
+ * ТОЛЬКО ДЛЯ ОБЗОРНЫХ ЭКРАНОВ, где числа читают глазами и сравнивают между собой: там
+ * ".00" у каждой суммы съедает место, а на телефоне из-за него не помещается вся строка.
+ *
+ * Где сумма — это ОБЯЗАТЕЛЬСТВО (выплата флористу, запись в книге операций, возврат
+ * клиенту, ввод в форме), обязан оставаться `formatCents`. Округлённая выплата — это
+ * неверная выплата, и разница в 50 центов на экране против банковской выписки будет стоить
+ * дороже, чем сэкономленное место.
+ */
+export function formatDollars(cents: number | null | undefined): string {
+  if (cents == null) return "—";
+  return DOLLARS.format(cents / 100);
+}

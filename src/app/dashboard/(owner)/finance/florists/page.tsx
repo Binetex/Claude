@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/Badge";
 import { EmptyState } from "@/components/ui/states";
 import { FloristAvatar } from "@/components/FloristAvatar";
 import { FinancePeriodBar } from "@/components/finance/PeriodBar";
-import { formatCents } from "@/lib/cents";
+import { formatDollars } from "@/lib/cents";
 import { floristBalances } from "@/modules/finance/balance";
 import { listCurrentProfiles } from "@/modules/finance/profile";
 import { countDeliveredByFlorist } from "@/modules/finance/review";
@@ -83,9 +83,9 @@ export default async function FinanceFloristsPage({
 
       {/* На телефоне три колонки режут суммы — карточки идут в столбик. */}
       <div className="grid gap-3 sm:grid-cols-3">
-        <StatCard label="Заработали флористы" value={formatCents(earnings.earnedCents)} />
+        <StatCard label="Заработали флористы" value={formatDollars(earnings.earnedCents)} />
         <StatCard label="Выполнено заказов" value={earnings.ordersTotal} />
-        <StatCard label="Средний заработок на заказ" value={formatCents(earnings.avgCents)} />
+        <StatCard label="Средний заработок на заказ" value={formatDollars(earnings.avgCents)} />
       </div>
 
       {/* Молчать об этом нельзя: и то и другое занижает все три числа выше, а причина не
@@ -179,20 +179,20 @@ export default async function FinanceFloristsPage({
                           )}
                         </td>
                         <td className="px-3 py-3 text-right font-medium tabular-nums text-slate-800">
-                          {formatCents(inPeriod?.earnedCents ?? 0)}
+                          {formatDollars(inPeriod?.earnedCents ?? 0)}
                         </td>
                         <td className="border-r border-slate-100 px-3 py-3 text-right tabular-nums text-slate-600">
                           {inPeriod?.orders ?? 0}
                         </td>
                         <td className="px-3 py-3 text-right tabular-nums text-slate-600">{delivered.get(f.id) ?? 0}</td>
-                        <td className="px-3 py-3 text-right tabular-nums text-slate-600">{formatCents(b.earnedCents)}</td>
-                        <td className="px-3 py-3 text-right tabular-nums text-slate-600">{formatCents(b.paidCents)}</td>
+                        <td className="px-3 py-3 text-right tabular-nums text-slate-600">{formatDollars(b.earnedCents)}</td>
+                        <td className="px-3 py-3 text-right tabular-nums text-slate-600">{formatDollars(b.paidCents)}</td>
                         <td
                           className={`px-4 py-3 text-right font-semibold tabular-nums ${
                             b.outstandingCents < 0 ? "text-red-600" : "text-emerald-700"
                           }`}
                         >
-                          {formatCents(b.outstandingCents)}
+                          {formatDollars(b.outstandingCents)}
                         </td>
                       </tr>
                     );

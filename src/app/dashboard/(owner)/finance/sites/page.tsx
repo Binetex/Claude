@@ -4,7 +4,7 @@ import { requireRole } from "@/lib/rbac";
 import { PageHeader, StatCard } from "@/components/ui/misc";
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/Card";
 import { EmptyState } from "@/components/ui/states";
-import { formatCents } from "@/lib/cents";
+import { formatDollars } from "@/lib/cents";
 import { getSitesRevenue } from "@/modules/finance/sitesRevenue";
 import { resolvePeriod } from "@/modules/finance/period";
 import { FinancePeriodBar } from "@/components/finance/PeriodBar";
@@ -47,8 +47,8 @@ export default async function FinanceSitesPage({
       {/* На телефоне три колонки режут суммы — карточки идут в столбик. */}
       <div className="grid gap-3 sm:grid-cols-3">
         <StatCard label="Заказов" value={data.ordersTotal} />
-        <StatCard label="Выручка" value={formatCents(data.revenueCents)} />
-        <StatCard label="Средний чек" value={formatCents(data.avgCents)} />
+        <StatCard label="Выручка" value={formatDollars(data.revenueCents)} />
+        <StatCard label="Средний чек" value={formatDollars(data.avgCents)} />
       </div>
 
       {/* График — как шли дни и из чего складывался каждый; таблица под ним — итоги за
@@ -95,8 +95,8 @@ export default async function FinanceSitesPage({
                     </div>
                     <div className="grid flex-1 grid-cols-3 gap-x-2 text-right sm:gap-x-6">
                       <Metric label="Заказов" value={String(r.ordersTotal)} />
-                      <Metric label="Выручка" value={formatCents(r.revenueCents)} />
-                      <Metric label="Средний чек" shortLabel="Ср. чек" value={formatCents(r.avgCents)} />
+                      <Metric label="Выручка" value={formatDollars(r.revenueCents)} />
+                      <Metric label="Средний чек" shortLabel="Ср. чек" value={formatDollars(r.avgCents)} />
                     </div>
                     {/* Стрелка только на большом экране: на телефоне она отбирала у цифр
                         последние 30px, а что по строке можно нажать — и так понятно. */}

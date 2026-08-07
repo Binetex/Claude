@@ -19,7 +19,7 @@
  */
 import Link from "next/link";
 import { ChevronRight } from "lucide-react";
-import { formatCents } from "@/lib/cents";
+import { formatDollars } from "@/lib/cents";
 import { Badge } from "@/components/ui/Badge";
 import type { OwnerDay } from "@/modules/finance/ownerDashboard";
 
@@ -65,7 +65,7 @@ function Metric({ label, cents, accent = false }: { label: string; cents: number
               : "text-slate-900"
         }`}
       >
-        {cents == null ? "—" : formatCents(cents)}
+        {cents == null ? "—" : formatDollars(cents)}
       </div>
     </div>
   );
@@ -130,7 +130,7 @@ export function OwnerDayList({ days }: { days: OwnerDay[] }) {
           суммы видимых дней. Появляется, только когда есть что объяснять. */}
       {pending.length > 0 && (
         <p className="border-t border-slate-100 px-4 py-2.5 text-xs text-amber-700">
-          Не готово дней: {pending.length} — их выручка {formatCents(pendingRevenueCents)} в итоги не вошла.
+          Не готово дней: {pending.length} — их выручка {formatDollars(pendingRevenueCents)} в итоги не вошла.
         </p>
       )}
     </div>
