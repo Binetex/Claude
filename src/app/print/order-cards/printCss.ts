@@ -9,7 +9,6 @@
  */
 import type { PrintGeometry } from "@/modules/print/settings";
 
-export type { PrintLayout } from "@/modules/print/settings";
 
 /**
  * Линии реза — вспомогательные, а не часть открытки: их видно ровно настолько, чтобы

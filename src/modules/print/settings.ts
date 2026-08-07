@@ -10,10 +10,9 @@
  */
 
 /** CSS-пикселей на дюйм. */
-export const PX = 96;
+const PX = 96;
 
 export type PrintLayout = "wide" | "tall";
-export const PRINT_LAYOUTS: readonly PrintLayout[] = ["wide", "tall"];
 
 /** Раскладка в БД (`PrintLayoutKind`) и обратно. */
 export const layoutToKind = (l: PrintLayout): "WIDE" | "TALL" => (l === "wide" ? "WIDE" : "TALL");
@@ -134,10 +133,9 @@ export function clampSettings(layout: PrintLayout, raw: PrintSettings): PrintSet
   // записках, и менять его молча значит менять внешний вид всех записок разом.
   s.minPt = Math.min(s.minPt, s.basePt);
 
-  // Подъём получателя ограничен половиной свободного места: иначе блок уехал бы за верхний
-  // край карточки, а поле снизу стало бы больше самой карточки.
-  const freeHeight = Math.max(0, Math.floor(cell.h) - s.textHeightPx);
-  s.recipientLiftPx = Math.min(s.recipientLiftPx, Math.floor(freeHeight / 2) + Math.floor(s.textHeightPx / 4));
+  // Подъём съедает ВДВОЕ больше места, чем поднимает (поле снизу двойное), поэтому больше
+  // четверти поля для текста ему не отдаём: остальное нужно самому блоку получателя.
+  s.recipientLiftPx = Math.min(s.recipientLiftPx, Math.floor(s.textHeightPx / 4));
 
   return s;
 }

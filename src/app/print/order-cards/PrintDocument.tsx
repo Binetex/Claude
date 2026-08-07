@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { splitCardIntoParts } from "@/lib/print/splitNote";
 import { fitFontPt, startingFontPt } from "@/lib/print/fitText";
 import {
@@ -44,7 +44,11 @@ export function PrintDocument({
   const wide = layout === "wide";
   const measRef = useRef<HTMLDivElement>(null);
   const [pages, setPages] = useState<Page[] | null>(null);
-  const g = geometry(layout, settings);
+
+  // Геометрия мемоизирована не ради скорости, а ради зависимостей: без этого она была бы
+  // новым объектом на каждый рендер, и подбор кегля пришлось бы перечислять девятью
+  // отдельными числами. `settings` приходит с сервера и между рендерами не меняется.
+  const g = useMemo(() => geometry(layout, settings), [layout, settings]);
 
   // Экранный масштаб листа. Лист задан в дюймах, поэтому альбомные 11in (1056px) в окно уже
   // не влезали и обрезались по правому краю. Уменьшаем ТОЛЬКО показ; печать берёт
@@ -58,12 +62,11 @@ export function PrintDocument({
     return () => window.removeEventListener("resize", update);
   }, [layout]);
 
-  const { textWidthPx, textHeightPx, basePt, minPt, baseMaxLines, crowdedStepPt } = g.settings;
-  const lineHeight = g.lineHeight;
-
   useLayoutEffect(() => {
     const meas = measRef.current;
     if (!meas) return;
+    const { textWidthPx, textHeightPx, basePt, minPt, baseMaxLines, crowdedStepPt } = g.settings;
+    const lineHeight = g.lineHeight;
     meas.style.width = `${textWidthPx}px`;
     const measure = (text: string, fontPt: number): number => {
       meas.style.fontSize = `${fontPt}pt`;
@@ -107,8 +110,8 @@ export function PrintDocument({
       return buildOrderHalves(recipient, parts.length ? parts : [o.cardMessage], fontPt);
     });
 
-    setPages(packColumnsIntoPages(packOrderColumns(perOrder), layout === "wide" ? 2 : 1));
-  }, [orders, layout, textWidthPx, textHeightPx, basePt, minPt, baseMaxLines, crowdedStepPt, lineHeight]);
+    setPages(packColumnsIntoPages(packOrderColumns(perOrder), g.layout === "wide" ? 2 : 1));
+  }, [orders, g]);
 
   return (
     <>
