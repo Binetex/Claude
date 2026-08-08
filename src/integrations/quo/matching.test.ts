@@ -30,6 +30,64 @@ describe("matchCommunicationToOrder", () => {
     expect(matchCommunicationToOrder(CUST, now, cands)).toEqual({ matched: true, orderId: "today", partyRole: "CUSTOMER" });
   });
 
+  // Реальный случай прода: клиент отправил заказ дважды за 53 секунды, оплатил вторую попытку.
+  // Первая осталась AWAITING_PAYMENT с тем же телефоном и той же датой доставки → раньше это
+  // давало ambiguous, и ответы клиента не привязывались ни к одному заказу.
+  describe("неоплаченный дубль заказа (THEFLOW-20395/-20396)", () => {
+    const twins = (): CommOrderCandidate[] => [
+      { orderId: "unpaid-twin", senderPhoneE164: CUST, recipientPhoneE164: RECIP, deliveryDate: day("2026-08-08"), orderStatus: "AWAITING_PAYMENT" },
+      { orderId: "paid", senderPhoneE164: CUST, recipientPhoneE164: RECIP, deliveryDate: day("2026-08-08"), orderStatus: "DELIVERED" },
+    ];
+
+    it("входящее от получателя привязывается к ОПЛАЧЕННОМУ, а не к дублю", () => {
+      expect(matchCommunicationToOrder(RECIP, new Date("2026-08-08T22:13:37Z"), twins())).toEqual({
+        matched: true, orderId: "paid", partyRole: "RECIPIENT",
+      });
+    });
+
+    it("то же для заказчика", () => {
+      expect(matchCommunicationToOrder(CUST, new Date("2026-08-08T22:13:37Z"), twins())).toEqual({
+        matched: true, orderId: "paid", partyRole: "CUSTOMER",
+      });
+    });
+
+    it("порядок кандидатов не влияет на результат", () => {
+      const reversed = twins().reverse();
+      expect(matchCommunicationToOrder(RECIP, new Date("2026-08-08T22:13:37Z"), reversed)).toEqual({
+        matched: true, orderId: "paid", partyRole: "RECIPIENT",
+      });
+    });
+
+    it("ЕДИНСТВЕННЫЙ неоплаченный заказ всё равно матчится — переписка по нему тоже нужна", () => {
+      const only: CommOrderCandidate[] = [
+        { orderId: "unpaid-only", senderPhoneE164: CUST, recipientPhoneE164: RECIP, deliveryDate: day("2026-08-08"), orderStatus: "AWAITING_PAYMENT" },
+      ];
+      expect(matchCommunicationToOrder(CUST, new Date("2026-08-08T22:13:37Z"), only)).toEqual({
+        matched: true, orderId: "unpaid-only", partyRole: "CUSTOMER",
+      });
+    });
+
+    it("если ВСЕ кандидаты неоплаченные и равно близки — по-прежнему ambiguous, наугад не привязываем", () => {
+      const bothUnpaid: CommOrderCandidate[] = [
+        { orderId: "u1", senderPhoneE164: CUST, recipientPhoneE164: null, deliveryDate: day("2026-08-08"), orderStatus: "AWAITING_PAYMENT" },
+        { orderId: "u2", senderPhoneE164: CUST, recipientPhoneE164: null, deliveryDate: day("2026-08-08"), orderStatus: "AWAITING_PAYMENT" },
+      ];
+      expect(matchCommunicationToOrder(CUST, new Date("2026-08-08T22:13:37Z"), bothUnpaid)).toEqual({
+        matched: false, reason: "ambiguous",
+      });
+    });
+
+    it("два ОПЛАЧЕННЫХ заказа с одной датой остаются ambiguous — правило не ослаблено", () => {
+      const bothPaid: CommOrderCandidate[] = [
+        { orderId: "p1", senderPhoneE164: CUST, recipientPhoneE164: null, deliveryDate: day("2026-08-08"), orderStatus: "CONFIRMED" },
+        { orderId: "p2", senderPhoneE164: CUST, recipientPhoneE164: null, deliveryDate: day("2026-08-08"), orderStatus: "DELIVERED" },
+      ];
+      expect(matchCommunicationToOrder(CUST, new Date("2026-08-08T22:13:37Z"), bothPaid)).toEqual({
+        matched: false, reason: "ambiguous",
+      });
+    });
+  });
+
   it("отменённый заказ не выбирается, если есть активный", () => {
     const now = new Date("2026-07-20T15:00:00Z");
     const cands: CommOrderCandidate[] = [

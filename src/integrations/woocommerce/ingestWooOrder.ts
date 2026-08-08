@@ -30,6 +30,7 @@ import {
 import { paymentTriggerFor } from "@/modules/automations/paymentTriggers";
 import { publishTelegramNotification } from "@/integrations/telegram/events";
 import { onWooOrderIngestedForAirwallex } from "@/integrations/airwallex/reconcile";
+import { adoptOrphanCommunicationsForNewOrder } from "@/integrations/quo/adoptOrphans";
 
 /**
  * Авто-назначение основного флориста при переходе заказа в CONFIRMED (оплачен / в работу) —
@@ -358,6 +359,9 @@ export async function ingestWooOrder(
   }
   if (opts.emitLifecycle) {
     await publishOrderCreatedTrigger(prisma, { orderId: created.id, siteId: site.id });
+    // Клиент мог написать/позвонить ДО того, как заказ дошёл до нас — такое событие осталось
+    // сиротой. Даём матчингу второй шанс (best-effort, свои ошибки глотает).
+    await adoptOrphanCommunicationsForNewOrder(prisma, created.id);
     await scheduleDeliveryTodayTrigger(prisma, created.id);
     const trigger = paymentTriggerFor(payment, incomingState.paymentStatus);
     if (trigger) await publishPaymentStateTrigger(prisma, { orderId: created.id, siteId: site.id, triggerType: trigger });

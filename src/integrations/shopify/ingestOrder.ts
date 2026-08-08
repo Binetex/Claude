@@ -19,6 +19,7 @@ import {
 } from "@/modules/automations/lifecycle";
 import { deriveShopifyOrderState, reconcileShopifyUpdate, type ShopifyStateSignal } from "./orderState";
 import { publishTelegramNotification } from "@/integrations/telegram/events";
+import { adoptOrphanCommunicationsForNewOrder } from "@/integrations/quo/adoptOrphans";
 
 /** Планирование доставки, безопасное для импорта: ошибка логируется, но не роняет приём заказа. */
 async function scheduleDeliverySafe(orderId: string): Promise<void> {
@@ -280,6 +281,9 @@ export async function ingestShopifyOrder(
     await scheduleDeliverySafe(order.id);
     // Авто-SMS: триггер ORDER_CREATED только для НОВОГО заказа (не update/resync/backfill).
     await publishOrderCreatedTrigger(prisma, { orderId: order.id, siteId: site.id });
+    // Клиент мог написать/позвонить ДО того, как заказ дошёл до нас — такое событие осталось
+    // сиротой. Даём матчингу второй шанс (best-effort, свои ошибки глотает).
+    await adoptOrphanCommunicationsForNewOrder(prisma, order.id);
     // «Заказ оплачен» — заказ пришёл к нам уже оплаченным (обычный путь Shopify). ORDER_DELIVERED/
     // ORDER_CANCELLED на создании не публикуются: это импорт факта, а не наблюдённый переход.
     await publishOrderLifecycleTriggers(prisma, {
