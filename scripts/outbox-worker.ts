@@ -142,84 +142,112 @@ async function main() {
   process.on("SIGTERM", () => shutdown("SIGTERM"));
   process.on("SIGINT", () => shutdown("SIGINT"));
 
+  /**
+   * Периодическая задача с ПЕРВЫМ запуском вскоре после старта.
+   *
+   * Голый setInterval отсчитывает интервал заново при каждом перезапуске воркера, а
+   * перезапуск происходит на каждом деплое. Если деплой случается чаще интервала, задача не
+   * выполняется НИ РАЗУ: 8 августа между 09:36 и 10:23 не прошло ни одного пересчёта доли —
+   * в логе только строки о запуске таймера. Из-за этого доставленный заказ не попал в
+   * заработок флориста: день просто некому было пересчитать.
+   *
+   * Поэтому у каждой задачи есть стартовый запуск. Задержки разные, чтобы четыре задачи не
+   * били в базу и в чужие API одновременно на старте.
+   */
+  const timers: NodeJS.Timeout[] = [];
+
+  function schedule<T>(opts: {
+    name: string;
+    enabled: boolean;
+    disabledReason?: string;
+    intervalMs: number;
+    /** Через сколько после старта выполнить первый раз. */
+    kickoffMs: number;
+    run: () => Promise<T>;
+    /** Логировать ли результат прохода. По умолчанию — всегда. */
+    report?: (r: T) => boolean;
+  }): void {
+    if (!opts.enabled) {
+      log(`${opts.name}.disabled`, { reason: opts.disabledReason });
+      return;
+    }
+
+    const tick = () => {
+      if (shuttingDown) return;
+      opts
+        .run()
+        .then((r) => {
+          if (!opts.report || opts.report(r)) log(`${opts.name}.tick`, r as Record<string, unknown>);
+        })
+        .catch((err) => log(`${opts.name}.error`, { error: err instanceof Error ? err.message : String(err) }));
+    };
+
+    const kickoff = setTimeout(tick, opts.kickoffMs);
+    const repeat = setInterval(tick, opts.intervalMs);
+    kickoff.unref?.();
+    repeat.unref?.();
+    timers.push(kickoff, repeat);
+    log(`${opts.name}.enabled`, { intervalMs: opts.intervalMs, kickoffMs: opts.kickoffMs });
+  }
+
   // Реконсиляция Burq-расписаний — редкая самостраховка (потерянный enqueue). НЕ основной
   // механизм и НЕ вызывает Burq API: только пере-ставит потерянные задачи в outbox.
-  // Master gate: при выключенном BURQ_RUNTIME_ENABLED интервал НЕ запускается вовсе.
-  const reconcileMs = Number(process.env.BURQ_RECONCILE_MS ?? 3_600_000); // 1ч по умолчанию
-  const reconcileTimer = isBurqRuntimeEnabled()
-    ? setInterval(() => {
-        if (shuttingDown) return;
-        reconcileBurqSchedules(prisma)
-          .then((r) => log("burq.reconcile.tick", r))
-          .catch((err) => log("burq.reconcile.error", { error: err instanceof Error ? err.message : String(err) }));
-      }, reconcileMs)
-      : null;
-  reconcileTimer?.unref?.();
-  if (reconcileTimer) log("burq.reconcile.enabled", { intervalMs: reconcileMs });
-  else log("burq.reconcile.disabled", { reason: "BURQ_RUNTIME_ENABLED=false" });
+  schedule({
+    name: "burq.reconcile",
+    enabled: isBurqRuntimeEnabled(),
+    disabledReason: "BURQ_RUNTIME_ENABLED=false",
+    intervalMs: Number(process.env.BURQ_RECONCILE_MS ?? 3_600_000), // 1ч
+    kickoffMs: 20_000,
+    run: () => reconcileBurqSchedules(prisma),
+  });
 
   // Опрос статусов открытых доставок. Webhook — основной канал и быстрее, но он находит
   // доставку по НАШЕЙ метке, а у заведённой руками в кабинете Burq её нет: событие приходит
   // и выбрасывается. Опрос спрашивает Burq по ЕГО номеру заказа — тем же путём, что кнопка
-  // «обновить фото», которая работает всегда.
-  //
-  // Нагрузка мизерная: в выборку попадают ТОЛЬКО доставки, по которым события молчат больше
-  // 20 минут (см. statusSync.ts). Пока Burq исправно сообщает — не спрашиваем вовсе, и
-  // ночью, когда ничего не едет, проход не делает ни одного запроса.
-  const burqStatusMs = Number(process.env.BURQ_STATUS_SYNC_MS ?? 900_000); // 15 мин
-  const burqStatusTimer = isBurqRuntimeEnabled()
-    ? setInterval(() => {
-        if (shuttingDown) return;
-        syncOpenDeliveryStatuses(prisma)
-          .then((r) => { if (r.scanned > 0) log("burq.status.sync.tick", r); })
-          .catch((err) => log("burq.status.sync.error", { error: err instanceof Error ? err.message : String(err) }));
-      }, burqStatusMs)
-    : null;
-  burqStatusTimer?.unref?.();
-  log(burqStatusTimer ? "burq.status.sync.enabled" : "burq.status.sync.disabled", { intervalMs: burqStatusTimer ? burqStatusMs : undefined });
+  // «обновить фото», которая работает всегда. В выборку попадают только доставки, по которым
+  // события молчат больше 20 минут, поэтому в спокойное время запросов нет вовсе.
+  schedule({
+    name: "burq.status.sync",
+    enabled: isBurqRuntimeEnabled(),
+    disabledReason: "BURQ_RUNTIME_ENABLED=false",
+    intervalMs: Number(process.env.BURQ_STATUS_SYNC_MS ?? 900_000), // 15 мин
+    kickoffMs: 35_000,
+    run: () => syncOpenDeliveryStatuses(prisma),
+    report: (r) => r.scanned > 0,
+  });
 
-  // Диспетчер Airwallex: один индексированный SELECT раз в 5 минут, LIMIT 50, задачи — в outbox.
-  // Отдельного планировщика нет. Выключается флагом AIRWALLEX_MONITORING_ENABLED=false.
-  const awMs = Number(process.env.AIRWALLEX_DISPATCH_MS ?? 300_000); // 5 мин
-  const awTimer = process.env.AIRWALLEX_MONITORING_ENABLED === "true"
-    ? setInterval(() => {
-        if (shuttingDown) return;
-        dispatchAirwallexChecks(prisma)
-          .then((r) => { if (r.selected > 0) log("airwallex.dispatch.tick", r); })
-          .catch((err) => log("airwallex.dispatch.error", { error: err instanceof Error ? err.message : String(err) }));
-      }, awMs)
-    : null;
-  awTimer?.unref?.();
-  log(awTimer ? "airwallex.dispatch.enabled" : "airwallex.dispatch.disabled", { intervalMs: awTimer ? awMs : undefined });
-
-  // Диспетчер начислений флористам: один индексированный SELECT раз в 10 минут, LIMIT 100,
-  // задачи — в тот же outbox. Гейт двойной (флаг + дата старта), при закрытом гейте интервал
-  // не запускается вовсе — деплой сам по себе не начисляет ничего.
+  // Диспетчер Airwallex: один индексированный SELECT, LIMIT 50, задачи — в outbox.
+  schedule({
+    name: "airwallex.dispatch",
+    enabled: process.env.AIRWALLEX_MONITORING_ENABLED === "true",
+    disabledReason: "AIRWALLEX_MONITORING_ENABLED != true",
+    intervalMs: Number(process.env.AIRWALLEX_DISPATCH_MS ?? 300_000), // 5 мин
+    kickoffMs: 50_000,
+    run: () => dispatchAirwallexChecks(prisma),
+    report: (r) => r.selected > 0,
+  });
 
   // Доля основного флориста: пересчёт итогов дней начиная с даты запуска. Долг выводится
   // из этих итогов и денег не переводит — реальная выплата только вручную от владельца,
   // поэтому автоматический пересчёт ничего не может «заплатить» по ошибке.
   const shareGate = primaryShareGate();
-  const shareMs = Number(process.env.FINANCE_SHARE_DISPATCH_MS ?? 900_000); // 15 мин
-  const shareTimer = shareGate.enabled
-    ? setInterval(() => {
-        if (shuttingDown) return;
-        dispatchPrimaryShare(prisma)
-          .then((r) => { if (r.days > 0) log("finance.share.tick", r); })
-          .catch((err) => log("finance.share.error", { error: err instanceof Error ? err.message : String(err) }));
-      }, shareMs)
-    : null;
-  shareTimer?.unref?.();
-  if (shareTimer) log("finance.share.enabled", { intervalMs: shareMs });
-  else log("finance.share.disabled", { reason: shareGate.enabled ? "unknown" : shareGate.reason });
+  schedule({
+    name: "finance.share",
+    enabled: shareGate.enabled,
+    disabledReason: shareGate.enabled ? undefined : shareGate.reason,
+    intervalMs: Number(process.env.FINANCE_SHARE_DISPATCH_MS ?? 900_000), // 15 мин
+    kickoffMs: 65_000,
+    run: () => dispatchPrimaryShare(prisma),
+    report: (r) => r.days > 0,
+  });
 
   log("worker.started", { workerId: worker.id });
   try {
     await worker.start(); // блокирует до stop()
   } finally {
-    if (reconcileTimer) clearInterval(reconcileTimer);
-    if (awTimer) clearInterval(awTimer);
-    if (shareTimer) clearInterval(shareTimer);
+    // Гасятся ВСЕ, включая стартовые: раньше опрос статусов доставок не гасился вовсе —
+    // при копировании блока про него просто забыли.
+    for (const t of timers) clearTimeout(t);
     await prisma.$disconnect();
     log("worker.stopped", { workerId: worker.id });
   }
