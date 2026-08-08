@@ -13,6 +13,7 @@ import { isBurqRuntimeEnabled } from "@/lib/featureFlags";
 import { applyDeliveryStatusUpdate } from "./statusIngest";
 import { refetchPodForDelivery, BURQ_POD_REFETCH_EVENT, BURQ_POD_REFETCH_DELAY_MS } from "./podService";
 import { publishOrderDeliveredTrigger } from "@/modules/automations/lifecycle";
+import { recomputeDayForOrder } from "@/modules/finance/orderDayHook";
 import type { BurqWebhookEvent } from "./types";
 
 export const BURQ_WEBHOOK_EVENT = "burq.webhook.received";
@@ -28,7 +29,11 @@ export function makeCompletedPublisher(prisma: PrismaClient) {
     await publishEvent(repo, "order.delivery.completed", { orderId }, { idempotencyKey: `order.delivery.completed:${deliveryId}` });
     // Авто-SMS: ORDER_DELIVERED — ровно один раз на доставленную попытку (тот же дедуп по deliveryId).
     await publishOrderDeliveredTrigger(prisma, { orderId, deliveryId });
-    // Финансы: заказ доставлен курьером → задача на начисление флористу.
+    // Финансы: заказ вошёл в день только сейчас — пересчитываем итог дня. Раньше здесь был
+    // этот же комментарий и НИ ОДНОЙ строки под ним, а дыру закрывал интервал воркера:
+    // он раз в 15 минут пересчитывал все дни подряд. Из-за перезапусков на деплое интервал
+    // не срабатывал сутками, и заработок молча отставал.
+    await recomputeDayForOrder(prisma, orderId);
   };
 }
 

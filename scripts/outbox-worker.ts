@@ -40,8 +40,6 @@ import { TELEGRAM_NOTIFY_EVENT } from "@/integrations/telegram/events";
 import { buildAirwallexVerifyHandler } from "@/integrations/airwallex/handler";
 import { AIRWALLEX_VERIFY_EVENT } from "@/integrations/airwallex/events";
 import { dispatchAirwallexChecks } from "@/integrations/airwallex/dispatcher";
-import { primaryShareGate } from "@/modules/finance/config";
-import { dispatchPrimaryShare } from "@/modules/finance/shareDispatcher";
 import { createSmsChannelSender } from "@/modules/automations/channels/sms";
 import { createEmailChannelSender } from "@/modules/automations/channels/email";
 import { getQuoConfig } from "@/integrations/quo/config";
@@ -227,19 +225,15 @@ async function main() {
     report: (r) => r.selected > 0,
   });
 
-  // Доля основного флориста: пересчёт итогов дней начиная с даты запуска. Долг выводится
-  // из этих итогов и денег не переводит — реальная выплата только вручную от владельца,
-  // поэтому автоматический пересчёт ничего не может «заплатить» по ошибке.
-  const shareGate = primaryShareGate();
-  schedule({
-    name: "finance.share",
-    enabled: shareGate.enabled,
-    disabledReason: shareGate.enabled ? undefined : shareGate.reason,
-    intervalMs: Number(process.env.FINANCE_SHARE_DISPATCH_MS ?? 900_000), // 15 мин
-    kickoffMs: 65_000,
-    run: () => dispatchPrimaryShare(prisma),
-    report: (r) => r.days > 0,
-  });
+  // Интервального пересчёта доли основного флориста здесь БОЛЬШЕ НЕТ, и возвращать его не
+  // надо. Он пересчитывал ВСЕ дни с даты запуска каждые 15 минут — то есть работа росла
+  // линейно с каждым прожитым днём, а нужен пересчёт был только там, где состав дня реально
+  // изменился. Теперь пересчёт висит на самих изменениях (modules/finance/orderDayHook.ts):
+  // доставлено курьером, подтверждено магазином, статус или дата правлены руками,
+  // переназначен флорист. Плюс правки финансовых входных данных, которые и раньше
+  // пересчитывали свои дни сами.
+  //
+  // Разовый пересчёт всего периода остался доступен: npm run finance:recompute.
 
   log("worker.started", { workerId: worker.id });
   try {

@@ -6,6 +6,7 @@ import { isFloristAvailable } from "./availability";
 import { notifyFloristAssigned } from "@/integrations/notifications/telegram";
 import { TERMINAL_ORDER_STATUSES } from "@/lib/statuses";
 import { onOrderDeliveryChangeSafe } from "@/integrations/delivery/burq/scheduleService";
+import { recomputeDayForOrder } from "@/modules/finance/orderDayHook";
 
 /** Активные флористы сайта в порядке приоритета (position ↑). */
 /**
@@ -229,6 +230,9 @@ export async function assignAndActivateFlorist(orderId: string, floristId: strin
   // Строго один раз после успешной транзакции: уведомление + (пере)планирование доставки под флориста.
   await notifyFloristAssigned(floristId, orderId, { previousFloristId, assignmentId });
   await onOrderDeliveryChangeSafe(prisma, orderId);
+  // Переназначение выводит заказ из «Доставлен», то есть меняет состав финансового дня —
+  // и у прежнего флориста, и у нового. Пересчитываем день заново.
+  await recomputeDayForOrder(prisma, orderId);
 }
 
 /**

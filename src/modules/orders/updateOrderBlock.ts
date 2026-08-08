@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { Prisma } from "@/generated/prisma/client";
 import type { OrderStatus, Role } from "@/generated/prisma/enums";
 import { normalizePhone } from "@/lib/phone";
+import { recomputeDaysForOrder } from "@/modules/finance/orderDayHook";
 import { manualOrderStatuses } from "@/lib/statuses";
 
 /**
@@ -143,7 +144,14 @@ export async function updateOrderBlock(input: {
   const expected = new Date(input.expectedUpdatedAt);
   if (Number.isNaN(expected.getTime())) return { status: "invalid", error: "Некорректная версия записи." };
 
-  return prisma.$transaction(async (tx) => {
+  // Дни, чей финансовый итог изменился этой правкой. Заполняются внутри транзакции, а
+  // пересчёт запускается ПОСЛЕ коммита: он читает заказ из базы и внутри транзакции увидел
+  // бы ещё не зафиксированные данные.
+  const affectedDays: Date[] = [];
+
+  // Тип возврата указан явно: без него литеральные "ok"/"conflict" расширяются до string,
+  // потому что результат больше не возвращается напрямую из функции.
+  const result = await prisma.$transaction(async (tx): Promise<UpdateOrderBlockResult> => {
     const before = await tx.order.findUnique({ where: { id: input.orderId }, select });
     if (!before) return { status: "notfound" };
 
@@ -165,6 +173,19 @@ export async function updateOrderBlock(input: {
     const { updatedAt, ...afterRest } = after as Record<string, unknown> & { updatedAt: Date };
     const changed = diffChanged(input.block, before as Record<string, unknown>, afterRest);
 
+    // Что меняет состав финансового дня: статус (заказ входит в день по «Доставлен») и дата
+    // доставки (заказ переезжает — пересчитать надо ОБА дня, откуда ушёл и куда пришёл).
+    if (input.block === "status" && "orderStatus" in changed) {
+      const day = await tx.order.findUnique({ where: { id: input.orderId }, select: { deliveryDate: true } });
+      if (day) affectedDays.push(day.deliveryDate);
+    }
+    if (input.block === "delivery" && "deliveryDate" in changed) {
+      const from = (before as { deliveryDate?: Date }).deliveryDate;
+      const to = (afterRest as { deliveryDate?: Date }).deliveryDate;
+      if (from) affectedDays.push(from);
+      if (to) affectedDays.push(to);
+    }
+
     await tx.orderAudit.create({
       data: {
         orderId: input.orderId,
@@ -177,4 +198,9 @@ export async function updateOrderBlock(input: {
 
     return { status: "ok", updatedAt: updatedAt.toISOString(), changed };
   });
+
+  if (result.status === "ok" && affectedDays.length > 0) {
+    await recomputeDaysForOrder(prisma, input.orderId, affectedDays);
+  }
+  return result;
 }
