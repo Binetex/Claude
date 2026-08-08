@@ -12,8 +12,8 @@ export function localDateStr(date: Date, tz: string): string {
 }
 
 /** Сегодняшняя дата (YYYY-MM-DD) в таймзоне магазина. */
-export function todayStrInTz(tz: string | null | undefined): string {
-  return localDateStr(new Date(), tz || DEFAULT_STORE_TZ);
+export function todayStrInTz(tz: string | null | undefined, now: Date = new Date()): string {
+  return localDateStr(now, tz || DEFAULT_STORE_TZ);
 }
 
 /** true, если строка — валидная IANA-таймзона. */

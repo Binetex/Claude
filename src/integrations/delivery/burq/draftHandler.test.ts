@@ -19,6 +19,7 @@ function makeCtx(over: Partial<DraftContext> = {}): DraftContext {
       id: "o1",
       orderStatus: "AWAITING_COURIER",
       deliveryDate: null,
+    timezone: null,
       scheduleVersion: 1,
       siteAutoCreateEnabled: true,
       dropoff: {

@@ -32,7 +32,7 @@ export function createPrismaDraftPort(prisma: PrismaClient): DraftCreatePort {
           zip: true,
           customerNote: true,
           pickupLocationOverrideId: true,
-          site: { select: { burqDraftAutoCreateEnabled: true, burqDefaultDropoffInstructions: true } },
+          site: { select: { burqDraftAutoCreateEnabled: true, burqDefaultDropoffInstructions: true, timezone: true } },
           deliveryIntent: { select: { scheduleVersion: true } },
           currentFlorist: { select: { id: true, pickupLocations: true } },
           deliveries: { select: { attemptNumber: true, isCurrentAttempt: true, externalDeliveryId: true } },
@@ -55,6 +55,7 @@ export function createPrismaDraftPort(prisma: PrismaClient): DraftCreatePort {
           deliveryDate: order.deliveryDate ?? null,
           scheduleVersion: order.deliveryIntent?.scheduleVersion ?? 0,
           siteAutoCreateEnabled: order.site?.burqDraftAutoCreateEnabled ?? false,
+          timezone: order.site?.timezone ?? null,
           dropoff: {
             recipientName: order.recipientName,
             recipientPhone: order.recipientPhone,

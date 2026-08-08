@@ -22,6 +22,8 @@ export type DraftContext = {
     scheduleVersion: number; // текущая версия расписания (из DeliveryIntent)
     siteAutoCreateEnabled: boolean;
     deliveryDate: Date | null; // для guard'а прошедшей даты (авто-путь)
+    /** Таймзона магазина: «сегодня» для guard'а считается по ней, а не по UTC. */
+    timezone: string | null;
     dropoff: DraftOrderInput;
   };
   floristId: string | null;
@@ -106,6 +108,7 @@ export async function handleBurqDraftCreate(deps: DraftHandlerDeps, payload: Bur
     pickup: ctx.pickup,
     hasCurrentDraft: ctx.hasCurrentDraft,
     deliveryDate: ctx.order.deliveryDate, // авто-путь: прошедшую дату не создаём
+    timezone: ctx.order.timezone, // «сегодня» — по календарю магазина, не по UTC
   });
 
   if (decision.action === "SKIP") {

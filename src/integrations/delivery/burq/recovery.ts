@@ -60,6 +60,7 @@ export async function reconcileBurqSchedules(prisma: PrismaClient, now: Date = n
       pickup: ctx.pickup,
       hasCurrentDraft: ctx.hasCurrentDraft,
       deliveryDate: ctx.order.deliveryDate, // recovery тоже не воскрешает прошедшие даты
+      timezone: ctx.order.timezone,
     });
     if (decision.action !== "CREATE_DRAFT") continue;
 
