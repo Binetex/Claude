@@ -27,3 +27,18 @@ export function pluralOrders(n: number): string {
   if (mod10 >= 2 && mod10 <= 4) return `${n} заказа`;
   return `${n} заказов`;
 }
+
+/**
+ * Доля величины в выручке: «43%». Нужна, чтобы понимать не абсолютные суммы, а кто сколько
+ * съедает — расходы, флористы, я.
+ *
+ * NULL, когда процент был бы ложью:
+ *  - выручки нет (делить не на что). Ноль выручки при непустом расходе — это не «0%»;
+ *  - сама величина неизвестна (день не посчитан) — там и суммы нет, стоит прочерк.
+ *
+ * Знак сохраняется: убыточный день честно показывает «−31%».
+ */
+export function shareOfRevenue(cents: number | null | undefined, revenueCents: number): string | null {
+  if (cents == null || revenueCents <= 0) return null;
+  return `${Math.round((cents / revenueCents) * 100)}%`;
+}

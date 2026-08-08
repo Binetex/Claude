@@ -20,6 +20,7 @@
 import Link from "next/link";
 import { ChevronRight } from "lucide-react";
 import { formatDollars } from "@/lib/cents";
+import { shareOfRevenue } from "@/modules/finance/earningsFormat";
 import { Badge } from "@/components/ui/Badge";
 import type { OwnerDay } from "@/modules/finance/ownerDashboard";
 
@@ -49,8 +50,24 @@ function missingList(day: OwnerDay): string[] {
   return out;
 }
 
-/** `cents = null` — величину посчитать нечем; прочерк честнее нуля. */
-function Metric({ label, cents, accent = false }: { label: string; cents: number | null; accent?: boolean }) {
+/**
+ * `cents = null` — величину посчитать нечем; прочерк честнее нуля.
+ *
+ * `shareOfCents` — выручка дня, если рядом с суммой нужна её доля: «$525 (46%)». У самой
+ * выручки доли нет намеренно — это та сотня, от которой считаются остальные.
+ */
+function Metric({
+  label,
+  cents,
+  shareOfCents,
+  accent = false,
+}: {
+  label: string;
+  cents: number | null;
+  shareOfCents?: number;
+  accent?: boolean;
+}) {
+  const share = shareOfCents == null ? null : shareOfRevenue(cents, shareOfCents);
   return (
     <div className="min-w-0">
       <div className="truncate text-xs text-slate-400">{label}</div>
@@ -66,6 +83,7 @@ function Metric({ label, cents, accent = false }: { label: string; cents: number
         }`}
       >
         {cents == null ? "—" : formatDollars(cents)}
+        {share && <span className="ml-1 text-[11px] font-normal text-slate-400">({share})</span>}
       </div>
     </div>
   );
@@ -100,11 +118,12 @@ export function OwnerDayList({ days }: { days: OwnerDay[] }) {
 
                 <div className="min-w-0 flex-1">
                   <div className="grid grid-cols-2 gap-x-4 gap-y-2.5 sm:grid-cols-4 sm:gap-x-6">
-                    {/* Выручка известна всегда: заказы состоялись, сколько заплатили — видно. */}
+                    {/* Выручка известна всегда: заказы состоялись, сколько заплатили — видно.
+                        Процента у неё нет: остальные три считаются именно от неё. */}
                     <Metric label="Выручка" cents={d.revenueCents} />
-                    <Metric label="Расходы" cents={d.ready ? d.expensesCents : null} />
-                    <Metric label="Флористы" cents={d.ready ? d.floristEarningsCents : null} />
-                    <Metric label="Моя прибыль" cents={d.ownerNetCents} accent />
+                    <Metric label="Расходы" cents={d.ready ? d.expensesCents : null} shareOfCents={d.revenueCents} />
+                    <Metric label="Флористы" cents={d.ready ? d.floristEarningsCents : null} shareOfCents={d.revenueCents} />
+                    <Metric label="Моя прибыль" cents={d.ownerNetCents} shareOfCents={d.revenueCents} accent />
                   </div>
 
                   {d.ownerNetCents == null && (

@@ -9,11 +9,38 @@ import { OrdersNavProvider, OrdersPendingArea } from "@/app/dashboard/(owner)/or
 import { OwnerMonthChart } from "./OwnerMonthChart";
 import { getOwnerMonth } from "@/modules/finance/ownerDashboard";
 import { yearOptions } from "@/modules/finance/expensePeriod";
+import { shareOfRevenue } from "@/modules/finance/earningsFormat";
 import { prisma } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 
 const utc = (y: number, m: number, d: number) => new Date(Date.UTC(y, m, d));
+
+/**
+ * Сумма и её доля в выручке рядом: «$3,552 (43%)».
+ *
+ * Процент в скобках и серым, чтобы не спорить с самой суммой: она главное, доля —
+ * пояснение. У прибыли рядом стоит ещё и сравнение с прошлым месяцем — оно цветное и без
+ * скобок, поэтому два числа не путаются.
+ */
+function WithShare({
+  cents,
+  revenueCents,
+  children,
+}: {
+  cents: number;
+  revenueCents: number;
+  children?: React.ReactNode;
+}) {
+  const share = shareOfRevenue(cents, revenueCents);
+  return (
+    <span className="flex flex-wrap items-baseline gap-1.5">
+      {formatDollars(cents)}
+      {share && <span className="text-xs font-normal text-slate-400">({share})</span>}
+      {children}
+    </span>
+  );
+}
 
 /** «−12%» у прибыли: как выбранный месяц идёт против предыдущего. */
 function deltaLabel(current: number, previous: number): { text: string; positive: boolean } | null {
@@ -79,21 +106,28 @@ export default async function FinanceDashboardPage({
           <div className="mt-4 space-y-4">
 
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+            {/* У выручки процента нет намеренно: это и есть та сотня, от которой считаются
+                остальные. «100%» рядом с ней — шум. */}
             <StatCard label="Выручка" value={formatDollars(selected.revenueCents)} />
-            <StatCard label="Расходы" value={formatDollars(selected.expensesCents)} />
-            <StatCard label="Флористы" value={formatDollars(selected.floristEarningsCents)} />
+            <StatCard
+              label="Расходы"
+              value={<WithShare cents={selected.expensesCents} revenueCents={selected.revenueCents} />}
+            />
+            <StatCard
+              label="Флористы"
+              value={<WithShare cents={selected.floristEarningsCents} revenueCents={selected.revenueCents} />}
+            />
             <StatCard
               label="Моя прибыль"
               tone={selected.ownerNetCents < 0 ? "danger" : "success"}
               value={
-                <span className="flex flex-wrap items-baseline gap-2">
-                  {formatDollars(selected.ownerNetCents)}
+                <WithShare cents={selected.ownerNetCents} revenueCents={selected.revenueCents}>
                   {delta && (
                     <span className={`text-xs font-normal ${delta.positive ? "text-emerald-600" : "text-red-600"}`}>
                       {delta.text}
                     </span>
                   )}
-                </span>
+                </WithShare>
               }
             />
           </div>
