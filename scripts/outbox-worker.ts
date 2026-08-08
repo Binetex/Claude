@@ -17,6 +17,7 @@ import { PrismaOutboxRepository } from "@/outbox/prismaRepository";
 import { PrismaProcessedOperationStore } from "@/outbox/prismaProcessedOperations";
 import { OutboxWorker, type OutboxHandler } from "@/outbox/worker";
 import { OutboxLogger } from "@/outbox/logger";
+import { createHeartbeatWriter, heartbeatFilePath } from "@/outbox/heartbeat";
 import { buildDeliveryCompletedHandler } from "@/outbox/handlers";
 import { createDeliveryResolver } from "@/outbox/deliveryResolver";
 import { buildShopifyWebhookHandler } from "@/integrations/shopify/customApp/webhookHandler";
@@ -58,6 +59,7 @@ async function main() {
   const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL }) });
   const repo = new PrismaOutboxRepository(prisma);
   const idempotency = new PrismaProcessedOperationStore(prisma);
+  const heartbeatWriter = createHeartbeatWriter();
 
   // Mock-провайдеры: реального сетевого вызова нет. Реальные — за фиче-флагами (follow-up).
   const providers = createMockProviders();
@@ -122,6 +124,9 @@ async function main() {
     logger: new OutboxLogger(),
     // Потеря события больше не проходит молча — владельцу уходит сигнал в Telegram.
     onDeadLetter: buildDeadLetterAlert(prisma),
+    // Отметка живости в logs/worker-heartbeat.json → её читает /api/health/worker.
+    // Нужна потому, что dead-letter-алерт выше отправляет САМ воркер: мёртвый воркер молчит.
+    heartbeat: heartbeatWriter.beat,
     workerId: process.env.WORKER_ID,
     policy: {
       batchSize: Number(process.env.OUTBOX_BATCH_SIZE ?? 20),
@@ -235,7 +240,7 @@ async function main() {
   //
   // Разовый пересчёт всего периода остался доступен: npm run finance:recompute.
 
-  log("worker.started", { workerId: worker.id });
+  log("worker.started", { workerId: worker.id, heartbeatFile: heartbeatFilePath() });
   try {
     await worker.start(); // блокирует до stop()
   } finally {

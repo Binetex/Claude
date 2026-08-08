@@ -59,6 +59,13 @@ export type OutboxWorkerDeps = {
    * Telegram: канал подключается в scripts/outbox-worker.ts.
    */
   onDeadLetter?: (record: OutboxRecord, err: unknown) => Promise<void>;
+  /**
+   * Отметка живости: вызывается КАЖДЫМ циклом поллинга, как часто писать — решает сама
+   * (см. outbox/heartbeat.ts). Ставится из цикла, а не отдельным setInterval, чтобы отметка
+   * означала «тик реально прошёл», а не «процесс ещё не убит»: зависший на внешнем вызове
+   * воркер жив для ОС, но очередь не двигает.
+   */
+  heartbeat?: (workerId: string, now: Date) => Promise<void>;
 };
 
 const realSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -72,6 +79,7 @@ export class OutboxWorker {
   private readonly now: () => Date;
   private readonly sleep: (ms: number) => Promise<void>;
   private readonly onDeadLetter?: (record: OutboxRecord, err: unknown) => Promise<void>;
+  private readonly heartbeat?: (workerId: string, now: Date) => Promise<void>;
   private stopping = false;
   private looping = false;
 
@@ -84,6 +92,7 @@ export class OutboxWorker {
     this.now = deps.now ?? (() => new Date());
     this.sleep = deps.sleep ?? realSleep;
     this.onDeadLetter = deps.onDeadLetter;
+    this.heartbeat = deps.heartbeat;
   }
 
   /**
@@ -182,6 +191,8 @@ export class OutboxWorker {
     while (!this.stopping) {
       try {
         const result = await this.tick();
+        // Отметка живости — ПОСЛЕ тика: она означает «цикл дошёл до конца», а не «процесс жив».
+        if (this.heartbeat) await this.heartbeat(this.workerId, this.now());
         // Если ничего не забрали — ждём интервал; иначе сразу следующий батч (дренаж очереди).
         if (result.claimed === 0 && !this.stopping) await this.sleep(this.policy.pollIntervalMs);
       } catch (err) {

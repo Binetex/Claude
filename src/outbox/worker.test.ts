@@ -18,7 +18,11 @@ const ev = (over: Partial<NewOutboxEvent> = {}): NewOutboxEvent => ({
 
 const noSleep = async () => {};
 
-function makeWorker(handlers: Record<string, OutboxHandler>, clock: { t: number }, opts: { sink?: (l: OutboxLogLine) => void } = {}) {
+function makeWorker(
+  handlers: Record<string, OutboxHandler>,
+  clock: { t: number },
+  opts: { sink?: (l: OutboxLogLine) => void; heartbeat?: (workerId: string, now: Date) => Promise<void> } = {}
+) {
   const repo = new InMemoryOutboxRepository();
   const worker = new OutboxWorker({
     repo,
@@ -27,6 +31,7 @@ function makeWorker(handlers: Record<string, OutboxHandler>, clock: { t: number 
     now: () => new Date(clock.t),
     sleep: noSleep,
     logger: new OutboxLogger(opts.sink),
+    heartbeat: opts.heartbeat,
     policy: { batchSize: 10, pollIntervalMs: 0, stuckAfterMs: 60_000, retry: { maxAttempts: 4, baseDelayMs: 10, maxDelayMs: 100 } },
   });
   return { repo, worker };
@@ -242,6 +247,39 @@ describe("OutboxWorker — graceful shutdown", () => {
     const p = worker.start();
     worker.stop();
     await expect(p).resolves.toBeUndefined();
+  });
+});
+
+describe("OutboxWorker — отметка живости", () => {
+  it("цикл ставит отметку и передаёт свой workerId", async () => {
+    const clock = { t: T0.getTime() };
+    const beats: { workerId: string; at: string }[] = [];
+    const { worker } = makeWorker({}, clock, {
+      heartbeat: async (workerId, now) => {
+        beats.push({ workerId, at: now.toISOString() });
+        worker.stop(); // одного оборота достаточно
+      },
+    });
+
+    await worker.start();
+
+    expect(beats).toEqual([{ workerId: "W1", at: T0.toISOString() }]);
+  });
+
+  it("отметка ставится и когда очередь пуста — иначе тихий простой выглядел бы смертью", async () => {
+    const clock = { t: T0.getTime() };
+    let beats = 0;
+    // В очередь СОЗНАТЕЛЬНО ничего не кладём: проверяем именно холостой оборот цикла.
+    const { worker } = makeWorker({}, clock, {
+      heartbeat: async () => {
+        beats++;
+        worker.stop();
+      },
+    });
+
+    await worker.start();
+
+    expect(beats).toBe(1);
   });
 });
 
