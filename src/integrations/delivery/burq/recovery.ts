@@ -42,12 +42,30 @@ export async function reconcileBurqSchedules(prisma: PrismaClient, now: Date = n
   let rescheduled = 0;
 
   for (const { id: orderId } of candidates) {
-    // Есть ли ЖИВАЯ задача создания? Тогда не трогаем (она отработает).
-    const liveTask = await prisma.outboxEvent.findFirst({
-      where: { eventType: BURQ_DRAFT_CREATE_EVENT, aggregateId: orderId, status: { in: ["PENDING", "PROCESSING"] } },
-      select: { id: true },
+    // Задача создания в любом состоянии, кроме «отработала успешно». Живая — значит
+    // отработает сама; мёртвая — значит воскрешать её нельзя (см. ниже).
+    const task = await prisma.outboxEvent.findFirst({
+      where: {
+        eventType: BURQ_DRAFT_CREATE_EVENT,
+        aggregateId: orderId,
+        status: { in: ["PENDING", "PROCESSING", "DEAD_LETTER"] },
+      },
+      select: { status: true },
+      orderBy: { createdAt: "desc" },
     });
-    if (liveTask) continue;
+    if (task?.status === "PENDING" || task?.status === "PROCESSING") continue;
+
+    // МЁРТВУЮ задачу реконсиляция не воскрешает, и это главное её правило.
+    //
+    // Она умерла, исчерпав все повторы, — значит причина в самих данных заказа, а не в
+    // сбое. Ставить её заново раз в час означает бесконечно повторять то, что уже восемь
+    // раз не вышло: ограничение попыток перестаёт существовать, а владелец каждый час
+    // получает одно и то же уведомление о потерянном событии (так и было с M-THEFLOW-002 —
+    // семь одинаковых сообщений за вечер).
+    //
+    // Возобновление остаётся за человеком: кнопка в карточке заказа, а также хуки на
+    // назначение флориста и настройку pickup — они срабатывают, когда причина устранена.
+    if (task?.status === "DEAD_LETTER") continue;
 
     // Живой задачи нет (потеряна или уже обработана без результата). Ставим заново ТОЛЬКО если
     // заказ реально готов к созданию черновика — иначе он корректно ждёт (без churn).
