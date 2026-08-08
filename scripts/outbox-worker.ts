@@ -47,6 +47,7 @@ import { createEmailChannelSender } from "@/modules/automations/channels/email";
 import { getQuoConfig } from "@/integrations/quo/config";
 import { createQuoClient } from "@/integrations/quo/client";
 import { reconcileBurqSchedules } from "@/integrations/delivery/burq/recovery";
+import { syncOpenDeliveryStatuses } from "@/integrations/delivery/burq/statusSync";
 import { isBurqRuntimeEnabled, featureFlags } from "@/lib/featureFlags";
 import { MessagingService } from "@/messaging/service";
 import { createMockProviders } from "@/messaging/providers/mock";
@@ -156,6 +157,23 @@ async function main() {
   reconcileTimer?.unref?.();
   if (reconcileTimer) log("burq.reconcile.enabled", { intervalMs: reconcileMs });
   else log("burq.reconcile.disabled", { reason: "BURQ_RUNTIME_ENABLED=false" });
+
+  // Опрос статусов открытых доставок. Webhook — основной канал и быстрее, но он находит
+  // доставку по НАШЕЙ метке, а у заведённой руками в кабинете Burq её нет: событие приходит
+  // и выбрасывается. Опрос спрашивает Burq по ЕГО номеру заказа — тем же путём, что кнопка
+  // «обновить фото», которая работает всегда. Закрывает и ручные доставки, и потерянные
+  // события, и молчание приёмника.
+  const burqStatusMs = Number(process.env.BURQ_STATUS_SYNC_MS ?? 600_000); // 10 мин
+  const burqStatusTimer = isBurqRuntimeEnabled()
+    ? setInterval(() => {
+        if (shuttingDown) return;
+        syncOpenDeliveryStatuses(prisma)
+          .then((r) => { if (r.scanned > 0) log("burq.status.sync.tick", r); })
+          .catch((err) => log("burq.status.sync.error", { error: err instanceof Error ? err.message : String(err) }));
+      }, burqStatusMs)
+    : null;
+  burqStatusTimer?.unref?.();
+  log(burqStatusTimer ? "burq.status.sync.enabled" : "burq.status.sync.disabled", { intervalMs: burqStatusTimer ? burqStatusMs : undefined });
 
   // Диспетчер Airwallex: один индексированный SELECT раз в 5 минут, LIMIT 50, задачи — в outbox.
   // Отдельного планировщика нет. Выключается флагом AIRWALLEX_MONITORING_ENABLED=false.
