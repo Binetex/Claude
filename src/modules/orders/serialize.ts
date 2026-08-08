@@ -1,7 +1,7 @@
 import { Prisma } from "@/generated/prisma/client";
 import { toNumber } from "@/lib/money";
 import { computeEstimatedProfit } from "@/modules/pricing/profit";
-import { effectiveFloristTotal, isTipItem } from "@/modules/pricing/serviceItems";
+import { compensableItems, effectiveFloristTotal, isTipItem } from "@/modules/pricing/serviceItems";
 import { getOrderItemImages } from "./images";
 
 /**
@@ -131,7 +131,11 @@ export function serializeForOwner(o: OrderWithRelations) {
           safeError: o.airwallexPayment.safeError,
         }
       : null,
-    items: o.items.map((i) => ({
+    // Служебная строка «Tip» из Shopify в список не идёт: это не товар, а способ прислать
+    // чаевые. Флористу за неё не платят, в закупку она не попадает, и уже поэтому в перечне
+    // товаров ей делать нечего. Деньги не теряются — сумма чаевых живёт в Order.tip и
+    // показывается отдельной строкой в финансах; ни один экран не суммирует этот список.
+    items: compensableItems(o.items).map((i) => ({
       id: i.id,
       name: i.name,
       variantName: i.variantName,
@@ -195,7 +199,8 @@ export function serializeForCallCenter(o: OrderWithRelations) {
     senderName: o.senderName,
     senderPhone: o.senderPhone,
     senderEmail: o.senderEmail,
-    items: o.items.map((i) => ({
+    // Служебная строка «Tip» скрыта — см. пояснение у serializeForOwner.
+    items: compensableItems(o.items).map((i) => ({
       id: i.id,
       name: i.name,
       variantName: i.variantName,
@@ -231,7 +236,8 @@ export function serializeForFlorist(o: OrderWithRelations) {
     // вопросам букета/доставки. senderEmail не включаем — не нужен, не запрашивался.
     senderName: o.senderName,
     senderPhone: o.senderPhone,
-    items: o.items.map((i) => ({
+    // Служебная строка «Tip» скрыта — см. пояснение у serializeForOwner.
+    items: compensableItems(o.items).map((i) => ({
       id: i.id,
       name: i.name,
       variantName: i.variantName,
