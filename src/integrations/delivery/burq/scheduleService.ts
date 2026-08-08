@@ -11,6 +11,7 @@ import "server-only";
 import type { PrismaClient } from "@/generated/prisma/client";
 import { PrismaOutboxRepository } from "@/outbox/prismaRepository";
 import { isBurqRuntimeEnabled } from "@/lib/featureFlags";
+import { utcDayRangeForLocalToday } from "@/lib/tz";
 import { TERMINAL_ORDER_STATUSES } from "@/lib/statuses";
 import { scheduleBurqDraftForOrder } from "./schedule";
 import { handleFloristReassignment, type DeliveryCancellationReason, type ReassignmentResult } from "./reassignmentService";
@@ -116,7 +117,10 @@ export async function rescheduleFloristWaitingOrders(prisma: PrismaClient, flori
   const orders = await prisma.order.findMany({
     where: {
       currentFloristId: floristId,
-      deliveryDate: { gte: startOfUtcDay(now) },
+      // Граница дня — по календарю МАГАЗИНА, не по UTC. Полночь UTC наступает в
+      // Лос-Анджелесе в 17:00: при сравнении по UTC настройка pickup вечером теряла
+      // сегодняшние заказы флориста — они выглядели вчерашними и в выборку не попадали.
+      deliveryDate: { gte: utcDayRangeForLocalToday(null, now).gte },
       orderStatus: { notIn: TERMINAL_ORDER_STATUSES },
       deliveries: { none: { isCurrentAttempt: true, externalDeliveryId: { not: null } } },
     },
@@ -126,9 +130,6 @@ export async function rescheduleFloristWaitingOrders(prisma: PrismaClient, flori
   return orders.length;
 }
 
-function startOfUtcDay(d: Date): Date {
-  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
-}
 
 /**
  * Массовое перепланирование будущих заказов сайта без активного draft (напр. при смене
@@ -136,10 +137,14 @@ function startOfUtcDay(d: Date): Date {
  */
 export async function rescheduleSiteFutureOrders(prisma: PrismaClient, siteId: string, now: Date = new Date()): Promise<number> {
   if (!isBurqRuntimeEnabled()) return 0; // master gate
+  // Таймзона нужна для границы дня: `deliveryDate` — UTC-полночь ЛОКАЛЬНОГО дня, и сравнивать
+  // её с моментом времени нельзя. `gte: now` отсекал сегодняшние заказы целиком (их полночь
+  // всегда раньше «сейчас»), то есть «будущие» начинались с завтра.
+  const site = await prisma.site.findUnique({ where: { id: siteId }, select: { timezone: true } });
   const orders = await prisma.order.findMany({
     where: {
       siteId,
-      deliveryDate: { gte: now },
+      deliveryDate: { gte: utcDayRangeForLocalToday(site?.timezone, now).gte },
       orderStatus: { notIn: TERMINAL_ORDER_STATUSES },
       deliveries: { none: { isCurrentAttempt: true, externalDeliveryId: { not: null } } },
     },

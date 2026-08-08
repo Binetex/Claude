@@ -22,6 +22,7 @@ import { FinanceSettingsError } from "@/modules/finance/settings";
 import { detectFinanceIssues } from "@/modules/finance/issues";
 import { setFinanceProfile } from "@/modules/finance/profile";
 import { primaryShareDays, recomputeDay } from "@/modules/finance/dayFinance";
+import { todayStrInTz } from "@/lib/tz";
 
 export type SetupResult = { ok?: true; message?: string; error?: string };
 
@@ -37,8 +38,9 @@ function toError(err: unknown): SetupResult {
 function parseDay(input: string | undefined): Date {
   const raw = input?.trim();
   if (!raw) {
-    const now = new Date();
-    return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+    // «Сегодня» — по календарю магазина, а не по UTC: полночь UTC наступает в
+    // Лос-Анджелесе в 17:00, и запись, сделанная вечером, датировалась следующим днём.
+    return new Date(`${todayStrInTz(null)}T00:00:00.000Z`);
   }
   if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) throw new FinanceFixError("bad_date", "Дата должна быть в формате ГГГГ-ММ-ДД.");
   return new Date(`${raw}T00:00:00.000Z`);

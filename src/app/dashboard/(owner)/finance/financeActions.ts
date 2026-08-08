@@ -12,6 +12,7 @@ import { usdToCents, CentsParseError } from "@/lib/cents";
 import { LedgerError, LedgerRuleError, reverseEntry } from "@/modules/finance/ledger";
 import { recordPayment, recordAdjustment, previewPayment, type AdjustmentKind } from "@/modules/finance/payouts";
 import type { LedgerDirection } from "@/generated/prisma/enums";
+import { todayStrInTz } from "@/lib/tz";
 
 export type ActionResult = { ok?: true; message?: string; error?: string; needsConfirmation?: boolean };
 
@@ -33,8 +34,9 @@ function toError(err: unknown): ActionResult {
 function parseEffectiveDate(input: string | undefined): Date {
   const raw = input?.trim();
   if (!raw) {
-    const now = new Date();
-    return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+    // «Сегодня» — по календарю магазина, а не по UTC: полночь UTC наступает в
+    // Лос-Анджелесе в 17:00, и запись, сделанная вечером, датировалась следующим днём.
+    return new Date(`${todayStrInTz(null)}T00:00:00.000Z`);
   }
   if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) throw new LedgerError("bad_date", "Дата должна быть в формате ГГГГ-ММ-ДД.");
   return new Date(`${raw}T00:00:00.000Z`);

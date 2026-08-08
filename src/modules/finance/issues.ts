@@ -18,6 +18,7 @@ import type { DayFinanceResult } from "./dayCalc";
 import { resolveItemsFinance } from "./itemFinance";
 import { resolveOwnerTaxPolicy } from "./settings";
 import { primaryShareGate } from "./config";
+import { todayStrInTz } from "@/lib/tz";
 
 /** Сколько дней назад смотрит детектор. Дальше история разбирается вручную по дате. */
 export const DETECTOR_WINDOW_DAYS = 60;
@@ -463,7 +464,9 @@ export type IssueGroup = "TODAY" | "LAST_7_DAYS" | "OLDER" | "NO_DATE";
 
 export function groupFor(scopeDate: Date | null, now: Date = new Date()): IssueGroup {
   if (!scopeDate) return "NO_DATE";
-  const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  // «Сегодня» — по календарю магазина: по UTC вечерние проблемы каждый день выпадали из
+  // группы TODAY в LAST_7_DAYS, потому что UTC уже переваливал за полночь.
+  const today = new Date(`${todayStrInTz(null, now)}T00:00:00.000Z`);
   if (scopeDate.getTime() >= today.getTime()) return "TODAY";
   if (scopeDate.getTime() >= today.getTime() - 7 * 86400_000) return "LAST_7_DAYS";
   return "OLDER";
