@@ -17,6 +17,13 @@ import "server-only";
  * через ту же `applyDeliveryStatusUpdate`: те же anti-rollback, дедуп, маппинг статуса
  * заказа и публикация `order.delivery.completed`. Второй ветки «а если polling» нет и
  * заводить её нельзя — разойдётся с webhook.
+ *
+ * ЧТО ИМЕННО ОПРАШИВАЕТСЯ. Только те доставки, по которым канал событий МОЛЧИТ: вебхука не
+ * было вовсе либо он давно не приходил. Пока Burq исправно шлёт события, спрашивать его
+ * незачем — ответ мы и так знаем. Живая доставка меняет статус каждые несколько минут,
+ * поэтому нормальная доставка в выборку почти не попадает, а заведённая руками (вебхуков
+ * нет никогда) попадает всегда. Это и есть весь смысл: страховать молчание, а не дублировать
+ * работающий канал.
  */
 import type { PrismaClient } from "@/generated/prisma/client";
 import type { DeliveryProviderStatus } from "@/generated/prisma/enums";
@@ -35,6 +42,18 @@ const TERMINAL: DeliveryProviderStatus[] = ["DELIVERED", "CANCELLED", "RETURNED"
 /** Сколько доставок опрашиваем за один проход. Ограничение бережёт чужой API. */
 const BATCH = 25;
 
+/**
+ * Насколько канал событий должен замолчать, чтобы мы пошли спрашивать сами. Меньше — лишние
+ * запросы по нормально работающим доставкам, больше — дольше не замечаем поломку.
+ */
+const WEBHOOK_SILENCE_MS = 20 * 60_000;
+
+/**
+ * Окно поиска по дате доставки. Незавершённая доставка старше этого срока не «догонится»
+ * опросом: она застряла, и разбирать её нужно руками, а не дёргать Burq вечно.
+ */
+const WINDOW_MS = 2 * 24 * 60 * 60_000;
+
 export type StatusSyncResult = { scanned: number; updated: number; failed: number };
 
 export async function syncOpenDeliveryStatuses(
@@ -49,9 +68,13 @@ export async function syncOpenDeliveryStatuses(
       isDraft: false, // черновик ещё не доставка: у него нет курьера и статуса, который меняется
       externalDeliveryId: { not: null },
       status: { notIn: TERMINAL },
-      // Заказы старше недели не опрашиваем: если за неделю статус не пришёл, он и не придёт,
-      // а Burq незачем дёргать вечно. Такие разбираются руками.
-      order: { deliveryDate: { gte: new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000) } },
+      order: { deliveryDate: { gte: new Date(now.getTime() - WINDOW_MS) } },
+      // Спрашиваем только там, где канал событий молчит: вебхука не было вовсе либо он
+      // давно не приходил. По доставке, о которой Burq исправно сообщает, запрос — лишний.
+      OR: [
+        { lastWebhookAt: null },
+        { lastWebhookAt: { lt: new Date(now.getTime() - WEBHOOK_SILENCE_MS) } },
+      ],
     },
     select: { id: true, externalDeliveryId: true },
     orderBy: { updatedAt: "asc" }, // самые залежавшиеся — первыми

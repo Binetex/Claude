@@ -68,11 +68,21 @@ describe("отбор доставок для опроса", () => {
     expect(excluded).not.toContain("PROBLEM");
   });
 
-  it("не дёргает Burq вечно: только заказы за последнюю неделю", async () => {
+  it("не дёргает Burq вечно: окно два дня", async () => {
+    // Незавершённая доставка старше — застряла, её разбирают руками, а не опросом.
     const now = new Date("2026-08-08T12:00:00.000Z");
     await syncOpenDeliveryStatuses(fakePrisma([]), now);
     const order = captured.order as { deliveryDate: { gte: Date } };
-    expect(order.deliveryDate.gte.toISOString()).toBe("2026-08-01T12:00:00.000Z");
+    expect(order.deliveryDate.gte.toISOString()).toBe("2026-08-06T12:00:00.000Z");
+  });
+
+  it("спрашивает ТОЛЬКО там, где события молчат", async () => {
+    // Главная экономия: по доставке, о которой Burq исправно сообщает, запрос лишний.
+    const now = new Date("2026-08-08T12:00:00.000Z");
+    await syncOpenDeliveryStatuses(fakePrisma([]), now);
+    const or = captured.OR as [{ lastWebhookAt: null }, { lastWebhookAt: { lt: Date } }];
+    expect(or[0]).toEqual({ lastWebhookAt: null }); // вебхука не было вовсе
+    expect(or[1].lastWebhookAt.lt.toISOString()).toBe("2026-08-08T11:40:00.000Z"); // молчит 20 мин
   });
 
   it("пустая выборка не ходит в Burq вовсе", async () => {
