@@ -23,6 +23,7 @@ import { accrualGate, primaryShareGate } from "./config";
 import { listCurrentProfiles } from "./profile";
 import { eachDay } from "./period";
 import { formatDayLabel, seriesColor } from "@/components/charts/theme";
+import { todayStrInTz } from "@/lib/tz";
 
 /**
  * Флорист на графике. Цвет приходит С СЕРВЕРА и закреплён навсегда: он берётся из позиции в
@@ -103,7 +104,12 @@ type Cell = { earned: number; orders: number };
  * снизу так же, как в `balance.ts`: до даты старта расчёта заработка не существует, и
  * показывать по тем дням нули честнее, чем считать их задним числом по нынешним настройкам.
  */
-export async function getFloristsEarnings(from: Date, to: Date): Promise<FloristsEarnings> {
+export async function getFloristsEarnings(from: Date, to: Date, now: Date = new Date()): Promise<FloristsEarnings> {
+  // «Сегодня» по календарю магазина — та же граница, что и в issues.ts::groupFor. Дни
+  // впереди неё — ещё не наступившие предзаказы, а не недостающие данные: считать их
+  // «pending» отправляло владельца в «Требует заполнения» за то, что почитить нельзя.
+  const today = new Date(`${todayStrInTz(null, now)}T00:00:00.000Z`);
+
   const [florists, profiles] = await Promise.all([
     prisma.florist.findMany({
       select: { id: true, user: { select: { name: true } } },
@@ -179,7 +185,10 @@ export async function getFloristsEarnings(from: Date, to: Date): Promise<Florist
     // Неполный день не даёт ни заработка, ни заказов. Считать его заказы значило бы занизить
     // средний заработок на заказ: деньги за них ещё не посчитаны.
     if (!d.complete) {
-      pending.days += 1;
+      // Будущий день (предзаказ) неполон по построению — доставки ещё не было. Это не
+      // «недостающие данные», поэтому в pending.days не идёт и в «Требует заполнения» не
+      // отправляет: там для него всё равно нечего разбирать.
+      if (d.day <= today) pending.days += 1;
       continue;
     }
     const share = d.financeProfile.sharePercentBp;
