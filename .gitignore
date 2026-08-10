@@ -36,11 +36,13 @@ yarn-error.log*
 .pnpm-debug.log*
 
 # env files — реальные секреты никогда не коммитим; *.example — документация, коммитим.
+# Список имён не годится: на проде рядом с .env однажды остался .env.neon-backup-… с полной
+# копией боевых секретов, и под старые правила он НЕ подпадал — один `git add -A` на сервере
+# отправил бы их в репозиторий. Поэтому игнорируем всё семейство, а нужное разрешаем явно.
 .env
-.env.local
-.env.*.local
-.env.production
-.env.development
+.env.*
+!.env.example
+!.env.*.example
 
 # vercel
 .vercel

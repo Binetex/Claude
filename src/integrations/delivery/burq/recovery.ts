@@ -79,6 +79,10 @@ export async function reconcileBurqSchedules(prisma: PrismaClient, now: Date = n
       hasCurrentDraft: ctx.hasCurrentDraft,
       deliveryDate: ctx.order.deliveryDate, // recovery тоже не воскрешает прошедшие даты
       timezone: ctx.order.timezone,
+      // То же «сейчас», по которому отобраны кандидаты. Без этого отбор шёл по переданному
+      // now, а проверка прошедшей даты — по системным часам: два шага одного прохода жили
+      // в разном времени.
+      now,
     });
     if (decision.action !== "CREATE_DRAFT") continue;
 
