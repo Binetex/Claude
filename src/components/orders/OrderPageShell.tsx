@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { CalendarDays, ChevronLeft } from "lucide-react";
-import { fmtDate, formatOrderNumber } from "@/lib/format";
+import { fmtDate, fmtTimeWindow, formatOrderNumber } from "@/lib/format";
 
 /**
  * Общий каркас карточки заказа: ссылка назад, шапка с номером и бейджами, полоса доставки
@@ -74,7 +74,7 @@ export function OrderPageShell({
         <span className="text-[11px] font-medium tracking-wider text-slate-400 uppercase">Доставка</span>
         <span className="text-base font-semibold text-slate-900 tabular-nums">{fmtDate(deliveryDate)}</span>
         {deliveryWindow && (
-          <span className="text-base font-semibold text-slate-900 tabular-nums">{deliveryWindow}</span>
+          <span className="text-base font-semibold text-slate-900 tabular-nums">{fmtTimeWindow(deliveryWindow)}</span>
         )}
         {deliveryAction && <span className="ml-auto">{deliveryAction}</span>}
       </div>

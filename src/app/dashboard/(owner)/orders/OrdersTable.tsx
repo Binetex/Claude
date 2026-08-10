@@ -3,7 +3,7 @@ import { Card } from "@/components/ui/Card";
 import { EmptyState } from "@/components/ui/states";
 import { ZoomableImage } from "@/components/ImageLightbox";
 import { formatMoney } from "@/lib/money";
-import { fmtDate, formatOrderNumber } from "@/lib/format";
+import { fmtDate, fmtTimeWindow, formatOrderNumber } from "@/lib/format";
 import { resolveOrderStatusMeta } from "@/lib/statuses";
 import type { OrderStatus } from "@/generated/prisma/enums";
 import type { OrderIndicator } from "@/integrations/quo/communicationsView";
@@ -127,7 +127,7 @@ function DesktopCard({ o, ind, hideFinance, hideFlorist, hrefBase, sideAmountLab
             разделителю. mr-2 (а не padding) даёт воздух до получателя, не съедая эти 96px. */}
         <div className="mr-2 w-24 shrink-0">
           <div className="text-[11px] text-slate-500">{fmtDate(o.deliveryDate)}</div>
-          <div className="text-[12px] font-bold text-slate-900">{o.deliveryWindow}</div>
+          <div className="text-[12px] font-bold text-slate-900">{fmtTimeWindow(o.deliveryWindow)}</div>
         </div>
 
         {/* Получатель */}
@@ -203,7 +203,7 @@ function MobileCard({ o, ind, hideFinance, hideFlorist, hrefBase }: { o: OrdersT
 
       <div className="mt-2 space-y-1 text-[11px]">
         <div className="text-slate-500">
-          {fmtDate(o.deliveryDate)} · <span className="text-[13px] font-bold text-slate-900">{o.deliveryWindow}</span>
+          {fmtDate(o.deliveryDate)} · <span className="text-[13px] font-bold text-slate-900">{fmtTimeWindow(o.deliveryWindow)}</span>
         </div>
         <div>
           <span className="font-medium text-slate-800">{o.recipientName}</span>

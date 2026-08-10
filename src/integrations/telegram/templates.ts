@@ -1,4 +1,5 @@
 import { getAppUrl } from "@/lib/appUrl";
+import { fmtTimeWindow } from "@/lib/format";
 import { CAPTION_LIMIT, type TelegramButton } from "./sender";
 import type { TelegramEventType } from "./registry";
 
@@ -39,9 +40,17 @@ export type OrderSnapshot = {
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 const line = (label: string, value: string | null | undefined) => (value && value.trim() ? `${label}: ${esc(value.trim())}\n` : "");
 
+const MONTHS_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/**
+ * Дата доставки человеку: «24 Jul», а не «2026-07-24».
+ *
+ * Читаем ИМЕННО UTC-части: `Order.deliveryDate` — это UTC-полночь локального дня доставки,
+ * и локальная таймзона сервера сдвинула бы день на сутки (см. CLAUDE.md).
+ */
 function fmtDate(d: Date | null): string | null {
   if (!d) return null;
-  return d.toISOString().slice(0, 10);
+  return `${d.getUTCDate()} ${MONTHS_SHORT[d.getUTCMonth()]}`;
 }
 
 /** Адрес одной строкой — и для текста, и для запроса в Google Maps. */
@@ -75,7 +84,7 @@ export function googleMapsUrl(address: string): string {
 /** Шапка со временем и адресом — общая для «новый заказ» и «передан». Время и адрес выделены. */
 function deliveryHead(o: OrderSnapshot): string {
   const date = fmtDate(o.deliveryDate);
-  const win = o.deliveryWindow?.trim();
+  const win = fmtTimeWindow(o.deliveryWindow);
   // Время доставки в течение дня — жирным: флористу это важнее даты.
   const when = [date ? `📅 ${esc(date)}` : "", win ? `⏰ <b>${esc(win)}</b>` : ""].filter(Boolean).join("   ");
   const addr = addressText(o);
@@ -125,7 +134,7 @@ export function renderOwnerCreated(o: OrderSnapshot, paymentLabel: string): stri
     `🆕 <b>Новый заказ</b>\n` +
     `<b>${esc(o.orderNumber)}</b> · ${esc(o.siteName)}\n\n` +
     line("Оплата", paymentLabel) +
-    line("Доставка", [fmtDate(o.deliveryDate), o.deliveryWindow].filter(Boolean).join(" ")) +
+    line("Доставка", [fmtDate(o.deliveryDate), fmtTimeWindow(o.deliveryWindow)].filter(Boolean).join(" ")) +
     line("Получатель", o.recipientName) +
     line("Адрес", addressText(o))
   ).trimEnd();
@@ -198,7 +207,7 @@ export function renderOwnerNoCouriers(o: OrderSnapshot, checkedAtLabel: string |
     `<b>${esc(o.orderNumber)}</b> · ${esc(o.siteName)}\n\n` +
     line("Получатель", o.recipientName) +
     line("Адрес", addressText(o)) +
-    line("Доставка", o.deliveryWindow) +
+    line("Доставка", fmtTimeWindow(o.deliveryWindow)) +
     line("Проверено", checkedAtLabel) +
     `\nBurq не вернул ни одного провайдера. Проверка сделана при создании черновика — ` +
     `ближе к доставке курьеры могут появиться.`

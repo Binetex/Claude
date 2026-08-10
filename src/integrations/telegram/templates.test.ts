@@ -27,7 +27,7 @@ describe("сообщение флористу", () => {
   const text = renderFloristMessage(order);
 
   it("содержит всё, что нужно для сборки букета", () => {
-    for (const part of ["THEFLOW-20292", "TheFlow", "2026-07-24", "12:00 – 16:00", "Ann Recipient", "1 Main St", "Apt 4", "Petal Poetry", "pink peony (10)", "Позвонить за 10 минут"]) {
+    for (const part of ["THEFLOW-20292", "TheFlow", "24 Jul", "12PM – 4PM", "Ann Recipient", "1 Main St", "Apt 4", "Petal Poetry", "pink peony (10)", "Позвонить за 10 минут"]) {
       expect(text).toContain(part);
     }
   });
@@ -54,8 +54,16 @@ describe("сообщение флористу", () => {
   });
 
   it("адрес и время доставки выделены жирным", () => {
-    expect(text).toContain("⏰ <b>12:00 – 16:00</b>");
+    expect(text).toContain("⏰ <b>12PM – 4PM</b>");
     expect(text).toContain("📍 <b>1 Main St, Apt 4, Los Angeles, 90001</b>");
+  });
+
+  it("дата доставки — «день месяц», без года и ISO", () => {
+    expect(text).toContain("📅 24 Jul");
+    expect(text).not.toContain("2026-07-24");
+    // deliveryDate — UTC-полночь локального дня: день не должен съезжать в таймзоне сервера.
+    const nye = renderFloristMessage({ ...order, deliveryDate: new Date("2027-01-01T00:00:00Z") });
+    expect(nye).toContain("📅 1 Jan");
   });
 
   it("пустые поля не оставляют висящих подписей", () => {
