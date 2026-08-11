@@ -7,6 +7,7 @@ import { quoErrorFromStatus } from "@/integrations/quo/errors";
 import { buildAutomationTriggerHandler, buildAutomationSendHandler } from "./handlers";
 import { createSmsChannelSender } from "./channels/sms";
 import { setAutomationsGloballyDisabled } from "./settings";
+import { todayStrInTz, DEFAULT_STORE_TZ } from "@/lib/tz";
 
 /**
  * Интеграция Automation Engine на реальной БД (throwaway prisma dev). Прогоняем handler'ы напрямую
@@ -165,6 +166,71 @@ describe("SMS engine — trigger → job", () => {
     expect(jobs[0].recipientType).toBe("CUSTOMER"); // не RECIPIENT
   });
 
+  it("4c. Два правила (заказчику и получателю) при одном номере → одна SMS, версия заказчика", async () => {
+    const site = await makeSite();
+    const forCustomer = await makeAutomation(site.id, { triggerType: "ORDER_DELIVERED", audience: "CUSTOMER", template: "We hope they love it" });
+    const forRecipient = await makeAutomation(site.id, { triggerType: "ORDER_DELIVERED", audience: "RECIPIENT", template: "We hope you love it" });
+    const order = await makeOrder(site.id, { senderPhone: "+15551112222", recipientPhone: "+1 (555) 111-2222" });
+
+    await fireTrigger(order, "ORDER_DELIVERED", "delivery-dup");
+
+    const customerJobs = await jobsFor(forCustomer.id, order.id);
+    expect(customerJobs).toHaveLength(1);
+    expect(customerJobs[0]).toMatchObject({ status: "SCHEDULED", recipientType: "CUSTOMER" });
+
+    const recipientJobs = await jobsFor(forRecipient.id, order.id);
+    expect(recipientJobs).toHaveLength(1);
+    expect(recipientJobs[0]).toMatchObject({ status: "SKIPPED", lastErrorSafe: "DUPLICATE_PHONE" });
+
+    // Повтор события (outbox at-least-once) не переигрывает расклад и не создаёт вторых job'ов.
+    await fireTrigger(order, "ORDER_DELIVERED", "delivery-dup");
+    expect(await jobsFor(forCustomer.id, order.id)).toHaveLength(1);
+    expect((await jobsFor(forRecipient.id, order.id))[0].status).toBe("SKIPPED");
+  });
+
+  it("4d. Те же два правила при РАЗНЫХ номерах → обе SMS уходят", async () => {
+    const site = await makeSite();
+    const forCustomer = await makeAutomation(site.id, { triggerType: "ORDER_DELIVERED", audience: "CUSTOMER" });
+    const forRecipient = await makeAutomation(site.id, { triggerType: "ORDER_DELIVERED", audience: "RECIPIENT" });
+    const order = await makeOrder(site.id, { senderPhone: "+15551112222", recipientPhone: "+15553334444" });
+
+    await fireTrigger(order, "ORDER_DELIVERED", "delivery-two");
+
+    expect((await jobsFor(forCustomer.id, order.id))[0]).toMatchObject({ status: "SCHEDULED", recipientType: "CUSTOMER" });
+    expect((await jobsFor(forRecipient.id, order.id))[0]).toMatchObject({ status: "SCHEDULED", recipientType: "RECIPIENT" });
+  });
+
+  it("4e. Правило заказчика не прошло условия → правило получателя всё равно отправляет", async () => {
+    const site = await makeSite();
+    // Условие заведомо не выполняется: правило требует квартиру, а в заказе её нет.
+    const forCustomer = await makeAutomation(site.id, {
+      triggerType: "ORDER_DELIVERED",
+      audience: "CUSTOMER",
+      conditionsJson: { apartmentPresent: true },
+    });
+    const forRecipient = await makeAutomation(site.id, { triggerType: "ORDER_DELIVERED", audience: "RECIPIENT" });
+    const order = await makeOrder(site.id, { senderPhone: "+15551112222", recipientPhone: "+1 (555) 111-2222" });
+
+    await fireTrigger(order, "ORDER_DELIVERED", "delivery-cond");
+
+    expect(await jobsFor(forCustomer.id, order.id)).toHaveLength(0);
+    const recipientJobs = await jobsFor(forRecipient.id, order.id);
+    expect(recipientJobs).toHaveLength(1);
+    expect(recipientJobs[0].status).toBe("SCHEDULED"); // номер не «занят» молчащим правилом
+  });
+
+  it("4f. Email: правило «Получателю» не шлёт второе письмо тому же заказчику", async () => {
+    const site = await makeSite();
+    const forCustomer = await makeAutomation(site.id, { triggerType: "ORDER_DELIVERED", audience: "CUSTOMER", smsEnabled: false, emailEnabled: true });
+    const forRecipient = await makeAutomation(site.id, { triggerType: "ORDER_DELIVERED", audience: "RECIPIENT", smsEnabled: false, emailEnabled: true });
+    const order = await makeOrder(site.id, { senderEmail: `dup-${suffix}@example.com` });
+
+    await fireTrigger(order, "ORDER_DELIVERED", "delivery-email-dup");
+
+    expect((await jobsFor(forCustomer.id, order.id))[0]).toMatchObject({ status: "SCHEDULED", channel: "EMAIL" });
+    expect((await jobsFor(forRecipient.id, order.id))[0]).toMatchObject({ status: "SKIPPED", lastErrorSafe: "DUPLICATE_EMAIL" });
+  });
+
   it("5. Повторный trigger не создаёт дубль", async () => {
     const site = await makeSite();
     const auto = await makeAutomation(site.id);
@@ -219,10 +285,15 @@ describe("SMS engine — trigger → job", () => {
 });
 
 describe("новые триггеры: доставка сегодня и состояния оплаты", () => {
+  // Order.deliveryDate — UTC-полночь ЛОКАЛЬНОГО дня магазина, а «сегодня» считается по календарю
+  // магазина. Брать здесь `new Date()` нельзя: между полуночью UTC и полуночью в Лос-Анджелесе
+  // UTC-дата уже завтрашняя, и тест падал в зависимости от времени суток на машине.
+  const storeTodayMidnightUtc = () => new Date(`${todayStrInTz(DEFAULT_STORE_TZ)}T00:00:00.000Z`);
+
   it("DELIVERY_TODAY создаёт job для заказа с доставкой СЕГОДНЯ", async () => {
     const site = await makeSite();
     const auto = await makeAutomation(site.id, { triggerType: "DELIVERY_TODAY" });
-    const order = await makeOrder(site.id, { deliveryDate: new Date() });
+    const order = await makeOrder(site.id, { deliveryDate: storeTodayMidnightUtc() });
     await fireTrigger(order, "DELIVERY_TODAY", `${order.id}:today`);
     expect(await jobsFor(auto.id, order.id)).toHaveLength(1);
   });
@@ -231,7 +302,7 @@ describe("новые триггеры: доставка сегодня и сос
     const site = await makeSite();
     const auto = await makeAutomation(site.id, { triggerType: "DELIVERY_TODAY" });
     // Задача была поставлена на сегодня, но дату сдвинули на неделю вперёд.
-    const order = await makeOrder(site.id, { deliveryDate: new Date(Date.now() + 7 * 864e5) });
+    const order = await makeOrder(site.id, { deliveryDate: new Date(storeTodayMidnightUtc().getTime() + 7 * 864e5) });
     await fireTrigger(order, "DELIVERY_TODAY", `${order.id}:stale`);
     expect(await jobsFor(auto.id, order.id)).toHaveLength(0);
   });
@@ -303,6 +374,56 @@ describe("SMS engine — send job", () => {
     const b = await triggerAndGetJob(site.id, orderYes, { triggerType: "TRACKING_LINK_AVAILABLE", template: "Track {{tracking_url}}" }, "TRACKING_LINK_AVAILABLE");
     await sendHandler(rec({ jobId: b.job.id, orderId: orderYes.id }));
     expect((await prisma.automationJob.findUniqueOrThrow({ where: { id: b.job.id } })).status).toBe("SENT");
+  });
+
+  it("2b. Погашенное дедупом правило оживает, если выигравшее не отправило", async () => {
+    sendOk = true;
+    const site = await makeSite(); // reviewUrl не задан
+    // Правило заказчика упрётся в отсутствующий {{review_url}} на стадии отправки.
+    const forCustomer = await makeAutomation(site.id, { triggerType: "ORDER_DELIVERED", audience: "CUSTOMER", template: "Rate us {{review_url}}" });
+    const forRecipient = await makeAutomation(site.id, { triggerType: "ORDER_DELIVERED", audience: "RECIPIENT", template: "We hope you love it" });
+    const order = await makeOrder(site.id, { senderPhone: "+15551112222", recipientPhone: "+1 (555) 111-2222" });
+
+    await fireTrigger(order, "ORDER_DELIVERED", "delivery-revive");
+    const winner = (await jobsFor(forCustomer.id, order.id))[0];
+    const loser = (await jobsFor(forRecipient.id, order.id))[0];
+    expect(winner.status).toBe("SCHEDULED");
+    expect(loser).toMatchObject({ status: "SKIPPED", lastErrorSafe: "DUPLICATE_PHONE" });
+
+    // Победитель не смог отправить → проигравший возвращается в очередь.
+    await sendHandler(rec({ jobId: winner.id, orderId: order.id }));
+    expect((await prisma.automationJob.findUniqueOrThrow({ where: { id: winner.id } })).status).toBe("SKIPPED");
+    const revived = await prisma.automationJob.findUniqueOrThrow({ where: { id: loser.id } });
+    expect(revived).toMatchObject({ status: "SCHEDULED", lastErrorSafe: null, skippedAt: null });
+
+    // И реально отправляется — человек получает хотя бы одну версию.
+    await sendHandler(rec({ jobId: revived.id, orderId: order.id }));
+    const sent = await prisma.automationJob.findUniqueOrThrow({ where: { id: revived.id } });
+    expect(sent.status).toBe("SENT");
+    expect(sent.renderedTextSnapshot).toBe("We hope you love it");
+  });
+
+  it("2c. Оживление не зацикливается: если и второе правило не отправило, будить больше некого", async () => {
+    sendOk = true;
+    const site = await makeSite();
+    const forCustomer = await makeAutomation(site.id, { triggerType: "ORDER_DELIVERED", audience: "CUSTOMER", template: "Rate us {{review_url}}" });
+    const forRecipient = await makeAutomation(site.id, { triggerType: "ORDER_DELIVERED", audience: "RECIPIENT", template: "Also rate us {{review_url}}" });
+    const order = await makeOrder(site.id, { senderPhone: "+15551112222", recipientPhone: "+1 (555) 111-2222" });
+
+    await fireTrigger(order, "ORDER_DELIVERED", "delivery-revive-loop");
+    const winner = (await jobsFor(forCustomer.id, order.id))[0];
+    const loser = (await jobsFor(forRecipient.id, order.id))[0];
+
+    await sendHandler(rec({ jobId: winner.id, orderId: order.id }));
+    await sendHandler(rec({ jobId: loser.id, orderId: order.id }));
+
+    // Оба SKIPPED со своими причинами, третьего круга нет.
+    expect((await prisma.automationJob.findUniqueOrThrow({ where: { id: winner.id } })).status).toBe("SKIPPED");
+    const second = await prisma.automationJob.findUniqueOrThrow({ where: { id: loser.id } });
+    expect(second.status).toBe("SKIPPED");
+    expect(second.lastErrorSafe).toBe("missing_required_variable:review_url");
+    expect(await jobsFor(forCustomer.id, order.id)).toHaveLength(1);
+    expect(await jobsFor(forRecipient.id, order.id)).toHaveLength(1);
   });
 
   it("6b. Заказ отменён к моменту отправки → SKIP (повторная проверка условий)", async () => {

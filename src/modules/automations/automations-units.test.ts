@@ -4,7 +4,7 @@ import { buildOrderVariables, SMS_VARIABLES } from "./variables";
 import { audienceLabel } from "./display";
 import { evaluateConditions } from "./conditions";
 import { computeScheduledAt } from "./delay";
-import { resolveRecipients } from "./audience";
+import { resolveRecipients, planSmsRecipients, DUPLICATE_PHONE_REASON } from "./audience";
 import { listSmsTriggers, isSupportedTrigger, getSmsTrigger } from "./triggers";
 import { buildTestMessage, sendTestSmsViaClient } from "./testSend";
 
@@ -135,6 +135,101 @@ describe("audience.resolveRecipients", () => {
     const r = resolveRecipients("RECIPIENT", { senderPhone: null, recipientPhone: "abc" });
     expect(r.recipients).toHaveLength(0);
     expect(r.skipped[0]).toMatchObject({ recipientType: "RECIPIENT", reason: "PHONE_INVALID" });
+  });
+});
+
+describe("audience.planSmsRecipients — один телефон, одна SMS на событие", () => {
+  const SAME = { senderPhone: "+15551112222", recipientPhone: "+1 (555) 111-2222" };
+  const DIFFERENT = { senderPhone: "+15551112222", recipientPhone: "+15553334444" };
+
+  it("одинаковый номер: правило заказчика шлёт, правило получателя молчит", () => {
+    const plans = planSmsRecipients(
+      [
+        { id: "rule-recipient", audience: "RECIPIENT" },
+        { id: "rule-customer", audience: "CUSTOMER" },
+      ],
+      SAME
+    );
+    expect(plans.get("rule-customer")!.recipients).toEqual([
+      { recipientType: "CUSTOMER", phoneNormalized: "+15551112222" },
+    ]);
+    expect(plans.get("rule-recipient")!.recipients).toHaveLength(0);
+    expect(plans.get("rule-recipient")!.duplicates).toEqual([
+      { recipientType: "CUSTOMER", phoneNormalized: "+15551112222" },
+    ]);
+  });
+
+  it("порядок правил на входе не влияет на исход — выигрывает заказчик", () => {
+    const forward = planSmsRecipients(
+      [
+        { id: "rule-customer", audience: "CUSTOMER" },
+        { id: "rule-recipient", audience: "RECIPIENT" },
+      ],
+      SAME
+    );
+    expect(forward.get("rule-customer")!.recipients).toHaveLength(1);
+    expect(forward.get("rule-recipient")!.recipients).toHaveLength(0);
+  });
+
+  it("разные номера: работают оба правила, как раньше", () => {
+    const plans = planSmsRecipients(
+      [
+        { id: "rule-customer", audience: "CUSTOMER" },
+        { id: "rule-recipient", audience: "RECIPIENT" },
+      ],
+      DIFFERENT
+    );
+    expect(plans.get("rule-customer")!.recipients).toEqual([
+      { recipientType: "CUSTOMER", phoneNormalized: "+15551112222" },
+    ]);
+    expect(plans.get("rule-recipient")!.recipients).toEqual([
+      { recipientType: "RECIPIENT", phoneNormalized: "+15553334444" },
+    ]);
+    expect(plans.get("rule-recipient")!.duplicates).toHaveLength(0);
+  });
+
+  it("BOTH тоже считается сообщением заказчику — правило получателя молчит", () => {
+    const plans = planSmsRecipients(
+      [
+        { id: "rule-recipient", audience: "RECIPIENT" },
+        { id: "rule-both", audience: "BOTH" },
+      ],
+      SAME
+    );
+    expect(plans.get("rule-both")!.recipients).toHaveLength(1);
+    expect(plans.get("rule-recipient")!.recipients).toHaveLength(0);
+  });
+
+  it("одно правило — поведение не меняется", () => {
+    const plans = planSmsRecipients([{ id: "solo", audience: "RECIPIENT" }], SAME);
+    expect(plans.get("solo")!.recipients).toEqual([{ recipientType: "CUSTOMER", phoneNormalized: "+15551112222" }]);
+    expect(plans.get("solo")!.duplicates).toHaveLength(0);
+  });
+
+  it("два правила с ОДНОЙ аудиторией друг друга не глушат — это настройка владельца", () => {
+    const customers = planSmsRecipients(
+      [
+        { id: "c1", audience: "CUSTOMER" },
+        { id: "c2", audience: "CUSTOMER" },
+      ],
+      SAME
+    );
+    expect(customers.get("c1")!.recipients).toHaveLength(1);
+    expect(customers.get("c2")!.recipients).toHaveLength(1);
+
+    const recipients = planSmsRecipients(
+      [
+        { id: "r1", audience: "RECIPIENT" },
+        { id: "r2", audience: "RECIPIENT" },
+      ],
+      SAME
+    );
+    expect(recipients.get("r1")!.recipients).toHaveLength(1);
+    expect(recipients.get("r2")!.recipients).toHaveLength(1);
+  });
+
+  it("причина пропуска отличается от «нет телефона»", () => {
+    expect(DUPLICATE_PHONE_REASON).toBe("DUPLICATE_PHONE");
   });
 });
 

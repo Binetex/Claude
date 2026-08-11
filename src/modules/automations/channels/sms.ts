@@ -9,8 +9,10 @@ import type { QuoClient } from "@/integrations/quo/client";
 import { sendOrderSms, type SendTarget } from "@/integrations/quo/send";
 import type { ChannelSender, ChannelSendContext, ChannelSendResult } from "./types";
 
-// Временные (повторяемые) коды QUO — повтор с backoff через outbox.
-const RETRYABLE_CODES = new Set(["quo_server", "quo_network", "quo_rate_limit"]);
+// Временные (повторяемые) коды QUO — повтор с backoff через outbox. `previous_attempt_failed` —
+// гонка двух воркеров на одной попытке: ключ per-attempt уже сожжён неудачей, но следующая
+// попытка получит новый ключ, поэтому это тоже повторяемо, а не терминальный сбой.
+const RETRYABLE_CODES = new Set(["quo_server", "quo_network", "quo_rate_limit", "previous_attempt_failed"]);
 // Config/precondition-коды: не сбой отправки, а «нельзя отправить» → job SKIPPED (не FAILED).
 const SKIP_CODES = new Set([
   "store_no_quo_number",

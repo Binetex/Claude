@@ -5,7 +5,9 @@ import "server-only";
  *  1) sms.automation.trigger → для Site находим активные правила под triggerType, проверяем
  *     условия, разворачиваем аудиторию в адресатов ПО КАЖДОМУ включённому каналу (SMS/EMAIL),
  *     создаём AutomationJob (идемпотентно, ключ включает канал) и публикуем отложенный
- *     sms.automation.send (availableAt = scheduledAt).
+ *     sms.automation.send (availableAt = scheduledAt). Адресаты SMS планируются СРАЗУ ПО ВСЕМ
+ *     правилам события (`planSmsRecipients`): на один телефон уходит не больше одной SMS, при
+ *     споре за номер выигрывает версия заказчика — см. audience.ts.
  *
  *  2) sms.automation.send → берём due job, ПОВТОРНО проверяем на свежих данных (kill switch,
  *     правило/Site активны, заказ не отменён, обязательные переменные есть), рендерим (SMS) или
@@ -34,7 +36,7 @@ import { publishAutomationSend, type AutomationTriggerPayload, type AutomationSe
 import { getSmsTrigger } from "./triggers";
 import { evaluateConditions, type SmsConditions } from "./conditions";
 import { isDeliveryToday } from "./dailySchedule";
-import { resolveRecipients, type SmsAudience, type SmsRecipientType } from "./audience";
+import { planSmsRecipients, DUPLICATE_PHONE_REASON, DUPLICATE_EMAIL_REASON, type SmsAudience, type SmsRecipientType } from "./audience";
 import { resolveCustomerEmail } from "./emailAudience";
 import { computeScheduledAt, type SmsDelayUnit } from "./delay";
 import { buildOrderVariables } from "./variables";
@@ -163,6 +165,60 @@ async function createCustomerEmailJob(
   });
 }
 
+/**
+ * Подстраховка дедупа: правило, погашенное как DUPLICATE_PHONE, оживает, если ВЫИГРАВШЕЕ правило
+ * так и не отправило сообщение (пропуск на свежих проверках или терминальный провал). Без этого
+ * дедуп превращал одну осечку в полное молчание: человек не получал ни одной версии.
+ *
+ * Оживление безопасно по построению: job возвращается в SCHEDULED и проходит send-обработчик
+ * заново, со ВСЕМИ проверками (рубильник, активность правила, магазин, условия). Поэтому здесь
+ * не нужен разбор причины провала — «разбудить нельзя, потому что нельзя отправлять» решается на
+ * общем пути. Единственное исключение — глобальный рубильник: будить соседей, когда всё
+ * выключено, бессмысленно.
+ *
+ * Цикл невозможен: оживлённый job перестаёт быть SKIPPED/DUPLICATE_PHONE и вторым поиском уже не
+ * находится, а число правил события конечно.
+ */
+async function reviveDuplicateSibling(
+  prisma: PrismaClient,
+  repo: PrismaOutboxRepository,
+  job: { id: string; orderId: string; occurrenceKey: string | null; phoneNormalized: string | null; channel: string }
+): Promise<void> {
+  if (job.channel !== "SMS" || !job.occurrenceKey || !job.phoneNormalized) return;
+
+  const sibling = await prisma.automationJob.findFirst({
+    where: {
+      orderId: job.orderId,
+      occurrenceKey: job.occurrenceKey,
+      channel: "SMS",
+      status: "SKIPPED",
+      lastErrorSafe: DUPLICATE_PHONE_REASON,
+      phoneNormalized: job.phoneNormalized,
+      id: { not: job.id },
+    },
+    orderBy: { createdAt: "asc" },
+    select: { id: true, automationId: true },
+  });
+  if (!sibling) return;
+
+  // Условный апдейт вместо update(): два воркера могут добраться сюда одновременно, и оживить
+  // соседа должен ровно один — иначе send-событие опубликуется дважды.
+  const revived = await prisma.automationJob.updateMany({
+    where: { id: sibling.id, status: "SKIPPED", lastErrorSafe: DUPLICATE_PHONE_REASON },
+    data: { status: "SCHEDULED", skippedAt: null, lastErrorSafe: null, scheduledAt: new Date() },
+  });
+  if (revived.count === 0) return;
+
+  await logExecution(prisma, {
+    jobId: sibling.id,
+    automationId: sibling.automationId,
+    orderId: job.orderId,
+    stage: "scheduled",
+    detailSafe: "revived_after_winner_did_not_send",
+  });
+  await publishAutomationSend(repo, { jobId: sibling.id, orderId: job.orderId }, new Date());
+}
+
 // ─────────────────────────────  ЭТАП 1: TRIGGER → JOBS  ─────────────────────────────
 
 export function buildAutomationTriggerHandler(prisma: PrismaClient): OutboxHandler {
@@ -197,26 +253,43 @@ export function buildAutomationTriggerHandler(prisma: PrismaClient): OutboxHandl
     // Задача «доставка сегодня» ставится заранее; к моменту срабатывания дату могли перенести.
     if (p.triggerType === "DELIVERY_TODAY" && !isDeliveryToday(order.deliveryDate, order.site.timezone, now)) return;
 
-    for (const a of automations) {
-      const cond = evaluateConditions(a.conditionsJson as SmsConditions | null, {
-        orderStatus: order.orderStatus,
-        paymentStatus: order.paymentStatus,
-        deliveryDate: order.deliveryDate,
-        apartment: order.apartment,
-        timezone: order.site.timezone,
-        allowCancelledRefunded: ALLOW_CANCELLED_REFUNDED.has(p.triggerType),
-        now,
-      });
-      if (!cond.ok) continue; // условие не выполнено на момент триггера — job не создаём
+    // Условия проверяем ДО планирования адресатов: правило, не прошедшее условие, не должно
+    // занимать телефон и лишать сообщения то правило, которое реально сработало.
+    const eligible = automations.filter(
+      (a) =>
+        evaluateConditions(a.conditionsJson as SmsConditions | null, {
+          orderStatus: order.orderStatus,
+          paymentStatus: order.paymentStatus,
+          deliveryDate: order.deliveryDate,
+          apartment: order.apartment,
+          timezone: order.site.timezone,
+          allowCancelledRefunded: ALLOW_CANCELLED_REFUNDED.has(p.triggerType),
+          now,
+        }).ok
+    );
 
+    // Один телефон — одна SMS на событие, даже если правил несколько (заказчику и получателю).
+    // При споре за номер выигрывает версия заказчика; проигравшее правило получает SKIPPED-job.
+    const smsPlans = planSmsRecipients(
+      eligible.filter((a) => a.smsEnabled).map((a) => ({ id: a.id, audience: a.audience as SmsAudience })),
+      { senderPhone: order.senderPhone, recipientPhone: order.recipientPhone }
+    );
+
+    // То же правило для Email. Адрес у письма всегда ОДИН — заказчика (получательского email в
+    // заказе нет), поэтому правило «Получателю» с включённым Email пишет тому же человеку, что и
+    // правило «Заказчику». Если письмо заказчику по этому событию уже создаётся, второе гасим.
+    const customerEmailTaken =
+      resolveCustomerEmail({ senderEmail: order.senderEmail }).ok &&
+      eligible.some((a) => a.audience !== "RECIPIENT" && a.emailEnabled);
+
+    for (const a of eligible) {
+      const emailIsDuplicate = customerEmailTaken && a.audience === "RECIPIENT";
       const scheduledAt = computeScheduledAt(now, a.delayAmount, a.delayUnit as SmsDelayUnit);
 
       // ── SMS ──
-      if (a.smsEnabled) {
-        const { recipients, skipped } = resolveRecipients(a.audience as SmsAudience, {
-          senderPhone: order.senderPhone,
-          recipientPhone: order.recipientPhone,
-        });
+      const plan = smsPlans.get(a.id);
+      if (a.smsEnabled && plan) {
+        const { recipients, duplicates, skipped } = plan;
 
         for (const r of recipients) {
           await createOrFindJob(prisma, repo, {
@@ -230,6 +303,25 @@ export function buildAutomationTriggerHandler(prisma: PrismaClient): OutboxHandl
             scheduledAt,
             status: "SCHEDULED",
             logDetail: `channel=SMS recipient=${r.recipientType}`,
+          });
+        }
+
+        // Номер уже занят более приоритетным правилом события — фиксируем SKIPPED-job, чтобы в
+        // истории было видно, ПОЧЕМУ правило промолчало. Email-fallback тут не нужен: человек
+        // уже получит SMS от выигравшего правила, это не «не смогли доставить».
+        for (const d of duplicates) {
+          await createOrFindJob(prisma, repo, {
+            automationId: a.id,
+            orderId: p.orderId,
+            recipientType: d.recipientType,
+            channel: "SMS",
+            phoneNormalized: d.phoneNormalized,
+            emailNormalized: null,
+            occurrenceKey: p.occurrenceKey,
+            scheduledAt: now,
+            status: "SKIPPED",
+            lastErrorSafe: DUPLICATE_PHONE_REASON,
+            logDetail: "",
           });
         }
 
@@ -251,7 +343,8 @@ export function buildAutomationTriggerHandler(prisma: PrismaClient): OutboxHandl
 
           // Fallback: телефон отсутствует/некорректен → сразу Email (если разрешено и «обычный»
           // Email не включён отдельно — иначе он и так будет запланирован ниже, дублировать не надо).
-          if (a.emailFallbackEnabled && !a.emailEnabled) {
+          // Если письмо заказчику уже создаёт другое правило события — молчим по той же причине.
+          if (a.emailFallbackEnabled && !a.emailEnabled && !emailIsDuplicate) {
             await createCustomerEmailJob(prisma, repo, {
               automationId: a.id,
               orderId: p.orderId,
@@ -266,14 +359,32 @@ export function buildAutomationTriggerHandler(prisma: PrismaClient): OutboxHandl
 
       // ── EMAIL (обычный, независимо от SMS) ──
       if (a.emailEnabled) {
-        await createCustomerEmailJob(prisma, repo, {
-          automationId: a.id,
-          orderId: p.orderId,
-          occurrenceKey: p.occurrenceKey,
-          senderEmail: order.senderEmail,
-          scheduledAt,
-          logDetail: "channel=EMAIL recipient=CUSTOMER",
-        });
+        if (emailIsDuplicate) {
+          // Письмо тому же заказчику уже создаёт правило, нацеленное на него. Фиксируем SKIPPED,
+          // чтобы в истории было видно, почему правило «Получателю» промолчало по Email.
+          await createOrFindJob(prisma, repo, {
+            automationId: a.id,
+            orderId: p.orderId,
+            recipientType: "CUSTOMER",
+            channel: "EMAIL",
+            phoneNormalized: null,
+            emailNormalized: null,
+            occurrenceKey: p.occurrenceKey,
+            scheduledAt: now,
+            status: "SKIPPED",
+            lastErrorSafe: DUPLICATE_EMAIL_REASON,
+            logDetail: "",
+          });
+        } else {
+          await createCustomerEmailJob(prisma, repo, {
+            automationId: a.id,
+            orderId: p.orderId,
+            occurrenceKey: p.occurrenceKey,
+            senderEmail: order.senderEmail,
+            scheduledAt,
+            logDetail: "channel=EMAIL recipient=CUSTOMER",
+          });
+        }
       }
     }
 
@@ -311,13 +422,16 @@ export function buildAutomationSendHandler(prisma: PrismaClient, deps: Automatio
 
     await logExecution(prisma, { jobId: job.id, automationId: automation.id, orderId: order.id, stage: "picked" });
 
-    const skip = async (reason: string) => {
+    // reviveSibling=false только там, где отправка запрещена глобально: будить погашенное дедупом
+    // правило незачем, оно упрётся в тот же запрет.
+    const skip = async (reason: string, { reviveSibling = true }: { reviveSibling?: boolean } = {}) => {
       await prisma.automationJob.update({ where: { id: job.id }, data: { status: "SKIPPED", skippedAt: new Date(), lastErrorSafe: reason } });
       await logExecution(prisma, { jobId: job.id, automationId: automation.id, orderId: order.id, stage: "skipped", detailSafe: reason });
+      if (reviveSibling) await reviveDuplicateSibling(prisma, repo, job);
     };
 
     // Global kill switch: уже запланированный job при включённом рубильнике не отправляем.
-    if (await isAutomationsGloballyDisabled(prisma)) return skip("global_kill_switch");
+    if (await isAutomationsGloballyDisabled(prisma)) return skip("global_kill_switch", { reviveSibling: false });
 
     // Повторные проверки на СВЕЖИХ данных.
     if (!automation.active) return skip("automation_disabled");
@@ -412,6 +526,9 @@ export function buildAutomationSendHandler(prisma: PrismaClient, deps: Automatio
     }
     await prisma.automationJob.update({ where: { id: job.id }, data: { status: "FAILED", failedAt: new Date(), attempts: { increment: 1 }, lastErrorSafe: result.code } });
     await logExecution(prisma, { jobId: job.id, automationId: automation.id, orderId: order.id, stage: "failed", detailSafe: result.code });
+
+    // Сообщение так и не ушло — будим правило, погашенное дедупом по этому же номеру.
+    await reviveDuplicateSibling(prisma, repo, job);
 
     // Fallback: SMS окончательно не отправилось → Email, если разрешено и «обычный» Email не
     // включён отдельно (иначе он уже независимо запланирован при триггере — дублировать не надо).
