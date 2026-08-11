@@ -30,6 +30,36 @@ export function utcMidnightOfLocalDay(at: Date, tz: string | null | undefined): 
   return new Date(`${localDateStr(at, tz || DEFAULT_STORE_TZ)}T00:00:00.000Z`);
 }
 
+/**
+ * Разбирает ДАТУ ДОСТАВКИ, пришедшую строкой (note_attributes Shopify, meta WooCommerce, форма),
+ * в UTC-полночь того же календарного дня. Возвращает null, если строки нет или она не разбирается.
+ *
+ * Зачем не `new Date(raw)`: у него два разных поведения, и одно из них зависит от таймзоны
+ * СЕРВЕРА. «2026-08-15» разбирается как полночь UTC, а «August 15, 2026» — как полночь в зоне
+ * процесса. Пока прод в UTC, оба дают одно и то же; после переезда сервера в любую другую зону
+ * все «человеческие» даты доставки уехали бы на сутки — молча и сразу по всем заказам.
+ *
+ * Поэтому берётся именно КАЛЕНДАРНАЯ дата, как она написана: у ISO-строк — прямо из текста,
+ * у остальных — локальными компонентами разобранной даты (то есть теми же числами, что в строке).
+ */
+export function parseLocalDayToUtcMidnight(raw: string | null | undefined): Date | null {
+  const s = (raw ?? "").trim();
+  if (!s) return null;
+
+  const iso = /^(\d{4})-(\d{2})-(\d{2})/.exec(s);
+  if (iso) {
+    const d = new Date(`${iso[1]}-${iso[2]}-${iso[3]}T00:00:00.000Z`);
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+
+  const parsed = new Date(s);
+  if (Number.isNaN(parsed.getTime())) return null;
+  const y = parsed.getFullYear();
+  const m = String(parsed.getMonth() + 1).padStart(2, "0");
+  const day = String(parsed.getDate()).padStart(2, "0");
+  return new Date(`${y}-${m}-${day}T00:00:00.000Z`);
+}
+
 /** true, если строка — валидная IANA-таймзона. */
 export function isValidTimeZone(tz: string | null | undefined): boolean {
   if (!tz) return false;

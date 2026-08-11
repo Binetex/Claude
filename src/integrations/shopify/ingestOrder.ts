@@ -11,7 +11,7 @@ import { cleanCardMessage } from "@/integrations/cardMessageTail";
 import { scheduleDeliveryForNewOrder } from "@/integrations/delivery/burq/scheduleService";
 import { extractShopifyOrderNumber, extractSenderAddress, extractSenderIdentity } from "./orderFields";
 import { fetchShopifyDeliveryInstructions } from "./deliveryInstructions";
-import { utcMidnightOfLocalDay } from "@/lib/tz";
+import { utcMidnightOfLocalDay, parseLocalDayToUtcMidnight } from "@/lib/tz";
 import {
   publishOrderCreatedTrigger,
   scheduleDeliveryTodayTrigger,
@@ -335,11 +335,14 @@ function buildOrderData(
   // хранится, — UTC-полночь локального дня магазина. Сырой timestamp здесь давал вечерним
   // заказам (после 17:00 в Лос-Анджелесе — это уже следующие сутки UTC) день доставки на сутки
   // вперёд, со всеми последствиями: «доставка сегодня», списки дня, финансовый день.
-  const deliveryDate = deliveryDateRaw
-    ? new Date(deliveryDateRaw)
-    : utcMidnightOfLocalDay(new Date(payload.created_at ?? Date.now()), site.timezone);
-  if (!deliveryDateRaw) {
-    console.warn(`[shopify] заказ ${externalId}: не найдена дата доставки в note_attributes, использую дату заказа`);
+  const parsedDeliveryDay = parseLocalDayToUtcMidnight(deliveryDateRaw);
+  const deliveryDate =
+    parsedDeliveryDay ?? utcMidnightOfLocalDay(new Date(payload.created_at ?? Date.now()), site.timezone);
+  if (!parsedDeliveryDay) {
+    // Неразобранная строка раньше давала Invalid Date и роняла приём заказа целиком.
+    console.warn(
+      `[shopify] заказ ${externalId}: дата доставки в note_attributes отсутствует или не разобрана (${deliveryDateRaw ?? "нет"}), использую дату заказа`
+    );
   }
 
   const items = payload.line_items ?? [];

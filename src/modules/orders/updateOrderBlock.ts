@@ -5,6 +5,7 @@ import type { OrderStatus, Role } from "@/generated/prisma/enums";
 import { normalizePhone } from "@/lib/phone";
 import { recomputeDaysForOrder } from "@/modules/finance/orderDayHook";
 import { manualOrderStatuses } from "@/lib/statuses";
+import { parseLocalDayToUtcMidnight } from "@/lib/tz";
 
 /**
  * Общий сервис редактирования ОДНОГО блока заказа с оптимистической блокировкой (OCC) и
@@ -82,8 +83,10 @@ function buildUpdateData(block: OrderBlock, data: BlockFormData): { data: Prisma
       if (has("deliveryDate")) {
         const raw = str("deliveryDate");
         if (raw) {
-          const d = new Date(raw);
-          if (Number.isNaN(d.getTime())) return { error: "Некорректная дата доставки." };
+          // Тем же разбором, что и приём заказов: день берётся как написан, без участия
+          // таймзоны сервера (Order.deliveryDate = UTC-полночь локального дня).
+          const d = parseLocalDayToUtcMidnight(raw);
+          if (!d) return { error: "Некорректная дата доставки." };
           out.deliveryDate = d;
         }
       }

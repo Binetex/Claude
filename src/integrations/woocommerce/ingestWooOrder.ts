@@ -19,7 +19,7 @@ import { classifyWooPayment, type WooPaymentConfig, type WooOrderForPayment } fr
 import { deriveWooOrderState, reconcileOrderState, type OrderState } from "./orderState";
 import { resolveMappedOrderFields, type OrderMetaMapping } from "./orderMeta";
 import { cleanCardMessage } from "@/integrations/cardMessageTail";
-import { utcMidnightOfLocalDay } from "@/lib/tz";
+import { utcMidnightOfLocalDay, parseLocalDayToUtcMidnight } from "@/lib/tz";
 import { scheduleDeliveryForNewOrder } from "@/integrations/delivery/burq/scheduleService";
 import { assignInitial } from "@/modules/assignments/service";
 import {
@@ -248,11 +248,10 @@ export async function ingestWooOrder(
   // поле хранится именно так. Сырой timestamp сдвигал вечерние заказы на сутки вперёд (полночь
   // UTC наступает в Лос-Анджелесе в 17:00), и «доставка сегодня», списки дня и финансовый день
   // считали такой заказ завтрашним.
-  const deliveryDate = mapped.deliveryDate
-    ? new Date(mapped.deliveryDate)
-    : normalized.deliveryDate
-      ? new Date(normalized.deliveryDate)
-      : utcMidnightOfLocalDay(new Date(normalized.createdAt), site.timezone);
+  const deliveryDate =
+    parseLocalDayToUtcMidnight(mapped.deliveryDate) ??
+    parseLocalDayToUtcMidnight(normalized.deliveryDate) ??
+    utcMidnightOfLocalDay(new Date(normalized.createdAt), site.timezone);
   // Тот же мусор магазина, что и у Shopify: служебный хвост приложения доставки и
   // HTML-сущности. См. cardMessageTail.ts. Сырой текст остаётся в originalCardMessage.
   const rawCardMessage = mapped.cardMessage ?? normalized.cardMessage ?? "";

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { todayStrInTz, utcDayRangeForLocalToday, utcMidnightOfLocalDay } from "./tz";
+import { todayStrInTz, utcDayRangeForLocalToday, utcMidnightOfLocalDay, parseLocalDayToUtcMidnight } from "./tz";
 import { groupFor } from "@/modules/finance/issues";
 
 /**
@@ -81,6 +81,36 @@ describe("utcMidnightOfLocalDay — момент времени → день д�
 
   it("без таймзоны магазина берётся зона по умолчанию, а не UTC", () => {
     expect(utcMidnightOfLocalDay(EVENING, null).toISOString()).toBe("2026-08-07T00:00:00.000Z");
+  });
+});
+
+describe("parseLocalDayToUtcMidnight — дата доставки строкой", () => {
+  const DAY = "2026-08-07T00:00:00.000Z";
+
+  it("ISO-дата → тот же день", () => {
+    expect(parseLocalDayToUtcMidnight("2026-08-07")?.toISOString()).toBe(DAY);
+  });
+
+  it("«человеческий» формат Shopify → тот же день, а не сдвиг по зоне сервера", () => {
+    // Именно здесь пряталась мина: `new Date("August 7, 2026")` — это полночь в зоне ПРОЦЕССА.
+    expect(parseLocalDayToUtcMidnight("August 7, 2026")?.toISOString()).toBe(DAY);
+    expect(parseLocalDayToUtcMidnight("08/07/2026")?.toISOString()).toBe(DAY);
+  });
+
+  it("ISO с временем и смещением: берётся дата, как она написана", () => {
+    expect(parseLocalDayToUtcMidnight("2026-08-07T23:30:00-07:00")?.toISOString()).toBe(DAY);
+  });
+
+  it("пусто или мусор → null, а не Invalid Date в БД", () => {
+    expect(parseLocalDayToUtcMidnight(null)).toBeNull();
+    expect(parseLocalDayToUtcMidnight("")).toBeNull();
+    expect(parseLocalDayToUtcMidnight("   ")).toBeNull();
+    expect(parseLocalDayToUtcMidnight("завтра после обеда")).toBeNull();
+  });
+
+  it("результат всегда ровная UTC-полночь", () => {
+    const d = parseLocalDayToUtcMidnight("August 7, 2026")!;
+    expect(d.getUTCHours() + d.getUTCMinutes() + d.getUTCSeconds() + d.getUTCMilliseconds()).toBe(0);
   });
 });
 
