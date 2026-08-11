@@ -47,8 +47,14 @@ export default async function SitesPage() {
       <div className="space-y-2">
         {sites.map((s) => {
           const email = emailViews[s.id];
+          // Платформенный статус точнее, но он есть не всегда: у магазина без подключения
+          // строки нет вовсе, и без запасного варианта незавершённое подключение выглядело бы
+          // в списке ровно как рабочий магазин.
           const platformStatus = s.platform === "WOOCOMMERCE" ? s.wooConnection?.connStatus : s.shopifyConnStatus;
-          const meta = platformStatus ? connStatusMeta[platformStatus] : null;
+          const meta = (platformStatus && connStatusMeta[platformStatus]) ?? connStatusMeta[s.connectionStatus] ?? {
+            label: s.connectionStatus,
+            className: "bg-slate-100 text-slate-600 border-slate-200",
+          };
           return (
             <Link
               key={s.id}

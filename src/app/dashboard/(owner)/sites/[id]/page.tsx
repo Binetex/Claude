@@ -100,6 +100,11 @@ export default async function SiteSettingsPage({ params }: { params: Promise<{ i
                 <div><div className="text-xs text-slate-400">Короткое имя</div>{site.shortName}</div>
                 <div><div className="text-xs text-slate-400">Платформа</div>{site.platform}</div>
                 <div><div className="text-xs text-slate-400">Заказов / товаров</div>{site._count.orders} / {site._count.products}</div>
+                {site.shopifyShopDomain && (
+                  <div className="col-span-2 sm:col-span-3">
+                    <div className="text-xs text-slate-400">Домен Shopify</div>{site.shopifyShopDomain}
+                  </div>
+                )}
               </div>
               <SiteTimezoneSetting siteId={site.id} current={site.timezone} />
             </CardBody>
@@ -221,6 +226,20 @@ export default async function SiteSettingsPage({ params }: { params: Promise<{ i
                 })()}
                 {site.connectionError && <div className="text-xs text-red-600">{site.connectionError}</div>}
                 <SiteCardActions siteId={site.id} />
+              </CardBody>
+            </Card>
+          )}
+
+          {/* Все блоки вкладки условные: у магазина без подключения не выполнится ни один,
+              и вкладка была бы пустым экраном без объяснения. */}
+          {!site.wooConnection && site.authMode !== "CUSTOM_APP" && (
+            <Card>
+              <CardBody className="space-y-1 text-sm">
+                <div className="font-medium text-slate-700">Магазин не подключён</div>
+                <p className="text-xs text-slate-500">
+                  Здесь появятся данные подключения, проверка и синхронизация. Подключить магазин
+                  можно в блоке «Подключить новый магазин» на <Link href="/dashboard/sites" className="text-sky-600 underline">списке сайтов</Link>.
+                </p>
               </CardBody>
             </Card>
           )}

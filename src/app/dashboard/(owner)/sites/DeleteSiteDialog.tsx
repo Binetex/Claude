@@ -1,5 +1,6 @@
 "use client";
 import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Trash2 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -17,8 +18,13 @@ import type { SiteDeletionImpact } from "@/modules/sites/deletion";
  *
  * Кнопки «Удалить» может не быть вовсе: если к магазину привязаны заказы, диалог
  * объясняет, почему удаление невозможно, и отправляет к «Отключить».
+ *
+ * После удаления обязателен уход на список: диалог живёт на СТРАНИЦЕ МАГАЗИНА, и оставаться
+ * на её адресе больше нельзя — ревалидация перерисует страницу, магазина уже нет, и владелец
+ * получит «Страница не найдена» с зелёным тостом об успехе поверх.
  */
 export function DeleteSiteDialog({ siteId, siteName }: { siteId: string; siteName: string }) {
+  const router = useRouter();
   const [open, setOpen] = useState(false);
   const [impact, setImpact] = useState<SiteDeletionImpact | null>(null);
   const [loading, setLoading] = useState(false);
@@ -44,6 +50,7 @@ export function DeleteSiteDialog({ siteId, siteName }: { siteId: string; siteNam
       }
       toast.success(res?.message ?? "Магазин удалён");
       setOpen(false);
+      router.replace("/dashboard/sites");
     });
   }
 
