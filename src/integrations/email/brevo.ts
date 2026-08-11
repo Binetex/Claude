@@ -200,3 +200,54 @@ export async function verifyBrevoApiKey(apiKey: string): Promise<VerifyAccountRe
     clearTimeout(timer);
   }
 }
+
+export type SenderCheckResult =
+  | { ok: true; verified: boolean; knownSenders: string[] }
+  | { ok: false; code: string; safeError: string };
+
+/**
+ * Подтверждён ли адрес отправителя В ЭТОМ аккаунте Brevo (GET /v3/senders).
+ *
+ * Зачем отдельно от проверки ключа: `GET /v3/account` отвечает только «ключ живой». Аккаунт при
+ * этом может ничего не знать про наш домен — и тогда Brevo ПРИНИМАЕТ письмо по API, отдаёт
+ * messageId, а на доставке блокирует. Снаружи это выглядит как «отправили, но не пришло»
+ * (ровно так потерялось первое письмо TheFlow из нового аккаунта).
+ *
+ * Сравнение по адресу без учёта регистра. Неактивный отправитель считается неподтверждённым:
+ * Brevo с него не отправит.
+ */
+export async function verifyBrevoSender(apiKey: string, senderEmail: string): Promise<SenderCheckResult> {
+  const key = apiKey.trim();
+  const wanted = normalizeEmail(senderEmail);
+  if (!key) return { ok: false, code: "email_not_configured", safeError: "API key пуст." };
+  if (!wanted) return { ok: false, code: "invalid_sender_email", safeError: "Адрес отправителя некорректен." };
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+  try {
+    const res = await fetch("https://api.brevo.com/v3/senders", {
+      method: "GET",
+      headers: { "api-key": key, accept: "application/json" },
+      signal: controller.signal,
+    });
+    const text = await res.text();
+    if (!res.ok) {
+      const code = brevoErrorCode(res.status, text);
+      return { ok: false, code, safeError: `Brevo ответил ${res.status} (${code}).` };
+    }
+    const json = text ? (JSON.parse(text) as { senders?: { email?: string; active?: boolean }[] }) : null;
+    const senders = json?.senders ?? [];
+    const known = senders.map((x) => normalizeEmail(x.email ?? "")).filter((x): x is string => !!x);
+    const verified = senders.some((x) => normalizeEmail(x.email ?? "") === wanted && x.active !== false);
+    return { ok: true, verified, knownSenders: known };
+  } catch (err) {
+    const aborted = err instanceof Error && err.name === "AbortError";
+    return {
+      ok: false,
+      code: aborted ? "brevo_timeout" : "brevo_network",
+      safeError: aborted ? "Brevo не ответил за 15 секунд." : "Сеть недоступна при обращении к Brevo.",
+    };
+  } finally {
+    clearTimeout(timer);
+  }
+}

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { createBrevoProvider, isValidEmail, normalizeEmail, verifyBrevoApiKey } from "./brevo";
+import { createBrevoProvider, isValidEmail, normalizeEmail, verifyBrevoApiKey, verifyBrevoSender } from "./brevo";
 
 const fetchMock = vi.fn();
 vi.stubGlobal("fetch", fetchMock);
@@ -240,5 +240,43 @@ describe("verifyBrevoApiKey — GET /v3/account", () => {
       expect(res.code).toBe("brevo_network");
       expect(res.safeError).not.toContain("10.0.0.1");
     }
+  });
+});
+
+describe("проверка отправителя в аккаунте Brevo", () => {
+  const senders = (list: { email: string; active?: boolean }[]) => json(200, { senders: list });
+
+  it("адрес есть среди отправителей → подтверждён", async () => {
+    fetchMock.mockResolvedValue(senders([{ email: "client@theflow.la", active: true }, { email: "other@x.io" }]));
+    const r = await verifyBrevoSender("key", "client@theflow.la");
+    expect(r).toMatchObject({ ok: true, verified: true });
+  });
+
+  it("адреса нет → НЕ подтверждён (именно этот случай выглядит как «письмо не пришло»)", async () => {
+    fetchMock.mockResolvedValue(senders([{ email: "someone@else.com", active: true }]));
+    const r = await verifyBrevoSender("key", "client@theflow.la");
+    expect(r).toMatchObject({ ok: true, verified: false });
+  });
+
+  it("регистр адреса не имеет значения", async () => {
+    fetchMock.mockResolvedValue(senders([{ email: "Client@TheFlow.LA", active: true }]));
+    expect(await verifyBrevoSender("key", "  client@theflow.la ")).toMatchObject({ verified: true });
+  });
+
+  it("неактивный отправитель считается неподтверждённым — Brevo с него не отправит", async () => {
+    fetchMock.mockResolvedValue(senders([{ email: "client@theflow.la", active: false }]));
+    expect(await verifyBrevoSender("key", "client@theflow.la")).toMatchObject({ verified: false });
+  });
+
+  it("ошибка Brevo не выдаётся за «не подтверждён»", async () => {
+    fetchMock.mockResolvedValue(json(401, { message: "unauthorized" }));
+    const r = await verifyBrevoSender("key", "client@theflow.la");
+    expect(r.ok).toBe(false);
+  });
+
+  it("пустой ключ или кривой адрес — в сеть не идём", async () => {
+    expect((await verifyBrevoSender("", "a@b.co")).ok).toBe(false);
+    expect((await verifyBrevoSender("key", "мусор")).ok).toBe(false);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

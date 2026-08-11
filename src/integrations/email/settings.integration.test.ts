@@ -238,3 +238,40 @@ describe("шаблоны по событиям", () => {
     expect("error" in (await saveSiteEmailTemplate(prisma, flowId, "ORDER_CREATED", 1.5))).toBe(true);
   });
 });
+
+describe("тест не уходит с неподтверждённого отправителя", () => {
+  it("Brevo говорит «отправитель не подтверждён» → тест останавливается ДО отправки", async () => {
+    // Ровно тот случай, что потерял первое письмо TheFlow: ключ живой, магазин настроен,
+    // Brevo принял бы запрос и заблокировал письмо на доставке.
+    await configure(flowId, "orders@theflow.la", "The Flow");
+    await saveSiteEmailTemplate(prisma, flowId, "ORDER_CREATED", 11);
+
+    const res = await sendSiteTestEmail(prisma, createBrevoProvider("site-key"), {
+      siteId: flowId,
+      to: "test@example.com",
+      verifySender: async () => ({ verified: false }),
+    });
+
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.code).toBe("sender_not_verified");
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    const row = await prisma.siteEmailSettings.findUniqueOrThrow({ where: { siteId: flowId } });
+    expect(row.lastTestStatus).toBe("error");
+    expect(row.lastErrorSafe).toContain("не подтверждён");
+  });
+
+  it("проверка не смогла ответить (null) → тест идёт как обычно", async () => {
+    await configure(julieId, "hello@juliesflowers.com", "Julies");
+    await saveSiteEmailTemplate(prisma, julieId, "ORDER_CREATED", 12);
+    fetchMock.mockResolvedValue(json(201, { messageId: "m-ok" }));
+
+    const res = await sendSiteTestEmail(prisma, createBrevoProvider("site-key"), {
+      siteId: julieId,
+      to: "test@example.com",
+      verifySender: async () => null,
+    });
+
+    expect(res.ok).toBe(true);
+  });
+});

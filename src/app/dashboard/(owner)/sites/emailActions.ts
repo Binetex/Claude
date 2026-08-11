@@ -10,7 +10,7 @@
 import { revalidatePath } from "next/cache";
 import { requireRole } from "@/lib/rbac";
 import { prisma } from "@/lib/db";
-import { createBrevoProvider } from "@/integrations/email/brevo";
+import { createBrevoProvider, verifyBrevoSender } from "@/integrations/email/brevo";
 import { saveSiteEmailSettings, saveSiteEmailTemplate } from "@/integrations/email/settings";
 import { sendSiteTestEmail } from "@/integrations/email/testSend";
 import { resolveBrevoApiKey, saveBrevoApiKey, clearBrevoApiKey, verifyAndRecordBrevoConnection } from "@/integrations/email/accountKey";
@@ -78,7 +78,18 @@ export async function ownerSaveSiteEmailTemplate(siteId: string, triggerType: st
 export async function ownerSendSiteTestEmail(siteId: string, to: string): Promise<Result> {
   await requireRole("OWNER");
   const apiKey = await resolveBrevoApiKey(prisma, siteId);
-  const res = await sendSiteTestEmail(prisma, createBrevoProvider(apiKey), { siteId, to });
+  const res = await sendSiteTestEmail(prisma, createBrevoProvider(apiKey), {
+    siteId,
+    to,
+    // Спрашиваем Brevo, разрешён ли этот отправитель. Без этого «тест прошёл» означает лишь
+    // «Brevo принял запрос» — а письмо при неподтверждённом домене никуда не уходит.
+    verifySender: apiKey
+      ? async (senderEmail) => {
+          const r = await verifyBrevoSender(apiKey, senderEmail);
+          return r.ok ? { verified: r.verified } : null;
+        }
+      : undefined,
+  });
   revalidatePath("/dashboard/sites");
   return res.ok
     ? { ok: true, message: `Письмо отправлено${res.providerMessageId ? "" : " (Brevo не вернул messageId)"}` }
@@ -93,6 +104,25 @@ async function requireSite(siteId: string): Promise<Result | null> {
   if (!siteId) return { error: "Не указан магазин." };
   const site = await prisma.site.findUnique({ where: { id: siteId }, select: { id: true } });
   return site ? null : { error: "Магазин не найден — возможно, он удалён. Обновите страницу." };
+}
+
+/**
+ * Короткая приписка про отправителя к результату проверки подключения. Молчит, когда отправитель
+ * ещё не задан или Brevo не ответил: догадки хуже отсутствия строки.
+ */
+async function describeSenderState(siteId: string): Promise<string> {
+  const settings = await prisma.siteEmailSettings.findUnique({ where: { siteId }, select: { senderEmail: true } });
+  const senderEmail = settings?.senderEmail?.trim();
+  if (!senderEmail) return " Отправитель ещё не задан.";
+
+  const apiKey = await resolveBrevoApiKey(prisma, siteId);
+  if (!apiKey) return "";
+
+  const r = await verifyBrevoSender(apiKey, senderEmail);
+  if (!r.ok) return "";
+  return r.verified
+    ? ` Отправитель ${senderEmail} подтверждён.`
+    : ` ВНИМАНИЕ: отправитель ${senderEmail} НЕ подтверждён в этом аккаунте — письма будут приняты и заблокированы на доставке.`;
 }
 
 /** Аудит действий с ключом магазина БЕЗ значения (только маска) — по образцу QUO signing secrets. */
@@ -132,7 +162,10 @@ export async function ownerVerifyBrevoConnection(siteId: string): Promise<Result
   if (bad) return bad;
   const res = await verifyAndRecordBrevoConnection(prisma, siteId);
   revalidatePath("/dashboard/sites");
-  return res.ok
-    ? { ok: true, message: `Подключение подтверждено${res.accountEmail ? ` (аккаунт: ${res.accountEmail})` : ""}` }
-    : { error: res.error };
+  if (!res.ok) return { error: res.error };
+
+  // Живой ключ ещё не значит, что с нашего адреса разрешено слать. Спрашиваем отдельно —
+  // именно на этом молча терялись письма из нового аккаунта.
+  const senderNote = await describeSenderState(siteId);
+  return { ok: true, message: `Подключение подтверждено${res.accountEmail ? ` (аккаунт: ${res.accountEmail})` : ""}.${senderNote}` };
 }

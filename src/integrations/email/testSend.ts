@@ -38,7 +38,17 @@ export type TestSendResult = { ok: true; providerMessageId: string | null } | { 
 export async function sendSiteTestEmail(
   prisma: PrismaClient,
   provider: EmailProvider,
-  args: { siteId: string; to: string; triggerType?: string }
+  args: {
+    siteId: string;
+    to: string;
+    triggerType?: string;
+    /**
+     * Проверка отправителя в аккаунте Brevo. Необязательна (юнит-тесты обходятся без сети), но
+     * когда передана — тест НЕ уходит с неподтверждённого адреса. Brevo такое письмо принимает и
+     * молча блокирует, и «тест прошёл» становится враньём.
+     */
+    verifySender?: (senderEmail: string) => Promise<{ verified: boolean } | null>;
+  }
 ): Promise<TestSendResult> {
   const to = normalizeEmail(args.to);
   if (!to) {
@@ -51,6 +61,17 @@ export async function sendSiteTestEmail(
   if (!cfg.ok) {
     await recordEmailTestResult(prisma, args.siteId, { ok: false, safeError: cfg.safeError });
     return { ok: false, code: cfg.skip, safeError: cfg.safeError };
+  }
+
+  if (args.verifySender) {
+    const senderCheck = await args.verifySender(cfg.config.senderEmail);
+    // null = спросить не удалось (сеть/права). Это не повод останавливать тест: отсутствие
+    // ответа не означает, что отправитель плохой.
+    if (senderCheck && !senderCheck.verified) {
+      const safeError = `Отправитель ${cfg.config.senderEmail} не подтверждён в этом аккаунте Brevo — письмо будет принято и заблокировано на доставке.`;
+      await recordEmailTestResult(prisma, args.siteId, { ok: false, safeError });
+      return { ok: false, code: "sender_not_verified", safeError };
+    }
   }
 
   // Шаблон: указанное событие, иначе любой настроенный у ЭТОГО магазина (чужие не подходят).
