@@ -10,7 +10,7 @@
 import { revalidatePath } from "next/cache";
 import { requireRole } from "@/lib/rbac";
 import { prisma } from "@/lib/db";
-import { createBrevoProvider, verifyBrevoSender } from "@/integrations/email/brevo";
+import { createBrevoProvider, verifyBrevoSender, verifyBrevoTemplate } from "@/integrations/email/brevo";
 import { saveSiteEmailSettings, saveSiteEmailTemplate } from "@/integrations/email/settings";
 import { sendSiteTestEmail } from "@/integrations/email/testSend";
 import { resolveBrevoApiKey, saveBrevoApiKey, clearBrevoApiKey, verifyAndRecordBrevoConnection } from "@/integrations/email/accountKey";
@@ -87,6 +87,12 @@ export async function ownerSendSiteTestEmail(siteId: string, to: string): Promis
       ? async (senderEmail) => {
           const r = await verifyBrevoSender(apiKey, senderEmail);
           return r.ok ? { verified: r.verified } : null;
+        }
+      : undefined,
+    verifyTemplate: apiKey
+      ? async (templateId) => {
+          const r = await verifyBrevoTemplate(apiKey, templateId);
+          return r.ok ? { exists: r.exists, active: r.active, name: r.name } : null;
         }
       : undefined,
   });

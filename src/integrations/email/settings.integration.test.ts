@@ -275,3 +275,37 @@ describe("тест не уходит с неподтверждённого от�
     expect(res.ok).toBe(true);
   });
 });
+
+describe("тест не уходит по выключенному шаблону", () => {
+  it("шаблон выключен в Brevo → тест останавливается и называет причину", async () => {
+    await configure(flowId, "orders@theflow.la", "The Flow");
+    await saveSiteEmailTemplate(prisma, flowId, "ORDER_CREATED", 1);
+
+    const res = await sendSiteTestEmail(prisma, createBrevoProvider("site-key"), {
+      siteId: flowId,
+      to: "test@example.com",
+      verifyTemplate: async () => ({ exists: true, active: false, name: "New template" }),
+    });
+
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
+      expect(res.code).toBe("template_disabled");
+      expect(res.safeError).toContain("выключен");
+    }
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("шаблона нет в аккаунте → отдельная причина", async () => {
+    await configure(julieId, "hello@juliesflowers.com", "Julies");
+    await saveSiteEmailTemplate(prisma, julieId, "ORDER_CREATED", 42);
+
+    const res = await sendSiteTestEmail(prisma, createBrevoProvider("site-key"), {
+      siteId: julieId,
+      to: "test@example.com",
+      verifyTemplate: async () => ({ exists: false, active: false, name: null }),
+    });
+
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.code).toBe("template_not_found");
+  });
+});

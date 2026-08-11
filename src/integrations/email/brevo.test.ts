@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { createBrevoProvider, isValidEmail, normalizeEmail, verifyBrevoApiKey, verifyBrevoSender } from "./brevo";
+import { createBrevoProvider, isValidEmail, normalizeEmail, verifyBrevoApiKey, verifyBrevoSender, verifyBrevoTemplate } from "./brevo";
 
 const fetchMock = vi.fn();
 vi.stubGlobal("fetch", fetchMock);
@@ -277,6 +277,33 @@ describe("проверка отправителя в аккаунте Brevo", ()
   it("пустой ключ или кривой адрес — в сеть не идём", async () => {
     expect((await verifyBrevoSender("", "a@b.co")).ok).toBe(false);
     expect((await verifyBrevoSender("key", "мусор")).ok).toBe(false);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("проверка шаблона в аккаунте Brevo", () => {
+  it("включённый шаблон", async () => {
+    fetchMock.mockResolvedValue(json(200, { name: "Order delivered", isActive: true }));
+    expect(await verifyBrevoTemplate("key", 7)).toMatchObject({ ok: true, exists: true, active: true, name: "Order delivered" });
+  });
+
+  it("выключенный черновик — именно он молча съел первое письмо TheFlow", async () => {
+    fetchMock.mockResolvedValue(json(200, { name: "New template", isActive: false }));
+    expect(await verifyBrevoTemplate("key", 1)).toMatchObject({ ok: true, exists: true, active: false, name: "New template" });
+  });
+
+  it("404 — шаблона в аккаунте нет, это не ошибка запроса", async () => {
+    fetchMock.mockResolvedValue(json(404, { message: "Template not found" }));
+    expect(await verifyBrevoTemplate("key", 999)).toMatchObject({ ok: true, exists: false, active: false });
+  });
+
+  it("ошибка Brevo не выдаётся за «шаблон выключен»", async () => {
+    fetchMock.mockResolvedValue(json(401, { message: "unauthorized" }));
+    expect((await verifyBrevoTemplate("key", 1)).ok).toBe(false);
+  });
+
+  it("кривой id — в сеть не идём", async () => {
+    expect((await verifyBrevoTemplate("key", 0)).ok).toBe(false);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });

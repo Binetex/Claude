@@ -48,6 +48,12 @@ export async function sendSiteTestEmail(
      * молча блокирует, и «тест прошёл» становится враньём.
      */
     verifySender?: (senderEmail: string) => Promise<{ verified: boolean } | null>;
+    /**
+     * Проверка шаблона в аккаунте Brevo. Выключенный шаблон Brevo принимает и отклоняет уже на
+     * отправке (`template is disabled`), поэтому «тест прошёл» без этой проверки может означать
+     * «письмо никуда не ушло».
+     */
+    verifyTemplate?: (templateId: number) => Promise<{ exists: boolean; active: boolean; name: string | null } | null>;
   }
 ): Promise<TestSendResult> {
   const to = normalizeEmail(args.to);
@@ -95,6 +101,21 @@ export async function sendSiteTestEmail(
       return { ok: false, code: "site_template_missing", safeError };
     }
     templateId = any.brevoTemplateId;
+  }
+
+  if (args.verifyTemplate) {
+    const check = await args.verifyTemplate(templateId);
+    // null = спросить не удалось; молчим и шлём, как раньше.
+    if (check && !check.exists) {
+      const safeError = `Шаблон ${templateId} не найден в этом аккаунте Brevo.`;
+      await recordEmailTestResult(prisma, args.siteId, { ok: false, safeError });
+      return { ok: false, code: "template_not_found", safeError };
+    }
+    if (check && !check.active) {
+      const safeError = `Шаблон ${templateId}${check.name ? ` «${check.name}»` : ""} выключен в Brevo — письмо будет принято и не отправлено. Включите шаблон в аккаунте.`;
+      await recordEmailTestResult(prisma, args.siteId, { ok: false, safeError });
+      return { ok: false, code: "template_disabled", safeError };
+    }
   }
 
   const res = await provider.sendTemplate({

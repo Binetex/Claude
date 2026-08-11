@@ -251,3 +251,50 @@ export async function verifyBrevoSender(apiKey: string, senderEmail: string): Pr
     clearTimeout(timer);
   }
 }
+
+export type TemplateCheckResult =
+  | { ok: true; exists: boolean; active: boolean; name: string | null }
+  | { ok: false; code: string; safeError: string };
+
+/**
+ * Существует ли шаблон в ЭТОМ аккаунте Brevo и включён ли он (GET /v3/smtp/templates/{id}).
+ *
+ * Зачем: Brevo принимает отправку по выключенному шаблону, отдаёт messageId — и отказывает уже
+ * на самой отправке, с событием `error: template is disabled` в журнале аккаунта. Наружу это
+ * выглядит как «тест прошёл, письмо не пришло». Ровно так потерялось первое письмо TheFlow:
+ * шаблон №1 в новом аккаунте оказался выключённым черновиком «New template».
+ */
+export async function verifyBrevoTemplate(apiKey: string, templateId: number): Promise<TemplateCheckResult> {
+  const key = apiKey.trim();
+  if (!key) return { ok: false, code: "email_not_configured", safeError: "API key пуст." };
+  if (!Number.isInteger(templateId) || templateId <= 0) {
+    return { ok: false, code: "invalid_template_id", safeError: "Некорректный Template ID." };
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+  try {
+    const res = await fetch(`https://api.brevo.com/v3/smtp/templates/${templateId}`, {
+      method: "GET",
+      headers: { "api-key": key, accept: "application/json" },
+      signal: controller.signal,
+    });
+    const text = await res.text();
+    if (res.status === 404) return { ok: true, exists: false, active: false, name: null };
+    if (!res.ok) {
+      const code = brevoErrorCode(res.status, text);
+      return { ok: false, code, safeError: `Brevo ответил ${res.status} (${code}).` };
+    }
+    const json = text ? (JSON.parse(text) as { name?: string; isActive?: boolean }) : null;
+    return { ok: true, exists: true, active: json?.isActive === true, name: json?.name ?? null };
+  } catch (err) {
+    const aborted = err instanceof Error && err.name === "AbortError";
+    return {
+      ok: false,
+      code: aborted ? "brevo_timeout" : "brevo_network",
+      safeError: aborted ? "Brevo не ответил за 15 секунд." : "Сеть недоступна при обращении к Brevo.",
+    };
+  } finally {
+    clearTimeout(timer);
+  }
+}
