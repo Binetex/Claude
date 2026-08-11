@@ -62,10 +62,7 @@ export function SiteQuoWebhookSecurity({ secrets, envCount, cryptoConfigured }: 
         </span>
       </CardHeader>
       <CardBody className="space-y-3 text-sm">
-        <p className="text-xs text-slate-500">
-          Глобальная настройка workspace (не per-Site). Signing secret из QUO/OpenPhone для проверки подписи входящих вебхуков.
-          Активных ключей: <b>{totalActive}</b> (env: {envCount}, из UI: {secrets.length}). Полное значение не показывается.
-        </p>
+        <p className="text-xs text-slate-500">Активных ключей: <b>{totalActive}</b></p>
 
         {!cryptoConfigured && (
           <div className="rounded-md border border-red-200 bg-red-50 p-2 text-xs text-red-700">
@@ -86,7 +83,7 @@ export function SiteQuoWebhookSecurity({ secrets, envCount, cryptoConfigured }: 
           </ul>
         )}
         {secrets.length === 0 && envCount > 0 && (
-          <div className="text-xs text-slate-400">Ключи заданы только через env ({envCount}). Можно добавить дополнительные через UI.</div>
+          <div className="text-xs text-slate-400">Ключи заданы через env ({envCount}).</div>
         )}
 
         {/* Добавление */}
@@ -102,8 +99,7 @@ export function SiteQuoWebhookSecurity({ secrets, envCount, cryptoConfigured }: 
         {msg && <div className={msg.ok ? "text-xs text-emerald-700" : "text-xs text-red-600"}>{msg.text}</div>}
         {check && (
           <div className="rounded-md border border-slate-200 bg-slate-50 p-2 text-xs text-slate-600">
-            Шифрование: {check.cryptoConfigured ? "ок" : "не настроено"} · env-ключей: {check.envCount} · из UI: {check.dbCount} · всего активных: {check.totalActive} · расшифровка: {check.decryptOk ? "ок" : "ошибка"}.
-            <div className="mt-0.5 text-slate-400">Фактический приём подтвердится на следующем вебхуке (webhook.accepted в логах).</div>
+            Активных ключей: {check.totalActive}. Расшифровка: {check.decryptOk ? "ок" : "ошибка"}.
           </div>
         )}
       </CardBody>

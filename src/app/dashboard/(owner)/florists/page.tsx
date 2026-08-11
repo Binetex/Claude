@@ -1,32 +1,17 @@
+import Link from "next/link";
 import { prisma } from "@/lib/db";
 import { Card, CardHeader, CardTitle, CardBody } from "@/components/ui/Card";
 import { FinanceVisibilityToggle } from "./FinanceVisibilityToggle";
-import { SitePriorityEditor } from "./SitePriorityEditor";
 import { PickupLocationsEditor } from "./PickupLocationsEditor";
 import { AvailabilityEditor } from "./AvailabilityEditor";
 import { ownerSetFloristWeekends, ownerAddFloristDayOff, ownerRemoveFloristDayOff } from "./floristActions";
 import { AddFloristForm } from "./AddFloristForm";
 import { FloristEditForm } from "./FloristEditForm";
 import { FloristAvatar } from "@/components/FloristAvatar";
-import { TERMINAL_ORDER_STATUSES } from "@/lib/statuses";
 
 export const dynamic = "force-dynamic";
 
 export default async function FloristsPage() {
-  const sites = await prisma.site.findMany({
-    include: {
-      floristPriorities: { orderBy: { position: "asc" }, include: { florist: { include: { user: true } } } },
-      // Требуют назначения: оплачены, не назначены и не терминальные (выполнен/отменён).
-      _count: {
-        select: {
-          orders: {
-            where: { assignmentStatus: "UNASSIGNED", paymentStatus: "PAID", orderStatus: { notIn: TERMINAL_ORDER_STATUSES } },
-          },
-        },
-      },
-    },
-    orderBy: { name: "asc" },
-  });
 
   const florists = await prisma.florist.findMany({
     include: {
@@ -89,30 +74,10 @@ export default async function FloristsPage() {
         ))}
       </div>
 
-      <div>
-        <h2 className="mb-2 text-sm font-semibold text-slate-700">Приоритеты по сайтам</h2>
-        <p className="mb-3 text-xs text-slate-400">
-          Для каждого сайта — своя последовательность. Основной флорист (позиция 1) получает заказ первым; при отказе заказ уходит следующему.
-        </p>
-        <div className="grid gap-4 md:grid-cols-2">
-          {sites.map((s) => (
-            <Card key={s.id}>
-              <CardHeader className="flex items-center gap-2">
-                <span className="h-3 w-3 rounded-full" style={{ background: s.colorTag }} />
-                <CardTitle>{s.name}</CardTitle>
-              </CardHeader>
-              <CardBody>
-                <SitePriorityEditor
-                  siteId={s.id}
-                  priorities={s.floristPriorities.map((p) => ({ floristId: p.floristId, name: p.florist.user.name, position: p.position }))}
-                  allFlorists={florists.map((f) => ({ id: f.id, name: f.user.name }))}
-                  unassignedCount={s._count.orders}
-                />
-              </CardBody>
-            </Card>
-          ))}
-        </div>
-      </div>
+      <p className="text-xs text-slate-400">
+        Приоритет флористов задаётся у каждого магазина — <Link href="/dashboard/sites" className="text-sky-600 underline">Сайты</Link>, вкладка «Флористы».
+        Держать один и тот же редактор в двух местах значит однажды поправить один из них.
+      </p>
     </div>
   );
 }

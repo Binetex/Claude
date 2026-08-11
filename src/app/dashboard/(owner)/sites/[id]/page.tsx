@@ -18,11 +18,13 @@ import { SiteQuoSetting } from "../SiteQuoSetting";
 import { SiteEmailPanel } from "../SiteEmailPanel";
 import { BrevoAccountPanel } from "../BrevoAccountPanel";
 import { SiteSettingsTabs, type SettingsSection } from "../SiteSettingsTabs";
+import { SitePriorityEditor } from "../../florists/SitePriorityEditor";
 import { connStatusMeta, syncSnapshot, dateTime } from "../siteMeta";
 import { loadSiteEmailSettingsViews } from "@/integrations/email/settings";
 import { getBrevoAccountViews } from "@/integrations/email/accountKey";
 import { isCredentialCryptoConfigured } from "@/lib/crypto/secretBox";
 import { diffScopes } from "@/integrations/shopify/customApp/scopes";
+import { TERMINAL_ORDER_STATUSES } from "@/lib/statuses";
 
 export const dynamic = "force-dynamic";
 
@@ -48,7 +50,7 @@ export default async function SiteSettingsPage({ params }: { params: Promise<{ i
       webhooks: { select: { topic: true, status: true } },
       floristPriorities: {
         orderBy: { position: "asc" },
-        select: { id: true, position: true, florist: { select: { user: { select: { name: true } } } } },
+        select: { id: true, position: true, floristId: true, florist: { select: { user: { select: { name: true } } } } },
       },
       syncs: {
         select: {
@@ -75,14 +77,36 @@ export default async function SiteSettingsPage({ params }: { params: Promise<{ i
 
   if (!site) notFound();
 
-  const [emailViews, brevoViews] = await Promise.all([
+  const [emailViews, brevoViews, allFlorists, unassignedCount] = await Promise.all([
     loadSiteEmailSettingsViews(prisma, [site.id]),
     getBrevoAccountViews(prisma, [site.id]),
+    // Тот же редактор, что на странице «Флористы»: приоритет меняется там, где о нём вспоминают.
+    prisma.florist.findMany({ where: { active: true }, select: { id: true, user: { select: { name: true } } }, orderBy: { user: { name: "asc" } } }),
+    // «Требуют назначения» — тот же критерий, что на странице «Флористы»: оплачен, не назначен,
+    // не терминальный. Иначе кнопка «назначить неназначенные» считала бы разные вещи в двух местах.
+    prisma.order.count({
+      where: { siteId: id, assignmentStatus: "UNASSIGNED", paymentStatus: "PAID", orderStatus: { notIn: TERMINAL_ORDER_STATUSES } },
+    }),
   ]);
   const emailView = emailViews[site.id];
   const brevoView = brevoViews[site.id];
   const cryptoConfigured = isCredentialCryptoConfigured();
   const snapshot = syncSnapshot(site.syncs);
+
+  // Состояния каналов считаем один раз: вкладка и подпись под ней должны говорить одно и то же.
+  const platformStatus = site.platform === "WOOCOMMERCE" ? site.wooConnection?.connStatus : site.shopifyConnStatus;
+  const connectionOk = platformStatus === "CONNECTED" || site.connectionStatus === "CONNECTED";
+  const smsOk = site.quoEnabled && !!site.quoPhoneNumberId;
+  const emailOk = brevoView.configured && emailView.enabled && !!emailView.senderEmail && emailView.domainVerified;
+  const emailReason = !brevoView.configured
+    ? "Не отправляется: не задан ключ Brevo"
+    : !emailView.enabled
+      ? "Не отправляется: Email выключен"
+      : !emailView.senderEmail
+        ? "Не отправляется: не задан отправитель"
+        : !emailView.domainVerified
+          ? "Не отправляется: домен отправителя не отмечен подтверждённым"
+          : "Email работает";
 
   const sections: SettingsSection[] = [
     {
@@ -110,25 +134,6 @@ export default async function SiteSettingsPage({ params }: { params: Promise<{ i
             </CardBody>
           </Card>
 
-          <Card>
-            <CardBody className="text-sm">
-              <div className="mb-1 text-xs text-slate-400">Приоритет флористов</div>
-              {site.floristPriorities.length === 0 ? (
-                <div className="text-xs text-slate-400">Не задан</div>
-              ) : (
-                <ol className="space-y-1">
-                  {site.floristPriorities.map((p) => (
-                    <li key={p.id} className="flex items-center gap-2">
-                      <span className="flex h-5 w-5 items-center justify-center rounded-full bg-slate-800 text-xs text-white">{p.position + 1}</span>
-                      <span className="text-slate-700">{p.florist.user.name}</span>
-                      {p.position === 0 && <span className="text-xs text-emerald-600">основной</span>}
-                    </li>
-                  ))}
-                </ol>
-              )}
-            </CardBody>
-          </Card>
-
           {/* Удаление стоит у ВСЕХ магазинов, а не только у подключённых: чаще всего удаляют
               как раз незавершённое подключение — домен ввели с ошибкой, магазин так и не
               активировался, а в списке он остался дубликатом. Диалог сам посчитает связи и
@@ -143,9 +148,26 @@ export default async function SiteSettingsPage({ params }: { params: Promise<{ i
       ),
     },
     {
+      key: "florists",
+      label: "Флористы",
+      state: { ok: site.floristPriorities.length > 0, title: site.floristPriorities.length > 0 ? "Приоритет задан" : "Приоритет не задан — заказы некому назначать" },
+      content: (
+        <Card>
+          <CardBody className="text-sm">
+            <SitePriorityEditor
+              siteId={site.id}
+              priorities={site.floristPriorities.map((p) => ({ floristId: p.floristId, name: p.florist.user.name, position: p.position }))}
+              allFlorists={allFlorists.map((f) => ({ id: f.id, name: f.user.name }))}
+              unassignedCount={unassignedCount}
+            />
+          </CardBody>
+        </Card>
+      ),
+    },
+    {
       key: "connection",
       label: "Подключение",
-      hint: site.connectionStatus === "CONNECTED" ? "подключён" : null,
+      state: { ok: connectionOk, title: connectionOk ? "Подключён" : "Не подключён" },
       content: (
         <>
           {site.platform === "WOOCOMMERCE" && site.wooConnection && (
@@ -258,7 +280,7 @@ export default async function SiteSettingsPage({ params }: { params: Promise<{ i
     {
       key: "sms",
       label: "SMS",
-      hint: site.quoEnabled && site.quoPhoneNumberId ? "вкл" : "выкл",
+      state: { ok: smsOk, title: smsOk ? "SMS работают" : "SMS не отправляются: нет номера или выключено" },
       content: (
         <Card>
           <CardBody className="text-sm">
@@ -279,7 +301,7 @@ export default async function SiteSettingsPage({ params }: { params: Promise<{ i
     {
       key: "email",
       label: "Email",
-      hint: !brevoView.configured ? "нет ключа" : emailView.enabled ? "вкл" : "выкл",
+      state: { ok: emailOk, title: emailReason },
       content: (
         <>
           <BrevoAccountPanel siteId={site.id} view={brevoView} />
@@ -294,7 +316,7 @@ export default async function SiteSettingsPage({ params }: { params: Promise<{ i
     {
       key: "delivery",
       label: "Доставка",
-      hint: site.burqDraftAutoCreateEnabled ? "автосоздание" : null,
+
       content: (
         <Card>
           <CardBody className="space-y-3 text-sm">
@@ -312,7 +334,7 @@ export default async function SiteSettingsPage({ params }: { params: Promise<{ i
     sections.push({
       key: "payments",
       label: "Оплаты",
-      hint: site.wooConnection.airwallexMonitoringEnabled ? "наблюдение" : null,
+
       content: (
         <AirwallexMonitoringPanel
           siteId={site.id}

@@ -15,8 +15,12 @@ import type { ReactNode } from "react";
 export type SettingsSection = {
   key: string;
   label: string;
-  /** Короткая пометка справа от названия: «вкл», «нет ключа» и т.п. Не обязательна. */
-  hint?: string | null;
+  /**
+   * Состояние раздела кружком: зелёный — работает, красный — не работает, серый — нечего
+   * включать. Текстовые пометки рядом с названиями превращали строку вкладок в мешанину слов,
+   * поэтому состояние показывается цветом, а словами — только в подсказке при наведении.
+   */
+  state?: { ok: boolean; title: string } | null;
   content: ReactNode;
 };
 
@@ -38,17 +42,14 @@ export function SiteSettingsTabs({ sections }: { sections: SettingsSection[] }) 
                 (isActive ? "bg-sky-600 text-white" : "text-slate-600 hover:bg-slate-100")
               }
             >
-              {s.label}
-              {s.hint && (
+              {s.state && (
                 <span
-                  className={
-                    "rounded px-1 py-px text-[10px] font-normal " +
-                    (isActive ? "bg-white/20 text-white" : "bg-slate-100 text-slate-500")
-                  }
-                >
-                  {s.hint}
-                </span>
+                  title={s.state.title}
+                  aria-label={s.state.title}
+                  className={"h-2 w-2 shrink-0 rounded-full " + (s.state.ok ? "bg-emerald-500" : "bg-red-500")}
+                />
               )}
+              {s.label}
             </button>
           );
         })}

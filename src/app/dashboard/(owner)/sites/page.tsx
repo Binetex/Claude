@@ -2,9 +2,9 @@ import Link from "next/link";
 import { prisma } from "@/lib/db";
 import { Card, CardBody } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
-import { SiteConnectPanel } from "./SiteConnectPanel";
+import { AddSitePanel } from "./AddSitePanel";
 import { SiteQuoWebhookSecurity } from "./SiteQuoWebhookSecurity";
-import { connStatusMeta } from "./siteMeta";
+import { connStatusMeta, dateTime } from "./siteMeta";
 import { loadSiteEmailSettingsViews } from "@/integrations/email/settings";
 import { listQuoSigningSecretsMasked } from "@/integrations/quo/signingSecrets";
 import { getQuoSigningKeys } from "@/integrations/quo/config";
@@ -30,9 +30,8 @@ export default async function SitesPage() {
       id: true, name: true, shortName: true, platform: true, colorTag: true,
       connectionStatus: true, shopifyShopDomain: true,
       quoEnabled: true, quoPhoneNumberId: true,
-      shopifyConnStatus: true,
-      wooConnection: { select: { connStatus: true, storeUrl: true } },
-      _count: { select: { orders: true, products: true } },
+      shopifyConnStatus: true, lastSyncAt: true,
+      wooConnection: { select: { connStatus: true, storeUrl: true, lastOrderSyncAt: true } },
     },
     orderBy: { name: "asc" },
   });
@@ -44,6 +43,8 @@ export default async function SitesPage() {
     <div className="space-y-4">
       <h1 className="text-lg font-semibold text-slate-900">Сайты</h1>
 
+      <AddSitePanel />
+
       <div className="space-y-2">
         {sites.map((s) => {
           const email = emailViews[s.id];
@@ -51,6 +52,7 @@ export default async function SitesPage() {
           // строки нет вовсе, и без запасного варианта незавершённое подключение выглядело бы
           // в списке ровно как рабочий магазин.
           const platformStatus = s.platform === "WOOCOMMERCE" ? s.wooConnection?.connStatus : s.shopifyConnStatus;
+          const lastSync = s.wooConnection?.lastOrderSyncAt ?? s.lastSyncAt;
           const meta = (platformStatus && connStatusMeta[platformStatus]) ?? connStatusMeta[s.connectionStatus] ?? {
             label: s.connectionStatus,
             className: "bg-slate-100 text-slate-600 border-slate-200",
@@ -73,8 +75,8 @@ export default async function SitesPage() {
                     </div>
                   </div>
 
-                  <div className="text-xs text-slate-500">
-                    <span className="text-slate-400">Заказов / товаров:</span> {s._count.orders} / {s._count.products}
+                  <div className="text-xs text-slate-400">
+                    {lastSync ? `синхр. ${dateTime(lastSync)}` : "синхронизации не было"}
                   </div>
 
                   {/* Каналы: видно с одного взгляда, где магазин молчит и почему туда стоит зайти. */}
@@ -96,7 +98,6 @@ export default async function SitesPage() {
                     {meta && <Badge className={meta.className}>{meta.label}</Badge>}
                   </div>
 
-                  <span className="text-xs text-slate-400">Настроить →</span>
                 </CardBody>
               </Card>
             </Link>
@@ -104,13 +105,7 @@ export default async function SitesPage() {
         })}
       </div>
 
-      {/* Ниже — то, что НЕ принадлежит конкретному магазину. Раньше оно стояло сверху, и первым
-          экраном страницы «Сайты» была инструкция по подключению, а не сами сайты. */}
-      <Card className="p-4">
-        <div className="mb-2 text-sm font-semibold text-slate-700">Подключить новый магазин</div>
-        <SiteConnectPanel />
-      </Card>
-
+      {/* Ниже — то, что НЕ принадлежит конкретному магазину. */}
       <SiteQuoWebhookSecurity
         secrets={quoSecrets.map((s) => ({ id: s.id, maskedSuffix: s.maskedSuffix, createdAt: s.createdAt.toISOString() }))}
         envCount={getQuoSigningKeys().length}
