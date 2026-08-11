@@ -16,6 +16,20 @@ export function todayStrInTz(tz: string | null | undefined, now: Date = new Date
   return localDateStr(now, tz || DEFAULT_STORE_TZ);
 }
 
+/**
+ * Приводит МОМЕНТ ВРЕМЕНИ к тому виду, в котором хранится `Order.deliveryDate`, — UTC-полночь
+ * ЛОКАЛЬНОГО дня магазина.
+ *
+ * Нужно там, где день доставки выводится из отметки времени (например, приём заказа без явной
+ * даты доставки берёт дату самого заказа). Класть туда сырой timestamp нельзя: полночь UTC
+ * наступает в Лос-Анджелесе в 17:00, поэтому у вечернего заказа UTC-календарная дата уже
+ * ЗАВТРАШНЯЯ, и весь код, который читает поле как «UTC-полночь локального дня», сдвигает такой
+ * заказ на сутки вперёд.
+ */
+export function utcMidnightOfLocalDay(at: Date, tz: string | null | undefined): Date {
+  return new Date(`${localDateStr(at, tz || DEFAULT_STORE_TZ)}T00:00:00.000Z`);
+}
+
 /** true, если строка — валидная IANA-таймзона. */
 export function isValidTimeZone(tz: string | null | undefined): boolean {
   if (!tz) return false;

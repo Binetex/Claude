@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { todayStrInTz, utcDayRangeForLocalToday } from "./tz";
+import { todayStrInTz, utcDayRangeForLocalToday, utcMidnightOfLocalDay } from "./tz";
 import { groupFor } from "@/modules/finance/issues";
 
 /**
@@ -57,6 +57,30 @@ describe("окно локального дня для выборок по delive
     expect(day("2026-08-07") >= gte && day("2026-08-07") < lt).toBe(true);
     expect(day("2026-08-06") >= gte).toBe(false);
     expect(day("2026-08-08") < lt).toBe(false);
+  });
+});
+
+describe("utcMidnightOfLocalDay — момент времени → день доставки", () => {
+  it("вечерний заказ остаётся СЕГОДНЯШНИМ днём, а не уезжает на завтра", () => {
+    // 7 августа 19:13 в Лос-Анджелесе — в UTC уже 8-е. Сырой timestamp давал заказу 8 августа.
+    expect(utcMidnightOfLocalDay(EVENING, LA).toISOString()).toBe("2026-08-07T00:00:00.000Z");
+  });
+
+  it("ровно 17:00 по Лос-Анджелесу (полночь UTC) — всё ещё 7 августа", () => {
+    expect(utcMidnightOfLocalDay(new Date("2026-08-08T00:00:00.000Z"), LA).toISOString()).toBe("2026-08-07T00:00:00.000Z");
+  });
+
+  it("утренний заказ даёт свой же день", () => {
+    expect(utcMidnightOfLocalDay(new Date("2026-08-07T16:00:00.000Z"), LA).toISOString()).toBe("2026-08-07T00:00:00.000Z");
+  });
+
+  it("результат — ровно полночь, без остатка времени", () => {
+    const d = utcMidnightOfLocalDay(new Date("2026-08-07T16:42:37.123Z"), LA);
+    expect(d.getUTCHours() + d.getUTCMinutes() + d.getUTCSeconds() + d.getUTCMilliseconds()).toBe(0);
+  });
+
+  it("без таймзоны магазина берётся зона по умолчанию, а не UTC", () => {
+    expect(utcMidnightOfLocalDay(EVENING, null).toISOString()).toBe("2026-08-07T00:00:00.000Z");
   });
 });
 

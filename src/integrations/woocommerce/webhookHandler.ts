@@ -16,7 +16,7 @@ import { normalizeWooProduct, collectWooVariations, type WooProduct, type WooVar
 type WooWebhookPayload = { siteId: string; topic: string; deliveryId: string; woo: unknown };
 
 async function handleOrderUpsert(siteId: string, woo: unknown): Promise<void> {
-  const site = await prisma.site.findUnique({ where: { id: siteId }, select: { id: true, shortName: true } });
+  const site = await prisma.site.findUnique({ where: { id: siteId }, select: { id: true, shortName: true, timezone: true } });
   if (!site) return;
   const config = await loadWooIngestConfig(siteId);
   // Живой webhook → разрешаем trigger-события авто-SMS (ORDER_CREATED).

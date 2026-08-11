@@ -58,6 +58,7 @@ export async function syncOrders(siteId: string): Promise<void> {
       shortName: site.shortName,
       shopifyShopDomain: shopDomain,
       shopifyAccessToken: accessToken,
+      timezone: site.timezone,
     };
 
     for await (const order of fetchOrdersSince(shopDomain, accessToken, sinceIso)) {

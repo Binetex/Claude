@@ -41,7 +41,7 @@ export function computeOrderSyncBound(
 }
 
 export async function syncWooOrders(siteId: string, opts: { fullHistory?: boolean } = {}): Promise<void> {
-  const site = await prisma.site.findUnique({ where: { id: siteId }, select: { id: true, shortName: true, platform: true } });
+  const site = await prisma.site.findUnique({ where: { id: siteId }, select: { id: true, shortName: true, platform: true, timezone: true } });
   if (!site) throw new Error(`Сайт ${siteId} не найден`);
   if (site.platform !== "WOOCOMMERCE") throw new Error(`syncWooOrders вызван для не-Woo сайта ${siteId}`);
 

@@ -11,6 +11,7 @@ import { cleanCardMessage } from "@/integrations/cardMessageTail";
 import { scheduleDeliveryForNewOrder } from "@/integrations/delivery/burq/scheduleService";
 import { extractShopifyOrderNumber, extractSenderAddress, extractSenderIdentity } from "./orderFields";
 import { fetchShopifyDeliveryInstructions } from "./deliveryInstructions";
+import { utcMidnightOfLocalDay } from "@/lib/tz";
 import {
   publishOrderCreatedTrigger,
   scheduleDeliveryTodayTrigger,
@@ -30,7 +31,8 @@ async function scheduleDeliverySafe(orderId: string): Promise<void> {
   }
 }
 
-type Site = { id: string; shortName: string; shopifyShopDomain: string | null; shopifyAccessToken: string | null };
+// timezone нужен, чтобы вывести день доставки из даты заказа, когда её нет в note_attributes.
+type Site = { id: string; shortName: string; shopifyShopDomain: string | null; shopifyAccessToken: string | null; timezone?: string | null };
 
 type ShopifyMoney = string | null | undefined;
 type ShopifyAddress = {
@@ -329,7 +331,13 @@ function buildOrderData(
   const customerNote = ""; // у Shopify-заказов открытка всегда в payload.note — отдельного поля под заметку клиента нет
   const deliveryDateRaw = findNoteAttribute(payload, /delivery.*date/i);
   const deliveryWindow = findNoteAttribute(payload, /delivery.*(time|window)/i) ?? "";
-  const deliveryDate = deliveryDateRaw ? new Date(deliveryDateRaw) : new Date(payload.created_at ?? Date.now());
+  // Без явной даты доставки берём дату САМОГО ЗАКАЗА, но приводим её к виду, в котором поле
+  // хранится, — UTC-полночь локального дня магазина. Сырой timestamp здесь давал вечерним
+  // заказам (после 17:00 в Лос-Анджелесе — это уже следующие сутки UTC) день доставки на сутки
+  // вперёд, со всеми последствиями: «доставка сегодня», списки дня, финансовый день.
+  const deliveryDate = deliveryDateRaw
+    ? new Date(deliveryDateRaw)
+    : utcMidnightOfLocalDay(new Date(payload.created_at ?? Date.now()), site.timezone);
   if (!deliveryDateRaw) {
     console.warn(`[shopify] заказ ${externalId}: не найдена дата доставки в note_attributes, использую дату заказа`);
   }

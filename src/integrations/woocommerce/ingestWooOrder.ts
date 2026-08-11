@@ -19,6 +19,7 @@ import { classifyWooPayment, type WooPaymentConfig, type WooOrderForPayment } fr
 import { deriveWooOrderState, reconcileOrderState, type OrderState } from "./orderState";
 import { resolveMappedOrderFields, type OrderMetaMapping } from "./orderMeta";
 import { cleanCardMessage } from "@/integrations/cardMessageTail";
+import { utcMidnightOfLocalDay } from "@/lib/tz";
 import { scheduleDeliveryForNewOrder } from "@/integrations/delivery/burq/scheduleService";
 import { assignInitial } from "@/modules/assignments/service";
 import {
@@ -147,7 +148,8 @@ async function loadCatalogMatch(siteId: string) {
  * `now`-независим по решениям (кроме предупреждений о зависшем pending внутри классификатора).
  */
 export async function ingestWooOrder(
-  site: { id: string; shortName: string },
+  // timezone нужен, чтобы вывести день доставки из даты заказа (см. deliveryDate ниже).
+  site: { id: string; shortName: string; timezone?: string | null },
   wooOrder: FullWooOrder,
   config: WooIngestConfig,
   // emitLifecycle: публиковать ли trigger-события авто-SMS (ORDER_CREATED). ТОЛЬКО для «живого»
@@ -242,7 +244,15 @@ export async function ingestWooOrder(
     return { v, product };
   };
 
-  const deliveryDate = mapped.deliveryDate ? new Date(mapped.deliveryDate) : normalized.deliveryDate ? new Date(normalized.deliveryDate) : new Date(normalized.createdAt);
+  // Последний вариант — дата САМОГО ЗАКАЗА, приведённая к UTC-полуночи локального дня магазина:
+  // поле хранится именно так. Сырой timestamp сдвигал вечерние заказы на сутки вперёд (полночь
+  // UTC наступает в Лос-Анджелесе в 17:00), и «доставка сегодня», списки дня и финансовый день
+  // считали такой заказ завтрашним.
+  const deliveryDate = mapped.deliveryDate
+    ? new Date(mapped.deliveryDate)
+    : normalized.deliveryDate
+      ? new Date(normalized.deliveryDate)
+      : utcMidnightOfLocalDay(new Date(normalized.createdAt), site.timezone);
   // Тот же мусор магазина, что и у Shopify: служебный хвост приложения доставки и
   // HTML-сущности. См. cardMessageTail.ts. Сырой текст остаётся в originalCardMessage.
   const rawCardMessage = mapped.cardMessage ?? normalized.cardMessage ?? "";
