@@ -1,0 +1,16 @@
+Hi {{ params.customer_name }},
+
+Thank you for your recent order ({{ params.order_number }}). We hope your
+flowers arrived beautifully and right on time.
+
+If you have a moment, we'd love to hear how it went. A few words from you
+go a long way for a small flower shop like ours.
+
+Leave a review: {{ params.review_url }}
+
+With love,
+TheFlow
+
+---
+Questions? Reply to this email or write to {{ params.support_email }}.
+This email was sent regarding order {{ params.order_number }}.

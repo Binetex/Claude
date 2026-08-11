@@ -1,0 +1,160 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+  <meta name="x-apple-disable-message-reformatting" />
+  <meta name="format-detection" content="telephone=no,address=no,email=no,date=no" />
+  <meta name="color-scheme" content="light" />
+  <meta name="supported-color-schemes" content="light" />
+  <title>How did we do?</title>
+  <!--[if mso]>
+  <xml>
+    <o:OfficeDocumentSettings>
+      <o:PixelsPerInch>96</o:PixelsPerInch>
+    </o:OfficeDocumentSettings>
+  </xml>
+  <![endif]-->
+  <style type="text/css">
+    /* Клиентские сбросы */
+    body { margin: 0 !important; padding: 0 !important; width: 100% !important; -webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; }
+    table { border-collapse: collapse !important; mso-table-lspace: 0pt; mso-table-rspace: 0pt; }
+    img { border: 0; outline: none; text-decoration: none; -ms-interpolation-mode: bicubic; display: block; }
+    a { text-decoration: none; }
+
+    /* Gmail/Apple Mail иногда сами делают ссылки из адресов и телефонов — приводим к своему стилю */
+    a[x-apple-data-detectors],
+    .unstyled-link a {
+      color: inherit !important;
+      text-decoration: none !important;
+      font-size: inherit !important;
+      font-family: inherit !important;
+      font-weight: inherit !important;
+      line-height: inherit !important;
+    }
+
+    /* Мобильная адаптация — минимальный безопасный набор */
+    @media only screen and (max-width: 620px) {
+      .card { width: 100% !important; max-width: 100% !important; }
+      .gutter { padding-left: 24px !important; padding-right: 24px !important; }
+      .hero-img { width: 100% !important; height: auto !important; }
+      .logo-img { width: 132px !important; height: auto !important; }
+      .h1 { font-size: 26px !important; line-height: 34px !important; }
+      .body-text { font-size: 16px !important; line-height: 26px !important; }
+      .btn-link { display: block !important; padding-top: 16px !important; padding-bottom: 16px !important; }
+      .spacer-lg { height: 28px !important; }
+    }
+  </style>
+</head>
+<body style="margin:0; padding:0; background-color:#f6f5f3;">
+
+<!-- Preheader: виден в списке писем, но не в самом письме. Хвост из &zwnj;&nbsp; не даёт Gmail подтянуть в превью начало основного текста. -->
+<div style="display:none; font-size:1px; color:#f6f5f3; line-height:1px; max-height:0px; max-width:0px; opacity:0; overflow:hidden;">
+  We&rsquo;d love to hear about your TheFlow experience.
+  &zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;
+</div>
+
+<!-- Внешний фон -->
+<table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="background-color:#f6f5f3;">
+  <tr>
+    <td align="center" style="padding:32px 12px;">
+
+      <!-- Центральная карточка, 600px -->
+      <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="600" class="card" style="width:600px; max-width:600px; background-color:#ffffff; border-radius:4px;">
+
+        <!-- Логотип -->
+        <tr>
+          <td align="center" class="gutter" style="padding:40px 48px 28px 48px;">
+            <img src="https://floremart.com/email-assets/theflow/logo.png" width="160" alt="TheFlow" class="logo-img" style="width:160px; max-width:160px; height:auto; display:block; border:0;" />
+          </td>
+        </tr>
+
+        <!-- Hero -->
+        <tr>
+          <td align="center" style="padding:0;">
+            <img src="https://floremart.com/email-assets/theflow/review-hero.jpg" width="600" height="70" alt="" class="hero-img" style="width:100%; max-width:600px; height:auto; display:block; border:0;" />
+          </td>
+        </tr>
+
+        <!-- Заголовок + текст -->
+        <tr>
+          <td class="gutter" style="padding:40px 48px 0 48px;">
+            <h1 class="h1" style="margin:0; font-family:Georgia,'Times New Roman',Times,serif; font-size:30px; line-height:38px; font-weight:normal; color:#26231f; mso-line-height-rule:exactly;">
+              How did we do?
+            </h1>
+          </td>
+        </tr>
+
+        <tr>
+          <td class="gutter body-text" style="padding:20px 48px 0 48px; font-family:-apple-system,'Segoe UI',Helvetica,Arial,sans-serif; font-size:17px; line-height:28px; color:#46413b; mso-line-height-rule:exactly;">
+            <p style="margin:0 0 18px 0;">Hi {{ params.customer_name }},</p>
+            <p style="margin:0 0 18px 0;">Thank you for your recent order ({{ params.order_number }}). We hope your flowers arrived beautifully and right on time.</p>
+            <p style="margin:0;">If you have a moment, we&rsquo;d love to hear how it went. A few words from you go a long way for a small flower shop like ours.</p>
+          </td>
+        </tr>
+
+        <!-- CTA -->
+        <tr>
+          <td align="center" class="gutter" style="padding:32px 48px 0 48px;">
+            <!--[if mso]>
+            <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="{{ params.review_url }}" style="height:52px; v-text-anchor:middle; width:260px;" arcsize="8%" strokecolor="#2b2723" fillcolor="#2b2723">
+              <w:anchorlock/>
+              <center style="color:#ffffff; font-family:Arial,sans-serif; font-size:17px; font-weight:bold;">Leave a Review</center>
+            </v:roundrect>
+            <![endif]-->
+            <!--[if !mso]><!-- -->
+            <table role="presentation" border="0" cellpadding="0" cellspacing="0" style="margin:0 auto;">
+              <tr>
+                <td align="center" bgcolor="#2b2723" style="background-color:#2b2723; border-radius:4px;">
+                  <a href="{{ params.review_url }}" target="_blank" class="btn-link" style="display:inline-block; padding:16px 40px; font-family:-apple-system,'Segoe UI',Helvetica,Arial,sans-serif; font-size:17px; line-height:20px; font-weight:bold; color:#ffffff; text-decoration:none; border-radius:4px; mso-line-height-rule:exactly;">
+                    Leave a Review
+                  </a>
+                </td>
+              </tr>
+            </table>
+            <!--<![endif]-->
+          </td>
+        </tr>
+
+        <!-- Подпись -->
+        <tr>
+          <td class="gutter" style="padding:36px 48px 0 48px; font-family:Georgia,'Times New Roman',Times,serif; font-size:17px; line-height:27px; color:#46413b; mso-line-height-rule:exactly;">
+            With love,<br />
+            TheFlow
+          </td>
+        </tr>
+
+        <tr>
+          <td class="gutter spacer-lg" style="padding:0 48px; height:40px; font-size:0; line-height:0;">&nbsp;</td>
+        </tr>
+
+        <!-- Разделитель -->
+        <tr>
+          <td class="gutter" style="padding:0 48px;">
+            <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%">
+              <tr><td style="border-top:1px solid #eae7e3; font-size:0; line-height:0;">&nbsp;</td></tr>
+            </table>
+          </td>
+        </tr>
+
+        <!-- Footer -->
+        <tr>
+          <td class="gutter" align="center" style="padding:24px 48px 40px 48px; font-family:-apple-system,'Segoe UI',Helvetica,Arial,sans-serif; font-size:13px; line-height:21px; color:#877f78; mso-line-height-rule:exactly;">
+            <p style="margin:0 0 8px 0;">
+              Questions? Reply to this email or write to
+              <a href="mailto:{{ params.support_email }}" style="color:#2b2723; text-decoration:underline;">{{ params.support_email }}</a>.
+            </p>
+            <p style="margin:0; color:#9c948d;">This email was sent regarding order {{ params.order_number }}.</p>
+          </td>
+        </tr>
+
+      </table>
+      <!-- /карточка -->
+
+    </td>
+  </tr>
+</table>
+
+</body>
+</html>
