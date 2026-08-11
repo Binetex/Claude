@@ -43,16 +43,23 @@ export function isBrevoConfigured(): boolean {
  * `apiKeyOverride` — ключ, разрешённый вызывающим кодом (обычно из БД через accountKey.ts,
  * приоритетнее env). Не передан → берём env BREVO_API_KEY, как раньше (обратная совместимость).
  */
-export function createBrevoProvider(apiKeyOverride?: string | null): EmailProvider {
+/**
+ * Провайдер работает с ЯВНО переданным ключом. Ключ обязателен именно как аргумент: раньше при
+ * его отсутствии подставлялся общий `BREVO_API_KEY` из env, а теперь ключи принадлежат магазинам,
+ * и «ключ по умолчанию» означал бы письмо из чужого аккаунта Brevo. `null` — законное значение
+ * «ключа нет», оно даёт понятный отказ, а не тихую подмену.
+ */
+export function createBrevoProvider(apiKey: string | null): EmailProvider {
+  const key = apiKey?.trim() || null;
   return {
     name: "brevo",
     async sendTemplate(params: EmailSendParams): Promise<EmailSendResult> {
-      const apiKey = apiKeyOverride !== undefined ? apiKeyOverride?.trim() : process.env.BREVO_API_KEY?.trim();
+      const apiKey = key;
       if (!apiKey) {
         return {
           ok: false,
           code: "email_not_configured",
-          safeError: "Не задан BREVO_API_KEY — Email-отправка недоступна.",
+          safeError: "У магазина не задан Brevo API key — отправка недоступна.",
           retryable: false,
           configuration: true,
         };

@@ -77,7 +77,7 @@ export async function ownerSaveSiteEmailTemplate(siteId: string, triggerType: st
  */
 export async function ownerSendSiteTestEmail(siteId: string, to: string): Promise<Result> {
   await requireRole("OWNER");
-  const apiKey = await resolveBrevoApiKey(prisma);
+  const apiKey = await resolveBrevoApiKey(prisma, siteId);
   const res = await sendSiteTestEmail(prisma, createBrevoProvider(apiKey), { siteId, to });
   revalidatePath("/dashboard/sites");
   return res.ok
@@ -85,35 +85,37 @@ export async function ownerSendSiteTestEmail(siteId: string, to: string): Promis
     : { error: res.safeError };
 }
 
-/** Аудит действий с общим ключом БЕЗ значения (только маска) — по образцу QUO signing secrets. */
-function auditBrevoKeyAction(event: "saved" | "cleared", userId: string, maskedSuffix: string | null) {
-  console.info(JSON.stringify({ scope: "integration-secret", provider: "BREVO", kind: "api_key", event, userId, maskedSuffix }));
+/** Аудит действий с ключом магазина БЕЗ значения (только маска) — по образцу QUO signing secrets. */
+function auditBrevoKeyAction(event: "saved" | "cleared", userId: string, siteId: string, maskedSuffix: string | null) {
+  console.info(JSON.stringify({ scope: "integration-secret", provider: "BREVO", kind: "api_key", event, userId, siteId, maskedSuffix }));
 }
 
-/** Сохраняет/заменяет общий Brevo API key (весь workspace, не per-Site). Полное значение не логируется и не возвращается. */
+/** Сохраняет/заменяет Brevo API key МАГАЗИНА. Полное значение не логируется и не возвращается. */
 export async function ownerSaveBrevoApiKey(_prev: unknown, fd: FormData): Promise<Result> {
   const user = await requireRole("OWNER");
+  const siteId = String(fd.get("siteId") ?? "");
+  if (!siteId) return { error: "Не указан магазин." };
   const raw = String(fd.get("apiKey") ?? "");
-  const res = await saveBrevoApiKey(prisma, raw);
+  const res = await saveBrevoApiKey(prisma, siteId, raw);
   if (!res.ok) return { error: res.error };
-  auditBrevoKeyAction("saved", user.id, res.maskedSuffix);
+  auditBrevoKeyAction("saved", user.id, siteId, res.maskedSuffix);
   revalidatePath("/dashboard/sites");
   return { ok: true, message: "API key сохранён. Проверьте подключение перед включением рассылок." };
 }
 
-/** Удаляет ключ из БД (после этого действует только env, если он задан). */
-export async function ownerClearBrevoApiKey(): Promise<Result> {
+/** Удаляет ключ магазина. Запасного ключа нет — после этого Email магазина не отправляется. */
+export async function ownerClearBrevoApiKey(siteId: string): Promise<Result> {
   const user = await requireRole("OWNER");
-  await clearBrevoApiKey(prisma);
-  auditBrevoKeyAction("cleared", user.id, null);
+  await clearBrevoApiKey(prisma, siteId);
+  auditBrevoKeyAction("cleared", user.id, siteId, null);
   revalidatePath("/dashboard/sites");
-  return { ok: true, message: "Ключ удалён из БД." };
+  return { ok: true, message: "Ключ удалён. Email этого магазина отправляться не будет." };
 }
 
 /** GET /v3/account — подтверждает, что ключ реально работает, без отправки писем. */
-export async function ownerVerifyBrevoConnection(): Promise<Result> {
+export async function ownerVerifyBrevoConnection(siteId: string): Promise<Result> {
   await requireRole("OWNER");
-  const res = await verifyAndRecordBrevoConnection(prisma);
+  const res = await verifyAndRecordBrevoConnection(prisma, siteId);
   revalidatePath("/dashboard/sites");
   return res.ok
     ? { ok: true, message: `Подключение подтверждено${res.accountEmail ? ` (аккаунт: ${res.accountEmail})` : ""}` }

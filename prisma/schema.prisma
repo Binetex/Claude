@@ -414,9 +414,11 @@ model Site {
   automationFlowSites AutomationFlowSite[]
   automationFlowRuns  AutomationFlowRun[]
 
-  // ── Email-рассылки (Brevo) — настройки СВОИ у каждого магазина ──
-  emailSettings  SiteEmailSettings?
-  emailTemplates SiteEmailTemplate[]
+  // ── Email-рассылки (Brevo) — настройки, КЛЮЧ и статус проверки СВОИ у каждого магазина ──
+  emailSettings      SiteEmailSettings?
+  emailTemplates     SiteEmailTemplate[]
+  integrationSecrets IntegrationSecret[]
+  brevoStatus        BrevoAccountStatus?
 
   // ── Финансы: магазины, на которые распространяется профиль флориста ──
   financeProfileSites FloristFinanceProfileSite[]
@@ -1875,15 +1877,25 @@ model OrderAudit {
  */
 model IntegrationSecret {
   id             String   @id @default(cuid())
-  provider       String // "QUO"
-  kind           String // "webhook_signing_secret"
+  provider       String // "QUO" | "BREVO"
+  kind           String // "webhook_signing_secret" | "api_key"
   encryptedValue String // AES-256-GCM payload (никогда не отдаётся в браузер)
   maskedSuffix   String // "********abcd" — только для UI
   active         Boolean  @default(true)
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
+  /**
+   * Магазин, которому принадлежит секрет. NULL = секрет уровня аккаунта (подпись вебхуков QUO
+   * общая на всю систему). Ключ Brevo — ВСЕГДА со своим siteId: у магазинов разные аккаунты
+   * Brevo, и общего ключа больше нет. Одно и то же значение у разных магазинов допустимо —
+   * уникальности по значению здесь нет и быть не должно.
+   */
+  siteId String?
+  site   Site?   @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
   @@index([provider, kind, active])
+  @@index([provider, kind, siteId, active])
 }
 
 /**
@@ -1899,6 +1911,13 @@ model BrevoAccountStatus {
   errorSafe    String?
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
+
+  /**
+   * Проверка подключения относится к КЛЮЧУ, а ключ теперь у каждого магазина свой — значит и
+   * результат проверки свой. Одна строка на магазин.
+   */
+  siteId String @unique
+  site   Site   @relation(fields: [siteId], references: [id], onDelete: Cascade)
 }
 
 // ─────────────────────────────  SMS-МАРКЕТИНГ  ─────────────────────────────

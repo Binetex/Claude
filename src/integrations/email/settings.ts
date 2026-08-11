@@ -13,7 +13,7 @@ import "server-only";
 import type { PrismaClient } from "@/generated/prisma/client";
 import { isSupportedTrigger } from "@/modules/automations/triggers";
 import { normalizeEmail } from "./brevo";
-import { isBrevoConfiguredAnywhere } from "./accountKey";
+import { isBrevoConfiguredForSite } from "./accountKey";
 
 export type SiteEmailConfig = {
   siteId: string;
@@ -56,14 +56,14 @@ export type ResolveConfigResult =
   | { ok: false; skip: EmailConfigSkip; safeError: string };
 
 /**
- * Готов ли магазин отправлять письма. Порядок проверок — от общего к частному, чтобы причина
- * в истории была самой информативной.
+ * Готов ли магазин отправлять письма. Порядок проверок — от самой грубой причины к самой тонкой,
+ * чтобы в истории оставалась самая информативная.
+ *
+ * Ключ Brevo проверяется ПОСЛЕ выключателя и отправителя: он принадлежит магазину, и у нового
+ * магазина не задано вообще ничего. «Email выключен» объясняет положение дел лучше, чем «нет
+ * ключа», — иначе каждый ненастроенный магазин рапортовал бы о проблеме с интеграцией.
  */
 export async function resolveSiteEmailConfig(prisma: PrismaClient, siteId: string): Promise<ResolveConfigResult> {
-  if (!(await isBrevoConfiguredAnywhere(prisma))) {
-    return { ok: false, skip: "email_not_configured", safeError: "Brevo не настроен: нет API key (ни в БД, ни в BREVO_API_KEY)." };
-  }
-
   const site = await prisma.site.findUnique({
     where: { id: siteId },
     select: { id: true, name: true, emailSettings: true },
@@ -81,6 +81,9 @@ export async function resolveSiteEmailConfig(prisma: PrismaClient, siteId: strin
   }
   if (!s.domainVerifiedAt) {
     return { ok: false, skip: "site_domain_not_verified", safeError: `Домен отправителя «${site.name}» не отмечен как подтверждённый.` };
+  }
+  if (!(await isBrevoConfiguredForSite(prisma, siteId))) {
+    return { ok: false, skip: "email_not_configured", safeError: `У «${site.name}» не задан Brevo API key.` };
   }
 
   return {
@@ -144,15 +147,20 @@ export async function loadSiteEmailSettingsViews(
   prisma: PrismaClient,
   siteIds: string[]
 ): Promise<Record<string, SiteEmailSettingsView>> {
-  const [rows, templates, apiKeyConfigured] = await Promise.all([
+  // Ключ у каждого магазина свой — спрашиваем наличие одним запросом на всех, а не по разу.
+  const [rows, templates, keyRows] = await Promise.all([
     prisma.siteEmailSettings.findMany({ where: { siteId: { in: siteIds } } }),
     prisma.siteEmailTemplate.findMany({
       where: { siteId: { in: siteIds } },
       select: { siteId: true, triggerType: true, brevoTemplateId: true },
     }),
-    isBrevoConfiguredAnywhere(prisma),
+    prisma.integrationSecret.findMany({
+      where: { provider: "BREVO", kind: "api_key", active: true, siteId: { in: siteIds } },
+      select: { siteId: true },
+    }),
   ]);
 
+  const sitesWithKey = new Set(keyRows.map((r) => r.siteId));
   const bySite = new Map(rows.map((r) => [r.siteId, r]));
 
   const out: Record<string, SiteEmailSettingsView> = {};
@@ -171,7 +179,7 @@ export async function loadSiteEmailSettingsViews(
       templates: Object.fromEntries(
         templates.filter((t) => t.siteId === siteId).map((t) => [t.triggerType, t.brevoTemplateId])
       ),
-      brevoApiKeyConfigured: apiKeyConfigured,
+      brevoApiKeyConfigured: sitesWithKey.has(siteId),
     };
   }
   return out;

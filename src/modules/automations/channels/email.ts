@@ -45,7 +45,7 @@ export function createEmailChannelSender(prisma: PrismaClient): ChannelSender {
       });
       if (!tpl.ok) return { ok: false, code: tpl.skip, retryable: false, skip: true };
 
-      const apiKey = await resolveBrevoApiKey(prisma);
+      const apiKey = await resolveBrevoApiKey(prisma, ctx.siteId);
       const provider = createBrevoProvider(apiKey);
       const res = await provider.sendTemplate({
         to: ctx.emailNormalized,

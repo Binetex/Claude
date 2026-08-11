@@ -96,7 +96,8 @@ export default async function SitesPage() {
   };
 
   const emailViews = await loadSiteEmailSettingsViews(prisma, sites.map((s) => s.id));
-  const brevoAccountView = await getBrevoAccountView(prisma);
+  // Ключ Brevo — у каждого магазина свой, поэтому и панель ключа живёт внутри магазина.
+  const brevoViews = new Map(await Promise.all(sites.map(async (s) => [s.id, await getBrevoAccountView(prisma, s.id)] as const)));
   const quoSecrets = await listQuoSigningSecretsMasked(prisma).catch(() => []);
   const quoEnvCount = getQuoSigningKeys().length;
   const quoCrypto = isCredentialCryptoConfigured();
@@ -109,8 +110,6 @@ export default async function SitesPage() {
         <div className="mb-2 text-sm font-semibold text-slate-700">Подключить новый магазин</div>
         <SiteConnectPanel />
       </Card>
-
-      <BrevoAccountPanel view={brevoAccountView} />
 
       <SiteQuoWebhookSecurity
         secrets={quoSecrets.map((s) => ({ id: s.id, maskedSuffix: s.maskedSuffix, createdAt: s.createdAt.toISOString() }))}
@@ -247,6 +246,8 @@ export default async function SitesPage() {
                   quoConnectionError: s.quoConnectionError,
                 }}
               />
+
+              <BrevoAccountPanel siteId={s.id} view={brevoViews.get(s.id)!} />
 
               <SiteEmailPanel siteId={s.id} initial={emailViews[s.id]} />
 

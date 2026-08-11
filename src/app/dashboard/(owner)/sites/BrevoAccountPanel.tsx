@@ -8,12 +8,15 @@ import { ownerSaveBrevoApiKey, ownerClearBrevoApiKey, ownerVerifyBrevoConnection
 import type { BrevoAccountView } from "@/integrations/email/accountKey";
 
 /**
- * Глобальный блок «Brevo API key» (workspace-level, один аккаунт на все магазины, не per-Site).
+ * Блок «Brevo API key» ЭТОГО магазина. Общего ключа на аккаунт нет: у магазинов разные аккаунты
+ * Brevo, и запасного ключа тоже нет — без своего ключа магазин просто не отправляет письма.
+ * Одно и то же значение у нескольких магазинов допустимо.
+ *
  * По образцу SiteQuoWebhookSecurity/AirwallexMonitoringPanel: значение хранится зашифрованным,
- * наружу — только маска; «Проверить подключение» подтверждает реальную работоспособность ключа
- * без отправки писем.
+ * наружу — только маска; «Проверить подключение» подтверждает работоспособность ключа без
+ * отправки писем.
  */
-export function BrevoAccountPanel({ view }: { view: BrevoAccountView }) {
+export function BrevoAccountPanel({ siteId, view }: { siteId: string; view: BrevoAccountView }) {
   const router = useRouter();
   const [value, setValue] = useState("");
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
@@ -30,6 +33,7 @@ export function BrevoAccountPanel({ view }: { view: BrevoAccountView }) {
 
   function save() {
     const fd = new FormData();
+    fd.set("siteId", siteId);
     fd.set("apiKey", value);
     run(async () => {
       const r = await ownerSaveBrevoApiKey(null, fd);
@@ -39,8 +43,8 @@ export function BrevoAccountPanel({ view }: { view: BrevoAccountView }) {
   }
 
   function clear() {
-    if (!confirm("Удалить сохранённый ключ из БД? Отправка станет недоступна, если нет env BREVO_API_KEY.")) return;
-    run(ownerClearBrevoApiKey);
+    if (!confirm("Удалить ключ этого магазина? Запасного ключа нет — Email магазина отправляться не будет.")) return;
+    run(() => ownerClearBrevoApiKey(siteId));
   }
 
   return (
@@ -49,7 +53,7 @@ export function BrevoAccountPanel({ view }: { view: BrevoAccountView }) {
         <CardTitle>Brevo API key</CardTitle>
         <div className="flex items-center gap-1.5">
           <span className={`rounded border px-1.5 py-px text-[10px] font-medium ${view.configured ? "bg-emerald-100 text-emerald-800 border-emerald-200" : "bg-amber-100 text-amber-800 border-amber-200"}`}>
-            {view.configured ? `настроен · ${view.source === "db" ? "БД" : "env"}` : "не настроен"}
+            {view.configured ? "ключ задан" : "ключа нет"}
           </span>
           {view.connStatus === "CONNECTED" && (
             <span className="rounded border border-sky-200 bg-sky-50 px-1.5 py-px text-[10px] text-sky-700">Проверено</span>
@@ -58,9 +62,9 @@ export function BrevoAccountPanel({ view }: { view: BrevoAccountView }) {
       </CardHeader>
       <CardBody className="space-y-3 text-sm">
         <p className="text-xs text-slate-500">
-          Общий Brevo-аккаунт на все магазины (workspace-level, не per-Site). Ключ хранится зашифрованным в БД
+          Ключ аккаунта Brevo этого магазина, хранится зашифрованным
           {view.maskedSuffix ? <>: <span className="font-mono text-slate-700">{view.maskedSuffix}</span></> : "."} Полное значение
-          нигде не отображается и не логируется.
+          нигде не отображается и не логируется. У разных магазинов ключи независимы и могут совпадать.
         </p>
 
         {!view.cryptoConfigured && (
@@ -71,14 +75,14 @@ export function BrevoAccountPanel({ view }: { view: BrevoAccountView }) {
 
         <div className="flex flex-wrap items-end gap-2">
           <div className="min-w-[280px] flex-1 space-y-1">
-            <label className="text-xs text-slate-400">{view.source === "db" ? "Новый API key (заменит текущий)" : "Brevo API key"}</label>
+            <label className="text-xs text-slate-400">{view.configured ? "Новый API key (заменит текущий)" : "Brevo API key"}</label>
             <Input value={value} onChange={(e) => { setValue(e.target.value); setMsg(null); }} type="password" autoComplete="new-password" placeholder="xkeysib-…" />
           </div>
           <Button type="button" size="sm" disabled={pending || !value.trim() || !view.cryptoConfigured} onClick={save}>Сохранить</Button>
-          <Button type="button" size="sm" variant="outline" disabled={pending || !view.configured} onClick={() => run(ownerVerifyBrevoConnection)}>
+          <Button type="button" size="sm" variant="outline" disabled={pending || !view.configured} onClick={() => run(() => ownerVerifyBrevoConnection(siteId))}>
             Проверить подключение
           </Button>
-          {view.source === "db" && (
+          {view.configured && (
             <Button type="button" size="sm" variant="ghost" className="text-red-600" disabled={pending} onClick={clear}>Удалить ключ</Button>
           )}
         </div>

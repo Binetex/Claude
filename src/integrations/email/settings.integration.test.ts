@@ -34,12 +34,27 @@ beforeAll(async () => {
   julieId = await makeSite("JF", `Julies Flowers ${RUN}`);
 });
 
-beforeEach(() => {
+beforeEach(async () => {
   fetchMock.mockReset();
-  process.env.BREVO_API_KEY = "test-key";
+  delete process.env.BREVO_API_KEY; // env больше не участвует: ключ только свой у магазина
+  await giveKey(flowId);
+  await giveKey(julieId);
 });
 
+/** Ключ Brevo магазина. Значение здесь не расшифровывается — важен сам факт наличия строки. */
+async function giveKey(siteId: string) {
+  await prisma.integrationSecret.deleteMany({ where: { provider: "BREVO", kind: "api_key", siteId } });
+  await prisma.integrationSecret.create({
+    data: { provider: "BREVO", kind: "api_key", encryptedValue: "enc", maskedSuffix: "****key", active: true, siteId },
+  });
+}
+
+async function takeKeyAway(siteId: string) {
+  await prisma.integrationSecret.deleteMany({ where: { provider: "BREVO", kind: "api_key", siteId } });
+}
+
 afterAll(async () => {
+  await prisma.integrationSecret.deleteMany({ where: { siteId: { in: siteIds } } });
   await prisma.siteEmailTemplate.deleteMany({ where: { siteId: { in: siteIds } } });
   await prisma.siteEmailSettings.deleteMany({ where: { siteId: { in: siteIds } } });
   await prisma.site.deleteMany({ where: { id: { in: siteIds } } });
@@ -64,8 +79,8 @@ describe("значения по умолчанию", () => {
 });
 
 describe("гейты конфигурации", () => {
-  it("без BREVO_API_KEY отправка невозможна для любого магазина", async () => {
-    delete process.env.BREVO_API_KEY;
+  it("без своего ключа Brevo отправка магазину невозможна", async () => {
+    await takeKeyAway(flowId);
     await configure(flowId, "orders@theflow.la", "The Flow");
     const res = await resolveSiteEmailConfig(prisma, flowId);
     expect(res.ok).toBe(false);
@@ -130,7 +145,7 @@ describe("изоляция магазинов", () => {
     await saveSiteEmailTemplate(prisma, julieId, "ORDER_CREATED", 202);
     fetchMock.mockResolvedValue(json(201, { messageId: "m-julie" }));
 
-    const res = await sendSiteTestEmail(prisma, createBrevoProvider(), { siteId: julieId, to: "test@example.com" });
+    const res = await sendSiteTestEmail(prisma, createBrevoProvider("site-key"), { siteId: julieId, to: "test@example.com" });
     expect(res.ok).toBe(true);
 
     const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
@@ -146,7 +161,7 @@ describe("тестовое письмо", () => {
     await saveSiteEmailTemplate(prisma, flowId, "ORDER_CREATED", 101);
     fetchMock.mockResolvedValue(json(201, { messageId: "m-1" }));
 
-    const res = await sendSiteTestEmail(prisma, createBrevoProvider(), { siteId: flowId, to: "test@example.com" });
+    const res = await sendSiteTestEmail(prisma, createBrevoProvider("site-key"), { siteId: flowId, to: "test@example.com" });
     expect(res).toEqual({ ok: true, providerMessageId: "m-1" });
 
     const s = await prisma.siteEmailSettings.findUniqueOrThrow({ where: { siteId: flowId } });
@@ -160,7 +175,7 @@ describe("тестовое письмо", () => {
     await saveSiteEmailTemplate(prisma, flowId, "ORDER_CREATED", 101);
     fetchMock.mockResolvedValue(json(401, { message: "unauthorized key abc123" }));
 
-    const res = await sendSiteTestEmail(prisma, createBrevoProvider(), { siteId: flowId, to: "test@example.com" });
+    const res = await sendSiteTestEmail(prisma, createBrevoProvider("site-key"), { siteId: flowId, to: "test@example.com" });
     expect(res.ok).toBe(false);
     if (!res.ok) expect(res.code).toBe("brevo_unauthorized");
 
@@ -172,8 +187,9 @@ describe("тестовое письмо", () => {
   it("без шаблонов тест не отправляется, а объясняет причину", async () => {
     const s = await makeSite("NOTPL", `No tpl ${RUN}`);
     await configure(s, "orders@notpl.example", "No Tpl");
+    await giveKey(s); // проверяем именно отсутствие ШАБЛОНА, поэтому ключ у магазина есть
 
-    const res = await sendSiteTestEmail(prisma, createBrevoProvider(), { siteId: s, to: "test@example.com" });
+    const res = await sendSiteTestEmail(prisma, createBrevoProvider("site-key"), { siteId: s, to: "test@example.com" });
     expect(res.ok).toBe(false);
     if (!res.ok) expect(res.code).toBe("site_template_missing");
     expect(fetchMock).not.toHaveBeenCalled();
@@ -181,7 +197,7 @@ describe("тестовое письмо", () => {
 
   it("некорректный адрес получателя не доходит до Brevo", async () => {
     await configure(flowId, "orders@theflow.la", "The Flow");
-    const res = await sendSiteTestEmail(prisma, createBrevoProvider(), { siteId: flowId, to: "мусор" });
+    const res = await sendSiteTestEmail(prisma, createBrevoProvider("site-key"), { siteId: flowId, to: "мусор" });
     expect(res.ok).toBe(false);
     if (!res.ok) expect(res.code).toBe("invalid_recipient_email");
     expect(fetchMock).not.toHaveBeenCalled();
@@ -192,7 +208,7 @@ describe("тестовое письмо", () => {
     await saveSiteEmailTemplate(prisma, flowId, "ORDER_CREATED", 101);
     fetchMock.mockResolvedValue(json(201, { messageId: "m" }));
 
-    await sendSiteTestEmail(prisma, createBrevoProvider(), { siteId: flowId, to: "test@example.com" });
+    await sendSiteTestEmail(prisma, createBrevoProvider("site-key"), { siteId: flowId, to: "test@example.com" });
     const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
     for (const key of ["order_number", "recipient_name", "delivery_date", "delivery_time", "tracking_url", "store_name"]) {
       expect(body.params[key]).toBeTruthy();

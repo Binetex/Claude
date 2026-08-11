@@ -1,4 +1,10 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
+import { randomBytes } from "node:crypto";
+
+// Ключи Brevo хранятся зашифрованными и расшифровываются при отправке, поэтому тесту нужен свой
+// ключ шифрования. Ставится ДО импорта модулей, читающих env, и не зависит от окружения машины.
+process.env.CREDENTIALS_ENCRYPTION_KEY ||= randomBytes(32).toString("base64");
+
 import { prisma } from "@/lib/db";
 import { Prisma } from "@/generated/prisma/client";
 import type { OutboxRecord } from "@/outbox/types";
@@ -8,6 +14,7 @@ import { buildAutomationTriggerHandler, buildAutomationSendHandler } from "./han
 import { createSmsChannelSender } from "./channels/sms";
 import { createEmailChannelSender } from "./channels/email";
 import { setAutomationsGloballyDisabled } from "./settings";
+import { saveBrevoApiKey } from "@/integrations/email/accountKey";
 
 /**
  * Stage 2 — Email-канал автоматизаций (обычный + fallback), на реальной БД (throwaway prisma
@@ -65,8 +72,13 @@ async function makeSite(n: number | string) {
   return site;
 }
 
-/** Полностью настроенный Email для магазина: отправитель + подтверждённый домен + шаблон события. */
+/**
+ * Полностью настроенный Email магазина: СВОЙ ключ Brevo + отправитель + подтверждённый домен +
+ * шаблон события. Ключ обязателен: общего ключа на аккаунт больше нет, env не участвует.
+ */
 async function setupSiteEmail(siteId: string, senderEmail: string, templateId: number, triggerType = "ORDER_CREATED") {
+  const saved = await saveBrevoApiKey(prisma, siteId, `key-for-${siteId}-1234567890`);
+  if (!saved.ok) throw new Error(`не удалось сохранить ключ Brevo: ${saved.error}`);
   await prisma.siteEmailSettings.create({
     data: { siteId, enabled: true, senderEmail, senderName: "Test Store", domainVerifiedAt: new Date() },
   });
@@ -145,10 +157,11 @@ beforeEach(() => {
   // Response читается один раз (res.text() в brevo.ts), второй fetch в тесте падал бы с "Body
   // has already been read". mockImplementation создаёт свежий Response на каждый вызов.
   fetchMock.mockImplementation(async () => brevoJson(201, { messageId: "m" }));
-  process.env.BREVO_API_KEY = "test-key";
+  delete process.env.BREVO_API_KEY; // ключ берётся только у магазина
 });
 
 afterAll(async () => {
+  await prisma.integrationSecret.deleteMany({ where: { siteId: { in: createdSiteIds } } });
   await prisma.automationExecutionLog.deleteMany({});
   await prisma.automationJob.deleteMany({});
   await prisma.orderCommunication.deleteMany({ where: { orderId: { in: createdOrderIds } } });
