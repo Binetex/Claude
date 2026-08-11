@@ -119,6 +119,25 @@ describe("sendOrderSms", () => {
     expect(await prisma.orderCommunication.count({ where: { orderId, sendKey: key } })).toBe(1);
   });
 
+  it("повтор с ключом ПРОВАЛИВШЕЙСЯ попытки → честная ошибка, а не «уже отправлено»", async () => {
+    const orderId = await makeOrder(siteWithNumber);
+    const key = `k-${orderId}-burned`;
+    const failing = vi.fn(async () => { throw quoErrorFromStatus(500); });
+    const r1 = await sendOrderSms(prisma, fakeClient(failing as never), { orderId, target: "CUSTOMER", text: "hi", idempotencyKey: key });
+    expect(r1).toMatchObject({ ok: false, code: "quo_server" });
+
+    // Тот же ключ второй раз: сообщение НЕ ушло, значит и «успех» возвращать нельзя.
+    const send2 = vi.fn(async (i: { from: string; to: string[] }) => ({ id: "AC_2", status: "queued", conversationId: null, from: i.from, to: i.to }));
+    const r2 = await sendOrderSms(prisma, fakeClient(send2 as never), { orderId, target: "CUSTOMER", text: "hi", idempotencyKey: key });
+    expect(r2).toMatchObject({ ok: false, code: "previous_attempt_failed" });
+    expect(send2).not.toHaveBeenCalled();
+
+    // Новый ключ = новая попытка → отправка реально происходит.
+    const r3 = await sendOrderSms(prisma, fakeClient(send2 as never), { orderId, target: "CUSTOMER", text: "hi", idempotencyKey: `${key}-retry` });
+    expect(r3).toMatchObject({ ok: true, duplicate: false });
+    expect(send2).toHaveBeenCalledTimes(1);
+  });
+
   it("delivered webhook обновляет существующую запись (по message id), а не создаёт новую", async () => {
     const orderId = await makeOrder(siteWithNumber);
     await sendOrderSms(prisma, okClient("AC_deliv"), { orderId, target: "CUSTOMER", text: "track me", idempotencyKey: `k-${orderId}-d` });

@@ -69,10 +69,11 @@ export function OrderCommunications({
     try {
       const res = await sendOrderSmsAction(null, fd);
       setResult(res);
-      if (res?.ok) {
-        setText("");
-        setIdem(newKey());
-      }
+      if (res?.ok) setText("");
+      // Ключ одноразовый и меняется ТАКЖЕ после ошибки: сервер уже записал неудачную попытку под
+      // этим ключом, и повтор с ним никогда не дошёл бы до QUO — кнопка «Отправить» молча перестала
+      // бы работать до перезагрузки страницы. Двойной клик по-прежнему заблокирован `disabled`.
+      setIdem(newKey());
     } catch {
       setResult({ error: "Не удалось отправить. Попробуйте ещё раз." });
     } finally {

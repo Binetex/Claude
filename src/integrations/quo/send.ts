@@ -4,7 +4,8 @@ import "server-only";
  *   PENDING (до вызова QUO) → SENT (успех, сохранён message/conversation id) → DELIVERED (webhook)
  *                                    └→ FAILED (ошибка QUO, безопасный код без секретов)
  * Идемпотентность — durable: уникальный app-level sendKey (двойной клик/повтор формы не создаёт дубль
- * и НЕ отправляет второй раз). Клиент должен быть создан БЕЗ авто-ретрая (maxRetries:0), чтобы не
+ * и НЕ отправляет второй раз). Ключ ОДНОРАЗОВЫЙ: после FAILED повтор с ним же — это не «уже
+ * отправлено», а `previous_attempt_failed`; новая попытка обязана прийти с новым ключом. Клиент должен быть создан БЕЗ авто-ретрая (maxRetries:0), чтобы не
  * повторять POST при неоднозначной сетевой ошибке (неизвестно, принял ли QUO). PII в логи не пишем.
  */
 import type { PrismaClient } from "@/generated/prisma/client";
@@ -63,6 +64,13 @@ export async function sendOrderSms(prisma: PrismaClient, client: QuoClient | nul
     if (isP2002(err)) {
       const existing = await prisma.orderCommunication.findUnique({ where: { sendKey: input.idempotencyKey }, select: { id: true, status: true } });
       if (existing) {
+        // Прошлая попытка с ЭТИМ ключом провалилась — сообщение не ушло. Отвечать «дубликат-успех»
+        // нельзя: отправитель решит, что клиента уведомили, а SMS нет и не будет. Повтор возможен
+        // только с НОВЫМ ключом (новая попытка), поэтому здесь честная ошибка.
+        if (existing.status === "FAILED") {
+          quoLog("sms.duplicate_of_failed", { communicationId: existing.id });
+          return { ok: false, code: "previous_attempt_failed", communicationId: existing.id };
+        }
         quoLog("sms.duplicate_request", { communicationId: existing.id });
         return { ok: true, communicationId: existing.id, status: existing.status === "PENDING" ? "PENDING" : "SENT", duplicate: true };
       }

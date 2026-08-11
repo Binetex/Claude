@@ -18,6 +18,7 @@ const ERR_RU: Record<string, string> = {
   quo_not_configured: "Интеграция QUO не настроена.",
   order_not_found: "Заказ не найден.",
   missing_idempotency_key: "Повторите отправку.",
+  previous_attempt_failed: "Прошлая попытка не удалась и сообщение не ушло. Нажмите «Отправить» ещё раз.",
   quo_auth: "QUO отклонил запрос (авторизация).",
   quo_forbidden: "QUO: недостаточно прав.",
   quo_not_found: "QUO: ресурс не найден.",

@@ -17,6 +17,8 @@ export type TimelineItem = {
   attachments: { url: string; type: string | null }[];
   occurredAt: string; // ISO
   sentByName?: string | null;
+  /** Ключ отправки: нужен, чтобы свернуть попытки одного job'а в одно сообщение (collapseAttempts). */
+  sendKey?: string | null;
 };
 
 function isImageAttachment(url: string, type: string | null): boolean {

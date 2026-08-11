@@ -27,6 +27,7 @@ import { OrderStatusCard } from "./OrderStatusCard";
 import { DeliveryStatusCard } from "./DeliveryStatusCard";
 import { OrderPickupCard } from "./OrderPickupCard";
 import { OrderCommunications, type CommItem } from "./OrderCommunications";
+import { collapseSendAttempts } from "./collapseAttempts";
 import { OrderExpensesSection } from "@/components/finance/OrderExpensesSection";
 import {
   addOrderExpenseAction,
@@ -106,20 +107,25 @@ export default async function OwnerOrderPage({ params }: { params: Promise<{ id:
         where: { orderId: id },
         orderBy: { occurredAt: "desc" },
         take: 200,
-        select: { id: true, type: true, direction: true, status: true, partyRole: true, externalPhone: true, messageText: true, durationSeconds: true, recordingUrl: true, transcript: true, summary: true, attachmentsJson: true, occurredAt: true, sentByUserId: true },
+        select: { id: true, type: true, direction: true, status: true, partyRole: true, externalPhone: true, messageText: true, durationSeconds: true, recordingUrl: true, transcript: true, summary: true, attachmentsJson: true, occurredAt: true, sentByUserId: true, sendKey: true },
       }),
       prisma.site.findFirst({ where: { orders: { some: { id } } }, select: { quoPhoneNumberId: true, quoEnabled: true, timezone: true } }),
     ]);
     const senderIds = [...new Set(comms.map((c) => c.sentByUserId).filter((x): x is string => !!x))];
     const users = senderIds.length ? await prisma.user.findMany({ where: { id: { in: senderIds } }, select: { id: true, name: true } }) : [];
     const nameById = new Map(users.map((u) => [u.id, u.name]));
-    communications = comms.map((c) => ({
-      id: c.id, type: c.type, direction: c.direction, status: c.status, partyRole: c.partyRole,
-      externalPhone: c.externalPhone, messageText: c.messageText, durationSeconds: c.durationSeconds,
-      recordingUrl: c.recordingUrl, transcript: c.transcript, summary: c.summary,
-      attachments: parseAttachments(c.attachmentsJson),
-      occurredAt: c.occurredAt.toISOString(), sentByName: c.sentByUserId ? nameById.get(c.sentByUserId) ?? null : null,
-    }));
+    // Попытки одной отправки (провал + удачный повтор) сворачиваются в одно сообщение —
+    // иначе лента показывает их как дубли клиенту (см. collapseAttempts.ts).
+    communications = collapseSendAttempts(
+      comms.map((c) => ({
+        id: c.id, type: c.type, direction: c.direction, status: c.status, partyRole: c.partyRole,
+        externalPhone: c.externalPhone, messageText: c.messageText, durationSeconds: c.durationSeconds,
+        recordingUrl: c.recordingUrl, transcript: c.transcript, summary: c.summary,
+        attachments: parseAttachments(c.attachmentsJson),
+        occurredAt: c.occurredAt.toISOString(), sentByName: c.sentByUserId ? nameById.get(c.sentByUserId) ?? null : null,
+        sendKey: c.sendKey,
+      }))
+    );
     storeHasQuoNumber = !!(siteQuo?.quoPhoneNumberId && siteQuo?.quoEnabled);
     storeTimeZone = siteQuo?.timezone ?? undefined;
   } catch {
