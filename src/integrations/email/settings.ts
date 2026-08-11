@@ -25,8 +25,8 @@ export type SiteEmailConfig = {
 };
 
 /**
- * Что отдаётся в UI. Секретов здесь нет по построению: общий API key живёт зашифрованным в БД
- * (приоритетнее) либо в env, а `brevoApiKeyConfigured` — это факт его наличия, не значение.
+ * Что отдаётся в UI. Секретов здесь нет по построению: API key магазина живёт зашифрованным
+ * в БД, а `brevoApiKeyConfigured` — это факт его наличия, не значение.
  */
 export type SiteEmailSettingsView = {
   enabled: boolean;
@@ -45,7 +45,7 @@ export type SiteEmailSettingsView = {
 
 /** Почему отправка невозможна. Значения попадают в историю отправок как есть. */
 export type EmailConfigSkip =
-  | "email_not_configured" // нет BREVO_API_KEY (общий на аккаунт)
+  | "email_not_configured" // у магазина не задан свой Brevo API key
   | "site_email_disabled" // магазин выключил Email
   | "site_email_not_configured" // нет отправителя
   | "site_domain_not_verified" // домен отправителя не подтверждён владельцем

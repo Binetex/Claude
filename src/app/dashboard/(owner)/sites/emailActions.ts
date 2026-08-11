@@ -85,6 +85,16 @@ export async function ownerSendSiteTestEmail(siteId: string, to: string): Promis
     : { error: res.safeError };
 }
 
+/**
+ * Магазин мог исчезнуть, пока страница была открыта в соседней вкладке. Без этой проверки
+ * запись упёрлась бы в внешний ключ и вернулась в интерфейс необработанным исключением.
+ */
+async function requireSite(siteId: string): Promise<Result | null> {
+  if (!siteId) return { error: "Не указан магазин." };
+  const site = await prisma.site.findUnique({ where: { id: siteId }, select: { id: true } });
+  return site ? null : { error: "Магазин не найден — возможно, он удалён. Обновите страницу." };
+}
+
 /** Аудит действий с ключом магазина БЕЗ значения (только маска) — по образцу QUO signing secrets. */
 function auditBrevoKeyAction(event: "saved" | "cleared", userId: string, siteId: string, maskedSuffix: string | null) {
   console.info(JSON.stringify({ scope: "integration-secret", provider: "BREVO", kind: "api_key", event, userId, siteId, maskedSuffix }));
@@ -94,7 +104,8 @@ function auditBrevoKeyAction(event: "saved" | "cleared", userId: string, siteId:
 export async function ownerSaveBrevoApiKey(_prev: unknown, fd: FormData): Promise<Result> {
   const user = await requireRole("OWNER");
   const siteId = String(fd.get("siteId") ?? "");
-  if (!siteId) return { error: "Не указан магазин." };
+  const bad = await requireSite(siteId);
+  if (bad) return bad;
   const raw = String(fd.get("apiKey") ?? "");
   const res = await saveBrevoApiKey(prisma, siteId, raw);
   if (!res.ok) return { error: res.error };
@@ -106,6 +117,8 @@ export async function ownerSaveBrevoApiKey(_prev: unknown, fd: FormData): Promis
 /** Удаляет ключ магазина. Запасного ключа нет — после этого Email магазина не отправляется. */
 export async function ownerClearBrevoApiKey(siteId: string): Promise<Result> {
   const user = await requireRole("OWNER");
+  const bad = await requireSite(siteId);
+  if (bad) return bad;
   await clearBrevoApiKey(prisma, siteId);
   auditBrevoKeyAction("cleared", user.id, siteId, null);
   revalidatePath("/dashboard/sites");
@@ -115,6 +128,8 @@ export async function ownerClearBrevoApiKey(siteId: string): Promise<Result> {
 /** GET /v3/account — подтверждает, что ключ реально работает, без отправки писем. */
 export async function ownerVerifyBrevoConnection(siteId: string): Promise<Result> {
   await requireRole("OWNER");
+  const bad = await requireSite(siteId);
+  if (bad) return bad;
   const res = await verifyAndRecordBrevoConnection(prisma, siteId);
   revalidatePath("/dashboard/sites");
   return res.ok

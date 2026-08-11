@@ -18,7 +18,7 @@ import { SiteQuoWebhookSecurity } from "./SiteQuoWebhookSecurity";
 import { SiteEmailPanel } from "./SiteEmailPanel";
 import { BrevoAccountPanel } from "./BrevoAccountPanel";
 import { loadSiteEmailSettingsViews } from "@/integrations/email/settings";
-import { getBrevoAccountView } from "@/integrations/email/accountKey";
+import { getBrevoAccountViews } from "@/integrations/email/accountKey";
 import { listQuoSigningSecretsMasked } from "@/integrations/quo/signingSecrets";
 import { getQuoSigningKeys } from "@/integrations/quo/config";
 import { isCredentialCryptoConfigured } from "@/lib/crypto/secretBox";
@@ -97,7 +97,7 @@ export default async function SitesPage() {
 
   const emailViews = await loadSiteEmailSettingsViews(prisma, sites.map((s) => s.id));
   // Ключ Brevo — у каждого магазина свой, поэтому и панель ключа живёт внутри магазина.
-  const brevoViews = new Map(await Promise.all(sites.map(async (s) => [s.id, await getBrevoAccountView(prisma, s.id)] as const)));
+  const brevoViews = await getBrevoAccountViews(prisma, sites.map((s) => s.id));
   const quoSecrets = await listQuoSigningSecretsMasked(prisma).catch(() => []);
   const quoEnvCount = getQuoSigningKeys().length;
   const quoCrypto = isCredentialCryptoConfigured();
@@ -247,7 +247,7 @@ export default async function SitesPage() {
                 }}
               />
 
-              <BrevoAccountPanel siteId={s.id} view={brevoViews.get(s.id)!} />
+              <BrevoAccountPanel siteId={s.id} view={brevoViews[s.id]} />
 
               <SiteEmailPanel siteId={s.id} initial={emailViews[s.id]} />
 

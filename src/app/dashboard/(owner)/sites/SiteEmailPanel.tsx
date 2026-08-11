@@ -63,7 +63,8 @@ export function SiteEmailPanel({ siteId, initial }: { siteId: string; initial: S
 
       {!initial.brevoApiKeyConfigured && (
         <div className="rounded-md border border-amber-200 bg-amber-50 p-2 text-[11px] text-amber-800">
-          На сервере не задан BREVO_API_KEY — настройки сохранить можно, отправка (включая тест) недоступна.
+          У этого магазина не задан Brevo API key — настройки сохранить можно, отправка (включая тест) недоступна.
+          Ключ вставляется в блоке «Brevo API key» выше.
         </div>
       )}
 

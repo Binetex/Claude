@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { createBrevoProvider, isValidEmail, normalizeEmail, isBrevoConfigured, verifyBrevoApiKey } from "./brevo";
+import { createBrevoProvider, isValidEmail, normalizeEmail, verifyBrevoApiKey } from "./brevo";
 
 const fetchMock = vi.fn();
 vi.stubGlobal("fetch", fetchMock);
@@ -53,16 +53,10 @@ describe("отсутствие ключа не ломает приложение
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("isBrevoConfigured отражает наличие ключа", () => {
-    expect(isBrevoConfigured()).toBe(false);
-    process.env.BREVO_API_KEY = "key";
-    expect(isBrevoConfigured()).toBe(true);
-  });
 });
 
 describe("отправка письма", () => {
   beforeEach(() => {
-    process.env.BREVO_API_KEY = "test-key";
   });
 
   it("успех возвращает messageId провайдера", async () => {
@@ -114,7 +108,6 @@ describe("отправка письма", () => {
 
 describe("ошибки провайдера", () => {
   beforeEach(() => {
-    process.env.BREVO_API_KEY = "test-key";
   });
 
   it("некорректный получатель отсекается до сети", async () => {

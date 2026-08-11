@@ -75,6 +75,43 @@ export async function getBrevoAccountView(prisma: PrismaClient, siteId: string):
   };
 }
 
+/**
+ * Виды сразу по нескольким магазинам — двумя запросами на всех, а не двумя на каждого. Страница
+ * сайтов рисует панель ключа у каждого магазина, и поштучная загрузка давала линейный рост
+ * обращений к БД на ровном месте.
+ */
+export async function getBrevoAccountViews(prisma: PrismaClient, siteIds: string[]): Promise<Record<string, BrevoAccountView>> {
+  const [rows, statuses] = await Promise.all([
+    prisma.integrationSecret.findMany({
+      where: { provider: PROVIDER, kind: KIND, active: true, siteId: { in: siteIds } },
+      orderBy: { createdAt: "desc" },
+    }),
+    prisma.brevoAccountStatus.findMany({ where: { siteId: { in: siteIds } } }),
+  ]);
+
+  // orderBy desc + первый выигравший = та же строка, что вернул бы getActiveRow поштучно.
+  const rowBySite = new Map<string, (typeof rows)[number]>();
+  for (const r of rows) if (r.siteId && !rowBySite.has(r.siteId)) rowBySite.set(r.siteId, r);
+  const statusBySite = new Map(statuses.map((st) => [st.siteId, st]));
+  const cryptoConfigured = isCredentialCryptoConfigured();
+
+  const out: Record<string, BrevoAccountView> = {};
+  for (const siteId of siteIds) {
+    const row = rowBySite.get(siteId);
+    const status = statusBySite.get(siteId);
+    out[siteId] = {
+      configured: !!row,
+      maskedSuffix: row?.maskedSuffix ?? null,
+      cryptoConfigured,
+      connStatus: status?.connStatus ?? null,
+      verifiedAt: status?.verifiedAt ? status.verifiedAt.toISOString() : null,
+      accountEmail: status?.accountEmail ?? null,
+      errorSafe: status?.errorSafe ?? null,
+    };
+  }
+  return out;
+}
+
 export type SaveKeyResult = { ok: true; maskedSuffix: string } | { ok: false; error: string };
 
 /** Сохраняет новый ключ (заменяет предыдущий из БД) и сбрасывает статус проверки — новый ключ ещё не проверен. */

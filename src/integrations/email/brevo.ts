@@ -35,14 +35,6 @@ export function normalizeEmail(value: string | null | undefined): string | null 
   return isValidEmail(v) ? v : null;
 }
 
-export function isBrevoConfigured(): boolean {
-  return !!process.env.BREVO_API_KEY?.trim();
-}
-
-/**
- * `apiKeyOverride` — ключ, разрешённый вызывающим кодом (обычно из БД через accountKey.ts,
- * приоритетнее env). Не передан → берём env BREVO_API_KEY, как раньше (обратная совместимость).
- */
 /**
  * Провайдер работает с ЯВНО переданным ключом. Ключ обязателен именно как аргумент: раньше при
  * его отсутствии подставлялся общий `BREVO_API_KEY` из env, а теперь ключи принадлежат магазинам,
