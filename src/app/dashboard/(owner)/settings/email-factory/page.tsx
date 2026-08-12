@@ -7,17 +7,7 @@ export const dynamic = "force-dynamic";
 
 export default async function EmailFactorySettingsPage() {
   await requireRole("OWNER");
-
-  // Адрес для проверки фильтра подставляем из настроек магазина: клиенты отвечают на тот же
-  // адрес, с которого им пишут. Это подсказка в поле, а не настройка — её можно перебить руками.
-  const [view, sample] = await Promise.all([
-    loadEmailFactoryView(prisma),
-    prisma.siteEmailSettings.findFirst({
-      where: { enabled: true, senderEmail: { not: null } },
-      select: { senderEmail: true },
-      orderBy: { updatedAt: "desc" },
-    }),
-  ]);
+  const view = await loadEmailFactoryView(prisma);
 
   return (
     <div className="mx-auto max-w-4xl space-y-4">
@@ -30,7 +20,7 @@ export default async function EmailFactorySettingsPage() {
         </p>
       </div>
 
-      <EmailFactoryPanel view={view} defaultAddress={sample?.senderEmail ?? ""} />
+      <EmailFactoryPanel view={view} />
     </div>
   );
 }
