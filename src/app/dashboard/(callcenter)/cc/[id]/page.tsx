@@ -3,7 +3,7 @@ import { format } from "date-fns";
 import { getForCallCenter } from "@/modules/orders/queries";
 import { prisma } from "@/lib/db";
 import { loadOrderCommunicationsCard } from "@/integrations/quo/communicationsService";
-import { loadOrderEmails } from "@/integrations/emailFactory/read";
+import { loadOrderEmailPanel } from "@/integrations/emailFactory/read";
 import { OrderCommunications } from "@/app/dashboard/(owner)/orders/[id]/OrderCommunications";
 import { ContactEditDialog } from "@/app/dashboard/(owner)/orders/[id]/ContactEditDialog";
 import { CardNoteCard } from "@/app/dashboard/(owner)/orders/[id]/CardNoteCard";
@@ -40,7 +40,7 @@ export default async function CallCenterOrderPage({ params }: { params: Promise<
   const order = await getForCallCenter(id);
   if (!order) notFound();
 
-  const orderEmails = await loadOrderEmails(prisma, id).catch(() => []);
+  const emailPanel = await loadOrderEmailPanel(prisma, id).catch(() => ({ emails: [], customerEmail: null }));
   const comm = await loadOrderCommunicationsCard(prisma, id).catch(() => ({ communications: [], storeHasQuoNumber: false, storeTimeZone: undefined, unread: { customer: 0, recipient: 0 } }));
 
   return (
@@ -137,7 +137,8 @@ export default async function CallCenterOrderPage({ params }: { params: Promise<
             customerPhone={order.senderPhone}
             recipientPhone={order.recipientPhone}
             storeHasQuoNumber={comm.storeHasQuoNumber}
-            emails={orderEmails}
+            emails={emailPanel.emails}
+          customerEmail={emailPanel.customerEmail}
           communications={comm.communications}
             storeTimeZone={comm.storeTimeZone}
             unread={comm.unread}

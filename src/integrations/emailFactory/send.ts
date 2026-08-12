@@ -1,7 +1,15 @@
 import "server-only";
 /**
- * Ручной ответ клиенту по email из карточки заказа. Только ОТВЕТ в существующий тред: письмо
- * первым мы не пишем — переписку начинает клиент, а транзакционные письма шлёт Brevo.
+ * Ручная переписка с клиентом по email из карточки заказа: ответ в существующий тред и первое
+ * письмо, когда переписки ещё нет.
+ *
+ * Куда уходит письмо, решает СЕРВЕР, а не браузер. При ответе — адрес и тред из последнего
+ * входящего письма заказа; при первом письме — адрес заказчика из самого заказа. Принимать
+ * адресата из формы нельзя: подменой поля можно было бы написать кому угодно от имени магазина.
+ *
+ * Адрес ОТПРАВИТЕЛЯ мы не задаём вовсе — его определяет домен, подключённый в Email Factory
+ * (проверено: `from`/`domain` в теле игнорируются). Значит писать можно только тем магазинам, чей
+ * домен там подключён; сегодня подключён один — theflow.la.
  *
  * Идемпотентность — по образцу `sendOrderSms`: строка создаётся ДО вызова провайдера под
  * уникальным `sendKey`. Успешная отправка, оборвавшаяся до записи, иначе оставила бы клиента с
@@ -10,7 +18,7 @@ import "server-only";
  */
 import type { PrismaClient } from "@/generated/prisma/client";
 import { resolveEmailFactoryToken } from "./token";
-import { replyToThread } from "./client";
+import { replyToThread, sendNewMessage, type SentMessage, type ClientResult } from "./client";
 
 export const EMAIL_REPLY_MAX_LENGTH = 10_000;
 
@@ -22,11 +30,12 @@ function isP2002(err: unknown): boolean {
   return typeof err === "object" && err !== null && (err as { code?: string }).code === "P2002";
 }
 
-/**
- * `threadId` берётся из ПОСЛЕДНЕГО входящего письма заказа, а не передаётся из браузера: иначе
- * ответ можно было бы отправить в чужой тред, подменив значение в запросе.
- */
-export async function sendOrderEmailReply(
+/** Тема первого письма. Номер заказа — единственное, что клиент точно узнает в списке писем. */
+function firstSubject(orderNumber: string): string {
+  return `Заказ ${orderNumber}`;
+}
+
+export async function sendOrderEmail(
   prisma: PrismaClient,
   input: { orderId: string; text: string; sendKey: string; sentByUserId: string | null }
 ): Promise<SendReplyResult> {
@@ -35,30 +44,41 @@ export async function sendOrderEmailReply(
   if (text.length > EMAIL_REPLY_MAX_LENGTH) return { ok: false, code: "too_long" };
   if (!input.sendKey) return { ok: false, code: "missing_idempotency_key" };
 
-  const last = await prisma.orderEmailMessage.findFirst({
+  const order = await prisma.order.findUnique({
+    where: { id: input.orderId },
+    select: { orderNumber: true, senderEmail: true },
+  });
+  if (!order) return { ok: false, code: "order_not_found" };
+
+  // Переписка уже идёт — отвечаем в её тред, чтобы письмо легло в ту же цепочку у клиента.
+  const lastInbound = await prisma.orderEmailMessage.findFirst({
     where: { orderId: input.orderId, direction: "INBOUND", threadId: { not: null } },
     orderBy: { occurredAt: "desc" },
     select: { threadId: true, fromEmail: true, toEmail: true, subject: true },
   });
-  // Отвечать некому и не во что: тред заводит клиент своим письмом.
-  if (!last?.threadId) return { ok: false, code: "no_thread" };
+
+  // Кому пишем: собеседнику из переписки, а если её нет — заказчику из заказа.
+  const toEmail = lastInbound?.fromEmail ?? order.senderEmail ?? "";
+  if (!toEmail.includes("@")) return { ok: false, code: "no_customer_email" };
 
   const token = await resolveEmailFactoryToken(prisma);
   if (!token) return { ok: false, code: "email_factory_not_configured" };
+
+  const subject = lastInbound?.subject ?? firstSubject(order.orderNumber);
 
   let pendingId: string;
   try {
     const pending = await prisma.orderEmailMessage.create({
       data: {
         orderId: input.orderId,
-        threadId: last.threadId,
+        threadId: lastInbound?.threadId ?? null,
         direction: "OUTBOUND",
         status: "PENDING",
-        // Наш ответ идёт с того адреса, НА который клиент писал, и ему самому — обратный
-        // порядок относительно входящего письма.
-        fromEmail: last.toEmail,
-        toEmail: last.fromEmail,
-        subject: last.subject,
+        // Отправитель проставится доменом Email Factory. До ответа провайдера мы его не знаем,
+        // поэтому у первого письма здесь пусто — заполним тем, что вернёт провайдер, если вернёт.
+        fromEmail: lastInbound?.toEmail ?? "",
+        toEmail,
+        subject,
         text,
         occurredAt: new Date(),
         sendKey: input.sendKey,
@@ -77,7 +97,10 @@ export async function sendOrderEmailReply(
     return { ok: true, messageId: existing.id, duplicate: true };
   }
 
-  const res = await replyToThread(token, last.threadId, text);
+  const res: ClientResult<SentMessage> = lastInbound?.threadId
+    ? await replyToThread(token, lastInbound.threadId, text)
+    : await sendNewMessage(token, { to: toEmail, subject, text });
+
   if (!res.ok) {
     await prisma.orderEmailMessage.update({ where: { id: pendingId }, data: { status: "FAILED", errorSafe: res.code } });
     return { ok: false, code: res.code, messageId: pendingId };
@@ -85,7 +108,13 @@ export async function sendOrderEmailReply(
 
   await prisma.orderEmailMessage.update({
     where: { id: pendingId },
-    data: { status: "SENT", providerMessageId: res.data.id },
+    data: {
+      status: "SENT",
+      providerMessageId: res.data.id,
+      // У первого письма тред появляется только сейчас — без него следующий ответ ушёл бы
+      // отдельной цепочкой, и клиент увидел бы два несвязанных письма.
+      threadId: res.data.threadId ?? lastInbound?.threadId ?? null,
+    },
   });
   return { ok: true, messageId: pendingId };
 }

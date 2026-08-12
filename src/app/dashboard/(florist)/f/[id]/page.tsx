@@ -6,7 +6,7 @@ import { getForFlorist } from "@/modules/orders/queries";
 import { prisma } from "@/lib/db";
 import { listActiveHandoffTargets } from "@/modules/florists/service";
 import { loadOrderCommunicationsCard } from "@/integrations/quo/communicationsService";
-import { loadOrderEmails } from "@/integrations/emailFactory/read";
+import { loadOrderEmailPanel } from "@/integrations/emailFactory/read";
 import {
   addOrderExpenseAction,
   removeOrderExpenseAction,
@@ -49,7 +49,7 @@ export default async function FloristOrderPage({ params }: { params: Promise<{ i
   const order = await getForFlorist(id, user.floristId);
   if (!order) notFound();
 
-  const orderEmails = await loadOrderEmails(prisma, id).catch(() => []);
+  const emailPanel = await loadOrderEmailPanel(prisma, id).catch(() => ({ emails: [], customerEmail: null }));
   const comm = await loadOrderCommunicationsCard(prisma, id).catch(() => ({ communications: [], storeHasQuoNumber: false, storeTimeZone: undefined, unread: { customer: 0, recipient: 0 } }));
   const handoffTargets = await listActiveHandoffTargets(prisma, user.floristId).catch(() => []);
 
@@ -153,7 +153,8 @@ export default async function FloristOrderPage({ params }: { params: Promise<{ i
             customerPhone={order.senderPhone}
             recipientPhone={order.recipientPhone}
             storeHasQuoNumber={comm.storeHasQuoNumber}
-            emails={orderEmails}
+            emails={emailPanel.emails}
+          customerEmail={emailPanel.customerEmail}
           communications={comm.communications}
             storeTimeZone={comm.storeTimeZone}
             unread={comm.unread}

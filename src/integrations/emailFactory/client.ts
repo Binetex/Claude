@@ -128,10 +128,51 @@ export async function listInbound(token: string, since: Date, limit = 100): Prom
   return { ok: true, data: list.map(toMessage).filter((m): m is EmailFactoryMessage => m !== null) };
 }
 
+export type SentMessage = { id: string | null; threadId: string | null };
+
+function toSent(res: { data: unknown }): SentMessage {
+  const d = (res.data as { data?: { id?: unknown; threadId?: unknown } } | null)?.data;
+  return {
+    id: typeof d?.id === "string" ? d.id : null,
+    threadId: typeof d?.threadId === "string" ? d.threadId : null,
+  };
+}
+
 /** Ответ в существующий тред. Провайдер сам проставляет In-Reply-To/References. */
-export async function replyToThread(token: string, threadId: string, text: string): Promise<ClientResult<{ id: string | null }>> {
+export async function replyToThread(token: string, threadId: string, text: string): Promise<ClientResult<SentMessage>> {
   const res = await call(token, "POST", `/api/v1/threads/${encodeURIComponent(threadId)}/reply`, { text });
   if (!res.ok) return res;
-  const d = (res.data as { data?: { id?: unknown } } | null)?.data;
-  return { ok: true, data: { id: typeof d?.id === "string" ? d.id : null } };
+  return { ok: true, data: toSent(res) };
+}
+
+/**
+ * Новое письмо, когда переписки ещё нет. Адрес отправителя НЕ передаётся: его задаёт домен
+ * аккаунта Email Factory (проверено — `from`/`domain` в теле игнорируются). Отсюда следствие,
+ * которое важнее самой отправки: писать можно только с того домена, что подключён в Email
+ * Factory. Сегодня он один — theflow.la.
+ */
+export async function sendNewMessage(
+  token: string,
+  input: { to: string; subject: string; text: string }
+): Promise<ClientResult<SentMessage>> {
+  const res = await call(token, "POST", "/api/v1/messages", input);
+  if (!res.ok) return res;
+  return { ok: true, data: toSent(res) };
+}
+
+/** Домены аккаунта. Нужен один: понять, с какого адреса уходят письма и готов ли он. */
+export async function listDomains(token: string): Promise<ClientResult<{ domain: string; email: string; status: string }[]>> {
+  const res = await call(token, "GET", "/api/v1/domains");
+  if (!res.ok) return res;
+  const list = (res.data as { data?: unknown } | null)?.data;
+  if (!Array.isArray(list)) return { ok: false, code: "ef_bad_response", retryable: false };
+  return {
+    ok: true,
+    data: list.flatMap((d) => {
+      const r = d as Record<string, unknown>;
+      return typeof r.domain === "string" && typeof r.email === "string"
+        ? [{ domain: r.domain, email: r.email, status: String(r.status ?? "") }]
+        : [];
+    }),
+  };
 }

@@ -43,6 +43,7 @@ export function OrderCommunications({
   customerPhone,
   recipientPhone,
   storeHasQuoNumber,
+  customerEmail,
   communications,
   emails,
   storeTimeZone,
@@ -52,6 +53,8 @@ export function OrderCommunications({
   customerPhone: string;
   recipientPhone: string;
   storeHasQuoNumber: boolean;
+  /** E-mail заказчика из заказа: адресат, когда переписки ещё нет. */
+  customerEmail: string | null;
   communications: CommItem[];
   emails: EmailItem[];
   storeTimeZone?: string;
@@ -66,9 +69,11 @@ export function OrderCommunications({
 
   const isEmail = activeKey === "EMAIL";
   const active = tabs.find((t) => t.key === activeKey) ?? tabs[0];
-  // Отвечать можно только в тред, который завёл клиент своим письмом. Сервер это проверяет ещё
-  // раз, но и кнопку держать активной незачем — иначе она обещает то, чего не будет.
-  const canReply = emails.some((e) => e.direction === "INBOUND");
+  // Писать можно и первым — тогда адресат берётся из заказа. Нужен только адрес: без него
+  // держать кнопку активной незачем, она обещала бы то, чего не будет.
+  const lastInboundFrom = emails.find((e) => e.direction === "INBOUND")?.fromEmail ?? null;
+  const emailTarget = lastInboundFrom ?? customerEmail;
+  const canReply = !!emailTarget;
   const inboundCount = emails.filter((e) => e.direction === "INBOUND").length;
   // Разбор по ФАКТИЧЕСКОМУ номеру сообщения, а не по сохранённой роли: роль ставится один раз
   // при приёме и устаревает, когда телефон заказа исправляют (см. commGroupOf).
@@ -160,8 +165,8 @@ export function OrderCommunications({
         )}
 
         {isEmail && !canReply && (
-          <div className="rounded-md border border-slate-200 bg-slate-50 p-2 text-xs text-slate-600">
-            Клиент ещё не писал по этому заказу. Переписку начинает он — отвечать пока не на что.
+          <div className="rounded-md border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800">
+            В заказе не указан e-mail заказчика — писать некому.
           </div>
         )}
 
@@ -171,7 +176,7 @@ export function OrderCommunications({
           <div className="text-xs text-slate-500">
             Отправить на:{" "}
             <span className="font-medium tabular-nums text-slate-700">
-              {isEmail ? emails.find((e) => e.direction === "INBOUND")?.fromEmail || "—" : active.phone || "—"}
+              {isEmail ? emailTarget || "—" : active.phone || "—"}
             </span>
           </div>
           <textarea
@@ -181,7 +186,9 @@ export function OrderCommunications({
           />
           <div className="flex items-center justify-between">
             <span className={"text-[11px] " + (tooLong ? "text-red-600" : "text-slate-400")}>{text.length}/{limit}</span>
-            <Button type="submit" size="sm" disabled={disabled}>{pending ? "Отправка…" : isEmail ? "Ответить письмом" : "Отправить SMS"}</Button>
+            <Button type="submit" size="sm" disabled={disabled}>
+              {pending ? "Отправка…" : isEmail ? (lastInboundFrom ? "Ответить письмом" : "Написать письмо") : "Отправить SMS"}
+            </Button>
           </div>
           {result?.error && <p className="text-xs text-red-600">{result.error}</p>}
           {result?.ok && (
@@ -212,7 +219,7 @@ export function OrderCommunications({
  */
 function EmailTimeline({ items }: { items: EmailItem[] }) {
   if (items.length === 0) {
-    return <p className="py-3 text-center text-xs text-slate-400">Писем по этому заказу пока нет.</p>;
+    return <p className="py-3 text-center text-xs text-slate-400">Писем по этому заказу пока нет — можно написать первым.</p>;
   }
 
   let prevSubject: string | null = null;

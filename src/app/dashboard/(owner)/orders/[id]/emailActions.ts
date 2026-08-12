@@ -2,7 +2,7 @@
 import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/rbac";
 import { prisma } from "@/lib/db";
-import { sendOrderEmailReply } from "@/integrations/emailFactory/send";
+import { sendOrderEmail } from "@/integrations/emailFactory/send";
 
 type FormState = { ok?: boolean; error?: string } | null;
 
@@ -10,7 +10,8 @@ const ERR_RU: Record<string, string> = {
   empty_text: "Введите текст письма.",
   too_long: "Слишком длинное письмо (макс. 10 000 символов).",
   missing_idempotency_key: "Повторите отправку.",
-  no_thread: "Клиент ещё не писал по этому заказу — отвечать не на что.",
+  no_customer_email: "В заказе не указан e-mail заказчика — писать некому.",
+  order_not_found: "Заказ не найден.",
   email_factory_not_configured: "Email Factory не подключён: введите токен в настройках.",
   previous_attempt_failed: "Прошлая попытка не удалась и письмо не ушло. Нажмите «Ответить» ещё раз.",
   ef_unauthorized: "Email Factory отклонил запрос: проверьте токен.",
@@ -25,11 +26,11 @@ const ERR_RU: Record<string, string> = {
 };
 
 /**
- * Ответ клиенту по email из карточки заказа. Доступен ЛЮБОМУ сотруднику — как и отправка SMS:
- * переписку ведёт тот, кто работает с заказом, а не только владелец.
+ * Письмо клиенту из карточки заказа — ответ в переписку или первое письмо, если её ещё нет.
+ * Доступно ЛЮБОМУ сотруднику, как и отправка SMS: переписку ведёт тот, кто работает с заказом.
  *
- * Адресат и тред НЕ приходят из браузера: сервер берёт их из последнего входящего письма этого
- * заказа. Иначе подменой поля можно было бы написать в чужую переписку.
+ * Адресат НЕ приходит из браузера: сервер берёт его из переписки или из самого заказа. Иначе
+ * подменой поля можно было бы написать кому угодно от имени магазина.
  */
 export async function sendOrderEmailReplyAction(_prev: FormState, formData: FormData): Promise<FormState> {
   const user = await requireUser();
@@ -38,7 +39,7 @@ export async function sendOrderEmailReplyAction(_prev: FormState, formData: Form
   const sendKey = String(formData.get("idempotencyKey") ?? "");
   if (!orderId) return { error: "Некорректный запрос." };
 
-  const res = await sendOrderEmailReply(prisma, { orderId, text, sendKey, sentByUserId: user.id });
+  const res = await sendOrderEmail(prisma, { orderId, text, sendKey, sentByUserId: user.id });
   revalidatePath(`/dashboard/orders/${orderId}`);
   if (res.ok) return { ok: true };
   return { error: ERR_RU[res.code] ?? "Не удалось отправить письмо." };

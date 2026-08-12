@@ -35,7 +35,7 @@ import {
   updateOrderExpenseAction,
 } from "@/app/dashboard/orderExpenseActions";
 import { markOrderCommunicationsRead, countUnreadBySide, parseAttachments } from "@/integrations/quo/communicationsService";
-import { loadOrderEmails } from "@/integrations/emailFactory/read";
+import { loadOrderEmailPanel } from "@/integrations/emailFactory/read";
 import { FloristAvatar } from "@/components/FloristAvatar";
 
 export const dynamic = "force-dynamic";
@@ -98,7 +98,7 @@ export default async function OwnerOrderPage({ params }: { params: Promise<{ id:
   let storeHasQuoNumber = false;
   let storeTimeZone: string | undefined;
   // Переписка по email — своя таблица и своя вкладка; сбой её загрузки не должен ронять карточку.
-  const orderEmails = await loadOrderEmails(prisma, id).catch(() => []);
+  const emailPanel = await loadOrderEmailPanel(prisma, id).catch(() => ({ emails: [], customerEmail: null }));
 
   let commUnread = { customer: 0, recipient: 0 };
   try {
@@ -245,7 +245,8 @@ export default async function OwnerOrderPage({ params }: { params: Promise<{ id:
             customerPhone={order.senderPhone}
             recipientPhone={order.recipientPhone}
             storeHasQuoNumber={storeHasQuoNumber}
-            emails={orderEmails}
+            emails={emailPanel.emails}
+          customerEmail={emailPanel.customerEmail}
           communications={communications}
             storeTimeZone={storeTimeZone}
             unread={commUnread}
