@@ -374,6 +374,31 @@ describe("6d. Дедуп fallback между правилами", () => {
     expect(suppressed?.status).toBe("SKIPPED"); // молчание соседа объяснено в истории
     expect(suppressed?.lastErrorSafe).toBe("DUPLICATE_EMAIL");
   });
+
+  // Обратная сторона того же правила. Планировщик гасит ТОЛЬКО правило «Получателю» и намеренно
+  // не трогает два правила с одной аудиторией: это осознанная настройка владельца — два разных
+  // текста на событие. Дедуп на пути отправки обязан вести себя так же, иначе одно из двух
+  // задуманных сообщений пропадает молча, и восстановить его нечем.
+  it("два правила «Заказчику» друг друга НЕ глушат — оба письма уходят", async () => {
+    const site = await makeSite("6e");
+    await setupSiteEmail(site.id, "orders@site6e.example", 165);
+    const first = await makeAutomation(site.id, { smsEnabled: true, emailFallbackEnabled: true, audience: "CUSTOMER" });
+    const second = await makeAutomation(site.id, { smsEnabled: true, emailFallbackEnabled: true, audience: "CUSTOMER" });
+    // Телефон ПРИГОДЕН на триггере — иначе оба письма создал бы планировщик, и путь отправки,
+    // ради которого написан тест, не выполнился бы вовсе.
+    const order = await makeOrder(site.id, { senderPhone: "+15554443322", recipientPhone: "+15554443322" });
+    await fireTrigger(order);
+    expect(await prisma.automationJob.count({ where: { orderId: order.id, channel: "EMAIL" } })).toBe(0);
+
+    await prisma.site.update({ where: { id: site.id }, data: { quoPhoneNumberId: null } });
+    await sendAllScheduled(first.id, order.id);
+    await sendAllScheduled(second.id, order.id);
+
+    const emails = await prisma.automationJob.findMany({ where: { orderId: order.id, channel: "EMAIL" } });
+    expect(emails).toHaveLength(2);
+    expect(emails.every((e) => e.status !== "SKIPPED")).toBe(true); // ни одно не погашено как дубль
+    expect(new Set(emails.map((e) => e.automationId))).toEqual(new Set([first.id, second.id]));
+  });
 });
 
 describe("7. Дублирующий Email не создаётся", () => {

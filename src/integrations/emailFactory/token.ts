@@ -8,6 +8,10 @@ import "server-only";
  * Наружу отдаётся ТОЛЬКО маска. Полное значение не попадает ни в браузер, ни в логи, ни в ответы
  * server actions.
  *
+ * Хранение повторяет `integrations/email/accountKey.ts` (ключ Brevo) буква в букву — замена в
+ * транзакции и физическое удаление. Это не вкусовщина: у секретов оба свойства смысловые, см.
+ * комментарии ниже.
+ *
  * Здесь только хранение. Ни отправки писем, ни вебхуков, ни канала автоматизаций — по решению
  * владельца Email Factory отвечает исключительно за ручную переписку, а транзакционные письма
  * остаются на Brevo. Смешивать нельзя: одно письмо ушло бы дважды с двух разных адресов.
@@ -18,8 +22,8 @@ import { encryptSecret, decryptSecret, maskSecret, isCredentialCryptoConfigured 
 const PROVIDER = "EMAIL_FACTORY";
 const KIND = "api_token";
 
-/** Базовый адрес API. Константой: настройка, которую меняют раз в жизни, экрана не заслуживает. */
-export const EMAIL_FACTORY_BASE_URL = "https://mail.binetex.com";
+/** Короче этого токена у Email Factory не бывает — отсекаем обрезок, вставленный по ошибке. */
+const MIN_TOKEN_LENGTH = 20;
 
 async function getActiveRow(prisma: PrismaClient) {
   return prisma.integrationSecret.findFirst({
@@ -63,35 +67,37 @@ export async function saveEmailFactoryToken(
   prisma: PrismaClient,
   raw: string
 ): Promise<{ ok: true } | { error: string }> {
-  const token = raw.trim();
+  const token = (raw ?? "").trim();
   if (!token) return { error: "Токен пустой." };
+  // Обрезок буфера обмена сохранился бы как полноценный токен, страница показала бы зелёное
+  // «токен задан», и ошибка всплыла бы только при первом вызове API — когда связь с действием
+  // уже потеряна.
+  if (token.length < MIN_TOKEN_LENGTH) return { error: "Слишком короткий токен." };
   if (!isCredentialCryptoConfigured()) {
     return { error: "Шифрование секретов не настроено на сервере (CREDENTIALS_ENCRYPTION_KEY)." };
   }
 
-  // Предыдущий токен гасим, а не удаляем: если новый окажется неверным, в базе остаётся след
-  // того, что подключение когда-то было настроено.
-  await prisma.integrationSecret.updateMany({
-    where: { provider: PROVIDER, kind: KIND, siteId: null, active: true },
-    data: { active: false },
-  });
-  await prisma.integrationSecret.create({
-    data: {
-      provider: PROVIDER,
-      kind: KIND,
-      siteId: null,
-      encryptedValue: encryptSecret(token),
-      maskedSuffix: maskSecret(token),
-      active: true,
-    },
-  });
+  // Шифруем ДО транзакции: сбой шифрования не должен оставить аккаунт без старого токена.
+  const encryptedValue = encryptSecret(token);
+  const maskedSuffix = maskSecret(token);
+
+  // Удаление и вставка — ОДНОЙ транзакцией. Двумя запросами подряд сбой на втором оставлял бы
+  // ноль активных токенов: старый уже погашен, новый не создан, а на экране «токена нет».
+  //
+  // Именно УДАЛЕНИЕ, а не флаг `active = false`: строка с расшифровываемым значением, пережившая
+  // замену, попадёт в любой дамп базы и в бэкапы. Отозванный токен не должен продолжать где-то
+  // лежать. История подключений тут не нужна — это не журнал, а один действующий секрет.
+  await prisma.$transaction([
+    prisma.integrationSecret.deleteMany({ where: { provider: PROVIDER, kind: KIND, siteId: null } }),
+    prisma.integrationSecret.create({
+      data: { provider: PROVIDER, kind: KIND, siteId: null, encryptedValue, maskedSuffix, active: true },
+    }),
+  ]);
   return { ok: true };
 }
 
+/** Полное удаление: владелец жмёт «Удалить», чтобы отозвать доступ, а не спрятать его из списка. */
 export async function clearEmailFactoryToken(prisma: PrismaClient): Promise<{ ok: true }> {
-  await prisma.integrationSecret.updateMany({
-    where: { provider: PROVIDER, kind: KIND, siteId: null, active: true },
-    data: { active: false },
-  });
+  await prisma.integrationSecret.deleteMany({ where: { provider: PROVIDER, kind: KIND, siteId: null } });
   return { ok: true };
 }

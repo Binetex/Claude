@@ -27,16 +27,21 @@ production-URL и не требуют авторизации — почтовы�
 Растеризация — через headless Chrome: `rsvg-convert`/ImageMagick на машине нет, а `sips`
 не умеет SVG. `--default-background-color=00000000` даёт прозрачный фон.
 
+**HTML пишется РЯДОМ с картинками, а не в `/tmp`.** Пути в `<img src>` браузер считает
+относительно самой страницы: страница в `/tmp` искала бы логотип в `/tmp` и молча отрисовала бы
+иконку «битое изображение» — на выходе получился бы PNG в тысячу байт вместо настоящего.
+
 ```bash
 cd docs/email-templates/source-assets
 CHROME="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 
 # Логотип: 320 × 62 PNG с прозрачностью
 sed 's/fill="white"/fill="#2b2723"/g' logo_tf.svg > logo_tf_dark.svg
-printf '%s' '<style>html,body{margin:0;background:transparent}img{display:block;width:320px}</style><img src="logo_tf_dark.svg">' > /tmp/logo.html
+printf '%s' '<style>html,body{margin:0;background:transparent}img{display:block;width:320px}</style><img src="logo_tf_dark.svg">' > logo.html
 "$CHROME" --headless=new --disable-gpu --hide-scrollbars --default-background-color=00000000 \
   --allow-file-access-from-files --screenshot=../../../public/email-assets/theflow/logo.png \
-  --window-size=320,62 "file:///tmp/logo.html"
+  --window-size=320,62 "file://$PWD/logo.html"
+rm logo.html
 ```
 
 Hero — это **полоса, вырезанная из баннера**: окно 950 × 111 по исходнику со смещением
@@ -44,12 +49,16 @@ Hero — это **полоса, вырезанная из баннера**: ок
 ровно та, в которой полоса показывается в письме.
 
 ```bash
-printf '%s' '<style>html,body{margin:0}.w{width:950px;height:111px;overflow:hidden;position:relative}.w img{position:absolute;width:1600px;left:-650px;top:-554px}</style><div class="w"><img src="banner_tf.jpg"></div>' > /tmp/hero.html
+printf '%s' '<style>html,body{margin:0}.w{width:950px;height:111px;overflow:hidden;position:relative}.w img{position:absolute;width:1600px;left:-650px;top:-554px}</style><div class="w"><img src="banner_tf.jpg"></div>' > hero.html
 "$CHROME" --headless=new --disable-gpu --hide-scrollbars --allow-file-access-from-files \
-  --screenshot=/tmp/hero_raw.png --window-size=950,111 "file:///tmp/hero.html"
+  --screenshot=/tmp/hero_raw.png --window-size=950,111 "file://$PWD/hero.html"
 sips -s format jpeg -s formatOptions 72 /tmp/hero_raw.png \
   --out ../../../public/email-assets/theflow/review-hero.jpg
+rm hero.html
 ```
+
+Проверить, что пересборка удалась: `logo.png` должен быть около 6 КБ, `review-hero.jpg` — около
+35 КБ. Файл в одну-две тысячи байт означает, что браузер не нашёл исходник и снял пустую страницу.
 
 ## Что важно
 

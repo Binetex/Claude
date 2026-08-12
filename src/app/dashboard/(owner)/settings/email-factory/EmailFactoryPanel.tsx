@@ -38,6 +38,13 @@ export function EmailFactoryPanel({ view }: { view: EmailFactoryView }) {
     });
   }
 
+  function clear() {
+    // Кнопка стоит вплотную к «Сохранить», а промах отзывает подключение: вернуть его можно
+    // только сходив за токеном в Email Factory заново. Тот же confirm, что в панели Brevo.
+    if (!confirm("Удалить токен Email Factory? Чтобы подключить снова, понадобится взять токен в Email Factory.")) return;
+    run(ownerClearEmailFactoryToken);
+  }
+
   return (
     <Card>
       <CardHeader className="flex flex-wrap items-center justify-between gap-2">
@@ -87,7 +94,7 @@ export function EmailFactoryPanel({ view }: { view: EmailFactoryView }) {
             Сохранить
           </Button>
           {view.configured && (
-            <Button type="button" size="sm" variant="ghost" className="text-red-600" disabled={pending} onClick={() => run(ownerClearEmailFactoryToken)}>
+            <Button type="button" size="sm" variant="ghost" className="text-red-600" disabled={pending} onClick={clear}>
               Удалить
             </Button>
           )}

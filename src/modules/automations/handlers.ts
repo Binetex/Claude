@@ -558,13 +558,21 @@ export function buildAutomationSendHandler(prisma: PrismaClient, deps: Automatio
  * Не шлём в трёх случаях:
  *  - fallback выключен у правила;
  *  - «обычный» Email включён отдельно — письмо и так запланировано при триггере;
- *  - заказчику по этому событию письмо уже идёт от ДРУГОГО правила.
+ *  - это правило «Получателю», а письмо заказчику по событию уже идёт от правила, нацеленного
+ *    на заказчика.
  *
- * Последнее — тот же дедуп, что делает планировщик (`customerEmailTaken`), только на пути отправки.
- * Без него дедуп по телефону оборачивался двумя письмами: правило-победитель падало, будило
- * соседа с тем же номером, и оба слали заказчику по письму на одно событие. Порядок здесь
- * гарантирован структурно — победитель создаёт письмо ДО того, как `skip()`/FAILED-ветка разбудят
- * соседа, поэтому проигравший всегда видит уже существующее письмо, а не наоборот.
+ * Последнее — ТОТ ЖЕ дедуп, что делает планировщик (`customerEmailTaken` + `emailIsDuplicate`),
+ * только на пути отправки. Условие обязано совпадать с ним дословно, включая асимметрию по
+ * аудитории: гасится ТОЛЬКО правило «Получателю» и ТОЛЬКО правилом, целящим в заказчика. Два
+ * правила с одной аудиторией друг друга не глушат — это осознанная настройка владельца (два
+ * разных текста на событие), и более широкий дедуп молча съедал бы одно из двух задуманных
+ * сообщений. Восстановить его нечем: у писем нет механизма оживления, как `reviveDuplicateSibling`
+ * у телефонов.
+ *
+ * Зачем это на пути отправки вообще: без проверки дедуп по телефону оборачивался двумя письмами —
+ * правило-победитель падало, будило соседа с тем же номером, и оба слали заказчику по письму на
+ * одно событие. Порядок здесь гарантирован структурно: победитель создаёт письмо ДО того, как
+ * `skip()`/FAILED-ветка разбудят соседа, поэтому проигравший всегда видит уже существующее письмо.
  *
  * Адресат всегда ЗАКАЗЧИК: e-mail получателя в заказе нет.
  */
@@ -573,7 +581,7 @@ async function sendFallbackEmail(
   repo: PrismaOutboxRepository,
   args: {
     job: { channel: string; occurrenceKey: string | null };
-    automation: { id: string; emailFallbackEnabled: boolean; emailEnabled: boolean };
+    automation: { id: string; audience: string; emailFallbackEnabled: boolean; emailEnabled: boolean };
     order: { id: string; senderEmail: string | null };
     reason: string;
   }
@@ -584,17 +592,23 @@ async function sendFallbackEmail(
 
   // Считаются только письма, которые реально в пути или уже дошли. SKIPPED/FAILED/CANCELLED
   // заказчика не достигли — гасить из-за них живой fallback значило бы менять одно молчание на другое.
-  const alreadyGoing = await prisma.automationJob.findFirst({
-    where: {
-      orderId: order.id,
-      occurrenceKey: job.occurrenceKey,
-      channel: "EMAIL",
-      recipientType: "CUSTOMER",
-      status: { in: ["SCHEDULED", "PROCESSING", "SENT"] },
-      automationId: { not: automation.id },
-    },
-    select: { id: true },
-  });
+  // Правило-источник обязано целить в ЗАКАЗЧИКА (CUSTOMER или BOTH): письмо от другого правила
+  // «Получателю» — не тот случай, ради которого планировщик вводил дедуп.
+  const alreadyGoing =
+    automation.audience !== "RECIPIENT"
+      ? null
+      : await prisma.automationJob.findFirst({
+          where: {
+            orderId: order.id,
+            occurrenceKey: job.occurrenceKey,
+            channel: "EMAIL",
+            recipientType: "CUSTOMER",
+            status: { in: ["SCHEDULED", "PROCESSING", "SENT"] },
+            automationId: { not: automation.id },
+            automation: { audience: { not: "RECIPIENT" } },
+          },
+          select: { id: true },
+        });
 
   if (alreadyGoing) {
     // Фиксируем SKIPPED-job, чтобы в истории было видно, ПОЧЕМУ правило промолчало по Email —
