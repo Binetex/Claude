@@ -46,6 +46,7 @@ import { isAutomationsGloballyDisabled } from "./settings";
 import { logExecution } from "./executionLog";
 import { startFlowsForTrigger } from "./flows/engine";
 import type { ChannelSender } from "./channels/types";
+import { SMS_UNAVAILABLE_CODES } from "./channels/sms";
 
 /** Триггеры, для которых заказ ИМЕННО отменён/возвращён — дефолтное исключение не применяем. */
 const ALLOW_CANCELLED_REFUNDED = new Set(["ORDER_REFUNDED", "PAYMENT_FAILED", "ORDER_CANCELLED"]);
@@ -513,8 +514,16 @@ export function buildAutomationSendHandler(prisma: PrismaClient, deps: Automatio
       return;
     }
 
-    // Precondition/config-проблема (канал вернул skip) → SKIPPED, не FAILED.
-    if (result.skip) return skip(result.code);
+    // Precondition/config-проблема (канал вернул skip) → SKIPPED, не FAILED. Но «SMS не смогла
+    // уйти» (телефон непригоден, у магазина нет номера-отправителя) — это ровно тот случай, ради
+    // которого настройка «Email, если SMS недоступно» и существует: пропускаем SMS и шлём письмо.
+    if (result.skip) {
+      if (SMS_UNAVAILABLE_CODES.has(result.code)) {
+        await sendFallbackEmail(prisma, repo, { job, automation, order, reason: result.code });
+      }
+      await skip(result.code);
+      return;
+    }
 
     // Ошибка отправки: временную повторяем через outbox (job остаётся SCHEDULED), пока не исчерпаны
     // попытки события; иначе — терминальный FAILED (без бесконечного повтора).
@@ -524,23 +533,94 @@ export function buildAutomationSendHandler(prisma: PrismaClient, deps: Automatio
       await logExecution(prisma, { jobId: job.id, automationId: automation.id, orderId: order.id, stage: "failed", detailSafe: `${result.code} (retry)` });
       throw new Error(`automation_send_transient:${result.code}`); // plain Error → outbox backoff/retry
     }
+    // Fallback: SMS окончательно не отправилось → Email. ДО перевода job в FAILED — по той же
+    // причине, что и на skip-пути.
+    await sendFallbackEmail(prisma, repo, { job, automation, order, reason: "SMS_FAILED" });
+
     await prisma.automationJob.update({ where: { id: job.id }, data: { status: "FAILED", failedAt: new Date(), attempts: { increment: 1 }, lastErrorSafe: result.code } });
     await logExecution(prisma, { jobId: job.id, automationId: automation.id, orderId: order.id, stage: "failed", detailSafe: result.code });
 
     // Сообщение так и не ушло — будим правило, погашенное дедупом по этому же номеру.
     await reviveDuplicateSibling(prisma, repo, job);
-
-    // Fallback: SMS окончательно не отправилось → Email, если разрешено и «обычный» Email не
-    // включён отдельно (иначе он уже независимо запланирован при триггере — дублировать не надо).
-    if (job.channel === "SMS" && automation.emailFallbackEnabled && !automation.emailEnabled && job.occurrenceKey) {
-      await createCustomerEmailJob(prisma, repo, {
-        automationId: automation.id,
-        orderId: order.id,
-        occurrenceKey: job.occurrenceKey,
-        senderEmail: order.senderEmail,
-        scheduledAt: new Date(),
-        logDetail: "channel=EMAIL recipient=CUSTOMER fallback_reason=SMS_FAILED",
-      });
-    }
   };
+}
+
+/**
+ * Email вместо не ушедшей SMS. Один вход на оба повода — «SMS не смогла уйти» (skip) и «отправка
+ * провалилась» (FAILED): две копии этой проверки уже расходились бы при первой же правке условий.
+ * Проверка канала живёт ЗДЕСЬ, а не в местах вызова: забыть её в третьем месте слишком легко.
+ *
+ * ВАЖЕН ПОРЯДОК: оба места вызывают эту функцию ДО того, как переведут SMS-job в терминальный
+ * статус. Повторный заход обработчика выходит по проверке `job.status !== "SCHEDULED"`, поэтому
+ * сбой между «пометили job» и «создали письмо» терял бы fallback навсегда. Обратный порядок
+ * безопасен: `createOrFindJob` идемпотентен по ключу, повтор второго письма не создаёт.
+ *
+ * Не шлём в трёх случаях:
+ *  - fallback выключен у правила;
+ *  - «обычный» Email включён отдельно — письмо и так запланировано при триггере;
+ *  - заказчику по этому событию письмо уже идёт от ДРУГОГО правила.
+ *
+ * Последнее — тот же дедуп, что делает планировщик (`customerEmailTaken`), только на пути отправки.
+ * Без него дедуп по телефону оборачивался двумя письмами: правило-победитель падало, будило
+ * соседа с тем же номером, и оба слали заказчику по письму на одно событие. Порядок здесь
+ * гарантирован структурно — победитель создаёт письмо ДО того, как `skip()`/FAILED-ветка разбудят
+ * соседа, поэтому проигравший всегда видит уже существующее письмо, а не наоборот.
+ *
+ * Адресат всегда ЗАКАЗЧИК: e-mail получателя в заказе нет.
+ */
+async function sendFallbackEmail(
+  prisma: PrismaClient,
+  repo: PrismaOutboxRepository,
+  args: {
+    job: { channel: string; occurrenceKey: string | null };
+    automation: { id: string; emailFallbackEnabled: boolean; emailEnabled: boolean };
+    order: { id: string; senderEmail: string | null };
+    reason: string;
+  }
+): Promise<void> {
+  const { job, automation, order } = args;
+  if (job.channel !== "SMS") return;
+  if (!automation.emailFallbackEnabled || automation.emailEnabled || !job.occurrenceKey) return;
+
+  // Считаются только письма, которые реально в пути или уже дошли. SKIPPED/FAILED/CANCELLED
+  // заказчика не достигли — гасить из-за них живой fallback значило бы менять одно молчание на другое.
+  const alreadyGoing = await prisma.automationJob.findFirst({
+    where: {
+      orderId: order.id,
+      occurrenceKey: job.occurrenceKey,
+      channel: "EMAIL",
+      recipientType: "CUSTOMER",
+      status: { in: ["SCHEDULED", "PROCESSING", "SENT"] },
+      automationId: { not: automation.id },
+    },
+    select: { id: true },
+  });
+
+  if (alreadyGoing) {
+    // Фиксируем SKIPPED-job, чтобы в истории было видно, ПОЧЕМУ правило промолчало по Email —
+    // так же, как это делает планировщик для правила «Получателю».
+    await createOrFindJob(prisma, repo, {
+      automationId: automation.id,
+      orderId: order.id,
+      recipientType: "CUSTOMER",
+      channel: "EMAIL",
+      phoneNormalized: null,
+      emailNormalized: null,
+      occurrenceKey: job.occurrenceKey,
+      scheduledAt: new Date(),
+      status: "SKIPPED",
+      lastErrorSafe: DUPLICATE_EMAIL_REASON,
+      logDetail: "",
+    });
+    return;
+  }
+
+  await createCustomerEmailJob(prisma, repo, {
+    automationId: automation.id,
+    orderId: order.id,
+    occurrenceKey: job.occurrenceKey,
+    senderEmail: order.senderEmail,
+    scheduledAt: new Date(),
+    logDetail: `channel=EMAIL recipient=CUSTOMER fallback_reason=${args.reason}`,
+  });
 }

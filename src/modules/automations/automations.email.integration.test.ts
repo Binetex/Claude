@@ -279,6 +279,101 @@ describe("5-6. Fallback по финальному провалу SMS", () => {
     expect(jobs).toHaveLength(1); // ни одного EMAIL-job'а не появилось
     expect(jobs[0].status).toBe("SENT");
   });
+
+  // Телефон был пригоден на триггере, но SMS всё равно не ушла в момент отправки: у магазина
+  // пропал номер-отправитель. Канал возвращает skip, а не сбой — и раньше на этом всё и
+  // заканчивалось, хотя «Email, если SMS недоступно» был включён. Это ровно та дыра, ради
+  // которой настройка и нужна.
+  it("6a. SMS не смогла уйти на отправке (store_no_quo_number) → Email-fallback", async () => {
+    const site = await makeSite("6a");
+    await setupSiteEmail(site.id, "orders@site6a.example", 161);
+    const auto = await makeAutomation(site.id, { smsEnabled: true, emailFallbackEnabled: true });
+    const order = await makeOrder(site.id);
+    await fireTrigger(order);
+    const smsJob = (await jobsFor(auto.id, order.id)).find((j) => j.channel === "SMS")!;
+
+    await prisma.site.update({ where: { id: site.id }, data: { quoPhoneNumberId: null } });
+    await sendHandler(rec({ jobId: smsJob.id, orderId: order.id }));
+
+    const jobs = await jobsFor(auto.id, order.id);
+    const sms = jobs.find((j) => j.channel === "SMS")!;
+    const email = jobs.find((j) => j.channel === "EMAIL");
+    expect(sms.status).toBe("SKIPPED"); // не сбой отправки, а «нельзя отправить»
+    expect(sms.lastErrorSafe).toBe("store_no_quo_number");
+    expect(email?.status).toBe("SCHEDULED");
+
+    await sendAllScheduled(auto.id, order.id);
+    expect((await prisma.automationJob.findUniqueOrThrow({ where: { id: email!.id } })).status).toBe("SENT");
+  });
+
+  it("6b. Тот же skip без включённого fallback → письма нет", async () => {
+    const site = await makeSite("6b");
+    await setupSiteEmail(site.id, "orders@site6b.example", 162);
+    const auto = await makeAutomation(site.id, { smsEnabled: true, emailFallbackEnabled: false });
+    const order = await makeOrder(site.id);
+    await fireTrigger(order);
+    const smsJob = (await jobsFor(auto.id, order.id)).find((j) => j.channel === "SMS")!;
+
+    await prisma.site.update({ where: { id: site.id }, data: { quoPhoneNumberId: null } });
+    await sendHandler(rec({ jobId: smsJob.id, orderId: order.id }));
+
+    const jobs = await jobsFor(auto.id, order.id);
+    expect(jobs).toHaveLength(1);
+    expect(jobs[0].channel).toBe("SMS");
+    expect(jobs[0].status).toBe("SKIPPED");
+  });
+
+  // Владелец ВЫКЛЮЧИЛ QUO магазину — это решение «не шлём SMS», а не сбой. Подменять его почтой
+  // нельзя: один снятый флажок разослал бы письма по всем заказам магазина.
+  it("6c. QUO выключен владельцем (store_quo_disabled) → письма НЕТ даже при включённом fallback", async () => {
+    const site = await makeSite("6c");
+    await setupSiteEmail(site.id, "orders@site6c.example", 163);
+    const auto = await makeAutomation(site.id, { smsEnabled: true, emailFallbackEnabled: true });
+    const order = await makeOrder(site.id);
+    await fireTrigger(order);
+    const smsJob = (await jobsFor(auto.id, order.id)).find((j) => j.channel === "SMS")!;
+
+    await prisma.site.update({ where: { id: site.id }, data: { quoEnabled: false } });
+    await sendHandler(rec({ jobId: smsJob.id, orderId: order.id }));
+
+    const jobs = await jobsFor(auto.id, order.id);
+    expect(jobs).toHaveLength(1);
+    expect(jobs[0].lastErrorSafe).toBe("store_quo_disabled");
+  });
+});
+
+describe("6d. Дедуп fallback между правилами", () => {
+  // Прод-раскладка: два правила на одно событие (заказчику и получателю) и заказ, где телефон
+  // заказчика и получателя совпадают. Планировщик гасит правило «Получателю» как DUPLICATE_PHONE.
+  // Когда SMS правила-победителя не уходит, дедуп будит соседа — и без проверки на пути отправки
+  // оба слали заказчику по письму: два письма на одно событие, одно из них с текстом для получателя.
+  it("оживлённый дедупом сосед не создаёт второе письмо заказчику", async () => {
+    const site = await makeSite("6d");
+    await setupSiteEmail(site.id, "orders@site6d.example", 164);
+    const winner = await makeAutomation(site.id, { smsEnabled: true, emailFallbackEnabled: true, audience: "CUSTOMER" });
+    const loser = await makeAutomation(site.id, { smsEnabled: true, emailFallbackEnabled: true, audience: "RECIPIENT" });
+    const order = await makeOrder(site.id, { senderPhone: "+15557778888", recipientPhone: "+15557778888" });
+    await fireTrigger(order);
+
+    // Планировщик: победитель шлёт, сосед погашен по номеру.
+    expect((await jobsFor(loser.id, order.id))[0].lastErrorSafe).toBe("DUPLICATE_PHONE");
+
+    await prisma.site.update({ where: { id: site.id }, data: { quoPhoneNumberId: null } });
+    const winnerSms = (await jobsFor(winner.id, order.id)).find((j) => j.channel === "SMS")!;
+    await sendHandler(rec({ jobId: winnerSms.id, orderId: order.id }));
+
+    // skip() разбудил соседа — прогоняем и его, как это сделал бы воркер.
+    await sendAllScheduled(loser.id, order.id);
+
+    const emails = await prisma.automationJob.findMany({ where: { orderId: order.id, channel: "EMAIL" } });
+    const live = emails.filter((e) => e.status !== "SKIPPED");
+    expect(live).toHaveLength(1); // ровно одно письмо заказчику, а не два
+    expect(live[0].automationId).toBe(winner.id); // и это версия правила-победителя
+
+    const suppressed = emails.find((e) => e.automationId === loser.id);
+    expect(suppressed?.status).toBe("SKIPPED"); // молчание соседа объяснено в истории
+    expect(suppressed?.lastErrorSafe).toBe("DUPLICATE_EMAIL");
+  });
 });
 
 describe("7. Дублирующий Email не создаётся", () => {

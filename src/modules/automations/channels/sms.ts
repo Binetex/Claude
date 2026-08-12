@@ -13,12 +13,34 @@ import type { ChannelSender, ChannelSendContext, ChannelSendResult } from "./typ
 // гонка двух воркеров на одной попытке: ключ per-attempt уже сожжён неудачей, но следующая
 // попытка получит новый ключ, поэтому это тоже повторяемо, а не терминальный сбой.
 const RETRYABLE_CODES = new Set(["quo_server", "quo_network", "quo_rate_limit", "previous_attempt_failed"]);
+/**
+ * Подмножество SKIP_CODES, при котором включается «Email, если SMS недоступно». Граница узкая
+ * и проведена по одному вопросу: ХОТЕЛИ ли мы вообще отправить это SMS.
+ *
+ * Здесь — «хотели, но физически не смогли»: телефон непригоден, у магазина нет номера-отправителя
+ * при включённом QUO. Такое молчание и есть та дыра, ради которой настройка существует.
+ *
+ * Здесь НЕТ `store_quo_disabled` и `quo_not_configured`: выключенный QUO — это решение владельца
+ * «этот магазин не шлёт SMS», а не сбой. Подменять его рассылкой писем нельзя — выключение канала
+ * превратилось бы в смену канала, и один снятый флажок разослал бы почту по всем заказам магазина.
+ *
+ * Здесь НЕТ `too_long`, `empty_text`, `order_not_found`, `missing_idempotency_key`: это поломка
+ * шаблона или вызова. Письмо Brevo собирается из СВОЕГО шаблона, а не из текста SMS, поэтому
+ * fallback отправил бы другое сообщение и спрятал ошибку вместо того, чтобы её показать.
+ *
+ * Ошибки самого QUO (`quo_client`, `quo_server`, …) сюда не входят по построению: они не skip, а
+ * сбой отправки, и до fallback доходят через терминальный FAILED.
+ */
+export const SMS_UNAVAILABLE_CODES = new Set([
+  "invalid_target_phone", // телефон непригоден (нет, мусор, не парсится в E.164)
+  "store_no_quo_number", // QUO включён, но номера-отправителя нет — настройка сломана, не выключена
+]);
+
 // Config/precondition-коды: не сбой отправки, а «нельзя отправить» → job SKIPPED (не FAILED).
 const SKIP_CODES = new Set([
-  "store_no_quo_number",
+  ...SMS_UNAVAILABLE_CODES,
   "store_quo_disabled",
   "quo_not_configured",
-  "invalid_target_phone",
   "empty_text",
   "too_long",
   "order_not_found",
