@@ -1211,6 +1211,7 @@ model Order {
   assignments        OrderAssignment[]
   messages           Message[]
   communications     OrderCommunication[]
+  emailMessages      OrderEmailMessage[]
   deliveryIntent     DeliveryIntent?
   deliveries         Delivery[]
   telegramMessages   TelegramMessage[]
@@ -2417,4 +2418,70 @@ model PrintLayoutSettings {
 
   updatedBy String?
   updatedAt DateTime @updatedAt
+}
+
+// ─────────────────────────  ПЕРЕПИСКА ПО EMAIL (Email Factory)  ─────────────────────────
+
+/**
+ * Письмо, относящееся к заказу: входящее от клиента или наш ручной ответ. Провайдер —
+ * Email Factory (`mail.binetex.com`), ТОЛЬКО ручная переписка. Автоматические письма по событиям
+ * заказа живут в Brevo и сюда НЕ попадают: у них своя история в AutomationJob, и смешивать нельзя,
+ * иначе появится соблазн отвечать на автоматическое письмо из карточки.
+ * Почему отдельная модель, а не тип EMAIL в OrderCommunication: та таблица целиком про телефонию —
+ * `externalPhone` обязателен, есть длительность звонка, запись, транскрипт, привязка к номеру
+ * магазина в QUO. Письмо не имеет ни одного из этих полей и имеет свои (тема, тред). Втискивание
+ * дало бы наполовину пустую строку и вечное «если тип SMS, то…» в каждом запросе.
+ * `orderId` НЕОБЯЗАТЕЛЕН намеренно. Опрос сохраняет все входящие письма, а к заказу привязываются
+ * не все: клиент мог написать с другого адреса или не по заказу вовсе. Непривязанные НЕ
+ * показываются нигде — они нужны только как курсор опроса: без них `since` застревал бы на
+ * последнем привязанном письме и одни и те же письма выгружались бы снова и снова.
+ */
+model OrderEmailMessage {
+  id      String  @id @default(cuid())
+  orderId String?
+  order   Order?  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  provider          String  @default("EMAIL_FACTORY")
+  /**
+   * id письма у провайдера. Ключ идемпотентности опроса: одно письмо — одна строка.
+   */
+  providerMessageId String? @unique
+  /**
+   * Тред у провайдера — по нему уходит ответ (`POST /threads/{id}/reply`).
+   */
+  threadId          String?
+
+  direction CommunicationDirection
+  status    EmailMessageStatus     @default(RECEIVED)
+
+  fromEmail String
+  toEmail   String
+  subject   String?
+  /**
+   * ТОЛЬКО plain text. HTML не храним и не показываем: в карточке нужен смысл, а не вёрстка.
+   */
+  text      String
+
+  occurredAt DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  /**
+   * Идемпотентность исходящих — как `sendKey` у OrderCommunication. Строка создаётся ДО вызова
+   * провайдера: иначе успешная отправка, оборвавшаяся до записи, оставила бы клиента с письмом,
+   * которого нет в карточке, а повтор отправил бы второе.
+   */
+  sendKey      String? @unique
+  sentByUserId String?
+  errorSafe    String?
+
+  @@index([orderId, occurredAt])
+  @@index([direction, occurredAt])
+}
+
+enum EmailMessageStatus {
+  RECEIVED // входящее
+  PENDING // исходящее: строка создана, провайдер ещё не ответил
+  SENT
+  FAILED
 }

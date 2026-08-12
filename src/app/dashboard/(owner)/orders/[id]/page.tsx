@@ -35,6 +35,7 @@ import {
   updateOrderExpenseAction,
 } from "@/app/dashboard/orderExpenseActions";
 import { markOrderCommunicationsRead, countUnreadBySide, parseAttachments } from "@/integrations/quo/communicationsService";
+import { loadOrderEmails } from "@/integrations/emailFactory/read";
 import { FloristAvatar } from "@/components/FloristAvatar";
 
 export const dynamic = "force-dynamic";
@@ -96,6 +97,9 @@ export default async function OwnerOrderPage({ params }: { params: Promise<{ id:
   let communications: CommItem[] = [];
   let storeHasQuoNumber = false;
   let storeTimeZone: string | undefined;
+  // Переписка по email — своя таблица и своя вкладка; сбой её загрузки не должен ронять карточку.
+  const orderEmails = await loadOrderEmails(prisma, id).catch(() => []);
+
   let commUnread = { customer: 0, recipient: 0 };
   try {
     // Непрочитанные по сторонам считаем ДО пометки прочитанным (иначе всегда 0).
@@ -241,7 +245,8 @@ export default async function OwnerOrderPage({ params }: { params: Promise<{ id:
             customerPhone={order.senderPhone}
             recipientPhone={order.recipientPhone}
             storeHasQuoNumber={storeHasQuoNumber}
-            communications={communications}
+            emails={orderEmails}
+          communications={communications}
             storeTimeZone={storeTimeZone}
             unread={commUnread}
           />

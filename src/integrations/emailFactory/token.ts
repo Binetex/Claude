@@ -22,6 +22,9 @@ import { encryptSecret, decryptSecret, maskSecret, isCredentialCryptoConfigured 
 const PROVIDER = "EMAIL_FACTORY";
 const KIND = "api_token";
 
+/** Базовый адрес API. Константой: настройка, которую меняют раз в жизни, экрана не заслуживает. */
+export const EMAIL_FACTORY_BASE_URL = "https://mail.binetex.com";
+
 /** Короче этого токена у Email Factory не бывает — отсекаем обрезок, вставленный по ошибке. */
 const MIN_TOKEN_LENGTH = 20;
 

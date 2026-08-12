@@ -1,0 +1,45 @@
+"use server";
+import { revalidatePath } from "next/cache";
+import { requireUser } from "@/lib/rbac";
+import { prisma } from "@/lib/db";
+import { sendOrderEmailReply } from "@/integrations/emailFactory/send";
+
+type FormState = { ok?: boolean; error?: string } | null;
+
+const ERR_RU: Record<string, string> = {
+  empty_text: "Введите текст письма.",
+  too_long: "Слишком длинное письмо (макс. 10 000 символов).",
+  missing_idempotency_key: "Повторите отправку.",
+  no_thread: "Клиент ещё не писал по этому заказу — отвечать не на что.",
+  email_factory_not_configured: "Email Factory не подключён: введите токен в настройках.",
+  previous_attempt_failed: "Прошлая попытка не удалась и письмо не ушло. Нажмите «Ответить» ещё раз.",
+  ef_unauthorized: "Email Factory отклонил запрос: проверьте токен.",
+  ef_thread_not_found: "Тред переписки не найден на стороне почты.",
+  ef_validation_error: "Почта отклонила письмо: не хватает данных.",
+  ef_rate_limit: "Слишком часто — попробуйте через минуту.",
+  ef_server: "Почта временно недоступна, попробуйте позже.",
+  ef_network: "Сетевая ошибка при обращении к почте.",
+  ef_timeout: "Почта не ответила вовремя.",
+  ef_client: "Почта отклонила запрос.",
+  ef_bad_response: "Неожиданный ответ почты.",
+};
+
+/**
+ * Ответ клиенту по email из карточки заказа. Доступен ЛЮБОМУ сотруднику — как и отправка SMS:
+ * переписку ведёт тот, кто работает с заказом, а не только владелец.
+ *
+ * Адресат и тред НЕ приходят из браузера: сервер берёт их из последнего входящего письма этого
+ * заказа. Иначе подменой поля можно было бы написать в чужую переписку.
+ */
+export async function sendOrderEmailReplyAction(_prev: FormState, formData: FormData): Promise<FormState> {
+  const user = await requireUser();
+  const orderId = String(formData.get("orderId") ?? "");
+  const text = String(formData.get("text") ?? "");
+  const sendKey = String(formData.get("idempotencyKey") ?? "");
+  if (!orderId) return { error: "Некорректный запрос." };
+
+  const res = await sendOrderEmailReply(prisma, { orderId, text, sendKey, sentByUserId: user.id });
+  revalidatePath(`/dashboard/orders/${orderId}`);
+  if (res.ok) return { ok: true };
+  return { error: ERR_RU[res.code] ?? "Не удалось отправить письмо." };
+}

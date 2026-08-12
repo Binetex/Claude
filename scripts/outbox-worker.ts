@@ -35,6 +35,7 @@ import { buildAutomationTriggerHandler, buildAutomationSendHandler } from "@/mod
 import { AUTOMATION_TRIGGER_EVENT, AUTOMATION_SEND_EVENT } from "@/modules/automations/events";
 import { buildFlowStepHandler } from "@/modules/automations/flows/handler";
 import { FLOW_STEP_EVENT } from "@/modules/automations/flows/events";
+import { ingestInboundEmails } from "@/integrations/emailFactory/ingest";
 import { buildTelegramNotifyHandler } from "@/integrations/telegram/handler";
 import { buildDeadLetterAlert } from "@/integrations/telegram/deadLetterAlert";
 import { TELEGRAM_NOTIFY_EVENT } from "@/integrations/telegram/events";
@@ -217,6 +218,19 @@ async function main() {
     kickoffMs: 35_000,
     run: () => syncOpenDeliveryStatuses(prisma),
     report: (r) => r.scanned > 0,
+  });
+
+  // Входящая почта Email Factory. Опрос, а не вебхук: у провайдера нет фильтра по адресу
+  // получателя, поэтому вебхук всё равно требовал бы доработки на его стороне, а `since` работает.
+  // Курсор отдельно не хранится — это время последнего сохранённого письма (см. ingest.ts).
+  // Без токена задача штатно молчит: она не «сломана», её просто ещё не подключили.
+  schedule({
+    name: "emailFactory.ingest",
+    enabled: true,
+    intervalMs: Number(process.env.EMAIL_FACTORY_INGEST_MS ?? 300_000), // 5 мин
+    kickoffMs: 65_000,
+    run: () => ingestInboundEmails(prisma),
+    report: (r) => r.stored > 0 || (r.skipped !== null && r.skipped !== "no_token"),
   });
 
   // Диспетчер Airwallex: один индексированный SELECT, LIMIT 50, задачи — в outbox.
