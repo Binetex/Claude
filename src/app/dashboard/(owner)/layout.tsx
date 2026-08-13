@@ -14,7 +14,6 @@ const nav: NavItem[] = [
   { href: "/dashboard/burq", label: "Доставка (Burq)" },
   { href: "/dashboard/automations", label: "Автоматизации" },
   { href: "/dashboard/settings/telegram", label: "Telegram" },
-  { href: "/dashboard/settings/email-factory", label: "Email Factory" },
   { href: "/dashboard/settings/print", label: "Печать записок" },
   { href: "/dashboard/users", label: "Пользователи" },
 ];

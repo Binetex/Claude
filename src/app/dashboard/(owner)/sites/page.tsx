@@ -9,6 +9,8 @@ import { loadSiteEmailSettingsViews } from "@/integrations/email/settings";
 import { listQuoSigningSecretsMasked } from "@/integrations/quo/signingSecrets";
 import { getQuoSigningKeys } from "@/integrations/quo/config";
 import { isCredentialCryptoConfigured } from "@/lib/crypto/secretBox";
+import { EmailFactoryTokenPanel } from "./EmailFactoryTokenPanel";
+import { loadEmailFactoryView } from "@/integrations/emailFactory/token";
 
 export const dynamic = "force-dynamic";
 
@@ -24,6 +26,7 @@ export const dynamic = "force-dynamic";
  * начиналась бы не с сайтов.
  */
 export default async function SitesPage() {
+  const emailFactoryView = await loadEmailFactoryView(prisma);
   // Явный select: ни секретов, ни полей, которые нужны только на странице магазина.
   const sites = await prisma.site.findMany({
     select: {
@@ -105,7 +108,10 @@ export default async function SitesPage() {
         })}
       </div>
 
-      {/* Ниже — то, что НЕ принадлежит конкретному магазину. */}
+      {/* Ниже — то, что НЕ принадлежит конкретному магазину. Токен Email Factory здесь по той же
+          причине: он один на аккаунт и видит все домены. Выбор домена — в карточке магазина. */}
+      <EmailFactoryTokenPanel view={emailFactoryView} />
+
       <SiteQuoWebhookSecurity
         secrets={quoSecrets.map((s) => ({ id: s.id, maskedSuffix: s.maskedSuffix, createdAt: s.createdAt.toISOString() }))}
         envCount={getQuoSigningKeys().length}

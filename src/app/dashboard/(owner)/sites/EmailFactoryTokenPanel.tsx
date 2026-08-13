@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { Card, CardHeader, CardTitle, CardBody } from "@/components/ui/Card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { ownerSaveEmailFactoryToken, ownerClearEmailFactoryToken } from "./actions";
+import { ownerSaveEmailFactoryToken, ownerClearEmailFactoryToken } from "./emailFactoryActions";
 import type { EmailFactoryView } from "@/integrations/emailFactory/token";
 
 /**
@@ -15,7 +15,7 @@ import type { EmailFactoryView } from "@/integrations/emailFactory/token";
  * результаты записаны в память проекта — временный блок с прогоном запросов, который для этого
  * стоял здесь, убран, свою задачу он выполнил.
  */
-export function EmailFactoryPanel({ view }: { view: EmailFactoryView }) {
+export function EmailFactoryTokenPanel({ view }: { view: EmailFactoryView }) {
   const router = useRouter();
   const [value, setValue] = useState("");
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);

@@ -47,7 +47,7 @@ export async function sendOrderEmail(
 
   const order = await prisma.order.findUnique({
     where: { id: input.orderId },
-    select: { orderNumber: true, senderEmail: true, site: { select: { emailSettings: { select: { senderEmail: true } } } } },
+    select: { orderNumber: true, senderEmail: true, site: { select: { emailFactoryDomain: true } } },
   });
   if (!order) return { ok: false, code: "order_not_found" };
 
@@ -103,7 +103,7 @@ export async function sendOrderEmail(
     // Ответ идёт в тред — домен там уже определён, повторно его называть не нужно.
     res = await replyToThread(token, lastInbound.threadId, text);
   } else {
-    const domain = await resolveSendingDomain(token, order.site?.emailSettings?.senderEmail ?? null);
+    const domain = await resolveSendingDomain(token, order.site?.emailFactoryDomain ?? null);
     if (!domain.ok) {
       await prisma.orderEmailMessage.update({ where: { id: pendingId }, data: { status: "FAILED", errorSafe: domain.code } });
       return { ok: false, code: domain.code, messageId: pendingId };
@@ -132,21 +132,27 @@ export async function sendOrderEmail(
 }
 
 /**
- * Домен, от имени которого уходит первое письмо. Один домен — берём его. Несколько — тот, что
- * совпадает с адресом отправителя магазина: иначе письмо про заказ Julie's ушло бы с адреса
- * TheFlow. Совпадения нет — честная ошибка вместо случайного выбора.
+ * Домен, от имени которого уходит первое письмо.
+ *
+ * Выбранный в настройках магазина — главный источник. Он ПЕРЕПРОВЕРЯЕТСЯ по живому списку: домен
+ * могли отключить в Email Factory уже после выбора, и отправка с него молча провалилась бы на их
+ * стороне. Если выбора нет, а домен в аккаунте ровно один — берём его: заводить настройку ради
+ * единственного варианта незачем. Во всех остальных случаях честная ошибка, а не случайный выбор:
+ * промах отправил бы письмо про заказ одного магазина с адреса другого.
  */
 async function resolveSendingDomain(
   token: string,
-  siteSenderEmail: string | null
+  siteDomain: string | null
 ): Promise<{ ok: true; domain: string } | { ok: false; code: string }> {
   const res = await listDomains(token);
   if (!res.ok) return { ok: false, code: res.code };
   const ready = res.data.filter((d) => d.status.toUpperCase() === "READY");
   if (ready.length === 0) return { ok: false, code: "no_sending_domain" };
-  if (ready.length === 1) return { ok: true, domain: ready[0].domain };
 
-  const own = siteSenderEmail?.split("@")[1]?.toLowerCase();
-  const match = own ? ready.find((d) => d.domain.toLowerCase() === own) : undefined;
-  return match ? { ok: true, domain: match.domain } : { ok: false, code: "domain_ambiguous" };
+  if (siteDomain) {
+    const chosen = ready.find((d) => d.domain.toLowerCase() === siteDomain.toLowerCase());
+    return chosen ? { ok: true, domain: chosen.domain } : { ok: false, code: "domain_not_ready" };
+  }
+  if (ready.length === 1) return { ok: true, domain: ready[0].domain };
+  return { ok: false, code: "domain_not_selected" };
 }

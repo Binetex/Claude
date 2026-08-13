@@ -399,6 +399,15 @@ model Site {
   // Пусто/NULL → стандартная инструкция выключена (отдельный boolean не нужен).
   burqDefaultDropoffInstructions String?
 
+  /**
+   * Домен Email Factory, от имени которого магазин пишет клиентам вручную. Хранится ЗДЕСЬ, рядом
+   * с quo*-полями, а не в SiteEmailSettings: там настройки Brevo, и один адрес на два независимых
+   * канала означал бы, что включение рассылок молча меняет обратный адрес переписки.
+   * null = не выбран. Когда домен в Email Factory ровно один, он берётся и без выбора — настройка
+   * нужна там, где доменов несколько и промах отправил бы письмо с чужого адреса.
+   */
+  emailFactoryDomain String?
+
   // ── QUO (ex-OpenPhone): номер магазина для исходящих SMS ──
   quoPhoneNumberId   String? // QUO phone number id (PN…) — используется как `from` при отправке
   quoPhoneNumber     String? // E.164 номер магазина (для отображения и storePhone)
