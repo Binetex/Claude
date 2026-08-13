@@ -182,7 +182,11 @@ export function createRealBurqClient(cfg: RealConfig): BurqClient {
       } catch {
         /* тело не JSON — код неизвестен */
       }
-      throw new BurqApiError(`Burq ${ctx} failed (${res.status})`, res.status, code);
+      // Тело ответа — в сообщение, усечённо. Без него в dead-letter оставался голый «(400)», и
+      // причину приходилось искать сравнением заказов между собой (так разбирали THEFLOW-20429).
+      // Секретов в ответе Burq нет: это эхо нашего же запроса и текст валидации.
+      const detail = text.trim().slice(0, 300);
+      throw new BurqApiError(`Burq ${ctx} failed (${res.status})${detail ? `: ${detail}` : ""}`, res.status, code);
     }
     return normalizeBurqOrder(JSON.parse(text) as BurqRawOrderResponse);
   }

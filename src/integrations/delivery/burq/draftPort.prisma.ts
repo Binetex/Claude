@@ -13,6 +13,7 @@ import { getBurqDimensions } from "./settings";
 import { combineDropoffNotes } from "./dropoffNotes";
 import { resolvePickupForOrder } from "./pickupResolution";
 import type { DraftContext, DraftCreatePort, PersistDraftInput } from "./draftHandler";
+import { resolveDropoffPhone } from "./dropoffPhone";
 
 export function createPrismaDraftPort(prisma: PrismaClient): DraftCreatePort {
   return {
@@ -26,13 +27,14 @@ export function createPrismaDraftPort(prisma: PrismaClient): DraftCreatePort {
           currentFloristId: true,
           recipientName: true,
           recipientPhone: true,
+          senderPhone: true,
           addressLine: true,
           apartment: true,
           city: true,
           zip: true,
           customerNote: true,
           pickupLocationOverrideId: true,
-          site: { select: { burqDraftAutoCreateEnabled: true, burqDefaultDropoffInstructions: true, timezone: true } },
+          site: { select: { burqDraftAutoCreateEnabled: true, burqDefaultDropoffInstructions: true, timezone: true, quoPhoneNumber: true } },
           deliveryIntent: { select: { scheduleVersion: true } },
           currentFlorist: { select: { id: true, pickupLocations: true } },
           deliveries: { select: { attemptNumber: true, isCurrentAttempt: true, externalDeliveryId: true } },
@@ -58,7 +60,13 @@ export function createPrismaDraftPort(prisma: PrismaClient): DraftCreatePort {
           timezone: order.site?.timezone ?? null,
           dropoff: {
             recipientName: order.recipientName,
-            recipientPhone: order.recipientPhone,
+            // Пустой телефон Burq отвергает с 400, и черновик умирает в dead-letter. Подставляем
+            // по цепочке получатель → заказчик → магазин; в самом заказе поле не трогаем.
+            recipientPhone: resolveDropoffPhone({
+              recipientPhone: order.recipientPhone,
+              senderPhone: order.senderPhone,
+              storePhone: order.site?.quoPhoneNumber,
+            }),
             addressLine: order.addressLine,
             apartment: order.apartment,
             city: order.city,
