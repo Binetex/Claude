@@ -12,7 +12,8 @@ import "server-only";
  *    вернул то же письмо, что и реальный;
  *  - `POST /api/v1/threads/{id}/reply` принимает `{text}` и отвечает 404 THREAD_NOT_FOUND на
  *    неизвестный тред;
- *  - `POST /api/v1/messages` требует `to`, `subject`, `text` (никакого `domain`);
+ *  - `POST /api/v1/messages` требует `to`, `subject`, `text` И `domain` — последний проверяется
+ *    ПОСЛЕ адреса, поэтому пробы с негодным `to` его не показывают (на этом я и ошибся сначала);
  *  - ошибки приходят как `{error:{code,message}}`.
  */
 import { EMAIL_FACTORY_BASE_URL } from "./token";
@@ -31,7 +32,10 @@ export type EmailFactoryMessage = {
   occurredAt: Date;
 };
 
-export type ClientResult<T> = { ok: true; data: T } | { ok: false; code: string; retryable: boolean };
+export type ClientResult<T> =
+  | { ok: true; data: T }
+  /** `detail` — текст провайдера как есть, для истории и диагностики. Секретов там нет. */
+  | { ok: false; code: string; detail?: string | null; retryable: boolean };
 
 /** Временные беды: повторить позже. Всё остальное повторять бессмысленно. */
 const RETRYABLE = new Set(["ef_network", "ef_timeout", "ef_server", "ef_rate_limit"]);
@@ -60,7 +64,7 @@ async function call(token: string, method: string, path: string, body?: unknown)
     });
   } catch (err) {
     const code = err instanceof Error && err.name === "TimeoutError" ? "ef_timeout" : "ef_network";
-    return { ok: false, code, retryable: true };
+    return { ok: false, code, detail: null, retryable: true };
   }
 
   const raw = await res.text();
@@ -69,14 +73,16 @@ async function call(token: string, method: string, path: string, body?: unknown)
     parsed = raw ? JSON.parse(raw) : null;
   } catch {
     // Не JSON — почти наверняка HTML страницы входа, то есть проблема доступа, а не данных.
-    return { ok: false, code: "ef_bad_response", retryable: false };
+    return { ok: false, code: "ef_bad_response", detail: null, retryable: false };
   }
 
   if (!res.ok) {
     // Код провайдера информативнее HTTP-статуса (THREAD_NOT_FOUND, VALIDATION_ERROR), берём его.
-    const providerCode = (parsed as { error?: { code?: string } } | null)?.error?.code;
-    const code = providerCode ? `ef_${providerCode.toLowerCase()}` : codeFromStatus(res.status);
-    return { ok: false, code, retryable: RETRYABLE.has(code) || res.status >= 500 || res.status === 429 };
+    const err = (parsed as { error?: { code?: string; message?: string } } | null)?.error;
+    const code = err?.code ? `ef_${err.code.toLowerCase()}` : codeFromStatus(res.status);
+    // Текст провайдера сохраняем отдельно: без него `ef_validation_error` не отвечает на вопрос
+    // «чего не хватило», и причину приходится искать пробами по живому API.
+    return { ok: false, code, detail: err?.message?.slice(0, 200) ?? null, retryable: RETRYABLE.has(code) || res.status >= 500 || res.status === 429 };
   }
   return { ok: true, data: parsed };
 }
@@ -124,7 +130,7 @@ export async function listInbound(token: string, since: Date, limit = 100): Prom
   if (!res.ok) return res;
 
   const list = (res.data as { data?: unknown } | null)?.data;
-  if (!Array.isArray(list)) return { ok: false, code: "ef_bad_response", retryable: false };
+  if (!Array.isArray(list)) return { ok: false, code: "ef_bad_response", detail: null, retryable: false };
   return { ok: true, data: list.map(toMessage).filter((m): m is EmailFactoryMessage => m !== null) };
 }
 
@@ -146,14 +152,16 @@ export async function replyToThread(token: string, threadId: string, text: strin
 }
 
 /**
- * Новое письмо, когда переписки ещё нет. Адрес отправителя НЕ передаётся: его задаёт домен
- * аккаунта Email Factory (проверено — `from`/`domain` в теле игнорируются). Отсюда следствие,
- * которое важнее самой отправки: писать можно только с того домена, что подключён в Email
- * Factory. Сегодня он один — theflow.la.
+ * Новое письмо, когда переписки ещё нет.
+ *
+ * `domain` ОБЯЗАТЕЛЕН — им выбирается отправляющий проект: без него приходит
+ * `VALIDATION_ERROR: Name the sending project with either "domainId" or "domain"`. Проверка эта
+ * идёт ПОСЛЕ проверки `to`, поэтому пробы с заведомо негодным адресом её не показывают — на этом
+ * я и ошибся, решив сначала, что домен игнорируется.
  */
 export async function sendNewMessage(
   token: string,
-  input: { to: string; subject: string; text: string }
+  input: { to: string; subject: string; text: string; domain: string }
 ): Promise<ClientResult<SentMessage>> {
   const res = await call(token, "POST", "/api/v1/messages", input);
   if (!res.ok) return res;
@@ -165,7 +173,7 @@ export async function listDomains(token: string): Promise<ClientResult<{ domain:
   const res = await call(token, "GET", "/api/v1/domains");
   if (!res.ok) return res;
   const list = (res.data as { data?: unknown } | null)?.data;
-  if (!Array.isArray(list)) return { ok: false, code: "ef_bad_response", retryable: false };
+  if (!Array.isArray(list)) return { ok: false, code: "ef_bad_response", detail: null, retryable: false };
   return {
     ok: true,
     data: list.flatMap((d) => {

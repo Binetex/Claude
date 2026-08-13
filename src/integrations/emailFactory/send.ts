@@ -7,9 +7,10 @@ import "server-only";
  * входящего письма заказа; при первом письме — адрес заказчика из самого заказа. Принимать
  * адресата из формы нельзя: подменой поля можно было бы написать кому угодно от имени магазина.
  *
- * Адрес ОТПРАВИТЕЛЯ мы не задаём вовсе — его определяет домен, подключённый в Email Factory
- * (проверено: `from`/`domain` в теле игнорируются). Значит писать можно только тем магазинам, чей
- * домен там подключён; сегодня подключён один — theflow.la.
+ * Отправляющий домен ОБЯЗАТЕЛЕН для первого письма и берётся из самого Email Factory. Список
+ * доменов спрашиваем при отправке, а не храним у себя настройкой: подключение домена делается на
+ * его стороне, и наша копия молча разъехалась бы с правдой. Когда домен один — берём его; когда
+ * несколько — тот, что совпадает с адресом отправителя магазина в настройках Email.
  *
  * Идемпотентность — по образцу `sendOrderSms`: строка создаётся ДО вызова провайдера под
  * уникальным `sendKey`. Успешная отправка, оборвавшаяся до записи, иначе оставила бы клиента с
@@ -18,7 +19,7 @@ import "server-only";
  */
 import type { PrismaClient } from "@/generated/prisma/client";
 import { resolveEmailFactoryToken } from "./token";
-import { replyToThread, sendNewMessage, type SentMessage, type ClientResult } from "./client";
+import { replyToThread, sendNewMessage, listDomains, type SentMessage, type ClientResult } from "./client";
 
 export const EMAIL_REPLY_MAX_LENGTH = 10_000;
 
@@ -46,7 +47,7 @@ export async function sendOrderEmail(
 
   const order = await prisma.order.findUnique({
     where: { id: input.orderId },
-    select: { orderNumber: true, senderEmail: true },
+    select: { orderNumber: true, senderEmail: true, site: { select: { emailSettings: { select: { senderEmail: true } } } } },
   });
   if (!order) return { ok: false, code: "order_not_found" };
 
@@ -97,12 +98,23 @@ export async function sendOrderEmail(
     return { ok: true, messageId: existing.id, duplicate: true };
   }
 
-  const res: ClientResult<SentMessage> = lastInbound?.threadId
-    ? await replyToThread(token, lastInbound.threadId, text)
-    : await sendNewMessage(token, { to: toEmail, subject, text });
+  let res: ClientResult<SentMessage>;
+  if (lastInbound?.threadId) {
+    // Ответ идёт в тред — домен там уже определён, повторно его называть не нужно.
+    res = await replyToThread(token, lastInbound.threadId, text);
+  } else {
+    const domain = await resolveSendingDomain(token, order.site?.emailSettings?.senderEmail ?? null);
+    if (!domain.ok) {
+      await prisma.orderEmailMessage.update({ where: { id: pendingId }, data: { status: "FAILED", errorSafe: domain.code } });
+      return { ok: false, code: domain.code, messageId: pendingId };
+    }
+    res = await sendNewMessage(token, { to: toEmail, subject, text, domain: domain.domain });
+  }
 
   if (!res.ok) {
-    await prisma.orderEmailMessage.update({ where: { id: pendingId }, data: { status: "FAILED", errorSafe: res.code } });
+    // Текст провайдера кладём рядом с кодом: он и объясняет, чего не хватило.
+    const safe = [res.code, res.detail].filter(Boolean).join(": ").slice(0, 250);
+    await prisma.orderEmailMessage.update({ where: { id: pendingId }, data: { status: "FAILED", errorSafe: safe } });
     return { ok: false, code: res.code, messageId: pendingId };
   }
 
@@ -117,4 +129,24 @@ export async function sendOrderEmail(
     },
   });
   return { ok: true, messageId: pendingId };
+}
+
+/**
+ * Домен, от имени которого уходит первое письмо. Один домен — берём его. Несколько — тот, что
+ * совпадает с адресом отправителя магазина: иначе письмо про заказ Julie's ушло бы с адреса
+ * TheFlow. Совпадения нет — честная ошибка вместо случайного выбора.
+ */
+async function resolveSendingDomain(
+  token: string,
+  siteSenderEmail: string | null
+): Promise<{ ok: true; domain: string } | { ok: false; code: string }> {
+  const res = await listDomains(token);
+  if (!res.ok) return { ok: false, code: res.code };
+  const ready = res.data.filter((d) => d.status.toUpperCase() === "READY");
+  if (ready.length === 0) return { ok: false, code: "no_sending_domain" };
+  if (ready.length === 1) return { ok: true, domain: ready[0].domain };
+
+  const own = siteSenderEmail?.split("@")[1]?.toLowerCase();
+  const match = own ? ready.find((d) => d.domain.toLowerCase() === own) : undefined;
+  return match ? { ok: true, domain: match.domain } : { ok: false, code: "domain_ambiguous" };
 }
