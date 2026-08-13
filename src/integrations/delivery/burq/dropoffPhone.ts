@@ -16,9 +16,13 @@
 /** Общий запасной номер: TheFlow, он же основной номер поддержки. */
 export const DEFAULT_DROPOFF_PHONE = "+13238008421";
 
-/** Номер считается пригодным, только если в нём есть хоть одна цифра. */
+/**
+ * Пригоден ли номер. Одной цифры мало: в поле телефона встречается «кв. 5» и «1 звонок не
+ * работает», а такой «номер» вытеснил бы рабочий телефон заказчика и уехал бы в Burq. Считаем
+ * цифры — короче семи телефоном не бывает нигде.
+ */
 function usable(phone: string | null | undefined): boolean {
-  return !!phone && /\d/.test(phone);
+  return (phone ?? "").replace(/\D/g, "").length >= 7;
 }
 
 export function resolveDropoffPhone(input: {

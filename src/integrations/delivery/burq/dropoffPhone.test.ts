@@ -30,6 +30,14 @@ describe("телефон для dropoff", () => {
     }
   });
 
+  it("мусор с одной-двумя цифрами телефоном не считается", () => {
+    // В поле телефона встречается «кв. 5» и «1 звонок не работает». Раньше такое вытесняло
+    // рабочий номер заказчика и уезжало в Burq вместо него.
+    for (const junk of ["кв. 5", "1 звонок не работает", "дом 12"]) {
+      expect(resolveDropoffPhone({ recipientPhone: junk, senderPhone: "+13105551234", storePhone: null })).toBe("+13105551234");
+    }
+  });
+
   it("обрезает пробелы по краям", () => {
     expect(resolveDropoffPhone({ recipientPhone: "  +13105551234 ", senderPhone: null, storePhone: null })).toBe("+13105551234");
   });

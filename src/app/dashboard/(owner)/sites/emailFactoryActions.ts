@@ -41,6 +41,17 @@ export async function ownerSetSiteEmailFactoryDomain(siteId: string, domain: str
   await requireRole("OWNER");
   const value = domain.trim();
   // Пустая строка — осознанный сброс «не выбран», а не ошибка ввода.
+  if (value !== "") {
+    // Сверяем со списком аккаунта: форма отдаёт только подтверждённые домены, но server action
+    // вызывается и напрямую. Иначе на экране было бы зелёное «домен выбран», а первое письмо
+    // упиралось бы в domain_not_ready — ошибка всплыла бы там, где её не ждут.
+    const token = await resolveEmailFactoryToken(prisma);
+    if (!token) return { error: "Токен Email Factory не задан." };
+    const res = await listDomains(token);
+    if (!res.ok) return { error: res.detail ?? res.code };
+    const known = res.data.some((d) => d.domain.toLowerCase() === value.toLowerCase() && d.status.toUpperCase() === "READY");
+    if (!known) return { error: `Домен ${value} не подтверждён в Email Factory.` };
+  }
   await prisma.site.update({ where: { id: siteId }, data: { emailFactoryDomain: value === "" ? null : value } });
   revalidatePath(`/dashboard/sites/${siteId}`);
   return { ok: true, message: value === "" ? "Домен снят." : `Домен ${value} сохранён.` };

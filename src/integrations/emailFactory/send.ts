@@ -99,6 +99,7 @@ export async function sendOrderEmail(
   }
 
   let res: ClientResult<SentMessage>;
+  let sentFromAddress: string | null = null;
   if (lastInbound?.threadId) {
     // Ответ идёт в тред — домен там уже определён, повторно его называть не нужно.
     res = await replyToThread(token, lastInbound.threadId, text);
@@ -109,6 +110,9 @@ export async function sendOrderEmail(
       return { ok: false, code: domain.code, messageId: pendingId };
     }
     res = await sendNewMessage(token, { to: toEmail, subject, text, domain: domain.domain });
+    // Теперь домен известен — дописываем адрес отправителя, иначе у первого письма он навсегда
+    // остался бы пустым, и «с какого адреса мы писали этому клиенту» было бы не восстановить.
+    sentFromAddress = domain.email;
   }
 
   if (!res.ok) {
@@ -126,6 +130,7 @@ export async function sendOrderEmail(
       // У первого письма тред появляется только сейчас — без него следующий ответ ушёл бы
       // отдельной цепочкой, и клиент увидел бы два несвязанных письма.
       threadId: res.data.threadId ?? lastInbound?.threadId ?? null,
+      ...(sentFromAddress ? { fromEmail: sentFromAddress } : {}),
     },
   });
   return { ok: true, messageId: pendingId };
@@ -143,7 +148,7 @@ export async function sendOrderEmail(
 async function resolveSendingDomain(
   token: string,
   siteDomain: string | null
-): Promise<{ ok: true; domain: string } | { ok: false; code: string }> {
+): Promise<{ ok: true; domain: string; email: string } | { ok: false; code: string }> {
   const res = await listDomains(token);
   if (!res.ok) return { ok: false, code: res.code };
   const ready = res.data.filter((d) => d.status.toUpperCase() === "READY");
@@ -151,8 +156,8 @@ async function resolveSendingDomain(
 
   if (siteDomain) {
     const chosen = ready.find((d) => d.domain.toLowerCase() === siteDomain.toLowerCase());
-    return chosen ? { ok: true, domain: chosen.domain } : { ok: false, code: "domain_not_ready" };
+    return chosen ? { ok: true, domain: chosen.domain, email: chosen.email } : { ok: false, code: "domain_not_ready" };
   }
-  if (ready.length === 1) return { ok: true, domain: ready[0].domain };
+  if (ready.length === 1) return { ok: true, domain: ready[0].domain, email: ready[0].email };
   return { ok: false, code: "domain_not_selected" };
 }
