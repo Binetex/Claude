@@ -1,8 +1,8 @@
 "use client";
-import { useActionState } from "react";
+import { useActionState, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { ZoomableImage } from "@/components/ImageLightbox";
-import { resolveDeliveryAction, createNewDeliveryAttemptAction, refetchPodAction } from "./deliveryActions";
+import { resolveDeliveryAction, createNewDeliveryAttemptAction, refetchPodAction, confirmDeliveryActualCostAction } from "./deliveryActions";
 import { BurqLinkForm } from "./BurqLinkForm";
 
 export type DeliveryPanelData = {
@@ -93,12 +93,16 @@ export function BurqDeliveryPanel({
   intent,
   orderStatus,
   attempts,
+  actualCost,
+  canEditActualCost,
 }: {
   orderId: string;
   delivery: DeliveryPanelData;
   intent: IntentData;
   orderStatus: string;
   attempts: DeliveryAttempt[];
+  actualCost: { amount: number; confirmedAt: string | null; source: string | null };
+  canEditActualCost: boolean;
 }) {
   const [state, action, pending] = useActionState(resolveDeliveryAction, null);
   const [retryState, retryAction, retryPending] = useActionState(createNewDeliveryAttemptAction, null);
@@ -111,6 +115,8 @@ export function BurqDeliveryPanel({
   return (
     <div className="space-y-3 border-t border-slate-100 pt-3 text-sm">
       <div className="text-xs font-semibold tracking-wide text-slate-400 uppercase">Доставка Burq</div>
+
+      <ActualCostBlock orderId={orderId} actualCost={actualCost} canEdit={canEditActualCost} burq={delivery} />
 
       {!delivery && (
         <div className="text-slate-500">
@@ -167,26 +173,6 @@ export function BurqDeliveryPanel({
             <div className="text-xs text-slate-600">
               Курьер: <span className="font-medium text-slate-800">{delivery.courierName}</span>
               {delivery.courierPhone && <span className="text-slate-500"> · {delivery.courierPhone}</span>}
-            </div>
-          )}
-
-          {/* Стоимость доставки (факт) — только Uber, появляется после dispatch. */}
-          {!isCancelledAttempt && (
-            <div className="rounded-md border border-slate-200 bg-slate-50 p-2">
-              {delivery.finalCost != null ? (
-                <div className="space-y-0.5">
-                  <div className="text-xs text-slate-500">Provider: <span className="font-medium text-slate-700">Uber</span></div>
-                  <div className="text-sm">
-                    Доставка (факт): <span className="font-semibold text-slate-900">${delivery.finalCost.toFixed(2)}</span>
-                    {delivery.currency && delivery.currency.toUpperCase() !== "USD" && <span className="ml-1 text-xs text-slate-400">{delivery.currency.toUpperCase()}</span>}
-                  </div>
-                  {delivery.finalCostUpdatedAt && (
-                    <div className="text-[11px] text-slate-400">обновлено: {new Date(delivery.finalCostUpdatedAt).toLocaleString()}</div>
-                  )}
-                </div>
-              ) : (
-                <div className="text-xs text-slate-500">Стоимость появится после выбора Uber и отправки доставки в Burq.</div>
-              )}
             </div>
           )}
 
@@ -282,6 +268,99 @@ export function BurqDeliveryPanel({
 
       {/* Ручная привязка существующего Burq Order (o_...) — доступна всегда. */}
       <BurqLinkForm orderId={orderId} />
+    </div>
+  );
+}
+
+/**
+ * Фактическая стоимость доставки — та самая, без подтверждения которой финансовый модуль не
+ * считает ВЕСЬ ДЕНЬ. Показывается ВСЕГДА, а не только при созданной доставке Burq: чаще всего
+ * подтверждать приходится как раз там, где Burq не участвовал — отвезли сами или чужим курьером.
+ *
+ * Ноль вводится явно и это нормальный ответ. Пустое поле означает «не знаем, сколько стоило», и
+ * подменять его нулём нельзя: прибыль дня окажется завышенной.
+ */
+function ActualCostBlock({
+  orderId,
+  actualCost,
+  canEdit,
+  burq,
+}: {
+  orderId: string;
+  actualCost: { amount: number; confirmedAt: string | null; source: string | null };
+  canEdit: boolean;
+  burq: DeliveryPanelData | null;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [state, action, pending] = useActionState(confirmDeliveryActualCostAction, null);
+
+  const confirmed = actualCost.confirmedAt !== null;
+  // Флористу и колл-центру блок показывается ТОЛЬКО когда стоимость подтверждена. «Не
+  // подтверждена» и объяснение про расчёт дня — язык владельца: правку они всё равно сделать не
+  // могут, а вопросы про финансы у них появятся.
+  if (!canEdit && !confirmed) return null;
+  // Подпись про источник: через месяц не вспомнить, ноль поставил человек или это цифра курьера.
+  const sourceLabel =
+    actualCost.source === "MANUAL" ? "указано вручную"
+    : actualCost.source === "BURQ" ? "из Burq"
+    : confirmed ? "источник неизвестен"
+    : null;
+
+  return (
+    <div className="rounded-md border border-slate-200 bg-slate-50 p-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="text-sm">
+          Доставка (факт):{" "}
+          {confirmed ? (
+            <span className="font-semibold text-slate-900">${actualCost.amount.toFixed(2)}</span>
+          ) : (
+            <span className="font-medium text-amber-700">не подтверждена</span>
+          )}
+        </div>
+        {canEdit && !editing && (
+          <Button type="button" size="sm" variant="ghost" onClick={() => setEditing(true)}>
+            {confirmed ? "Изменить" : "Указать"}
+          </Button>
+        )}
+      </div>
+
+      {sourceLabel && (
+        <div className="text-[11px] text-slate-400">
+          {sourceLabel}
+          {actualCost.source === "BURQ" && burq?.finalCostUpdatedAt && ` · обновлено ${new Date(burq.finalCostUpdatedAt).toLocaleString()}`}
+        </div>
+      )}
+
+      {canEdit && !confirmed && (
+        // Не «ошибка», а объяснение: без этой отметки день не посчитается, и человек должен
+        // понимать, почему его просят нажать кнопку.
+        <div className="mt-1 text-[11px] text-slate-500">
+          Пока не подтверждена, день не попадёт в расчёт финансов. Отвезли сами — укажите 0.
+        </div>
+      )}
+
+      {burq?.finalCost != null && actualCost.source !== "BURQ" && (
+        // Burq свою цифру прислал, но в расчёт идёт другая — молчать об этом нельзя.
+        <div className="mt-1 text-[11px] text-slate-500">Burq сообщил ${burq.finalCost.toFixed(2)}.</div>
+      )}
+
+      {editing && !state?.ok && (
+        <form action={action} className="mt-2 flex flex-wrap items-center gap-2">
+          <input type="hidden" name="orderId" value={orderId} />
+          <input
+            name="amount"
+            defaultValue={confirmed ? actualCost.amount.toFixed(2) : "0"}
+            inputMode="decimal"
+            autoFocus
+            className="w-28 rounded border border-slate-300 px-2 py-1 text-sm"
+          />
+          <Button type="submit" size="sm" disabled={pending}>{pending ? "Сохранение…" : "Подтвердить"}</Button>
+          <Button type="button" size="sm" variant="ghost" onClick={() => setEditing(false)} disabled={pending}>Отмена</Button>
+        </form>
+      )}
+
+      {state?.error && <div className="mt-1 text-xs text-red-600">{state.error}</div>}
+      {state?.ok && <div className="mt-1 text-xs text-emerald-700">{state.message}</div>}
     </div>
   );
 }

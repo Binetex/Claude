@@ -8,6 +8,7 @@ import { refetchPodForDelivery } from "@/integrations/delivery/burq/podService";
 import { linkBurqOrder } from "@/integrations/delivery/burq/linkService";
 import { makeCompletedPublisher } from "@/integrations/delivery/burq/webhookHandler";
 import { onOrderDeliveryChange } from "@/integrations/delivery/burq/scheduleService";
+import { fixDeliveryActualCost, FinanceFixError } from "@/modules/finance/fix";
 
 type FormState = { error?: string; ok?: boolean; message?: string } | null;
 type LinkFormState = { error?: string; ok?: boolean; message?: string; needsConfirm?: boolean } | null;
@@ -204,4 +205,39 @@ export async function linkBurqOrderAction(_prev: LinkFormState, formData: FormDa
     default:
       return { error: "Не удалось привязать Burq Order." };
   }
+}
+
+/**
+ * Подтверждение фактической стоимости доставки руками — для случаев, когда Burq не участвовал:
+ * отвезли сами или чужим курьером. Без подтверждения финансовый модуль не считает ВЕСЬ ДЕНЬ:
+ * пустое поле там означает «не знаем, сколько стоило», а не «бесплатно».
+ *
+ * Ноль — обычное и самое частое значение (отвёз сам), поэтому вводится он явно: подтверждённый
+ * ноль и незаполненное поле обязаны различаться, иначе прибыль дня окажется завышенной.
+ *
+ * ТОЛЬКО ВЛАДЕЛЕЦ — это финансовое решение, как и все правки в модуле финансов (проверку делает
+ * assertOwner внутри fixDeliveryActualCost).
+ */
+export async function confirmDeliveryActualCostAction(_prev: FormState, formData: FormData): Promise<FormState> {
+  const user = await requireUser();
+  const orderId = String(formData.get("orderId") ?? "");
+  const raw = String(formData.get("amount") ?? "").trim().replace(",", ".");
+  if (!orderId) return { error: "Некорректный запрос." };
+
+  const amount = Number(raw);
+  if (raw === "" || !Number.isFinite(amount) || amount < 0) {
+    return { error: "Введите сумму: 0 или больше." };
+  }
+  // Копейки округляем, а не отбрасываем: 14.995 должно стать 15.00, а не 14.99.
+  const amountCents = Math.round(amount * 100);
+
+  try {
+    await fixDeliveryActualCost({ orderId, amountCents, actor: { userId: user.id, role: user.role } });
+  } catch (err) {
+    const message = err instanceof FinanceFixError ? err.message : "Не удалось сохранить стоимость.";
+    return { error: message };
+  }
+
+  revalidatePath(`/dashboard/orders/${orderId}`);
+  return { ok: true, message: amountCents === 0 ? "Отмечено: доставка бесплатная." : "Стоимость доставки сохранена." };
 }

@@ -189,7 +189,13 @@ export async function applyDeliveryStatusUpdate(
             providerExternalId: input.providerId ?? undefined,
           },
         });
-        await tx.order.update({ where: { id: delivery.orderId }, data: { deliveryActualCost: new Prisma.Decimal(costDecision.dollars) } });
+        // Факт от курьера перекрывает ручную отметку: если владелец поставил ноль, а доставка всё же
+        // прошла через Burq и стоила денег, честнее цифра курьера. Источник переписываем вместе с
+        // суммой — иначе в карточке осталась бы подпись «указано вручную» при чужом числе.
+        await tx.order.update({
+          where: { id: delivery.orderId },
+          data: { deliveryActualCost: new Prisma.Decimal(costDecision.dollars), deliveryActualCostSource: "BURQ" },
+        });
         await recomputeEstimatedProfit(tx, delivery.orderId);
       });
     }

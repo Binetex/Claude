@@ -164,7 +164,7 @@ export async function fixDeliveryActualCost(args: {
   await prisma.$transaction(async (tx) => {
     await tx.order.update({
       where: { id: args.orderId },
-      data: { deliveryActualCost: (args.amountCents / 100).toFixed(2), deliveryActualCostConfirmedAt: now },
+      data: { deliveryActualCost: (args.amountCents / 100).toFixed(2), deliveryActualCostConfirmedAt: now, deliveryActualCostSource: "MANUAL" },
     });
     await tx.financeAudit.create({
       data: {
@@ -491,6 +491,7 @@ export async function confirmBurqDeliveryCosts(args: {
         data: {
           deliveryActualCost: (c.burqCents / 100).toFixed(2),
           deliveryActualCostConfirmedAt: now,
+          deliveryActualCostSource: "BURQ",
         },
       });
       await tx.financeAudit.create({

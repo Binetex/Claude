@@ -255,6 +255,7 @@ export default async function OwnerOrderPage({ params }: { params: Promise<{ id:
           {/* Доставка целиком: курьер, Burq и точка забора. Раньше владелец имел собственную
               копию этого блока вместе с копией трёх запросов Burq — теперь блок один. */}
           <DeliveryStatusCard
+            canEditActualCost
             orderId={order.id}
             orderStatus={order.orderStatus}
             deliveryInstructions={order.deliveryInstructions}

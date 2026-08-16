@@ -21,6 +21,7 @@ export async function DeliveryStatusCard({
   storeTimeZone,
   pickup,
   bouquetPhotoAction,
+  canEditActualCost = false,
 }: {
   orderId: string;
   orderStatus: OrderStatus;
@@ -39,12 +40,21 @@ export async function DeliveryStatusCard({
    * «Фото букета», чтобы одна и та же картинка не показывалась дважды.
    */
   bouquetPhotoAction?: React.ReactNode;
+  /**
+   * Можно ли подтвердить фактическую стоимость доставки прямо здесь. Решает СТРАНИЦА: карточка
+   * живёт у трёх ролей, а подтверждение стоимости — финансовое решение владельца. Флорист и
+   * колл-центр видят сумму, но не правят её.
+   */
+  canEditActualCost?: boolean;
 }) {
   let currentDelivery = null;
   let deliveryIntent = null;
   let deliveryAttempts: DeliveryAttempt[] = [];
+  // Фактическая стоимость живёт на ЗАКАЗЕ, а не на доставке: её подтверждают и тогда, когда
+  // доставки Burq не было вовсе (отвезли сами). Поэтому блок показывается всегда.
+  let actualCost = { amount: 0, confirmedAt: null as string | null, source: null as string | null };
   try {
-    const [d, i, all] = await Promise.all([
+    const [d, i, ord, all] = await Promise.all([
       prisma.delivery.findFirst({
         where: { orderId, isCurrentAttempt: true },
         select: {
@@ -59,6 +69,10 @@ export async function DeliveryStatusCard({
         where: { orderId },
         select: { intentStatus: true, lastSkipReason: true, scheduledAvailableAt: true },
       }),
+      prisma.order.findUnique({
+        where: { id: orderId },
+        select: { deliveryActualCost: true, deliveryActualCostConfirmedAt: true, deliveryActualCostSource: true },
+      }),
       prisma.delivery.findMany({
         where: { orderId },
         orderBy: { attemptNumber: "asc" },
@@ -72,6 +86,13 @@ export async function DeliveryStatusCard({
     ]);
     currentDelivery = d;
     deliveryIntent = i;
+    if (ord) {
+      actualCost = {
+        amount: Number(ord.deliveryActualCost),
+        confirmedAt: ord.deliveryActualCostConfirmedAt ? ord.deliveryActualCostConfirmedAt.toISOString() : null,
+        source: ord.deliveryActualCostSource,
+      };
+    }
     deliveryAttempts = all.map((a) => ({
       attemptNumber: a.attemptNumber,
       status: a.status,
@@ -127,6 +148,8 @@ export async function DeliveryStatusCard({
           orderId={orderId}
           orderStatus={orderStatus}
           attempts={deliveryAttempts}
+          actualCost={actualCost}
+          canEditActualCost={canEditActualCost}
           delivery={
             currentDelivery
               ? {
