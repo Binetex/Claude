@@ -93,6 +93,9 @@ export async function EarningsView({
   const isSecondary = profile?.model === "SECONDARY";
   const dayOrders = period.singleDay && isSecondary ? await floristDayOrders(floristId, period.from) : null;
 
+  // Есть ли что объяснять: бонусы и корректировки живут вне дневного заработка.
+  const hasRecordedExtras = balance.bonusCents !== 0 || balance.adjustmentCents !== 0;
+
   const todayHint =
     profile?.model === "PRIMARY" && totals.today.cents === 0 ? "день ещё считается" : pluralOrders(totals.today.orders);
 
@@ -115,19 +118,24 @@ export async function EarningsView({
       {/* Из чего ещё сложилось «К выплате». Плитки «Заработок» бонусов и корректировок НЕ
           включают — они выводятся из посчитанных дней, а это решения владельца, к дню не
           привязанные. Без этой строки внесённый бонус выглядит потерянным: человек смотрит на
-          заработок, тот не шевелится, и запись кажется не сохранившейся. */}
-      {(balance.bonusCents !== 0 || balance.adjustmentCents !== 0) && (
+          заработок, тот не шевелится, и запись кажется не сохранившейся.
+
+          Ссылка на книгу стоит ЗДЕСЬ И БЕЗУСЛОВНО. Держать её внутри условия про суммы нельзя:
+          отменив все бонусы, владелец получал ноль в обеих корзинах — и вместе со строкой исчезал
+          единственный вход в книгу, а искать её в подвале страницы он уже приходил жаловаться. */}
+      {(hasRecordedExtras || ledgerHref) && (
         <p className="text-xs text-slate-500">
-          В «К выплате» учтены{" "}
-          {balance.bonusCents !== 0 && <>бонусы <span className="font-medium text-slate-700">{formatCents(balance.bonusCents)}</span></>}
-          {balance.bonusCents !== 0 && balance.adjustmentCents !== 0 && " и "}
-          {balance.adjustmentCents !== 0 && <>корректировки <span className="font-medium text-slate-700">{formatCents(balance.adjustmentCents)}</span></>}
-          . В заработок за день они не входят.
-          {ledgerHref && (
+          {hasRecordedExtras && (
             <>
-              {" "}
-              <Link href={ledgerHref} className="text-sky-600 underline">Книга операций</Link>
+              В «К выплате» учтены{" "}
+              {balance.bonusCents !== 0 && <>бонусы <span className="font-medium text-slate-700">{formatCents(balance.bonusCents)}</span></>}
+              {balance.bonusCents !== 0 && balance.adjustmentCents !== 0 && " и "}
+              {balance.adjustmentCents !== 0 && <>корректировки <span className="font-medium text-slate-700">{formatCents(balance.adjustmentCents)}</span></>}
+              . В заработок за день они не входят.{" "}
             </>
+          )}
+          {ledgerHref && (
+            <Link href={ledgerHref} className="text-sky-600 underline">Книга операций</Link>
           )}
         </p>
       )}
