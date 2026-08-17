@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { requireRole } from "@/lib/rbac";
 import { Card, CardBody } from "@/components/ui/Card";
 import { EarningsView } from "@/components/finance/EarningsView";
@@ -37,6 +36,7 @@ export default async function OwnerFloristEarningsPage({
       basePath={base}
       dayHrefBase={`${base}/day`}
       orderHrefBase="/dashboard/orders"
+      ledgerHref={`${base}/ledger`}
       extra={
         <>
           {!gate.enabled && (
@@ -76,10 +76,8 @@ export default async function OwnerFloristEarningsPage({
             </Card>
           )}
 
-          {/* Книга — не главный экран, а справка: ссылкой, а не таблицей во весь экран. */}
-          <Link href={`${base}/ledger`} className="inline-flex text-sm text-slate-500 hover:text-slate-900">
-            Все операции по книге →
-          </Link>
+          {/* Книга — не главный экран, а справка. Ссылка на неё теперь стоит рядом с «К выплате»,
+              в строке про бонусы: искали её именно там, а не в подвале страницы. */}
         </>
       }
     />

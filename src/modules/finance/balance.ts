@@ -94,21 +94,38 @@ async function secondaryEarned(floristId: string) {
   return { cents, orders: orders.length, deductionCents: expenses._sum.amountCents ?? 0 };
 }
 
-/** Записанные решения владельца: выплаты, бонусы, корректировки. */
+/**
+ * Записанные решения владельца: выплаты, бонусы, корректировки И ИХ ОТМЕНЫ.
+ *
+ * `CORRECTION` обязателен в этом списке. Отмена бонуса или ручной правки пишется именно этим
+ * типом (`reversalTypeFor`: всё, кроме PAYMENT, становится CORRECTION), и пока его здесь не было,
+ * отмена не влияла на баланс ВООБЩЕ: бонус увеличивал долг, отмена его не уменьшала. У Насти так
+ * набежало $50 лишнего долга из двух отменённых бонусов по $25.
+ *
+ * Направление читается у ВСЕХ типов, а не у части. Раньше BONUS складывался по сумме без оглядки
+ * на direction — запись с DEBIT увеличивала бы долг вместо уменьшения. Сегодня все бонусы CREDIT,
+ * то есть это была мина, а не поломка, но отличать её от настоящей ошибки в отчёте нечем.
+ *
+ * Отмена ложится в корзину «корректировки», а не вычитается из «бонусов»: так видно и сам бонус,
+ * и его отмену, а не молча уменьшенное число. Итог в обоих случаях один.
+ */
 async function recordedEntries(floristId: string) {
   const rows = await prisma.ledgerEntry.findMany({
-    where: { floristId, type: { in: ["PAYMENT", "PAYMENT_REVERSAL", "BONUS", "MANUAL_ADJUSTMENT"] } },
+    where: { floristId, type: { in: ["PAYMENT", "PAYMENT_REVERSAL", "BONUS", "MANUAL_ADJUSTMENT", "CORRECTION"] } },
     select: { type: true, direction: true, amountCents: true },
   });
 
   let paidCents = 0;
   let bonusCents = 0;
   let adjustmentCents = 0;
+  const signed = (e: { direction: string; amountCents: number }) =>
+    e.direction === "CREDIT" ? e.amountCents : -e.amountCents;
+
   for (const e of rows) {
     if (e.type === "PAYMENT") paidCents += e.amountCents;
     else if (e.type === "PAYMENT_REVERSAL") paidCents -= e.amountCents;
-    else if (e.type === "BONUS") bonusCents += e.amountCents;
-    else adjustmentCents += e.direction === "CREDIT" ? e.amountCents : -e.amountCents;
+    else if (e.type === "BONUS") bonusCents += signed(e);
+    else adjustmentCents += signed(e);
   }
   return { paidCents, bonusCents, adjustmentCents };
 }

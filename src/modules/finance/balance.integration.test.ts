@@ -18,7 +18,7 @@ import { recomputeDay } from "./dayFinance";
 import { dayShareCents } from "./dayCalc";
 import { floristBalance } from "./balance";
 import { previewPayment } from "./payouts";
-import { appendEntry } from "./ledger";
+import { appendEntry, reverseEntry } from "./ledger";
 import { manualKey } from "./ledgerRules";
 
 const RUN = `bal${crypto.randomBytes(3).toString("hex")}`;
@@ -292,6 +292,54 @@ describe("записанные решения владельца", () => {
     const after = await floristBalance(secondaryId, NOW);
     expect(after.bonusCents).toBe(2000);
     expect(after.outstandingCents).toBe(before.outstandingCents + 2000);
+  });
+
+  /**
+   * Регрессия. Отмена пишется типом CORRECTION (reversalTypeFor: всё, кроме PAYMENT, становится
+   * CORRECTION), а баланс читал только PAYMENT/PAYMENT_REVERSAL/BONUS/MANUAL_ADJUSTMENT. Отмена
+   * не влияла на долг ВООБЩЕ: бонус его поднимал, отмена не опускала. У Насти на проде так
+   * набежало $50 лишнего долга из двух отменённых бонусов по $25.
+   */
+  it("отмена бонуса возвращает долг на место", async () => {
+    const before = await floristBalance(secondaryId, NOW);
+    const bonus = await appendEntry({
+      floristId: secondaryId,
+      type: "BONUS",
+      amountCents: 2500,
+      effectiveDate: NOW,
+      description: "Бонус к отмене",
+      sourceType: "MANUAL",
+      idempotencyKey: manualKey("BONUS", secondaryId, "rev-1"),
+      actor: OWNER,
+    });
+    const withBonus = await floristBalance(secondaryId, NOW);
+    expect(withBonus.outstandingCents).toBe(before.outstandingCents + 2500);
+
+    await reverseEntry({ entryId: bonus.id, actor: OWNER, comment: "ошибся" });
+
+    const after = await floristBalance(secondaryId, NOW);
+    expect(after.outstandingCents).toBe(before.outstandingCents);
+  });
+
+  it("отмена ручной корректировки тоже возвращает долг", async () => {
+    const before = await floristBalance(secondaryId, NOW);
+    const adj = await appendEntry({
+      floristId: secondaryId,
+      type: "MANUAL_ADJUSTMENT",
+      // У ручной правки направление не предопределено — CREDIT увеличивает долг.
+      direction: "CREDIT",
+      amountCents: 3300,
+      effectiveDate: NOW,
+      description: "Правка к отмене",
+      sourceType: "MANUAL",
+      idempotencyKey: manualKey("MANUAL_ADJUSTMENT", secondaryId, "rev-2"),
+      actor: OWNER,
+    });
+    expect((await floristBalance(secondaryId, NOW)).outstandingCents).toBe(before.outstandingCents + 3300);
+
+    await reverseEntry({ entryId: adj.id, actor: OWNER, comment: "ошибся" });
+
+    expect((await floristBalance(secondaryId, NOW)).outstandingCents).toBe(before.outstandingCents);
   });
 });
 

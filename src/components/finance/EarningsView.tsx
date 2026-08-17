@@ -60,6 +60,7 @@ export async function EarningsView({
   dayHrefBase,
   orderHrefBase,
   extra,
+  ledgerHref,
 }: {
   floristId: string;
   searchParams: Record<string, string | undefined>;
@@ -71,6 +72,11 @@ export async function EarningsView({
   orderHrefBase: string;
   /** Дополнительный блок под списком (у владельца — доля и пересчёт). */
   extra?: React.ReactNode;
+  /**
+   * Ссылка на книгу операций. Только у владельца: страница книги закрыта requireRole("OWNER"),
+   * и висящая у флориста ссылка вела бы в отказ.
+   */
+  ledgerHref?: string;
 }) {
   const period = resolvePeriod(searchParams.period, { from: searchParams.from, to: searchParams.to });
 
@@ -105,6 +111,26 @@ export async function EarningsView({
         <MoneyCard label="Заработок за месяц" cents={totals.month.cents} hint={pluralOrders(totals.month.orders)} />
         <MoneyCard label="Заработок за всё время" cents={totals.allTime.cents} hint={pluralOrders(totals.allTime.orders)} />
       </div>
+
+      {/* Из чего ещё сложилось «К выплате». Плитки «Заработок» бонусов и корректировок НЕ
+          включают — они выводятся из посчитанных дней, а это решения владельца, к дню не
+          привязанные. Без этой строки внесённый бонус выглядит потерянным: человек смотрит на
+          заработок, тот не шевелится, и запись кажется не сохранившейся. */}
+      {(balance.bonusCents !== 0 || balance.adjustmentCents !== 0) && (
+        <p className="text-xs text-slate-500">
+          В «К выплате» учтены{" "}
+          {balance.bonusCents !== 0 && <>бонусы <span className="font-medium text-slate-700">{formatCents(balance.bonusCents)}</span></>}
+          {balance.bonusCents !== 0 && balance.adjustmentCents !== 0 && " и "}
+          {balance.adjustmentCents !== 0 && <>корректировки <span className="font-medium text-slate-700">{formatCents(balance.adjustmentCents)}</span></>}
+          . В заработок за день они не входят.
+          {ledgerHref && (
+            <>
+              {" "}
+              <Link href={ledgerHref} className="text-sky-600 underline">Книга операций</Link>
+            </>
+          )}
+        </p>
+      )}
 
       <EarningsPeriodBar activeKey={period.key} basePath={basePath} />
 
