@@ -319,6 +319,10 @@ describe("записанные решения владельца", () => {
 
     const after = await floristBalance(secondaryId, NOW);
     expect(after.outstandingCents).toBe(before.outstandingCents);
+    // Отмена уменьшает ИМЕННО бонусы, а не корзину корректировок: иначе в отчёте выходило
+    // «бонусы $112 и корректировки −$7» — арифметически верно, прочитать невозможно.
+    expect(after.bonusCents).toBe(before.bonusCents);
+    expect(after.adjustmentCents).toBe(before.adjustmentCents);
   });
 
   it("отмена ручной корректировки тоже возвращает долг", async () => {
@@ -339,7 +343,10 @@ describe("записанные решения владельца", () => {
 
     await reverseEntry({ entryId: adj.id, actor: OWNER, comment: "ошибся" });
 
-    expect((await floristBalance(secondaryId, NOW)).outstandingCents).toBe(before.outstandingCents);
+    const after = await floristBalance(secondaryId, NOW);
+    expect(after.outstandingCents).toBe(before.outstandingCents);
+    expect(after.adjustmentCents).toBe(before.adjustmentCents);
+    expect(after.bonusCents).toBe(before.bonusCents);
   });
 });
 

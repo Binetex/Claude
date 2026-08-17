@@ -106,13 +106,17 @@ async function secondaryEarned(floristId: string) {
  * на direction — запись с DEBIT увеличивала бы долг вместо уменьшения. Сегодня все бонусы CREDIT,
  * то есть это была мина, а не поломка, но отличать её от настоящей ошибки в отчёте нечем.
  *
- * Отмена ложится в корзину «корректировки», а не вычитается из «бонусов»: так видно и сам бонус,
- * и его отмену, а не молча уменьшенное число. Итог в обоих случаях один.
+ * Отмена вычитается из ТОЙ ЖЕ корзины, что и запись, которую она отменяет: отмена бонуса
+ * уменьшает бонусы, отмена ручной правки — правки. Складывать все отмены в «корректировки» было
+ * ошибкой: отменив три бонуса на $112 при живой правке на $105, владелец видел «бонусы $112 и
+ * корректировки −$7» — арифметически верно, а прочитать невозможно. Теперь это «корректировки
+ * $105», а бонусы обнуляются и из строки исчезают. Итог по деньгам в обоих случаях один и тот же.
  */
 async function recordedEntries(floristId: string) {
   const rows = await prisma.ledgerEntry.findMany({
     where: { floristId, type: { in: ["PAYMENT", "PAYMENT_REVERSAL", "BONUS", "MANUAL_ADJUSTMENT", "CORRECTION"] } },
-    select: { type: true, direction: true, amountCents: true },
+    // Тип отменяемой записи — чтобы отмена попала в свою корзину, а не свалилась в «корректировки».
+    select: { type: true, direction: true, amountCents: true, reversedEntry: { select: { type: true } } },
   });
 
   let paidCents = 0;
@@ -124,7 +128,8 @@ async function recordedEntries(floristId: string) {
   for (const e of rows) {
     if (e.type === "PAYMENT") paidCents += e.amountCents;
     else if (e.type === "PAYMENT_REVERSAL") paidCents -= e.amountCents;
-    else if (e.type === "BONUS") bonusCents += signed(e);
+    // Отмена — это CORRECTION; в какую корзину она идёт, решает тип ОТМЕНЯЕМОЙ записи.
+    else if ((e.reversedEntry?.type ?? e.type) === "BONUS") bonusCents += signed(e);
     else adjustmentCents += signed(e);
   }
   return { paidCents, bonusCents, adjustmentCents };
