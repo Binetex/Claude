@@ -2,12 +2,13 @@
 import { useState, useTransition } from "react";
 import { Card, CardBody } from "@/components/ui/Card";
 import { saveSiteReviewUrl, saveSiteAutomationDailyTime } from "./actions";
+import { DEFAULT_DAILY_LOCAL_TIME } from "@/modules/automations/dailySchedule";
 
 type SiteRow = { id: string; name: string; reviewUrl: string | null; quoEnabled: boolean; automationDailyLocalTime: string };
 
 function Row({ site }: { site: SiteRow }) {
   const [value, setValue] = useState(site.reviewUrl ?? "");
-  const [time, setTime] = useState(site.automationDailyLocalTime || "09:00");
+  const [time, setTime] = useState(site.automationDailyLocalTime || DEFAULT_DAILY_LOCAL_TIME);
   const [timeMsg, setTimeMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [pending, start] = useTransition();

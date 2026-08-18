@@ -1,6 +1,13 @@
 import { zonedLocalTimeToUtc, localDateStr, DEFAULT_STORE_TZ } from "@/lib/tz";
 
 /**
+ * Во сколько по местному времени магазина уходит ежедневная рассылка, если у магазина своё
+ * время не задано. Значение дублируется в `Site.automationDailyLocalTime` (там оно и настраивается),
+ * здесь — только запасное на случай пустого поля.
+ */
+export const DEFAULT_DAILY_LOCAL_TIME = "08:00";
+
+/**
  * Момент (UTC), когда должен сработать ежедневный триггер по локальному дню и времени магазина.
  * Чистая функция — вся таймзонная арифметика тестируется без БД.
  *
@@ -16,7 +23,7 @@ export function computeDailyTriggerAt(
   tz: string | null | undefined,
   now: Date = new Date()
 ): Date {
-  const at = zonedLocalTimeToUtc(localDay, localTime || "09:00", tz || DEFAULT_STORE_TZ);
+  const at = zonedLocalTimeToUtc(localDay, localTime || DEFAULT_DAILY_LOCAL_TIME, tz || DEFAULT_STORE_TZ);
   return at.getTime() <= now.getTime() ? now : at;
 }
 
