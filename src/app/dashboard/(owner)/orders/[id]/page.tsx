@@ -37,6 +37,7 @@ import {
 import { markOrderCommunicationsRead, countUnreadBySide, parseAttachments } from "@/integrations/quo/communicationsService";
 import { loadOrderEmailPanel } from "@/integrations/emailFactory/read";
 import { FloristAvatar } from "@/components/FloristAvatar";
+import { ChargesDialog } from "./ChargesDialog";
 
 export const dynamic = "force-dynamic";
 
@@ -229,7 +230,26 @@ export default async function OwnerOrderPage({ params }: { params: Promise<{ id:
           />
 
           {/* Раскладка счёта клиента. Прибыли здесь нет — см. комментарий к странице. */}
-          <OrderFinanceBreakdown title="Раскладка заказа" finance={order.finance} />
+          <OrderFinanceBreakdown
+            title="Раскладка заказа"
+            finance={order.finance}
+            action={
+              // Только у заказов, заведённых руками: у платформенных суммы придут с синхронизацией
+              // и затрут правку.
+              order.source === "MANUAL" ? (
+                <ChargesDialog
+                  orderId={order.id}
+                  itemsTotal={order.finance.itemsTotal}
+                  current={{
+                    tax: order.finance.tax,
+                    tip: order.finance.tip,
+                    discount: order.finance.discount,
+                    deliveryCustomerCost: order.finance.deliveryCustomerCost,
+                  }}
+                />
+              ) : null
+            }
+          />
 
           <CardNoteCard
             orderId={order.id}

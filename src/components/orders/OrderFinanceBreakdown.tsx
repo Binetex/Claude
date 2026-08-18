@@ -23,13 +23,22 @@ export type OrderFinanceView = {
 export function OrderFinanceBreakdown({
   title,
   finance,
+  action,
 }: {
   title: string;
   finance: OrderFinanceView;
+  /**
+   * Иконка-действие справа от заголовка. Слот, а не встроенная кнопка: карточка рисуется у трёх
+   * ролей, а править суммы вправе только владелец — решает страница, не карточка.
+   */
+  action?: React.ReactNode;
 }) {
   return (
     <Card>
-      <CardHeader className="py-2.5"><CardTitle icon={Calculator}>{title}</CardTitle></CardHeader>
+      <CardHeader className="flex items-center justify-between py-2.5">
+        <CardTitle icon={Calculator}>{title}</CardTitle>
+        {action}
+      </CardHeader>
       <CardBody>
         {/* На телефоне — один столбец: в две колонки на 320px подпись «Доставка (заказчик)»
             налезает на сумму. */}

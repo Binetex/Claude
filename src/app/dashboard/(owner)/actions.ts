@@ -31,6 +31,7 @@ import { startProductSyncInBackground } from "@/modules/catalog/sync";
 import { startOrderSyncInBackground } from "@/modules/orders/sync";
 import { getAppUrl } from "@/lib/appUrl";
 import { TERMINAL_ORDER_STATUSES } from "@/lib/statuses";
+import { updateManualOrderCharges, type ManualCharges } from "@/modules/orders/manualCharges";
 
 async function ownerOnly() {
   await requireRole("OWNER");
@@ -56,6 +57,23 @@ export async function ownerSetManualPrice(orderId: string, amount: number) {
   // (modules/finance/balance.ts). Правка цены меняет входные данные — день пересчитается сам.
   revalidatePath(`/dashboard/orders/${orderId}`);
   revalidatePath("/dashboard/finance/florists");
+}
+
+/**
+ * Правка сумм ручного заказа (налог, чаевые, доставка, скидка). Только владелец: это деньги
+ * заказа, и они же вход дневных финансов. Пересчёт дня делает сам модуль.
+ */
+export async function ownerUpdateManualCharges(
+  orderId: string,
+  charges: ManualCharges
+): Promise<{ ok?: true; error?: string }> {
+  const user = await requireRole("OWNER");
+  const res = await updateManualOrderCharges(orderId, charges, { userId: user.id, role: user.role });
+  if (!res.ok) return { error: res.error };
+  revalidatePath(`/dashboard/orders/${orderId}`);
+  revalidatePath("/dashboard/orders");
+  revalidatePath("/dashboard/finance/florists");
+  return { ok: true };
 }
 
 export async function ownerReassign(
