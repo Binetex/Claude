@@ -1873,7 +1873,7 @@ model OrderAudit {
   orderId   String
   userId    String
   role      Role
-  block     String // contacts | sender | status | delivery | cardNote
+  block     String // contacts | sender | status | delivery | cardNote | charges
   changed   Json // { field: { from, to } } — только изменённые поля
   createdAt DateTime @default(now())
 

@@ -44,9 +44,26 @@ export function ChargesDialog({
   });
   const [pending, start] = useTransition();
 
+  /**
+   * Поля заполняются заново при КАЖДОМ открытии. Состояние клиентского компонента переживает
+   * закрытие модалки, поэтому без этого «Отмена» ничего не отменяла: набранные и брошенные числа
+   * оставались в полях, и следующее «Сохранить» применяло именно их.
+   */
+  function openDialog() {
+    setV({
+      tax: String(current.tax),
+      tip: String(current.tip),
+      deliveryCustomerCost: String(current.deliveryCustomerCost),
+      discount: String(current.discount),
+    });
+    setOpen(true);
+  }
+
+  // Округляем до цента ЗДЕСЬ, а не только на сервере: иначе «10.005» дало бы в предпросмотре
+  // один итог, а в базе — на цент другой, потому что сервер округляет каждое поле перед записью.
   const num = (s: string) => {
     const n = Number(s.replace(",", "."));
-    return Number.isFinite(n) ? n : NaN;
+    return Number.isFinite(n) ? Math.round(n * 100) / 100 : NaN;
   };
   const parsed = {
     tax: num(v.tax),
@@ -71,7 +88,7 @@ export function ChargesDialog({
 
   return (
     <>
-      <button type="button" onClick={() => setOpen(true)} className="text-slate-400 hover:text-slate-700" title="Изменить суммы">
+      <button type="button" onClick={openDialog} className="text-slate-400 hover:text-slate-700" title="Изменить суммы">
         <Pencil className="h-3.5 w-3.5" />
       </button>
 

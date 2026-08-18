@@ -40,9 +40,13 @@ export async function updateManualOrderCharges(
   input: ManualCharges,
   actor: { userId: string; role: Role }
 ): Promise<UpdateChargesResult> {
+  // Округляем до цента ДО всех расчётов: в базе Decimal(10,2), и без этого записанный итог
+  // отличался бы от показанного на копейку при вводе вида «10.005».
+  const charges = {} as ManualCharges;
   for (const f of FIELDS) {
     const v = input[f];
     if (!Number.isFinite(v) || v < 0) return { ok: false, error: "Суммы должны быть числами не меньше нуля." };
+    charges[f] = Math.round(v * 100) / 100;
   }
 
   const order = await prisma.order.findUnique({
@@ -55,7 +59,7 @@ export async function updateManualOrderCharges(
   }
 
   const itemsTotal = Number(order.itemsTotal);
-  const customerTotal = itemsTotal + input.tax + input.tip + input.deliveryCustomerCost - input.discount;
+  const customerTotal = itemsTotal + charges.tax + charges.tip + charges.deliveryCustomerCost - charges.discount;
   if (customerTotal < 0) return { ok: false, error: "Скидка больше суммы заказа." };
 
   // Пишем только то, что реально поменялось: аудит должен отвечать на вопрос «что правили»,
@@ -63,7 +67,7 @@ export async function updateManualOrderCharges(
   const changed: Record<string, { from: number; to: number }> = {};
   for (const f of FIELDS) {
     const before = Number(order[f]);
-    if (before !== input[f]) changed[f] = { from: before, to: input[f] };
+    if (before !== charges[f]) changed[f] = { from: before, to: charges[f] };
   }
   const beforeTotal = itemsTotal + Number(order.tax) + Number(order.tip) + Number(order.deliveryCustomerCost) - Number(order.discount);
   if (beforeTotal !== customerTotal) changed.customerTotal = { from: beforeTotal, to: customerTotal };
@@ -73,10 +77,10 @@ export async function updateManualOrderCharges(
     await tx.order.update({
       where: { id: orderId },
       data: {
-        tax: money(input.tax),
-        tip: money(input.tip),
-        discount: money(input.discount),
-        deliveryCustomerCost: money(input.deliveryCustomerCost),
+        tax: money(charges.tax),
+        tip: money(charges.tip),
+        discount: money(charges.discount),
+        deliveryCustomerCost: money(charges.deliveryCustomerCost),
         customerTotal: money(customerTotal),
       },
     });
