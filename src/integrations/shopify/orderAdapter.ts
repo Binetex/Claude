@@ -8,6 +8,7 @@ import type {
 } from "@/integrations/normalized";
 import type { PaymentStatus } from "@/generated/prisma/enums";
 import type { ShopifyOrder } from "./ingestOrder";
+import { displayVariantName } from "@/lib/variantName";
 
 /**
  * Shopify как реализация общего `OrderAdapter`: нормализует webhook-payload в `NormalizedOrder`.
@@ -66,13 +67,13 @@ function noteAttr(payload: ShopifyOrder, pattern: RegExp): string | null {
 
 export function parseShopifyOrder(payload: ShopifyOrder): NormalizedOrder {
   const items: NormalizedOrderItem[] = (payload.line_items ?? []).map((li) => {
-    const variantName = li.variant_title?.trim() || null;
+    const variantName = displayVariantName(li.variant_title);
     return {
       externalId: null,
       productExternalId: li.product_id != null ? String(li.product_id) : null,
       variantExternalId: li.variant_id != null ? String(li.variant_id) : null,
       name: li.title,
-      variantName: variantName && variantName !== "Default Title" ? variantName : null,
+      variantName,
       sku: li.sku?.trim() || null,
       quantity: li.quantity,
       unitPrice: num(li.price),

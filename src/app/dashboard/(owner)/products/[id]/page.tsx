@@ -15,6 +15,7 @@ import type { VariantFinanceVM } from "../VariantFinanceBlock";
 import { resolveVariantFinance, type VaseCostRow, type LinkedVaseInfo } from "@/modules/catalog/finance/resolveVariantFinance";
 import { listVaseOptions } from "@/modules/catalog/finance/vaseLink";
 import { financialTypeLabel, DEFAULT_TYPE_LABEL } from "@/modules/catalog/finance/display";
+import { displayVariantName } from "@/lib/variantName";
 
 export const dynamic = "force-dynamic";
 
@@ -26,7 +27,7 @@ function statusBadge(status: ProductStatus, remoteDeleted: boolean) {
 }
 
 function variantOptions(v: { option1: string | null; option2: string | null; option3: string | null; title: string }): string {
-  const opts = [v.option1, v.option2, v.option3].filter((o): o is string => !!o && o !== "Default Title");
+  const opts = [v.option1, v.option2, v.option3].filter((o): o is string => displayVariantName(o) !== null);
   return opts.length ? opts.join(" / ") : v.title;
 }
 
@@ -127,7 +128,7 @@ export default async function ProductDetailPage({
       productId: v.product.id,
       effectiveType: v.financialType ?? v.product.financialType ?? null,
       archived: v.remoteDeleted || v.deletedAt != null,
-      label: `${v.product.name}${v.title !== "Default Title" ? ` / ${v.title}` : ""}`,
+      label: `${v.product.name}${displayVariantName(v.title) ? ` / ${v.title}` : ""}`,
     };
   }
 

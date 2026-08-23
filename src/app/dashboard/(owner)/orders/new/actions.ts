@@ -7,6 +7,7 @@ import { requireRole } from "@/lib/rbac";
 import { prisma } from "@/lib/db";
 import { toNumber } from "@/lib/money";
 import { createManualOrder, ManualOrderError, type CreateManualOrderInput } from "@/modules/orders/manualOrder";
+import { displayVariantName } from "@/lib/variantName";
 
 export type CatalogHit = {
   productId: string;
@@ -82,7 +83,7 @@ export async function ownerSearchCatalog(query: string, siteId: string | null): 
         productId: p.id,
         variantId: v.id,
         productName: p.name,
-        variantName: v.title,
+        variantName: displayVariantName(v.title),
         siteId: p.site.id,
         siteName: p.site.name,
         image: v.image ?? p.image,

@@ -19,6 +19,7 @@ import { ownerGetProductsSyncSummary } from "@/app/dashboard/(owner)/actions";
 import { OrdersPager } from "@/app/dashboard/(owner)/orders/OrdersPager";
 import { OrdersNavProvider, OrdersPendingArea } from "@/app/dashboard/(owner)/orders/OrdersNav";
 import { resolvePaging, outOfRangePageUrl } from "@/app/dashboard/(owner)/orders/paging";
+import { displayVariantName } from "@/lib/variantName";
 
 export const dynamic = "force-dynamic";
 
@@ -28,7 +29,7 @@ type SP = Record<string, string | string[] | undefined>;
 const str = (v: string | string[] | undefined): string => (Array.isArray(v) ? v[0] : v ?? "");
 
 function variantOptions(v: { option1: string | null; option2: string | null; option3: string | null; title: string }): string {
-  const opts = [v.option1, v.option2, v.option3].filter((o): o is string => !!o && o !== "Default Title");
+  const opts = [v.option1, v.option2, v.option3].filter((o): o is string => displayVariantName(o) !== null);
   return opts.length ? opts.join(" / ") : v.title;
 }
 
@@ -144,7 +145,7 @@ export default async function ProductsPage({ searchParams }: { searchParams: Pro
       remoteDeleted: v.remoteDeleted,
       adminUrl: v.adminUrl,
     }));
-    const showVariants = variants.length > 1 || (variants.length === 1 && p.variants[0].title !== "Default Title");
+    const showVariants = variants.length > 1 || (variants.length === 1 && displayVariantName(p.variants[0].title) !== null);
 
     // Финансовая сводка — через ОБЩИЙ резолвер, никакой отдельной логики наследования здесь.
     const linked = [p.defaultIncludedVaseVariant, ...p.variants.map((v) => v.includedVaseVariant)].filter(

@@ -14,6 +14,7 @@ import { Prisma } from "@/generated/prisma/client";
 import type { Role } from "@/generated/prisma/enums";
 import { prisma } from "@/lib/db";
 import { effectiveFinancialType } from "./resolveVariantFinance";
+import { displayVariantName } from "@/lib/variantName";
 
 export type VaseSelection =
   | { mode: "INHERIT" }
@@ -75,7 +76,7 @@ async function assertLinkable(
     throw new Error("у вазы не может быть своей вложенной вазы");
   }
 
-  return { label: `${vase.product.name}${vase.title !== "Default Title" ? ` / ${vase.title}` : ""}` };
+  return { label: `${vase.product.name}${displayVariantName(vase.title) ? ` / ${vase.title}` : ""}` };
 }
 
 export async function applyVariantVase(
@@ -250,7 +251,7 @@ export async function listVaseOptions(siteId: string): Promise<
     return {
       id: v.id,
       productId: v.product.id,
-      label: `${v.product.name}${v.title !== "Default Title" ? ` / ${v.title}` : ""}`,
+      label: `${v.product.name}${displayVariantName(v.title) ? ` / ${v.title}` : ""}`,
       costCents: active?.purchaseCostCents ?? null,
       // Черновик магазина остаётся полноценной вазой для учёта — но владельцу стоит видеть,
       // что товар не опубликован.

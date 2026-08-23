@@ -21,6 +21,7 @@ import {
 import { deriveShopifyOrderState, reconcileShopifyUpdate, type ShopifyStateSignal } from "./orderState";
 import { publishTelegramNotification } from "@/integrations/telegram/events";
 import { adoptOrphanCommunicationsForNewOrder } from "@/integrations/quo/adoptOrphans";
+import { displayVariantName } from "@/lib/variantName";
 
 /** Планирование доставки, безопасное для импорта: ошибка логируется, но не роняет приём заказа. */
 async function scheduleDeliverySafe(orderId: string): Promise<void> {
@@ -432,16 +433,16 @@ function buildOrderData(
     items: {
       create: items.map((li) => {
         const { variant, product } = resolveMatch(li);
-        const variantName = li.variant_title?.trim() || variant?.title || null;
+        const variantName = displayVariantName(li.variant_title || variant?.title);
         return {
           productId: product?.id ?? variant?.product?.id ?? null,
           variantId: variant?.id ?? null,
           productExternalId: li.product_id != null ? String(li.product_id) : null,
           variantExternalId: li.variant_id != null ? String(li.variant_id) : null,
           name: li.title,
-          variantName: variantName && variantName !== "Default Title" ? variantName : null,
+          variantName,
           sku: li.sku?.trim() || variant?.sku || null,
-          options: variantName && variantName !== "Default Title" ? variantName : "",
+          options: variantName ?? "",
           quantity: li.quantity,
           externalPrice: money(li.price),
           image: resolveImage(li),
