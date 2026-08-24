@@ -93,7 +93,10 @@ describe("кнопки под сообщением", () => {
     expect(btns).toHaveLength(2);
     expect(btns[0].url).toMatch(/\/dashboard\/f\/o1$/);
     expect(btns[1].text).toContain("Google Maps");
-    expect(btns[1].url).toBe(googleMapsUrl("1 Main St, Apt 4, Los Angeles, 90001"));
+    // Квартира в ссылку не идёт: с ней геокодер уводит точку с нужного дома (THEFLOW-20537).
+    expect(btns[1].url).toBe(googleMapsUrl(order));
+    expect(decodeURIComponent(btns[1].url)).toContain("1 Main St, Los Angeles 90001");
+    expect(btns[1].url).not.toContain("Apt");
   });
 
   it("нет адреса → кнопки Google Maps нет", () => {

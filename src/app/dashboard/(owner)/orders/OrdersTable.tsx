@@ -8,6 +8,7 @@ import { resolveOrderStatusMeta } from "@/lib/statuses";
 import type { OrderStatus } from "@/generated/prisma/enums";
 import type { OrderIndicator } from "@/integrations/quo/communicationsView";
 import { FloristAvatar } from "@/components/FloristAvatar";
+import { recipientMapsUrl } from "@/components/orders/address";
 
 /**
  * Структурный тип строки списка — совместим с OwnerOrder, CallCenterOrder и FloristOrder.
@@ -71,9 +72,9 @@ function fullAddress(o: OrdersTableOrder): string {
   return [o.addressLine, o.apartment, o.city, o.zip].filter(Boolean).join(", ");
 }
 
-function mapsUrl(o: OrdersTableOrder): string {
-  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(fullAddress(o))}`;
-}
+// Ссылка — общая с карточкой заказа (`recipientMapsUrl`): своя копия здесь тянула в запрос
+// квартиру, и одна и та же строка адреса открывала из списка и из карточки разные точки.
+const mapsUrl = recipientMapsUrl;
 
 const dayKey = (d: Date | string) => new Date(d).toISOString().slice(0, 10);
 

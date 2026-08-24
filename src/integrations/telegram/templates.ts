@@ -2,6 +2,7 @@ import { getAppUrl } from "@/lib/appUrl";
 import { fmtTimeWindow } from "@/lib/format";
 import { CAPTION_LIMIT, type TelegramButton } from "./sender";
 import type { TelegramEventType } from "./registry";
+import { recipientMapsUrl } from "@/components/orders/address";
 
 /**
  * Тексты внутренних уведомлений. Чистые функции — тестируются без сети и БД.
@@ -77,9 +78,8 @@ export function ownerOrderUrl(orderId: string): string {
   return `${getAppUrl()}/dashboard/orders/${orderId}`;
 }
 
-export function googleMapsUrl(address: string): string {
-  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`;
-}
+/** Ссылка на карту — общая с дашбордом. Отдельной сборки здесь быть не должно. */
+export const googleMapsUrl = recipientMapsUrl;
 
 /** Шапка со временем и адресом — общая для «новый заказ» и «передан». Время и адрес выделены. */
 function deliveryHead(o: OrderSnapshot): string {
@@ -223,6 +223,6 @@ export function buttonsFor(type: TelegramEventType, o: OrderSnapshot): TelegramB
   if (!forFlorist) return [{ text: "Open Order", url: ownerOrderUrl(o.id) }];
   const buttons: TelegramButton[] = [{ text: "🧾 Open Order", url: floristOrderUrl(o.id) }];
   const addr = addressText(o);
-  if (addr) buttons.push({ text: "📍 Google Maps", url: googleMapsUrl(addr) });
+  if (addr) buttons.push({ text: "📍 Google Maps", url: googleMapsUrl(o) });
   return buttons;
 }
