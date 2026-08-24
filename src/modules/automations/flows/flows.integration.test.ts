@@ -457,6 +457,51 @@ describe("гейты запуска и остановки", () => {
     expect(emailSends).toHaveLength(0);
   });
 
+  it("заказ исключён из рассылок → цепочка останавливается, письма нет", async () => {
+    // Владелец пометил заказ в карточке: маркетинг по нему молчит и сейчас, и в будущем.
+    const site = await makeSite();
+    const order = await makeOrder(site.id);
+    const flow = await makeFlow(site.id, [{ type: "EMAIL", brevoTemplateId: 3 }]);
+
+    await fireTrigger(order);
+    await prisma.order.update({ where: { id: order.id }, data: { marketingMark: "MUTED" } });
+    await drainFlowSteps(order.id);
+
+    const runs = await runsOf(flow.id);
+    expect(runs[0].status).toBe("CANCELLED");
+    expect(runs[0].cancelledReason).toBe("order_marketing_muted");
+    expect(emailSends).toHaveLength(0);
+  });
+
+  it("отметка «исключён» гасит и ВТОРУЮ цепочку, запущенную позже", async () => {
+    // Смысл отметки — «все следующие рассылки», а не только та, что уже шла.
+    const site = await makeSite();
+    const order = await makeOrder(site.id);
+    await prisma.order.update({ where: { id: order.id }, data: { marketingMark: "MUTED" } });
+    const flow = await makeFlow(site.id, [{ type: "EMAIL", brevoTemplateId: 3 }]);
+
+    await fireTrigger(order);
+    await drainFlowSteps(order.id);
+
+    const runs = await runsOf(flow.id);
+    expect(runs[0].cancelledReason).toBe("order_marketing_muted");
+    expect(emailSends).toHaveLength(0);
+  });
+
+  it("пометка «попросить отзыв» цепочку НЕ останавливает", async () => {
+    // Граница двух значений: MUTED — запрет на письма, ASK_REVIEW — задача оператору.
+    // Спутать их значило бы молча отменить рассылку там, где владелец её как раз хотел.
+    const site = await makeSite();
+    const order = await makeOrder(site.id);
+    const flow = await makeFlow(site.id, [{ type: "EMAIL", brevoTemplateId: 3 }]);
+
+    await prisma.order.update({ where: { id: order.id }, data: { marketingMark: "ASK_REVIEW" } });
+    await fireTrigger(order);
+    await drainFlowSteps(order.id);
+
+    expect(emailSends).toHaveLength(1);
+  });
+
   it("шаг удалили во время ожидания → SKIPPED, цепочка идёт дальше", async () => {
     const site = await makeSite();
     const order = await makeOrder(site.id);

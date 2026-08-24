@@ -42,6 +42,17 @@ export async function resolveOwnerBot(prisma: PrismaClient): Promise<BotLookup> 
   return toResolved(b);
 }
 
+/**
+ * Бот колл-центра (singleton по смыслу, как у владельца). Через него уходят задачи оператору —
+ * например, «попросить у клиента отзыв». Бота нет или он выключен — уведомление тихо
+ * пропускается, как и у остальных адресатов.
+ */
+export async function resolveCustomerServiceBot(prisma: PrismaClient): Promise<BotLookup> {
+  const b = await prisma.telegramBot.findFirst({ where: { purpose: "CUSTOMER_SERVICE" }, orderBy: { createdAt: "asc" } });
+  if (!b) return { skip: "no_bot" };
+  return toResolved(b);
+}
+
 /** Персональный бот флориста. Нет бота — уведомление тихо пропускается (решение владельца). */
 export async function resolveFloristBot(prisma: PrismaClient, floristId: string): Promise<BotLookup> {
   const b = await prisma.telegramBot.findUnique({ where: { floristId } });

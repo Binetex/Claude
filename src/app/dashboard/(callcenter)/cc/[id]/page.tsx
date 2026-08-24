@@ -24,6 +24,7 @@ import { OrderQuickActions } from "@/components/orders/OrderQuickActions";
 import { recipientAddressLines, recipientMapsUrl } from "@/components/orders/address";
 import { OrderStatusBadge } from "@/components/StatusBadge";
 import { FloristAvatar } from "@/components/FloristAvatar";
+import { MARKETING_MARK_META } from "@/lib/marketingMark";
 
 export const dynamic = "force-dynamic";
 
@@ -52,6 +53,13 @@ export default async function CallCenterOrderPage({ params }: { params: Promise<
       badges={
         <>
           <OrderStatusBadge status={order.orderStatus} paymentFailed={order.paymentFailed} />
+          {/* Задача от владельца — рядом со статусом, чтобы оператор увидел её сразу, а не
+              искал по карточке. Ставит пометку владелец, оператор только выполняет. */}
+          {order.marketingMark && (
+            <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${MARKETING_MARK_META[order.marketingMark].className}`}>
+              {MARKETING_MARK_META[order.marketingMark].label}
+            </span>
+          )}
           {/* Назначенный флорист — только просмотр (переназначение доступно владельцу).
               Отдельной карточки под справочную подпись не заводим. */}
           <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 py-0.5 pr-2.5 pl-0.5 text-xs text-slate-600">

@@ -22,6 +22,7 @@ export const TELEGRAM_EVENTS = [
   "payment.not_found",
   "delivery.problem",
   "delivery.no_couriers",
+  "order.ask_review",
 ] as const;
 
 export type TelegramEventType = (typeof TELEGRAM_EVENTS)[number];
@@ -94,6 +95,15 @@ const REGISTRY: Record<TelegramEventType, TelegramEventDef> = {
     perFlorist: false,
     dedupeKey: ({ orderId }) => `order:${orderId}:owner.delivery`,
     description: "Доставка перешла в FAILED / CANCELLED / PROBLEM.",
+  },
+  "order.ask_review": {
+    type: "order.ask_review",
+    audience: "CUSTOMER_SERVICE",
+    perFlorist: false,
+    // Один заказ — одна задача. Владелец может снять и снова поставить пометку; второе
+    // сообщение оператору об одном и том же заказе было бы шумом.
+    dedupeKey: ({ orderId }) => `order:${orderId}:cs.ask_review`,
+    description: "Владелец пометил заказ «попросить отзыв» — задача оператору колл-центра.",
   },
   "delivery.no_couriers": {
     type: "delivery.no_couriers",

@@ -66,4 +66,5 @@ export const FLOW_CANCEL_REASON_LABELS: Record<string, string> = {
   flow_deleted: "цепочка удалена",
   site_unlinked: "магазин отвязан от цепочки",
   order_cancelled: "заказ отменён или возвращён",
+  order_marketing_muted: "заказ исключён из рассылок",
 };

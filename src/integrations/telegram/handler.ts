@@ -3,7 +3,7 @@ import type { PrismaClient } from "@/generated/prisma/client";
 import type { OutboxHandler } from "@/outbox/worker";
 import type { OutboxRecord } from "@/outbox/types";
 import { getTelegramEvent } from "./registry";
-import { resolveOwnerBot, resolveFloristBot, resolveBotById, type BotLookup, type ResolvedBot } from "./bots";
+import { resolveOwnerBot, resolveFloristBot, resolveCustomerServiceBot, resolveBotById, type BotLookup, type ResolvedBot } from "./bots";
 import { isTelegramGloballyEnabled } from "./config";
 import { TelegramSender } from "./sender";
 import {
@@ -13,6 +13,7 @@ import {
   renderOwnerCreated,
   renderOwnerDeliveryProblem,
   renderOwnerNoCouriers,
+  renderAskReview,
   renderOwnerPaymentProblem,
   renderOwnerPendingTooLong,
   renderOwnerStatusMismatch,
@@ -73,7 +74,9 @@ export function buildTelegramNotifyHandler(prisma: PrismaClient): OutboxHandler 
       ? await resolveBotById(prisma, existing.botId)
       : def.perFlorist
         ? await resolveFloristBot(prisma, p.floristId!)
-        : await resolveOwnerBot(prisma);
+        : def.audience === "CUSTOMER_SERVICE"
+          ? await resolveCustomerServiceBot(prisma)
+          : await resolveOwnerBot(prisma);
 
     if ("skip" in lookup) {
       if (lookup.skip === "bad_token_ciphertext") {
@@ -248,6 +251,8 @@ function renderFor(type: TelegramNotifyPayload["type"], order: OrderSnapshot, ct
       return renderOwnerDeliveryProblem(order, ctx.status ?? "PROBLEM", ctx.safeReason ?? null);
     case "delivery.no_couriers":
       return renderOwnerNoCouriers(order, ctx.checkedAt ?? null);
+    case "order.ask_review":
+      return renderAskReview(order);
   }
 }
 
@@ -256,7 +261,8 @@ async function loadOrderSnapshot(prisma: PrismaClient, orderId: string): Promise
     where: { id: orderId },
     select: {
       id: true, orderNumber: true, deliveryDate: true, deliveryWindow: true,
-      recipientName: true, addressLine: true, apartment: true, city: true, zip: true,
+      recipientName: true, senderName: true, senderPhone: true,
+      addressLine: true, apartment: true, city: true, zip: true,
       cardMessage: true, deliveryInstructions: true,
       site: { select: { name: true } },
       items: { select: { name: true, variantName: true, quantity: true, floristCompositionSnapshot: true, image: true, parentImageUrl: true, variantImageUrl: true } },

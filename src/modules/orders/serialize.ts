@@ -101,6 +101,8 @@ export function serializeForOwner(o: OrderWithRelations) {
     currentFloristName: o.currentFlorist?.user.name ?? null,
     currentFloristAvatarUrl: o.currentFlorist?.avatarUrl ?? null,
     currentFloristId: o.currentFloristId,
+    // Пометка о работе с клиентом — решение владельца, ему и правится.
+    marketingMark: o.marketingMark,
     senderName: o.senderName,
     senderPhone: o.senderPhone,
     senderEmail: o.senderEmail,
@@ -192,6 +194,8 @@ export type OwnerOrder = ReturnType<typeof serializeForOwner>;
 export function serializeForCallCenter(o: OrderWithRelations) {
   return {
     ...baseFields(o),
+    // Пометка владельца — оператор её ВИДИТ и выполняет, но не ставит (ставит владелец).
+    marketingMark: o.marketingMark,
     // Колл-центр ВИДИТ, какому флористу назначен заказ (имя + аватарка, для справки).
     // Переназначение и цены флориста остаются недоступны (нет currentFloristId/finance).
     currentFloristName: o.currentFlorist?.user.name ?? null,

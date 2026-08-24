@@ -271,6 +271,12 @@ enum AirwallexNormalizedStatus {
   UNKNOWN
 }
 
+/// Пометка владельца о работе с клиентом по конкретному заказу (см. Order.marketingMark).
+enum OrderMarketingMark {
+  MUTED // не писать клиенту маркетинговые цепочки
+  ASK_REVIEW // попросить у клиента отзыв (задача колл-центру)
+}
+
 enum TelegramBotPurpose {
   OWNER
   FLORIST
@@ -280,6 +286,7 @@ enum TelegramBotPurpose {
 enum TelegramAudience {
   FLORIST
   OWNER
+  CUSTOMER_SERVICE
 }
 
 enum SiteSyncStatus {
@@ -1217,6 +1224,14 @@ model Order {
   // "живой" вебхук). Используется, чтобы показывать его в отдельной вкладке
   // "Старые заказы", а не смешивать с обычной лентой (см. scripts/backfill-shopify-orders.ts).
   isBackfilled Boolean @default(false)
+
+  /// Пометка владельца о работе с клиентом по этому заказу. NULL — обычный заказ.
+  /// MUTED — не писать клиенту маркетинговые цепочки (Marketing Flows). ASK_REVIEW — наоборот,
+  /// попросить отзыв: колл-центр получает задачу в Telegram и видит пометку в карточке.
+  /// Одно поле, а не два флага: значения взаимоисключающие — нельзя одновременно молчать
+  /// и просить отзыв. Служебные уведомления (доставка сегодня, доставлен, трек) не зависят
+  /// от пометки ни в одном из значений.
+  marketingMark OrderMarketingMark?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

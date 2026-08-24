@@ -38,6 +38,7 @@ import { markOrderCommunicationsRead, countUnreadBySide, parseAttachments } from
 import { loadOrderEmailPanel } from "@/integrations/emailFactory/read";
 import { FloristAvatar } from "@/components/FloristAvatar";
 import { ChargesDialog } from "./ChargesDialog";
+import { MarketingMarkCard } from "./MarketingMarkCard";
 
 export const dynamic = "force-dynamic";
 
@@ -355,6 +356,9 @@ export default async function OwnerOrderPage({ params }: { params: Promise<{ id:
           />
 
           <OrderExpensesSection orderId={order.id} hideWhenEmpty />
+
+          {/* Редкая настройка — внизу колонки и свёрнутая. */}
+          <MarketingMarkCard orderId={order.id} mark={order.marketingMark} />
         </>
       }
     />

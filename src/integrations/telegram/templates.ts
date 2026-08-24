@@ -17,6 +17,9 @@ export type OrderSnapshot = {
   deliveryDate: Date | null;
   deliveryWindow: string | null;
   recipientName: string | null;
+  /** Заказчик — нужен только сообщению колл-центру: отзыв просят у того, кто платил. */
+  senderName?: string | null;
+  senderPhone?: string | null;
   addressLine: string | null;
   apartment: string | null;
   city: string | null;
@@ -76,6 +79,10 @@ export function floristOrderUrl(orderId: string): string {
 
 export function ownerOrderUrl(orderId: string): string {
   return `${getAppUrl()}/dashboard/orders/${orderId}`;
+}
+
+export function callCenterOrderUrl(orderId: string): string {
+  return `${getAppUrl()}/dashboard/cc/${orderId}`;
 }
 
 /** Ссылка на карту — общая с дашбордом. Отдельной сборки здесь быть не должно. */
@@ -215,10 +222,32 @@ export function renderOwnerNoCouriers(o: OrderSnapshot, checkedAtLabel: string |
 }
 
 /**
+ * Задача оператору колл-центра: попросить у клиента отзыв.
+ *
+ * Отзыв просят у ЗАКАЗЧИКА, а не у получателя: платил и выбирал он, и телефон в заказе есть
+ * именно его. Получателя всё же называем — по нему оператор поймёт, о каком букете речь.
+ *
+ * Это задача человеку, а не уведомление о событии, поэтому сказано прямо, что нужно сделать.
+ */
+export function renderAskReview(o: OrderSnapshot): string {
+  return (
+    `⭐ <b>Попросить отзыв</b>\n` +
+    `<b>${esc(o.orderNumber)}</b> · ${esc(o.siteName)}\n\n` +
+    line("Заказчик", o.senderName ?? null) +
+    line("Телефон", o.senderPhone ?? null) +
+    line("Получатель", o.recipientName) +
+    line("Доставка", fmtDate(o.deliveryDate)) +
+    `\nВладелец отметил заказ: свяжитесь с заказчиком и попросите оставить отзыв.`
+  ).trimEnd();
+}
+
+/**
  * Кнопки под сообщением. Флорист получает «Open Order» + «Google Maps» (если есть адрес):
  * карта открывает адрес получателя. Владелец — только «Open Order».
  */
 export function buttonsFor(type: TelegramEventType, o: OrderSnapshot): TelegramButton[] {
+  // Оператор открывает СВОЮ карточку заказа: в кабинет владельца у него нет доступа.
+  if (type === "order.ask_review") return [{ text: "Open Order", url: callCenterOrderUrl(o.id) }];
   const forFlorist = type === "order.assigned" || type === "order.handed_over";
   if (!forFlorist) return [{ text: "Open Order", url: ownerOrderUrl(o.id) }];
   const buttons: TelegramButton[] = [{ text: "🧾 Open Order", url: floristOrderUrl(o.id) }];

@@ -119,6 +119,12 @@ export function buildFlowStepHandler(prisma: PrismaClient, deps: FlowStepDeps): 
       }
     }
 
+    // Владелец исключил заказ из маркетинга. Проверка живёт ЗДЕСЬ, а не на старте цепочки:
+    // так пометка гасит и уже идущие цепочки, а в «Истории» остаётся видимый след, почему
+    // письмо не ушло. Служебных правил это не касается — они про сам заказ, а не про маркетинг.
+    // ASK_REVIEW цепочки НЕ трогает: это задача оператору, а не запрет на письма.
+    if (order.marketingMark === "MUTED") return cancelRun("order_marketing_muted");
+
     // Шаг убрали из цепочки, пока он ждал: фиксируем пропуск и идём дальше.
     if (runStep.step.deletedAt) return skipAndAdvance("step_deleted");
 

@@ -438,6 +438,18 @@ describe("SMS engine — send job", () => {
     expect(updated.lastErrorSafe).toBe("order_cancelled_or_refunded");
   });
 
+  it("6b-2. Заказ исключён из МАРКЕТИНГОВЫХ рассылок → служебное правило всё равно отправляется", async () => {
+    // Граница решения владельца: отметка глушит только цепочки (Marketing Flows). Служебные
+    // сообщения — «доставка сегодня», «заказ доставлен», трек — про сам заказ, и клиент их ждёт.
+    sendOk = true;
+    const site = await makeSite();
+    const order = await makeOrder(site.id);
+    const { job } = await triggerAndGetJob(site.id, order, {});
+    await prisma.order.update({ where: { id: order.id }, data: { marketingMark: "MUTED" } });
+    await sendHandler(rec({ jobId: job.id, orderId: order.id }));
+    expect((await prisma.automationJob.findUniqueOrThrow({ where: { id: job.id } })).status).toBe("SENT");
+  });
+
   it("6c. Магазин отвязан от правила к моменту отправки → SKIP automation_not_enabled_for_site", async () => {
     sendOk = true;
     const site = await makeSite();

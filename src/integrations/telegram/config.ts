@@ -11,7 +11,7 @@ import type { PrismaClient } from "@/generated/prisma/client";
  * Источник истины — TelegramSettings.enabled. Переменная окружения TELEGRAM_ENABLED осталась
  * запасным вариантом для окружений, где строки настроек ещё нет.
  */
-export type TelegramAudience = "FLORIST" | "OWNER";
+export type TelegramAudience = "FLORIST" | "OWNER" | "CUSTOMER_SERVICE";
 
 export async function isTelegramGloballyEnabled(prisma: PrismaClient): Promise<boolean> {
   const s = await prisma.telegramSettings.findUnique({ where: { id: "singleton" } }).catch(() => null);
