@@ -160,6 +160,7 @@ export function TelegramBotsPanel({
   const refresh = () => router.refresh();
 
   const ownerBot = bots.find((b) => b.purpose === "OWNER") ?? null;
+  const serviceBot = bots.find((b) => b.purpose === "CUSTOMER_SERVICE") ?? null;
   const botByFlorist = new Map(bots.filter((b) => b.floristId).map((b) => [b.floristId!, b]));
 
   return (
@@ -197,6 +198,21 @@ export function TelegramBotsPanel({
           </div>
           <div className="px-4 pb-2">
             <BotCard title="Владелец" subtitle="" purpose="OWNER" floristId={null} bot={ownerBot} onDone={refresh} />
+          </div>
+        </CardBody>
+      </Card>
+
+      <Card>
+        <CardBody className="p-0">
+          <div className="px-4 pt-3">
+            <h2 className="text-sm font-semibold text-slate-800">Бот колл-центра</h2>
+            <p className="text-xs text-slate-500">
+              Задачи оператору: например, попросить у клиента отзыв по помеченному заказу.
+              Без настроенного бота такие задачи просто не отправляются.
+            </p>
+          </div>
+          <div className="px-4 pb-2">
+            <BotCard title="Колл-центр" subtitle="" purpose="CUSTOMER_SERVICE" floristId={null} bot={serviceBot} onDone={refresh} />
           </div>
         </CardBody>
       </Card>

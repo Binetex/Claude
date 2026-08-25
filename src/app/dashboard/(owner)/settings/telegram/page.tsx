@@ -8,6 +8,13 @@ import { TelegramBotsPanel } from "./TelegramBotsPanel";
 
 export const dynamic = "force-dynamic";
 
+/** Кому уходит уведомление — подпись и цвет. Адресатов три, тернарником их не разложить. */
+const AUDIENCE_META: Record<string, { label: string; className: string }> = {
+  OWNER: { label: "владельцу", className: "border-sky-200 bg-sky-50 text-sky-700" },
+  FLORIST: { label: "флористу", className: "border-emerald-200 bg-emerald-50 text-emerald-700" },
+  CUSTOMER_SERVICE: { label: "колл-центру", className: "border-amber-200 bg-amber-50 text-amber-800" },
+};
+
 export default async function TelegramSettingsPage() {
   await requireRole("OWNER");
   const [global, bots, florists] = await Promise.all([
@@ -43,8 +50,8 @@ export default async function TelegramSettingsPage() {
           <ul className="space-y-1 text-xs text-slate-600">
             {events.map((e) => (
               <li key={e.type} className="flex gap-2">
-                <span className={`shrink-0 rounded border px-1.5 py-px text-[11px] ${e.audience === "OWNER" ? "border-sky-200 bg-sky-50 text-sky-700" : "border-emerald-200 bg-emerald-50 text-emerald-700"}`}>
-                  {e.audience === "OWNER" ? "владельцу" : "флористу"}
+                <span className={`shrink-0 rounded border px-1.5 py-px text-[11px] ${AUDIENCE_META[e.audience].className}`}>
+                  {AUDIENCE_META[e.audience].label}
                 </span>
                 <span><code className="rounded bg-slate-100 px-1">{e.type}</code> — {e.description}</span>
               </li>
