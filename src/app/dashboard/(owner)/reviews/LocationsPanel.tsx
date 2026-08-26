@@ -1,6 +1,6 @@
 "use client";
 import { useRef, useState, useTransition } from "react";
-import { MapPin, Plus, Trash2 } from "lucide-react";
+import { MapPin, Plus, Trash2, Pencil } from "lucide-react";
 import { Card, CardHeader, CardTitle, CardBody } from "@/components/ui/Card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -85,14 +85,17 @@ function SiteCard({ site }: { site: SiteBlock }) {
 
 function LocationRow({ loc, onEdit }: { loc: Loc; onEdit: () => void }) {
   return (
+    // Вся строка открывает правку, и об этом говорит курсор и подсветка. Раньше нажималось
+    // только название, ничем не обозначенное, — и правку просто не находили.
     <div
-      className={`flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border px-3 py-2 text-sm ${
-        loc.isActive ? "border-slate-200" : "border-slate-200 bg-slate-50 text-slate-400"
+      onClick={onEdit}
+      className={`flex cursor-pointer flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border px-3 py-2 text-sm transition-colors ${
+        loc.isActive
+          ? "border-slate-200 hover:border-slate-300 hover:bg-slate-50"
+          : "border-slate-200 bg-slate-50 text-slate-400 hover:border-slate-300"
       }`}
     >
-      <button type="button" onClick={onEdit} className="font-medium text-slate-800 hover:underline">
-        {loc.name}
-      </button>
+      <span className="font-medium text-slate-800">{loc.name}</span>
       {loc.isDefault && (
         <span className="rounded bg-slate-100 px-1.5 py-px text-[11px] text-slate-600">запасная</span>
       )}
@@ -114,10 +117,21 @@ function LocationRow({ loc, onEdit }: { loc: Loc; onEdit: () => void }) {
         href={loc.reviewUrl}
         target="_blank"
         rel="noopener noreferrer"
-        className="ml-auto max-w-[240px] truncate text-xs text-sky-600 hover:underline"
+        onClick={(e) => e.stopPropagation()}
+        className="ml-auto max-w-[220px] truncate text-xs text-sky-600 hover:underline"
       >
         {loc.reviewUrl}
       </a>
+      {/* Явная кнопка правки: строка кликается целиком, но без значка об этом не догадаться. */}
+      <button
+        type="button"
+        onClick={onEdit}
+        title="Изменить точку"
+        aria-label={`Изменить точку ${loc.name}`}
+        className="shrink-0 text-slate-400 hover:text-slate-700"
+      >
+        <Pencil className="size-3.5" />
+      </button>
     </div>
   );
 }
