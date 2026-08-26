@@ -88,7 +88,7 @@ afterAll(async () => {
 describe("создание запроса", () => {
   it("подставляет точку по ZIP и фиксирует ссылку снимком", async () => {
     const loc = await prisma.googleLocation.create({
-      data: { siteId, name: "Beverly", reviewUrl: "https://g.page/r/bh/review", zips: ["90210"] },
+      data: { siteId, name: "Beverly", reviewUrl: "https://g.page/r/bh/review", zipCode: "90210" },
     });
     const orderId = await makeOrder("90210");
 
@@ -105,7 +105,7 @@ describe("создание запроса", () => {
   it("снимок ссылки переживает удаление точки", async () => {
     // Разметку правят, точки закрывают — но «куда мы отправили этого клиента» должно остаться.
     const loc = await prisma.googleLocation.create({
-      data: { siteId, name: "Beverly", reviewUrl: "https://g.page/r/bh/review", zips: ["90210"] },
+      data: { siteId, name: "Beverly", reviewUrl: "https://g.page/r/bh/review", zipCode: "90210" },
     });
     const { id } = await createReviewRequest(prisma, await makeOrder("90210"), actor);
     await prisma.googleLocation.delete({ where: { id: loc.id } });
@@ -250,7 +250,7 @@ describe("смена точки вручную", () => {
   it("точка своего магазина принимается и переписывает ссылку", async () => {
     const { id } = await createReviewRequest(prisma, await makeOrder("99999"), actor);
     const loc = await prisma.googleLocation.create({
-      data: { siteId, name: "Culver", reviewUrl: "https://g.page/r/culver/review", zips: ["90232"] },
+      data: { siteId, name: "Culver", reviewUrl: "https://g.page/r/culver/review", zipCode: "90232" },
     });
 
     expect(await changeRequestLocation(prisma, id, loc.id, actor)).toEqual({ ok: true });
@@ -263,7 +263,7 @@ describe("смена точки вручную", () => {
     // Иначе клиент ушёл бы писать отзыв не тому бизнесу.
     const { id } = await createReviewRequest(prisma, await makeOrder(), actor);
     const alien = await prisma.googleLocation.create({
-      data: { siteId: otherSiteId, name: "Чужая", reviewUrl: "https://g.page/r/alien/review", zips: [] },
+      data: { siteId: otherSiteId, name: "Чужая", reviewUrl: "https://g.page/r/alien/review", zipCode: null },
     });
 
     expect(await changeRequestLocation(prisma, id, alien.id, actor)).toMatchObject({ ok: false });

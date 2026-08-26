@@ -88,7 +88,7 @@ export async function createReviewRequest(
         select: {
           reviewUrl: true,
           googleLocations: {
-            select: { id: true, name: true, reviewUrl: true, zips: true, isDefault: true, isActive: true },
+            select: { id: true, name: true, reviewUrl: true, zipCode: true, isDefault: true, isActive: true },
           },
         },
       },

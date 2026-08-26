@@ -6,10 +6,10 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { saveLocationAction, deleteLocationAction, checkZipAction } from "./actions";
 
-type Loc = { id: string; name: string; reviewUrl: string; zips: string[]; isDefault: boolean; isActive: boolean };
+type Loc = { id: string; name: string; reviewUrl: string; zipCode: string | null; isDefault: boolean; isActive: boolean };
 type SiteBlock = { siteId: string; siteName: string; siteReviewUrl: string | null; locations: Loc[] };
 
-const EMPTY: Loc = { id: "", name: "", reviewUrl: "", zips: [], isDefault: false, isActive: true };
+const EMPTY: Loc = { id: "", name: "", reviewUrl: "", zipCode: null, isDefault: false, isActive: true };
 
 /**
  * Точки Google по магазинам. Правка идёт прямо в строке, без отдельного экрана: точек у
@@ -75,7 +75,7 @@ function SiteCard({ site }: { site: SiteBlock }) {
         )}
         {site.locations.length > 0 && !hasDefault && (
           <p className="pt-1 text-xs text-amber-700">
-            Нет запасной точки: заказ с незнакомым ZIP уйдёт на общую ссылку магазина.
+            Нет запасной точки: заказ с незнакомым индексом уйдёт на общую ссылку магазина.
           </p>
         )}
       </CardBody>
@@ -100,7 +100,7 @@ function LocationRow({ loc, onEdit }: { loc: Loc; onEdit: () => void }) {
         <span className="rounded bg-slate-100 px-1.5 py-px text-[11px] text-slate-500">выключена</span>
       )}
       <span className="font-mono text-xs text-slate-500">
-        {loc.zips.length > 0 ? loc.zips.join(" · ") : "без адресов"}
+        {loc.zipCode ?? "без индекса"}
       </span>
       <a
         href={loc.reviewUrl}
@@ -127,7 +127,7 @@ function LocationForm({
 }) {
   const [name, setName] = useState(initial.name);
   const [reviewUrl, setReviewUrl] = useState(initial.reviewUrl);
-  const [zipsRaw, setZipsRaw] = useState(initial.zips.join(", "));
+  const [zipRaw, setZipRaw] = useState(initial.zipCode ?? "");
   const [isDefault, setIsDefault] = useState(initial.isDefault);
   const [isActive, setIsActive] = useState(initial.isActive);
   const [error, setError] = useState<string | null>(null);
@@ -141,7 +141,7 @@ function LocationForm({
         siteId,
         name,
         reviewUrl,
-        zipsRaw,
+        zipRaw,
         isDefault,
         isActive,
       });
@@ -177,17 +177,16 @@ function LocationForm({
       </div>
 
       <label className="block text-xs text-slate-600">
-        Какие адреса обслуживает точка
+        Индекс точки на карте
         <Input
-          value={zipsRaw}
-          onChange={(e) => setZipsRaw(e.target.value)}
-          placeholder="90001-90040, 90210, 900*"
-          className="mt-1 font-mono"
+          value={zipRaw}
+          onChange={(e) => setZipRaw(e.target.value)}
+          placeholder="90066"
+          className="mt-1 w-32 font-mono"
         />
         <span className="mt-1 block text-[11px] text-slate-500">
-          Отдельный код <b>90210</b>, диапазон <b>90064-90069</b> или начало кода <b>900*</b> —
-          через запятую или пробел. Перечислять коды поштучно не нужно: один диапазон описывает
-          целый район. Два правила не могут накрывать один адрес.
+          Индекс того места, где точка стоит в Google. Больше ничего указывать не нужно: каждый
+          заказ уходит к <b>ближайшей</b> точке магазина, система считает расстояние сама.
         </span>
       </label>
 
@@ -237,7 +236,7 @@ function LocationForm({
  */
 function ZipCheck({ siteId }: { siteId: string }) {
   const [zip, setZip] = useState("");
-  const [res, setRes] = useState<{ name: string | null; reason: string } | null>(null);
+  const [res, setRes] = useState<{ name: string | null; reason: string; miles: number | null } | null>(null);
   const [pending, start] = useTransition();
   // Номер запроса: ответы приходят в любом порядке, и без него ответ по стёртому ZIP мог
   // перезаписать свежий — поле показывало бы чужую точку рядом с введённым адресом. Врало бы
@@ -258,8 +257,8 @@ function ZipCheck({ siteId }: { siteId: string }) {
   const label =
     res === null
       ? null
-      : res.reason === "zip"
-        ? { text: `→ ${res.name}`, cls: "text-emerald-700" }
+      : res.reason === "nearest"
+        ? { text: `→ ${res.name} · ${res.miles!.toFixed(1)} мили`, cls: "text-emerald-700" }
         : res.reason === "default"
           ? { text: `→ ${res.name} (запасная)`, cls: "text-slate-600" }
           : res.reason === "site_fallback"

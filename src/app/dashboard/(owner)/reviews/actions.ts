@@ -19,7 +19,7 @@ export async function saveLocationAction(input: {
   siteId: string;
   name: string;
   reviewUrl: string;
-  zipsRaw: string;
+  zipRaw: string;
   isDefault: boolean;
   isActive: boolean;
 }): Promise<LocationFormResult> {
@@ -29,7 +29,7 @@ export async function saveLocationAction(input: {
       siteId: input.siteId,
       name: input.name,
       reviewUrl: input.reviewUrl,
-      zipsRaw: input.zipsRaw,
+      zipRaw: input.zipRaw,
       isDefault: input.isDefault,
       isActive: input.isActive,
     },
@@ -49,18 +49,25 @@ export async function deleteLocationAction(id: string): Promise<LocationFormResu
 }
 
 /**
- * Проверка адреса: какая точка достанется заказу с таким ZIP.
+ * Проверка адреса: какая точка достанется заказу с таким индексом и на каком она расстоянии.
  *
- * Нужна потому, что разметка ZIP — это данные, а не код: опечатка в одном коде тихо уводит
- * часть заказов к запасной точке, и заметить это иначе можно только по факту отправки.
+ * Нужна потому, что расстояние — вещь неочевидная: две точки могут стоять так, что граница
+ * между ними пройдёт не там, где ожидает владелец. Проверка показывает границу до того, как
+ * по ней уедет первый клиент.
  */
 export async function checkZipAction(siteId: string, zip: string): Promise<{
   name: string | null;
-  reason: "zip" | "default" | "site_fallback" | "none";
+  reason: "nearest" | "default" | "site_fallback" | "none";
   reviewUrl: string | null;
+  miles: number | null;
 }> {
   await requireRole("OWNER");
   const resolved = await resolveLocationForZip(siteId, zip);
-  if (!resolved || !resolved.result.ok) return { name: null, reason: "none", reviewUrl: null };
-  return { name: resolved.locationName, reason: resolved.result.reason, reviewUrl: resolved.reviewUrl };
+  if (!resolved || !resolved.result.ok) return { name: null, reason: "none", reviewUrl: null, miles: null };
+  return {
+    name: resolved.locationName,
+    reason: resolved.result.reason,
+    reviewUrl: resolved.reviewUrl,
+    miles: resolved.distanceMiles,
+  };
 }

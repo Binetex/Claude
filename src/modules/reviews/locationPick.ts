@@ -1,91 +1,47 @@
 /**
- * Какая точка Google достаётся заказу. Чистая функция: на вход — ZIP заказа и точки
- * магазина, на выход — выбранная точка и ПОЧЕМУ именно она.
+ * Какая точка Google достаётся заказу.
  *
- * Ключ выбора — ZIP, а не город. Город в заказах пишут как попало («LA», «Los Angeles»,
- * «Ladera Heights»), а ZIP заполнен всегда и однозначен. Расстояние до адреса не считаем:
- * это геокодирование каждого заказа ради разницы, которую владелец знает наперёд и
- * выражает разметкой ZIP.
+ * Правило одно: БЛИЖАЙШАЯ к адресу доставки. Владелец задаёт у точки только её собственный
+ * почтовый индекс — тот, где точка стоит на карте, — а какие адреса к ней относятся, система
+ * считает сама.
  *
- * Причина выбора возвращается наружу не для красоты: на экране точек владелец проверяет
- * адрес и должен видеть, попал ли ZIP в разметку или сработал запасной вариант. Без этого
- * «работает» и «случайно совпало» неразличимы.
+ * Так, а не списками районов, потому что список — это ручная работа с десятками кодов, которую
+ * человек проделает один раз и забудет обновить, а ошибётся молча: заказ уедет просить отзыв
+ * не в тот магазин, и заметить это будет нечем.
+ *
+ * Расстояние считается по таблице координат внутри проекта (`zipGeo.ts`): без геокодера, без
+ * ключей и без запроса наружу на каждый заказ.
+ *
+ * Причина выбора возвращается наружу не для красоты: на экране точек владелец проверяет адрес
+ * и должен видеть, сработала ли география или подставился запасной вариант.
  */
+import { zipCoords, distanceMiles } from "./zipGeo";
 
 export type PickableLocation = {
   id: string;
   name: string;
   reviewUrl: string;
-  zips: string[];
+  /** Индекс, где точка стоит на карте. Пустой — точка не участвует в расчёте расстояния. */
+  zipCode: string | null;
   isDefault: boolean;
   isActive: boolean;
 };
 
-export type PickReason = "zip" | "default" | "site_fallback";
+export type PickReason = "nearest" | "default" | "site_fallback";
 
 export type PickResult =
-  | { ok: true; reason: "zip" | "default"; location: PickableLocation }
+  | { ok: true; reason: "nearest"; location: PickableLocation; distanceMiles: number }
+  | { ok: true; reason: "default"; location: PickableLocation }
   | { ok: true; reason: "site_fallback"; location: null; reviewUrl: string }
   | { ok: false; error: "no_location" };
 
 /**
- * ZIP приводится к пяти цифрам. В заказах встречается «90056-1234» (ZIP+4) и пробелы по
- * краям — без нормализации такой адрес не нашёл бы свою точку и молча уехал бы к запасной.
+ * Индекс приводится к пяти цифрам. В заказах встречается «90056-1234» (ZIP+4) и пробелы по
+ * краям — без нормализации такой адрес не нашёлся бы в таблице и молча уехал бы к запасной точке.
  */
 export function normalizeZip(raw: string | null | undefined): string {
   const digits = (raw ?? "").trim().replace(/\D/g, "");
   return digits.slice(0, 5);
-}
-
-/**
- * Правило покрытия точки — числовой ОТРЕЗОК кодов. Три записи, и все три сводятся к отрезку:
- *
- *   90210        одиночный код     → [90210, 90210]
- *   90064-90069  диапазон          → [90064, 90069]
- *   900*         префикс           → [90000, 90099]
- *
- * Отрезки нужны потому, что перечислять коды поштучно нереально: в одном Лос-Анджелесе их под
- * сотню, и разметка двух точек превращалась бы в час работы с опечатками. Диапазон описывает
- * район одной строкой.
- *
- * Всё сведено к отрезкам ещё и ради проверки пересечений: два правила разных точек, накрывающие
- * один код, сделали бы выбор точки случайным, а пересечение отрезков проверяется тривиально.
- */
-export type ZipRange = { from: number; to: number };
-
-export function parseZipRule(raw: string): ZipRange | null {
-  const rule = raw.trim();
-  if (!rule) return null;
-
-  const range = rule.match(/^(\d{5})\s*[-–—]\s*(\d{5})$/);
-  if (range) {
-    const from = Number(range[1]);
-    const to = Number(range[2]);
-    // «90069-90064» — тот же диапазон, записанный задом наперёд. Разворачиваем, а не отвергаем.
-    return { from: Math.min(from, to), to: Math.max(from, to) };
-  }
-
-  const prefix = rule.match(/^(\d{1,4})\*$/);
-  if (prefix) {
-    const pad = 5 - prefix[1].length;
-    return { from: Number(prefix[1] + "0".repeat(pad)), to: Number(prefix[1] + "9".repeat(pad)) };
-  }
-
-  const single = rule.match(/^(\d{5})(?:[-\s]?\d{4})?$/);
-  if (single) return { from: Number(single[1]), to: Number(single[1]) };
-
-  return null;
-}
-
-export function zipRulesOverlap(a: ZipRange, b: ZipRange): boolean {
-  return a.from <= b.to && b.from <= a.to;
-}
-
-function ruleCovers(rule: string, zip: string): boolean {
-  const range = parseZipRule(rule);
-  if (!range) return false;
-  const n = Number(zip);
-  return n >= range.from && n <= range.to;
 }
 
 export function pickLocation(
@@ -94,13 +50,24 @@ export function pickLocation(
   siteReviewUrl: string | null | undefined
 ): PickResult {
   const active = locations.filter((l) => l.isActive);
-  const needle = normalizeZip(zip);
+  const orderZip = normalizeZip(zip);
+  const orderAt = orderZip ? zipCoords(orderZip) : null;
 
-  if (needle) {
-    const byZip = active.find((l) => l.zips.some((rule) => ruleCovers(rule, needle)));
-    if (byZip) return { ok: true, reason: "zip", location: byZip };
+  if (orderAt) {
+    let best: { location: PickableLocation; miles: number } | null = null;
+    for (const candidate of active) {
+      const at = candidate.zipCode ? zipCoords(normalizeZip(candidate.zipCode)) : null;
+      if (!at) continue;
+      const miles = distanceMiles(orderAt, at);
+      // Строгое «меньше» оставляет победителем первую при равенстве: две точки в одном индексе
+      // неразличимы географически, и выбор обязан быть хотя бы повторяемым.
+      if (!best || miles < best.miles) best = { location: candidate, miles };
+    }
+    if (best) return { ok: true, reason: "nearest", location: best.location, distanceMiles: best.miles };
   }
 
+  // Индекс заказа неизвестен таблице (абонентский ящик, новый код, опечатка) либо ни у одной
+  // точки не задан свой индекс. Тогда решает не география, а решение владельца.
   const fallback = active.find((l) => l.isDefault);
   if (fallback) return { ok: true, reason: "default", location: fallback };
 

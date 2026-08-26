@@ -13,14 +13,15 @@ import "server-only";
  */
 import type { PrismaClient } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
-import { pickLocation, pickedReviewUrl, parseZipRule, zipRulesOverlap, type PickResult } from "./locationPick";
+import { pickLocation, pickedReviewUrl, normalizeZip, type PickResult } from "./locationPick";
+import { zipCoords } from "./zipGeo";
 
 export type LocationInput = {
   siteId: string;
   name: string;
   reviewUrl: string;
-  /** Сырая строка из формы. Разбор и проверка — здесь же: два места разошлись бы. */
-  zipsRaw: string;
+  /** Индекс точки на карте. Сырая строка из формы: разбор и проверка — здесь же. */
+  zipRaw: string;
   isDefault: boolean;
   isActive: boolean;
 };
@@ -31,39 +32,30 @@ const LOCATION_FIELDS = {
   id: true,
   name: true,
   reviewUrl: true,
-  zips: true,
+  zipCode: true,
   isDefault: true,
   isActive: true,
 } as const;
 
 /**
- * Правила покрытия из формы: одиночные коды, диапазоны «90064-90069» и префиксы «900*».
- * Схлопываем дубли, держим порядок ввода — и ОТДЕЛЬНО возвращаем то, что разобрать не вышло.
+ * Индекс точки из формы. Принимаем ZIP+4 и лишние пробелы — приводим к пяти цифрам.
  *
- * Молча выбрасывать непонятое нельзя. «90210, 9021, 90048» сохранилось бы как два кода,
- * строка в списке выглядела бы нормально — просто на одно правило короче, — а заказы того
- * района тихо уходили бы на запасную точку. Точность разметки это единственное, ради чего
- * весь справочник и существует.
+ * Индекс, которого нет в таблице координат, отвергаем сразу: без координат точка не участвует
+ * в расчёте расстояния, то есть не достанется ни одному заказу — и владелец узнал бы об этом
+ * только по молчанию, разбираясь, почему отзывы не идут.
  */
-export function parseZips(raw: string): { zips: string[]; rejected: string[] } {
-  const seen = new Set<string>();
-  const rejected: string[] = [];
-  for (const part of raw.split(/[\s,;]+/)) {
-    const rule = part.trim();
-    if (!rule) continue;
-    // Хранится ровно то, что ввёл человек: «900*» в списке читается как район, а разложенная
-    // сотня кодов — нет.
-    if (parseZipRule(rule)) seen.add(rule);
-    else rejected.push(rule);
+export function parseLocationZip(raw: string): { zip: string | null; error: string | null } {
+  const value = raw.trim();
+  if (!value) return { zip: null, error: null };
+
+  const zip = normalizeZip(value);
+  if (zip.length !== 5) return { zip: null, error: "Индекс — это пять цифр, например 90066." };
+  if (!zipCoords(zip)) {
+    return { zip: null, error: `Индекс ${zip} не найден в справочнике США — проверьте, тот ли он.` };
   }
-  return { zips: [...seen], rejected };
+  return { zip, error: null };
 }
 
-/**
- * Только https. Сообщение об ошибке обещает именно его, а http-ссылка ушла бы клиенту в SMS
- * и открылась бы у части людей предупреждением о небезопасном соединении вместо формы отзыва.
- * Ссылки Google в любом случае https.
- */
 function badUrl(url: string): boolean {
   try {
     return new URL(url).protocol !== "https:";
@@ -78,10 +70,8 @@ export async function saveGoogleLocation(input: LocationInput, id: string | null
   if (!name) return { ok: false, error: "Назовите точку — иначе её не отличить в списке." };
   if (badUrl(reviewUrl)) return { ok: false, error: "Ссылка на отзыв должна быть полным адресом, начиная с https://" };
 
-  const { zips, rejected } = parseZips(input.zipsRaw);
-  if (rejected.length > 0) {
-    return { ok: false, error: `Это не похоже на ZIP: ${rejected.join(", ")}. ZIP — пять цифр.` };
-  }
+  const { zip, error: zipError } = parseLocationZip(input.zipRaw);
+  if (zipError) return { ok: false, error: zipError };
 
   // Правим существующую точку — убеждаемся, что она есть и принадлежит ЭТОМУ магазину.
   // Без проверки исчезнувшая точка роняла действие ошибкой Prisma, а форма молча зависала:
@@ -92,34 +82,11 @@ export async function saveGoogleLocation(input: LocationInput, id: string | null
     if (existing.siteId !== input.siteId) return { ok: false, error: "Точка принадлежит другому магазину." };
   }
 
-  // Конфликт считаем только среди АКТИВНЫХ точек и только для активной точки: выключенная в
-  // выборе не участвует, и держать её коды в заложниках незачем — иначе перенести район с
-  // закрытой точки на новую было бы нельзя, пока не почистишь мёртвую запись.
-  //
-  // Сравниваем ОТРЕЗКАМИ, а не строками: «90064-90069» и «90066» — разные записи, накрывающие
-  // один код, и без пересечения отрезков выбор точки для этого адреса стал бы случайным.
-  if (input.isActive && zips.length > 0) {
-    const siblings = await prisma.googleLocation.findMany({
-      where: { siteId: input.siteId, isActive: true, ...(id ? { id: { not: id } } : {}) },
-      select: { name: true, zips: true },
-    });
-    const mine = zips.map((rule) => ({ rule, range: parseZipRule(rule)! }));
-    for (const sib of siblings) {
-      for (const otherRule of sib.zips) {
-        const other = parseZipRule(otherRule);
-        if (!other) continue;
-        const clash = mine.find((m) => zipRulesOverlap(m.range, other));
-        if (clash) {
-          return {
-            ok: false,
-            error: `«${clash.rule}» пересекается с «${otherRule}» у точки «${sib.name}» — один адрес попал бы в две точки.`,
-          };
-        }
-      }
-    }
-  }
+  // Проверки «этот адрес занят другой точкой» больше нет и не нужно: адреса ни за кем не
+  // закреплены, каждый заказ достаётся ближайшей точке. Две точки в одном индексе допустимы —
+  // географически они неразличимы, и выбор просто останется повторяемым.
 
-  const data = { siteId: input.siteId, name, reviewUrl, zips, isDefault: input.isDefault, isActive: input.isActive };
+  const data = { siteId: input.siteId, name, reviewUrl, zipCode: zip, isDefault: input.isDefault, isActive: input.isActive };
 
   const saved = await prisma.$transaction(async (tx) => {
     // Снимаем прежнюю запасную ДО записи: иначе частичный уникальный индекс отвергнет вставку.
@@ -164,7 +131,7 @@ export type SiteLocations = {
   siteId: string;
   siteName: string;
   siteReviewUrl: string | null;
-  locations: Array<{ id: string; name: string; reviewUrl: string; zips: string[]; isDefault: boolean; isActive: boolean }>;
+  locations: Array<{ id: string; name: string; reviewUrl: string; zipCode: string | null; isDefault: boolean; isActive: boolean }>;
 };
 
 export async function listLocationsBySite(): Promise<SiteLocations[]> {
@@ -190,6 +157,8 @@ export type ResolvedLocation = {
   reviewUrl: string | null;
   locationId: string | null;
   locationName: string | null;
+  /** Сколько миль до выбранной точки. null, когда решила не география, а запасной вариант. */
+  distanceMiles: number | null;
 };
 
 /** Какая точка достанется заказу прямо сейчас. Читает ZIP заказа и точки его магазина. */
@@ -221,5 +190,6 @@ function describe(result: PickResult): ResolvedLocation {
     reviewUrl: pickedReviewUrl(result),
     locationId: result.ok && result.reason !== "site_fallback" ? result.location.id : null,
     locationName: result.ok && result.reason !== "site_fallback" ? result.location.name : null,
+    distanceMiles: result.ok && result.reason === "nearest" ? result.distanceMiles : null,
   };
 }

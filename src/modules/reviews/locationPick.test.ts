@@ -1,122 +1,110 @@
 import { describe, it, expect } from "vitest";
-import { pickLocation, pickedReviewUrl, normalizeZip, parseZipRule, zipRulesOverlap, type PickableLocation } from "./locationPick";
+import { pickLocation, pickedReviewUrl, normalizeZip, type PickableLocation } from "./locationPick";
 
+/**
+ * Выбор точки для заказа. Индексы взяты настоящие, лос-анджелесские, и расстояния между ними
+ * можно сверить по карте: даунтаун (90017), Mar Vista (90066), Palms (90064), Пасадена (91101).
+ */
 const loc = (over: Partial<PickableLocation> = {}): PickableLocation => ({
   id: "l1",
-  name: "Beverly Hills",
-  reviewUrl: "https://g.page/r/bh/review",
-  zips: ["90210"],
+  name: "Downtown",
+  reviewUrl: "https://g.page/r/dt/review",
+  zipCode: "90017",
   isDefault: false,
   isActive: true,
   ...over,
 });
 
-describe("нормализация ZIP", () => {
+describe("нормализация индекса", () => {
   it("ZIP+4 и пробелы приводятся к пяти цифрам", () => {
-    // В заказах встречается «90056-1234»; без этого адрес не нашёл бы свою точку.
+    // В заказах встречается «90056-1234»; без этого адрес не нашёлся бы в таблице координат.
     expect(normalizeZip(" 90056-1234 ")).toBe("90056");
     expect(normalizeZip("90056")).toBe("90056");
   });
 
-  it("мусор и пустота дают пустую строку, а не подобие ZIP", () => {
+  it("мусор и пустота дают пустую строку, а не подобие индекса", () => {
     for (const junk of ["", "   ", "—", null, undefined]) expect(normalizeZip(junk)).toBe("");
   });
 });
 
-describe("правила покрытия", () => {
-  it("одиночный код — отрезок из самого себя", () => {
-    expect(parseZipRule("90210")).toEqual({ from: 90210, to: 90210 });
+describe("ближайшая точка", () => {
+  const downtown = loc({ id: "dt", name: "Downtown", zipCode: "90017", reviewUrl: "https://g.page/r/dt/review" });
+  const marVista = loc({ id: "mv", name: "Mar Vista", zipCode: "90066", reviewUrl: "https://g.page/r/mv/review" });
+
+  it("адрес рядом с одной точкой уходит именно к ней", () => {
+    // 90064 (Palms) в паре миль от Mar Vista и почти в десяти от даунтауна.
+    const res = pickLocation("90064", [downtown, marVista], null);
+    expect(res).toMatchObject({ ok: true, reason: "nearest", location: { id: "mv" } });
+    expect(pickedReviewUrl(res)).toBe("https://g.page/r/mv/review");
   });
 
-  it("диапазон разбирается, в том числе записанный задом наперёд", () => {
-    expect(parseZipRule("90064-90069")).toEqual({ from: 90064, to: 90069 });
-    expect(parseZipRule("90069-90064")).toEqual({ from: 90064, to: 90069 });
-    expect(parseZipRule("90064 – 90069")).toEqual({ from: 90064, to: 90069 });
+  it("адрес в самом центре уходит в центральную точку", () => {
+    expect(pickLocation("90013", [downtown, marVista], null)).toMatchObject({ location: { id: "dt" } });
   });
 
-  it("префикс раскрывается в отрезок", () => {
-    // Перечислять сотню кодов Лос-Анджелеса поштучно нереально; «900*» — это район одной строкой.
-    expect(parseZipRule("900*")).toEqual({ from: 90000, to: 90099 });
-    expect(parseZipRule("9006*")).toEqual({ from: 90060, to: 90069 });
+  it("порядок точек в списке ничего не решает — решает расстояние", () => {
+    const a = pickLocation("90064", [downtown, marVista], null);
+    const b = pickLocation("90064", [marVista, downtown], null);
+    expect(a).toMatchObject({ location: { id: "mv" } });
+    expect(b).toMatchObject({ location: { id: "mv" } });
   });
 
-  it("мусор не становится правилом", () => {
-    for (const junk of ["", "нет", "9021", "90210-", "*", "abc*"]) expect(parseZipRule(junk)).toBeNull();
+  it("расстояние возвращается наружу — экрану проверки есть что показать", () => {
+    const res = pickLocation("90066", [downtown, marVista], null);
+    expect(res.ok && res.reason === "nearest" && res.distanceMiles).toBeLessThan(2);
   });
 
-  it("пересечение отрезков видно независимо от формы записи", () => {
-    expect(zipRulesOverlap(parseZipRule("90064-90069")!, parseZipRule("90066")!)).toBe(true);
-    expect(zipRulesOverlap(parseZipRule("900*")!, parseZipRule("90066")!)).toBe(true);
-    expect(zipRulesOverlap(parseZipRule("90064-90069")!, parseZipRule("90070")!)).toBe(false);
+  it("ZIP+4 в заказе тоже находит ближайшую", () => {
+    expect(pickLocation("90064-1234", [downtown, marVista], null)).toMatchObject({ location: { id: "mv" } });
+  });
+
+  it("выключенная точка не участвует, даже если она ближе всех", () => {
+    const res = pickLocation("90064", [downtown, { ...marVista, isActive: false }], null);
+    expect(res).toMatchObject({ reason: "nearest", location: { id: "dt" } });
+  });
+
+  it("точка без своего индекса в расчёте не участвует", () => {
+    // Без координат она не достанется ни одному заказу; поэтому пустой индекс и не сохраняем.
+    const nameless = loc({ id: "x", zipCode: null });
+    expect(pickLocation("90064", [nameless, marVista], null)).toMatchObject({ location: { id: "mv" } });
   });
 });
 
-describe("выбор точки", () => {
-  it("ZIP совпал — берём эту точку", () => {
-    const res = pickLocation("90210", [loc(), loc({ id: "l2", zips: ["90056"] })], null);
-    expect(res).toMatchObject({ ok: true, reason: "zip" });
-    expect(pickedReviewUrl(res)).toBe("https://g.page/r/bh/review");
+describe("когда география не помогает", () => {
+  const marVista = loc({ id: "mv", zipCode: "90066" });
+  const spare = loc({ id: "sp", name: "Запасная", zipCode: null, isDefault: true, reviewUrl: "https://g.page/r/sp/review" });
+
+  it("неизвестный индекс заказа уводит на запасную точку", () => {
+    // Абонентские ящики и новые коды в таблице отсутствуют — это обычное дело, не ошибка.
+    const res = pickLocation("00000", [marVista, spare], null);
+    expect(res).toMatchObject({ ok: true, reason: "default", location: { id: "sp" } });
   });
 
-  it("ZIP+4 в заказе находит точку, размеченную пятизначным ZIP", () => {
-    const res = pickLocation("90210-4021", [loc()], null);
-    expect(res).toMatchObject({ ok: true, reason: "zip" });
+  it("пустой индекс заказа — тоже запасная", () => {
+    expect(pickLocation("", [marVista, spare], null)).toMatchObject({ reason: "default" });
   });
 
-  it("адрес попадает в точку по диапазону", () => {
-    const west = loc({ id: "w", name: "Mar Vista", zips: ["90064-90069"] });
-    expect(pickLocation("90066", [west], null)).toMatchObject({ reason: "zip", location: { id: "w" } });
-  });
-
-  it("адрес попадает в точку по префиксу", () => {
-    const all = loc({ id: "a", name: "Весь LA", zips: ["900*"] });
-    expect(pickLocation("90017", [all], null)).toMatchObject({ reason: "zip", location: { id: "a" } });
-    expect(pickLocation("91101", [all], null)).not.toMatchObject({ reason: "zip" });
-  });
-
-  it("две точки с соседними диапазонами разводят адреса без общих правил", () => {
-    // Ровно случай владельца: точки в 90017 и 90066, между ними десятки кодов.
-    const downtown = loc({ id: "dt", name: "Downtown", zips: ["90001-90040"] });
-    const westside = loc({ id: "ws", name: "Westside", zips: ["90041-90099"] });
-    expect(pickLocation("90017", [downtown, westside], null)).toMatchObject({ location: { id: "dt" } });
-    expect(pickLocation("90066", [downtown, westside], null)).toMatchObject({ location: { id: "ws" } });
-    expect(pickLocation("90064", [downtown, westside], null)).toMatchObject({ location: { id: "ws" } });
-  });
-
-  it("ZIP не нашёлся — берём запасную точку магазина", () => {
-    const fallback = loc({ id: "l2", name: "Ladera", zips: [], isDefault: true, reviewUrl: "https://g.page/r/ld/review" });
-    const res = pickLocation("99999", [loc(), fallback], null);
-    expect(res).toMatchObject({ ok: true, reason: "default" });
-    expect(pickedReviewUrl(res)).toBe("https://g.page/r/ld/review");
-  });
-
-  it("выключенная точка не достаётся заказу, даже если её ZIP совпал", () => {
-    const res = pickLocation("90210", [loc({ isActive: false })], "https://site/review");
-    expect(res).toMatchObject({ ok: true, reason: "site_fallback" });
+  it("ни одной точки с индексом — запасная", () => {
+    const noZip = loc({ id: "n", zipCode: null });
+    expect(pickLocation("90064", [noZip, spare], null)).toMatchObject({ reason: "default", location: { id: "sp" } });
   });
 
   it("точек нет — работает старая ссылка магазина", () => {
     // Она кормит живые рассылки; пока справочник не заполнен, заказ всё равно получит ссылку.
-    const res = pickLocation("90210", [], "https://site/review");
+    const res = pickLocation("90064", [], "https://site/review");
     expect(res).toMatchObject({ ok: true, reason: "site_fallback" });
     expect(pickedReviewUrl(res)).toBe("https://site/review");
   });
 
   it("нет ни точек, ни старой ссылки — честный отказ, а не пустая строка", () => {
-    const res = pickLocation("90210", [], null);
+    const res = pickLocation("90064", [], null);
     expect(res).toEqual({ ok: false, error: "no_location" });
     expect(pickedReviewUrl(res)).toBeNull();
   });
 
-  it("пустой ZIP заказа уводит к запасной точке, а не к первой попавшейся", () => {
-    const first = loc({ id: "l1", zips: ["90210"] });
-    const fallback = loc({ id: "l2", zips: [], isDefault: true });
-    expect(pickLocation("", [first, fallback], null)).toMatchObject({ ok: true, reason: "default", location: { id: "l2" } });
-  });
-
-  it("ZIP важнее запасной точки, даже если запасная идёт первой в списке", () => {
-    const fallback = loc({ id: "l2", zips: [], isDefault: true });
-    const byZip = loc({ id: "l1", zips: ["90056"] });
-    expect(pickLocation("90056", [fallback, byZip], null)).toMatchObject({ reason: "zip", location: { id: "l1" } });
+  it("далёкий заказ всё равно уходит к ближайшей, а не к запасной", () => {
+    // Пасадена далеко от обеих точек, но география работает: запасная нужна только когда
+    // считать нечего.
+    expect(pickLocation("91101", [marVista, spare], null)).toMatchObject({ reason: "nearest", location: { id: "mv" } });
   });
 });
