@@ -444,6 +444,7 @@ model Site {
   acquiringFeeModels SiteAcquiringFeeModel[]
   ownerTaxPolicies   OwnerTaxPolicy[]
   financeIssues      FinanceIssue[]
+  googleLocations    GoogleLocation[]
 
   // Запрет двух активных Site одного платформенного домена (двойное подключение).
   @@unique([platform, normalizedShopDomain])
@@ -1508,6 +1509,45 @@ model WooCommerceWebhook {
 // используется для новых заказов; в конкретном заказе её можно переопределить
 // (Order.pickupLocationOverrideId). Точки не удаляются, а деактивируются: на них ссылаются
 // снимки Delivery.pickupLocationId из истории попыток.
+/// Точка магазина на картах Google, у которой клиент оставляет отзыв.
+///
+/// Точек у магазина несколько (обычно 2–3), и какая достанется заказу — решает ZIP адреса
+/// доставки. Именно ZIP, а не город: город в заказах пишут как попало («LA», «Los Angeles»,
+/// «Ladera Heights»), а ZIP заполнен всегда и однозначен.
+///
+/// Не путать с FloristPickupLocation: та про то, ОТКУДА курьер забирает букет, и живёт у
+/// флориста. Эта — про то, ГДЕ клиент пишет отзыв, и живёт у магазина.
+model GoogleLocation {
+  id     String @id @default(cuid())
+  siteId String
+  site   Site   @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  /// Как точка называется в Google — чтобы владелец узнал её в списке.
+  name String
+  /// Идентификатор точки в Business Profile. Пусто, пока обход не подключён (этап 3):
+  /// на первом этапе точка нужна ради ссылки, а читать отзывы ещё нечем.
+  googleLocationId String?
+  /// Короткая ссылка «оставить отзыв» — её и отправляем клиенту.
+  reviewUrl String
+  /// ZIP-коды, которые обслуживает эта точка. Пустой список допустим у запасной точки.
+  zips String[]
+  /// Запасная точка магазина: достаётся заказу, чей ZIP не нашёлся ни у одной точки.
+  /// Такая точка у магазина ровно одна — частичный уникальный индекс в миграции.
+  isDefault Boolean @default(false)
+  /// Выключенная точка не предлагается заказам и не обходится сканером. Не удаляем:
+  /// на неё уже могут ссылаться отправленные ссылки и подтверждённые отзывы.
+  isActive Boolean @default(true)
+
+  /// Состояние последнего обхода (этап 3). Точка, молчащая дольше суток, — это сигнал.
+  lastScanAt        DateTime?
+  lastScanErrorSafe String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([siteId])
+}
+
 model FloristPickupLocation {
   id                  String   @id @default(cuid())
   floristId           String

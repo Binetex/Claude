@@ -13,6 +13,7 @@ const nav: NavItem[] = [
   { href: "/dashboard/expenses", label: "Мои расходы" },
   { href: "/dashboard/burq", label: "Доставка (Burq)" },
   { href: "/dashboard/automations", label: "Автоматизации" },
+  { href: "/dashboard/reviews", label: "Отзывы" },
   { href: "/dashboard/settings/telegram", label: "Telegram" },
   { href: "/dashboard/settings/print", label: "Печать записок" },
   { href: "/dashboard/users", label: "Пользователи" },
