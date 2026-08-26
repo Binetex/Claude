@@ -137,18 +137,3 @@ export async function changeLocationAction(requestId: string, locationId: string
   refresh();
   return res.ok ? { ok: true } : { error: res.error };
 }
-
-/** Точки магазина этого заказа — для смены точки вручную. */
-export async function locationsForRequest(requestId: string) {
-  await requireOperator();
-  const req = await prisma.orderReviewRequest.findUnique({
-    where: { id: requestId },
-    select: { order: { select: { siteId: true } } },
-  });
-  if (!req) return [];
-  return prisma.googleLocation.findMany({
-    where: { siteId: req.order.siteId, isActive: true },
-    select: { id: true, name: true },
-    orderBy: { name: "asc" },
-  });
-}

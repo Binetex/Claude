@@ -31,13 +31,21 @@ export default async function ReviewsQueuePage({ searchParams }: { searchParams:
     queueCounts(),
   ]);
 
-  // Точки нужны для смены вручную. Магазинов в выдаче обычно один-два, поэтому берём разом.
+  // Точки нужны для смены вручную. Магазинов в выдаче обычно один-два, поэтому берём разом —
+  // но раскладываем ПО МАГАЗИНАМ: общий список предлагал бы оператору точки чужого магазина,
+  // а сервер их всё равно отвергает.
   const siteIds = [...new Set(cards.map((c) => c.order.site.id))];
-  const locations = await prisma.googleLocation.findMany({
+  const allLocations = await prisma.googleLocation.findMany({
     where: { siteId: { in: siteIds }, isActive: true },
     select: { id: true, name: true, siteId: true },
     orderBy: { name: "asc" },
   });
+  const locationsBySite = new Map<string, { id: string; name: string }[]>();
+  for (const l of allLocations) {
+    const list = locationsBySite.get(l.siteId) ?? [];
+    list.push({ id: l.id, name: l.name });
+    locationsBySite.set(l.siteId, list);
+  }
 
   const settingsBySite = new Map(
     await Promise.all(siteIds.map(async (id) => [id, await resolveReviewSettings(prisma, id)] as const))
@@ -56,11 +64,7 @@ export default async function ReviewsQueuePage({ searchParams }: { searchParams:
         </p>
       </div>
       <QueueTabs active={tab} counts={counts} />
-      <ReviewQueue
-        tab={tab}
-        cards={vms}
-        locations={locations.map((l) => ({ id: l.id, name: l.name }))}
-      />
+      <ReviewQueue tab={tab} cards={vms} locationsBySite={Object.fromEntries(locationsBySite)} />
     </div>
   );
 }
@@ -79,6 +83,8 @@ function toVM(c: QueueCard, now: Date, maxAttempts: number): CardVM {
     nextActionLabel: next && operatorTurn(c.status) ? `вернуться ${format(next, "dd.MM")}` : null,
     // Просрочка — не про «выбыл», а про «пора было вчера». Только там, где ход за оператором.
     overdue: !!next && operatorTurn(c.status) && next.getTime() < startOfToday(now).getTime(),
+    siteId: c.order.site.id,
+    locationId: c.location?.id ?? null,
     locationName: c.location?.name ?? null,
     hasLink: !!c.reviewUrlSnapshot,
     linkChannelLabel: c.linkChannel === "SMS" ? "в SMS" : c.linkChannel === "EMAIL" ? "письмом" : null,

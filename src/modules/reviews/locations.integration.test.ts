@@ -63,8 +63,12 @@ afterAll(async () => {
 });
 
 describe("разбор ZIP из формы", () => {
-  it("запятые, пробелы, ZIP+4 и дубли сводятся к списку пятизначных кодов", () => {
-    expect(parseZips("90210, 90211 90210; 90056-1234")).toMatchObject({ zips: ["90210", "90211", "90056"], rejected: [] });
+  it("коды, диапазоны и префиксы сохраняются как введены", () => {
+    // Хранится ровно то, что ввёл человек: «900*» в списке читается как район, сотня кодов — нет.
+    expect(parseZips("90210, 90064-90069 900*")).toMatchObject({
+      zips: ["90210", "90064-90069", "900*"],
+      rejected: [],
+    });
   });
 
   it("непонятое возвращается отдельно, а не пропадает", () => {
@@ -93,6 +97,22 @@ describe("целостность справочника", () => {
     expect(res).toMatchObject({ ok: false });
     if (!res.ok) expect(res.error).toContain("90210");
     expect(await prisma.googleLocation.count({ where: { siteId } })).toBe(1);
+  });
+
+  it("пересечение видно и когда коды записаны диапазоном и префиксом", async () => {
+    // «90064-90069» и «90066» — разные записи, накрывающие один адрес. Без сравнения отрезками
+    // выбор точки для него стал бы случайным.
+    await save({ name: "Westside", zipsRaw: "90064-90069" });
+    const res = await save({ name: "Mar Vista", zipsRaw: "90066" });
+    expect(res).toMatchObject({ ok: false });
+
+    const wide = await save({ name: "Весь LA", zipsRaw: "900*" });
+    expect(wide).toMatchObject({ ok: false });
+  });
+
+  it("соседние диапазоны без пересечения сохраняются оба", async () => {
+    expect(await save({ name: "Downtown", zipsRaw: "90001-90040" })).toMatchObject({ ok: true });
+    expect(await save({ name: "Westside", zipsRaw: "90041-90099" })).toMatchObject({ ok: true });
   });
 
   it("своя же точка не считается конфликтом при правке", async () => {

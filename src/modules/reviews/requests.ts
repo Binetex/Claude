@@ -125,8 +125,8 @@ type Patch = {
   linkChannel?: "SMS" | "EMAIL";
   promisedAt?: Date;
   remindedAt?: Date;
-  confirmedAt?: Date;
-  confirmedVia?: "GOOGLE_MATCH" | "MANUAL";
+  confirmedAt?: Date | null;
+  confirmedVia?: "GOOGLE_MATCH" | "MANUAL" | null;
   confirmedByUserId?: string | null;
   closedAt?: Date | null;
   locationId?: string | null;
@@ -186,9 +186,16 @@ export async function recordNoAnswer(
   return { attempts, exhausted };
 }
 
-/** Поговорили с клиентом, но он ещё ничего не обещал: ссылку отправляем и ждём. */
+/**
+ * Поговорили с клиентом, но он ещё ничего не обещал.
+ *
+ * Срок ОСТАЁТСЯ сегодняшним: разговор состоялся, а ссылку клиенту ещё не отправили — ход
+ * по-прежнему за оператором. Снятый срок при статусе CALLING делал запрос невидимым: в
+ * «сегодня» он не попадал (нет срока), в «ждут ответа» тоже (там другие статусы), и запрос
+ * пропадал из работы навсегда.
+ */
 export async function recordTalked(db: PrismaClient, requestId: string, actor: RequestActor): Promise<void> {
-  await transition(db, requestId, { status: "CALLING", nextActionAt: null }, "CALL_TALKED", actor);
+  await transition(db, requestId, { status: "CALLING", nextActionAt: new Date() }, "CALL_TALKED", actor);
 }
 
 /** Клиент обещал оставить отзыв. Отсюда отсчитывается срок до напоминания. */
@@ -235,9 +242,12 @@ export async function recordLinkSent(
 }
 
 /**
- * Отправка не удалась. Статус НЕ меняем: запрос остаётся там, где был, и если он был в очереди
- * оператора — там и останется. Молча переводить его в «ссылка отправлена» нельзя: клиент ничего
- * не получил.
+ * Отправка не удалась.
+ *
+ * Статус не меняем — переводить в «ссылка отправлена» нельзя, клиент ничего не получил. Но срок
+ * ВОЗВРАЩАЕМ на сегодня: иначе запрос, у которого срок уже сняли (например, после исчерпания
+ * попыток звонка), выпадал из всех вкладок оператора и терялся молча — а именно в этом случае
+ * с ним и надо разобраться руками.
  */
 export async function recordLinkFailed(
   db: PrismaClient,
@@ -245,14 +255,17 @@ export async function recordLinkFailed(
   code: string,
   actor: RequestActor
 ): Promise<void> {
-  await db.reviewRequestEvent.create({
-    data: { requestId, kind: "LINK_FAILED", userId: actor?.userId ?? null, detailSafe: code },
+  await db.$transaction(async (tx) => {
+    await tx.orderReviewRequest.update({ where: { id: requestId }, data: { nextActionAt: new Date() } });
+    await tx.reviewRequestEvent.create({
+      data: { requestId, kind: "LINK_FAILED", userId: actor?.userId ?? null, detailSafe: code },
+    });
   });
 }
 
 /** Клиент говорит, что отзыв уже оставлен, — на проверку. */
 export async function recordClaimed(db: PrismaClient, requestId: string, actor: RequestActor): Promise<void> {
-  await transition(db, requestId, { status: "READY_TO_CHECK", nextActionAt: null }, "CALL_TALKED", actor, "claimed");
+  await transition(db, requestId, { status: "READY_TO_CHECK", nextActionAt: null }, "CLAIMED", actor);
 }
 
 /**
@@ -307,7 +320,16 @@ export async function reopenReview(db: PrismaClient, requestId: string, actor: R
   await transition(
     db,
     requestId,
-    { status: "NEW", nextActionAt: new Date(), closedAt: null, confirmedAt: undefined },
+    // Каждое поле подтверждения гасим ЯВНО: `undefined` в Prisma означает «не менять», и
+    // запрос возвращался в работу, оставаясь помеченным как подтверждённый.
+    {
+      status: "NEW",
+      nextActionAt: new Date(),
+      closedAt: null,
+      confirmedAt: null,
+      confirmedVia: null,
+      confirmedByUserId: null,
+    },
     "REOPENED",
     actor
   );

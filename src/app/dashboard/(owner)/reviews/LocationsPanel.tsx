@@ -100,7 +100,7 @@ function LocationRow({ loc, onEdit }: { loc: Loc; onEdit: () => void }) {
         <span className="rounded bg-slate-100 px-1.5 py-px text-[11px] text-slate-500">выключена</span>
       )}
       <span className="font-mono text-xs text-slate-500">
-        {loc.zips.length > 0 ? loc.zips.join(" · ") : "без ZIP"}
+        {loc.zips.length > 0 ? loc.zips.join(" · ") : "без адресов"}
       </span>
       <a
         href={loc.reviewUrl}
@@ -177,15 +177,17 @@ function LocationForm({
       </div>
 
       <label className="block text-xs text-slate-600">
-        ZIP-коды, которые обслуживает точка
+        Какие адреса обслуживает точка
         <Input
           value={zipsRaw}
           onChange={(e) => setZipsRaw(e.target.value)}
-          placeholder="90210, 90211, 90048"
+          placeholder="90001-90040, 90210, 900*"
           className="mt-1 font-mono"
         />
         <span className="mt-1 block text-[11px] text-slate-500">
-          Через запятую или пробел. Один ZIP не может принадлежать двум точкам магазина.
+          Отдельный код <b>90210</b>, диапазон <b>90064-90069</b> или начало кода <b>900*</b> —
+          через запятую или пробел. Перечислять коды поштучно не нужно: один диапазон описывает
+          целый район. Два правила не могут накрывать один адрес.
         </span>
       </label>
 

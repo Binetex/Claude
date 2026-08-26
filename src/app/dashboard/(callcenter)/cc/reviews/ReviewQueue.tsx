@@ -25,6 +25,8 @@ export type CardVM = {
   maxAttempts: number;
   nextActionLabel: string | null;
   overdue: boolean;
+  siteId: string;
+  locationId: string | null;
   locationName: string | null;
   hasLink: boolean;
   linkChannelLabel: string | null;
@@ -46,11 +48,12 @@ type Tab = "today" | "waiting" | "check" | "closed";
 export function ReviewQueue({
   tab,
   cards,
-  locations,
+  locationsBySite,
 }: {
   tab: Tab;
   cards: CardVM[];
-  locations: { id: string; name: string }[];
+  /** Точки, разложенные по магазинам: карточка получает только свои. */
+  locationsBySite: Record<string, { id: string; name: string }[]>;
 }) {
   // Сообщение живёт НАД списком, а не в карточке: после отметки карточка уходит из вкладки
   // вместе с ответом, и оператор не узнал бы, ушла ли ссылка при исчерпании попыток.
@@ -84,7 +87,13 @@ export function ReviewQueue({
     <div className="space-y-2">
       {banner}
       {cards.map((c) => (
-        <RequestCard key={c.id} card={c} tab={tab} locations={locations} onResult={{ setNote, setError }} />
+        <RequestCard
+          key={c.id}
+          card={c}
+          tab={tab}
+          locations={locationsBySite[c.siteId] ?? []}
+          onResult={{ setNote, setError }}
+        />
       ))}
     </div>
   );
@@ -192,7 +201,7 @@ function RequestCard({
           <MapPin className="size-3.5" />
           <span>Отзыв на точку</span>
           <Select
-            value={locations.find((l) => l.name === card.locationName)?.id ?? ""}
+            value={card.locationId ?? ""}
             disabled={pending}
             onChange={(e) => run(() => changeLocationAction(card.id, e.target.value))}
             className="h-7 w-auto text-xs"

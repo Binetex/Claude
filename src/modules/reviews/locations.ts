@@ -13,7 +13,7 @@ import "server-only";
  */
 import type { PrismaClient } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
-import { pickLocation, pickedReviewUrl, normalizeZip, type PickResult } from "./locationPick";
+import { pickLocation, pickedReviewUrl, parseZipRule, zipRulesOverlap, type PickResult } from "./locationPick";
 
 export type LocationInput = {
   siteId: string;
@@ -37,22 +37,24 @@ const LOCATION_FIELDS = {
 } as const;
 
 /**
- * ZIP-ы из формы: нормализуем, схлопываем дубли, держим порядок ввода — и ОТДЕЛЬНО
- * возвращаем то, что на ZIP не похоже.
+ * Правила покрытия из формы: одиночные коды, диапазоны «90064-90069» и префиксы «900*».
+ * Схлопываем дубли, держим порядок ввода — и ОТДЕЛЬНО возвращаем то, что разобрать не вышло.
  *
  * Молча выбрасывать непонятое нельзя. «90210, 9021, 90048» сохранилось бы как два кода,
- * строка в списке выглядела бы нормально — просто на один ZIP короче, — а заказы того района
- * тихо уходили бы на запасную точку. Точность разметки это единственное, ради чего весь
- * справочник и существует.
+ * строка в списке выглядела бы нормально — просто на одно правило короче, — а заказы того
+ * района тихо уходили бы на запасную точку. Точность разметки это единственное, ради чего
+ * весь справочник и существует.
  */
 export function parseZips(raw: string): { zips: string[]; rejected: string[] } {
   const seen = new Set<string>();
   const rejected: string[] = [];
   for (const part of raw.split(/[\s,;]+/)) {
-    if (!part.trim()) continue;
-    const zip = normalizeZip(part);
-    if (zip.length === 5) seen.add(zip);
-    else rejected.push(part.trim());
+    const rule = part.trim();
+    if (!rule) continue;
+    // Хранится ровно то, что ввёл человек: «900*» в списке читается как район, а разложенная
+    // сотня кодов — нет.
+    if (parseZipRule(rule)) seen.add(rule);
+    else rejected.push(rule);
   }
   return { zips: [...seen], rejected };
 }
@@ -90,19 +92,30 @@ export async function saveGoogleLocation(input: LocationInput, id: string | null
     if (existing.siteId !== input.siteId) return { ok: false, error: "Точка принадлежит другому магазину." };
   }
 
-  // Конфликт ZIP считаем только среди АКТИВНЫХ точек и только для активной точки: выключенная
-  // в выборе не участвует, и держать её ZIP в заложниках незачем — иначе перенести коды с
+  // Конфликт считаем только среди АКТИВНЫХ точек и только для активной точки: выключенная в
+  // выборе не участвует, и держать её коды в заложниках незачем — иначе перенести район с
   // закрытой точки на новую было бы нельзя, пока не почистишь мёртвую запись.
+  //
+  // Сравниваем ОТРЕЗКАМИ, а не строками: «90064-90069» и «90066» — разные записи, накрывающие
+  // один код, и без пересечения отрезков выбор точки для этого адреса стал бы случайным.
   if (input.isActive && zips.length > 0) {
     const siblings = await prisma.googleLocation.findMany({
       where: { siteId: input.siteId, isActive: true, ...(id ? { id: { not: id } } : {}) },
       select: { name: true, zips: true },
     });
-    const taken = new Map<string, string>();
-    for (const s of siblings) for (const z of s.zips) taken.set(z, s.name);
-    const clash = zips.filter((z) => taken.has(z));
-    if (clash.length > 0) {
-      return { ok: false, error: `ZIP ${clash.join(", ")} уже закреплён за точкой «${taken.get(clash[0])}».` };
+    const mine = zips.map((rule) => ({ rule, range: parseZipRule(rule)! }));
+    for (const sib of siblings) {
+      for (const otherRule of sib.zips) {
+        const other = parseZipRule(otherRule);
+        if (!other) continue;
+        const clash = mine.find((m) => zipRulesOverlap(m.range, other));
+        if (clash) {
+          return {
+            ok: false,
+            error: `«${clash.rule}» пересекается с «${otherRule}» у точки «${sib.name}» — один адрес попал бы в две точки.`,
+          };
+        }
+      }
     }
   }
 

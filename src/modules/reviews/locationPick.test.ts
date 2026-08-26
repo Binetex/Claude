@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { pickLocation, pickedReviewUrl, normalizeZip, type PickableLocation } from "./locationPick";
+import { pickLocation, pickedReviewUrl, normalizeZip, parseZipRule, zipRulesOverlap, type PickableLocation } from "./locationPick";
 
 const loc = (over: Partial<PickableLocation> = {}): PickableLocation => ({
   id: "l1",
@@ -23,6 +23,34 @@ describe("нормализация ZIP", () => {
   });
 });
 
+describe("правила покрытия", () => {
+  it("одиночный код — отрезок из самого себя", () => {
+    expect(parseZipRule("90210")).toEqual({ from: 90210, to: 90210 });
+  });
+
+  it("диапазон разбирается, в том числе записанный задом наперёд", () => {
+    expect(parseZipRule("90064-90069")).toEqual({ from: 90064, to: 90069 });
+    expect(parseZipRule("90069-90064")).toEqual({ from: 90064, to: 90069 });
+    expect(parseZipRule("90064 – 90069")).toEqual({ from: 90064, to: 90069 });
+  });
+
+  it("префикс раскрывается в отрезок", () => {
+    // Перечислять сотню кодов Лос-Анджелеса поштучно нереально; «900*» — это район одной строкой.
+    expect(parseZipRule("900*")).toEqual({ from: 90000, to: 90099 });
+    expect(parseZipRule("9006*")).toEqual({ from: 90060, to: 90069 });
+  });
+
+  it("мусор не становится правилом", () => {
+    for (const junk of ["", "нет", "9021", "90210-", "*", "abc*"]) expect(parseZipRule(junk)).toBeNull();
+  });
+
+  it("пересечение отрезков видно независимо от формы записи", () => {
+    expect(zipRulesOverlap(parseZipRule("90064-90069")!, parseZipRule("90066")!)).toBe(true);
+    expect(zipRulesOverlap(parseZipRule("900*")!, parseZipRule("90066")!)).toBe(true);
+    expect(zipRulesOverlap(parseZipRule("90064-90069")!, parseZipRule("90070")!)).toBe(false);
+  });
+});
+
 describe("выбор точки", () => {
   it("ZIP совпал — берём эту точку", () => {
     const res = pickLocation("90210", [loc(), loc({ id: "l2", zips: ["90056"] })], null);
@@ -33,6 +61,26 @@ describe("выбор точки", () => {
   it("ZIP+4 в заказе находит точку, размеченную пятизначным ZIP", () => {
     const res = pickLocation("90210-4021", [loc()], null);
     expect(res).toMatchObject({ ok: true, reason: "zip" });
+  });
+
+  it("адрес попадает в точку по диапазону", () => {
+    const west = loc({ id: "w", name: "Mar Vista", zips: ["90064-90069"] });
+    expect(pickLocation("90066", [west], null)).toMatchObject({ reason: "zip", location: { id: "w" } });
+  });
+
+  it("адрес попадает в точку по префиксу", () => {
+    const all = loc({ id: "a", name: "Весь LA", zips: ["900*"] });
+    expect(pickLocation("90017", [all], null)).toMatchObject({ reason: "zip", location: { id: "a" } });
+    expect(pickLocation("91101", [all], null)).not.toMatchObject({ reason: "zip" });
+  });
+
+  it("две точки с соседними диапазонами разводят адреса без общих правил", () => {
+    // Ровно случай владельца: точки в 90017 и 90066, между ними десятки кодов.
+    const downtown = loc({ id: "dt", name: "Downtown", zips: ["90001-90040"] });
+    const westside = loc({ id: "ws", name: "Westside", zips: ["90041-90099"] });
+    expect(pickLocation("90017", [downtown, westside], null)).toMatchObject({ location: { id: "dt" } });
+    expect(pickLocation("90066", [downtown, westside], null)).toMatchObject({ location: { id: "ws" } });
+    expect(pickLocation("90064", [downtown, westside], null)).toMatchObject({ location: { id: "ws" } });
   });
 
   it("ZIP не нашёлся — берём запасную точку магазина", () => {
