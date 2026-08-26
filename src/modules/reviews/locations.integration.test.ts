@@ -7,7 +7,7 @@
  */
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import { prisma } from "@/lib/db";
-import { saveGoogleLocation, parseZips, resolveLocationForZip, resolveLocationForOrder } from "./locations";
+import { saveGoogleLocation, deleteGoogleLocation, parseZips, resolveLocationForZip, resolveLocationForOrder } from "./locations";
 
 const RUN = `gloc-${Date.now()}`;
 let siteId = "";
@@ -15,7 +15,7 @@ const orderIds: string[] = [];
 
 const save = (over: Partial<Parameters<typeof saveGoogleLocation>[0]> = {}, id: string | null = null) =>
   saveGoogleLocation(
-    { siteId, name: "Beverly Hills", reviewUrl: "https://g.page/r/bh/review", zips: ["90210"], isDefault: false, isActive: true, ...over },
+    { siteId, name: "Beverly Hills", reviewUrl: "https://g.page/r/bh/review", zipsRaw: "90210", isDefault: false, isActive: true, ...over },
     id
   );
 
@@ -64,11 +64,12 @@ afterAll(async () => {
 
 describe("разбор ZIP из формы", () => {
   it("запятые, пробелы, ZIP+4 и дубли сводятся к списку пятизначных кодов", () => {
-    expect(parseZips("90210, 90211 90210; 90056-1234")).toEqual(["90210", "90211", "90056"]);
+    expect(parseZips("90210, 90211 90210; 90056-1234")).toMatchObject({ zips: ["90210", "90211", "90056"], rejected: [] });
   });
 
-  it("мусор отбрасывается, а не сохраняется как ZIP", () => {
-    expect(parseZips("нет, —, 123")).toEqual([]);
+  it("непонятое возвращается отдельно, а не пропадает", () => {
+    // Молчаливая потеря опечатки увела бы часть заказов на запасную точку незаметно.
+    expect(parseZips("90210, 9021, нет")).toMatchObject({ zips: ["90210"], rejected: ["9021", "нет"] });
   });
 });
 
@@ -78,7 +79,7 @@ describe("целостность справочника", () => {
     // вместо ожидаемого поведения «эта теперь запасная».
     const first = await save({ name: "Первая", isDefault: true });
     expect(first.ok).toBe(true);
-    const second = await save({ name: "Вторая", zips: ["90056"], isDefault: true });
+    const second = await save({ name: "Вторая", zipsRaw: "90056", isDefault: true });
     expect(second.ok).toBe(true);
 
     const defaults = await prisma.googleLocation.findMany({ where: { siteId, isDefault: true }, select: { name: true } });
@@ -86,8 +87,8 @@ describe("целостность справочника", () => {
   });
 
   it("один ZIP нельзя закрепить за двумя точками магазина", async () => {
-    await save({ name: "Первая", zips: ["90210"] });
-    const res = await save({ name: "Вторая", zips: ["90210", "90048"] });
+    await save({ name: "Первая", zipsRaw: "90210" });
+    const res = await save({ name: "Вторая", zipsRaw: "90210, 90048" });
 
     expect(res).toMatchObject({ ok: false });
     if (!res.ok) expect(res.error).toContain("90210");
@@ -95,26 +96,76 @@ describe("целостность справочника", () => {
   });
 
   it("своя же точка не считается конфликтом при правке", async () => {
-    const created = await save({ name: "Первая", zips: ["90210"] });
+    const created = await save({ name: "Первая", zipsRaw: "90210" });
     if (!created.ok) throw new Error("не создалась");
-    const res = await save({ name: "Первая", zips: ["90210", "90211"] }, created.id);
+    const res = await save({ name: "Первая", zipsRaw: "90210, 90211" }, created.id);
 
     expect(res).toMatchObject({ ok: true });
     const row = await prisma.googleLocation.findUniqueOrThrow({ where: { id: created.id } });
     expect(row.zips).toEqual(["90210", "90211"]);
   });
 
+  it("опечатка в ZIP не сохраняется молча — сохранение отклоняется целиком", async () => {
+    // Раньше «9021» просто исчезал: строка выглядела нормально, просто на один код короче.
+    const res = await save({ zipsRaw: "90210, 9021, 90048" });
+    expect(res).toMatchObject({ ok: false });
+    if (!res.ok) expect(res.error).toContain("9021");
+    expect(await prisma.googleLocation.count({ where: { siteId } })).toBe(0);
+  });
+
+  it("ZIP выключенной точки не держит новую точку в заложниках", async () => {
+    // Выключенная в выборе не участвует, значит и конфликта с ней нет.
+    await save({ name: "Закрытая", zipsRaw: "90210", isActive: false });
+    expect(await save({ name: "Новая", zipsRaw: "90210" })).toMatchObject({ ok: true });
+  });
+
+  it("но включить вторую точку на занятый активный ZIP нельзя", async () => {
+    await save({ name: "Активная", zipsRaw: "90210" });
+    expect(await save({ name: "Вторая", zipsRaw: "90210" })).toMatchObject({ ok: false });
+  });
+
+  it("правка исчезнувшей точки даёт понятный ответ, а не падение", async () => {
+    // Две вкладки: в одной точку удалили, в другой жмут «Сохранить». Раньше ошибка Prisma
+    // всплывала мимо возвращаемого значения, и форма молча зависала.
+    const created = await save({ name: "Временная" });
+    if (!created.ok) throw new Error("не создалась");
+    await prisma.googleLocation.delete({ where: { id: created.id } });
+
+    const res = await save({ name: "Временная" }, created.id);
+    expect(res).toMatchObject({ ok: false });
+    if (!res.ok) expect(res.error).toContain("удалена");
+  });
+
   it("ссылка без протокола не сохраняется", async () => {
     // Такую ссылку клиент получил бы битой, и понять это можно было бы только от него.
     expect(await save({ reviewUrl: "g.page/r/bh" })).toMatchObject({ ok: false });
+    // http тоже отклоняем: сообщение обещает https, и такая ссылка открылась бы у части
+    // клиентов предупреждением о небезопасном соединении вместо формы отзыва.
+    expect(await save({ reviewUrl: "http://g.page/r/bh" })).toMatchObject({ ok: false });
     expect(await save({ name: "  " })).toMatchObject({ ok: false });
+  });
+});
+
+describe("удаление", () => {
+  it("удаление несуществующей точки честно сообщает об этом", async () => {
+    // Прежняя версия глотала любую ошибку и всегда возвращала успех: форма закрывалась,
+    // владелец считал точку удалённой, а она оставалась на месте.
+    const res = await deleteGoogleLocation("does-not-exist");
+    expect(res).toMatchObject({ ok: false });
+  });
+
+  it("существующая точка удаляется", async () => {
+    const created = await save({ name: "На удаление" });
+    if (!created.ok) throw new Error("не создалась");
+    expect(await deleteGoogleLocation(created.id)).toMatchObject({ ok: true });
+    expect(await prisma.googleLocation.count({ where: { id: created.id } })).toBe(0);
   });
 });
 
 describe("какая точка достанется адресу", () => {
   it("ZIP заказа находит свою точку", async () => {
-    await save({ name: "Beverly", zips: ["90210"] });
-    await save({ name: "Ladera", zips: ["90056"], isDefault: true });
+    await save({ name: "Beverly", zipsRaw: "90210" });
+    await save({ name: "Ladera", zipsRaw: "90056", isDefault: true });
 
     const id = await makeOrder("90056");
     const resolved = await resolveLocationForOrder(prisma, id);
@@ -123,14 +174,14 @@ describe("какая точка достанется адресу", () => {
   });
 
   it("ZIP+4 в заказе находит точку, размеченную пятизначным кодом", async () => {
-    await save({ name: "Beverly", zips: ["90210"] });
+    await save({ name: "Beverly", zipsRaw: "90210" });
     const id = await makeOrder("90210-4021");
     expect((await resolveLocationForOrder(prisma, id))?.locationName).toBe("Beverly");
   });
 
   it("незнакомый ZIP уходит на запасную точку", async () => {
-    await save({ name: "Beverly", zips: ["90210"] });
-    await save({ name: "Запасная", zips: [], isDefault: true });
+    await save({ name: "Beverly", zipsRaw: "90210" });
+    await save({ name: "Запасная", zipsRaw: "", isDefault: true });
 
     const id = await makeOrder("99999");
     const resolved = await resolveLocationForOrder(prisma, id);
@@ -153,7 +204,7 @@ describe("какая точка достанется адресу", () => {
   });
 
   it("проверка ZIP с экрана отвечает то же, что достанется заказу", async () => {
-    await save({ name: "Beverly", zips: ["90210"] });
+    await save({ name: "Beverly", zipsRaw: "90210" });
     const byZip = await resolveLocationForZip(siteId, "90210-1111");
     const id = await makeOrder("90210-1111");
     const byOrder = await resolveLocationForOrder(prisma, id);

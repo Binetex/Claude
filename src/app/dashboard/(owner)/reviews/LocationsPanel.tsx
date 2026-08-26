@@ -1,5 +1,5 @@
 "use client";
-import { useState, useTransition } from "react";
+import { useRef, useState, useTransition } from "react";
 import { MapPin, Plus, Trash2 } from "lucide-react";
 import { Card, CardHeader, CardTitle, CardBody } from "@/components/ui/Card";
 import { Button } from "@/components/ui/button";
@@ -237,12 +237,20 @@ function ZipCheck({ siteId }: { siteId: string }) {
   const [zip, setZip] = useState("");
   const [res, setRes] = useState<{ name: string | null; reason: string } | null>(null);
   const [pending, start] = useTransition();
+  // Номер запроса: ответы приходят в любом порядке, и без него ответ по стёртому ZIP мог
+  // перезаписать свежий — поле показывало бы чужую точку рядом с введённым адресом. Врало бы
+  // оно правдоподобно, а перепроверить нечем: это и есть сама проверка.
+  const seq = useRef(0);
 
   function check(value: string) {
     setZip(value);
     setRes(null);
     if (value.replace(/\D/g, "").length < 5) return;
-    start(async () => setRes(await checkZipAction(siteId, value)));
+    const mine = (seq.current += 1);
+    start(async () => {
+      const answer = await checkZipAction(siteId, value);
+      if (seq.current === mine) setRes(answer);
+    });
   }
 
   const label =

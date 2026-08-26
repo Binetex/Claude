@@ -19,7 +19,8 @@ export type LocationInput = {
   siteId: string;
   name: string;
   reviewUrl: string;
-  zips: string[];
+  /** Сырая строка из формы. Разбор и проверка — здесь же: два места разошлись бы. */
+  zipsRaw: string;
   isDefault: boolean;
   isActive: boolean;
 };
@@ -35,20 +36,35 @@ const LOCATION_FIELDS = {
   isActive: true,
 } as const;
 
-/** ZIP-ы из формы: нормализуем, выбрасываем мусор, схлопываем дубли, держим порядок ввода. */
-export function parseZips(raw: string): string[] {
+/**
+ * ZIP-ы из формы: нормализуем, схлопываем дубли, держим порядок ввода — и ОТДЕЛЬНО
+ * возвращаем то, что на ZIP не похоже.
+ *
+ * Молча выбрасывать непонятое нельзя. «90210, 9021, 90048» сохранилось бы как два кода,
+ * строка в списке выглядела бы нормально — просто на один ZIP короче, — а заказы того района
+ * тихо уходили бы на запасную точку. Точность разметки это единственное, ради чего весь
+ * справочник и существует.
+ */
+export function parseZips(raw: string): { zips: string[]; rejected: string[] } {
   const seen = new Set<string>();
+  const rejected: string[] = [];
   for (const part of raw.split(/[\s,;]+/)) {
+    if (!part.trim()) continue;
     const zip = normalizeZip(part);
     if (zip.length === 5) seen.add(zip);
+    else rejected.push(part.trim());
   }
-  return [...seen];
+  return { zips: [...seen], rejected };
 }
 
+/**
+ * Только https. Сообщение об ошибке обещает именно его, а http-ссылка ушла бы клиенту в SMS
+ * и открылась бы у части людей предупреждением о небезопасном соединении вместо формы отзыва.
+ * Ссылки Google в любом случае https.
+ */
 function badUrl(url: string): boolean {
   try {
-    const u = new URL(url);
-    return u.protocol !== "https:" && u.protocol !== "http:";
+    return new URL(url).protocol !== "https:";
   } catch {
     return true;
   }
@@ -60,18 +76,34 @@ export async function saveGoogleLocation(input: LocationInput, id: string | null
   if (!name) return { ok: false, error: "Назовите точку — иначе её не отличить в списке." };
   if (badUrl(reviewUrl)) return { ok: false, error: "Ссылка на отзыв должна быть полным адресом, начиная с https://" };
 
-  const zips = input.zips;
+  const { zips, rejected } = parseZips(input.zipsRaw);
+  if (rejected.length > 0) {
+    return { ok: false, error: `Это не похоже на ZIP: ${rejected.join(", ")}. ZIP — пять цифр.` };
+  }
 
-  // ZIP, уже закреплённый за другой точкой этого магазина, сделал бы выбор случайным.
-  const siblings = await prisma.googleLocation.findMany({
-    where: { siteId: input.siteId, ...(id ? { id: { not: id } } : {}) },
-    select: { name: true, zips: true },
-  });
-  const taken = new Map<string, string>();
-  for (const s of siblings) for (const z of s.zips) taken.set(z, s.name);
-  const clash = zips.filter((z) => taken.has(z));
-  if (clash.length > 0) {
-    return { ok: false, error: `ZIP ${clash.join(", ")} уже закреплён за точкой «${taken.get(clash[0])}».` };
+  // Правим существующую точку — убеждаемся, что она есть и принадлежит ЭТОМУ магазину.
+  // Без проверки исчезнувшая точка роняла действие ошибкой Prisma, а форма молча зависала:
+  // ошибка всплывала мимо возвращаемого значения, и сообщения владелец не видел.
+  if (id) {
+    const existing = await prisma.googleLocation.findUnique({ where: { id }, select: { siteId: true } });
+    if (!existing) return { ok: false, error: "Точка уже удалена — обновите страницу." };
+    if (existing.siteId !== input.siteId) return { ok: false, error: "Точка принадлежит другому магазину." };
+  }
+
+  // Конфликт ZIP считаем только среди АКТИВНЫХ точек и только для активной точки: выключенная
+  // в выборе не участвует, и держать её ZIP в заложниках незачем — иначе перенести коды с
+  // закрытой точки на новую было бы нельзя, пока не почистишь мёртвую запись.
+  if (input.isActive && zips.length > 0) {
+    const siblings = await prisma.googleLocation.findMany({
+      where: { siteId: input.siteId, isActive: true, ...(id ? { id: { not: id } } : {}) },
+      select: { name: true, zips: true },
+    });
+    const taken = new Map<string, string>();
+    for (const s of siblings) for (const z of s.zips) taken.set(z, s.name);
+    const clash = zips.filter((z) => taken.has(z));
+    if (clash.length > 0) {
+      return { ok: false, error: `ZIP ${clash.join(", ")} уже закреплён за точкой «${taken.get(clash[0])}».` };
+    }
   }
 
   const data = { siteId: input.siteId, name, reviewUrl, zips, isDefault: input.isDefault, isActive: input.isActive };
@@ -93,13 +125,26 @@ export async function saveGoogleLocation(input: LocationInput, id: string | null
 }
 
 /**
- * Точку УДАЛЯЕМ только пока на неё никто не сослался; в остальных случаях выключаем.
- * На первом этапе ссылаться ещё нечему, но правило заводим сразу: подтверждённый отзыв,
- * потерявший свою точку, — это дыра в статистике, которую потом не восстановить.
+ * Удаление точки. Пока на точку ссылаться нечему, поэтому удаляем по-настоящему — но об
+ * исходе говорим честно.
+ *
+ * Прежняя версия глотала любую ошибку и всегда возвращала успех: форма закрывалась, владелец
+ * считал точку удалённой, а она оставалась на месте.
+ *
+ * Когда появятся запросы отзывов и найденные отзывы (этапы 2–3), внешний ключ начнёт держать
+ * точку — и тогда здесь появится ветка «не удаляем, а выключаем». Заводить её заранее незачем:
+ * проверять пока нечего.
  */
 export async function deleteGoogleLocation(id: string): Promise<{ ok: true } | { ok: false; error: string }> {
-  await prisma.googleLocation.delete({ where: { id } }).catch(() => null);
-  return { ok: true };
+  try {
+    await prisma.googleLocation.delete({ where: { id } });
+    return { ok: true };
+  } catch (err) {
+    const code = (err as { code?: string }).code;
+    if (code === "P2025") return { ok: false, error: "Точка уже удалена — обновите страницу." };
+    if (code === "P2003") return { ok: false, error: "Точку нельзя удалить: на неё ссылаются отзывы. Выключите её." };
+    throw err;
+  }
 }
 
 export type SiteLocations = {

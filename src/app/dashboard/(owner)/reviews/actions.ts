@@ -8,7 +8,7 @@
  */
 import { revalidatePath } from "next/cache";
 import { requireRole } from "@/lib/rbac";
-import { saveGoogleLocation, deleteGoogleLocation, parseZips, resolveLocationForZip } from "@/modules/reviews/locations";
+import { saveGoogleLocation, deleteGoogleLocation, resolveLocationForZip } from "@/modules/reviews/locations";
 
 const PATH = "/dashboard/reviews";
 
@@ -29,7 +29,7 @@ export async function saveLocationAction(input: {
       siteId: input.siteId,
       name: input.name,
       reviewUrl: input.reviewUrl,
-      zips: parseZips(input.zipsRaw),
+      zipsRaw: input.zipsRaw,
       isDefault: input.isDefault,
       isActive: input.isActive,
     },
