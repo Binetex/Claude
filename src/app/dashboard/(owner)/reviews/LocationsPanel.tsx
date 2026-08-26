@@ -6,10 +6,10 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { saveLocationAction, deleteLocationAction, checkZipAction } from "./actions";
 
-type Loc = { id: string; name: string; reviewUrl: string; zipCode: string | null; isDefault: boolean; isActive: boolean };
+type Loc = { id: string; name: string; reviewUrl: string; zipCode: string | null; isDefault: boolean; isActive: boolean; zipKnown: boolean };
 type SiteBlock = { siteId: string; siteName: string; siteReviewUrl: string | null; locations: Loc[] };
 
-const EMPTY: Loc = { id: "", name: "", reviewUrl: "", zipCode: null, isDefault: false, isActive: true };
+const EMPTY: Loc = { id: "", name: "", reviewUrl: "", zipCode: null, isDefault: false, isActive: true, zipKnown: false };
 
 /**
  * Точки Google по магазинам. Правка идёт прямо в строке, без отдельного экрана: точек у
@@ -99,9 +99,17 @@ function LocationRow({ loc, onEdit }: { loc: Loc; onEdit: () => void }) {
       {!loc.isActive && (
         <span className="rounded bg-slate-100 px-1.5 py-px text-[11px] text-slate-500">выключена</span>
       )}
-      <span className="font-mono text-xs text-slate-500">
-        {loc.zipCode ?? "без индекса"}
-      </span>
+      {/* Точка без рабочего индекса не достанется ни одному заказу — это должно быть видно
+          сразу, а не выясняться по молчанию отзывов. Запасной индекс не нужен. */}
+      {loc.zipCode && loc.zipKnown && <span className="font-mono text-xs text-slate-500">{loc.zipCode}</span>}
+      {loc.zipCode && !loc.zipKnown && (
+        <span className="rounded bg-red-100 px-1.5 py-px font-mono text-[11px] text-red-800">
+          {loc.zipCode} — индекс не найден
+        </span>
+      )}
+      {!loc.zipCode && !loc.isDefault && (
+        <span className="rounded bg-red-100 px-1.5 py-px text-[11px] text-red-800">без индекса</span>
+      )}
       <a
         href={loc.reviewUrl}
         target="_blank"

@@ -70,6 +70,33 @@ describe("ближайшая точка", () => {
   });
 });
 
+describe("равное расстояние", () => {
+  // Две точки в одном индексе — обычное дело: два магазина в одном районе. Географически они
+  // неразличимы, и выбор обязан быть одинаковым при любом порядке строк из базы: запросы идут
+  // без orderBy, а порядок строк Postgres не гарантирует.
+  const twinA = loc({ id: "aaa", name: "A", zipCode: "90066", reviewUrl: "https://g.page/r/a/review" });
+  const twinB = loc({ id: "bbb", name: "B", zipCode: "90066", reviewUrl: "https://g.page/r/b/review" });
+
+  it("побеждает одна и та же точка независимо от порядка в списке", () => {
+    const direct = pickLocation("90064", [twinA, twinB], null);
+    const reversed = pickLocation("90064", [twinB, twinA], null);
+    expect(direct).toMatchObject({ location: { id: "aaa" } });
+    expect(reversed).toMatchObject({ location: { id: "aaa" } });
+  });
+
+  it("и клиент получает одну и ту же ссылку", () => {
+    expect(pickedReviewUrl(pickLocation("90064", [twinA, twinB], null))).toBe(
+      pickedReviewUrl(pickLocation("90064", [twinB, twinA], null))
+    );
+  });
+
+  it("на более близкую точку правило равенства не влияет", () => {
+    const closer = loc({ id: "zzz", name: "Ближе", zipCode: "90064" });
+    // id «zzz» проигрывает по алфавиту, но выигрывает по расстоянию — расстояние важнее.
+    expect(pickLocation("90064", [twinA, closer], null)).toMatchObject({ location: { id: "zzz" } });
+  });
+});
+
 describe("когда география не помогает", () => {
   const marVista = loc({ id: "mv", zipCode: "90066" });
   const spare = loc({ id: "sp", name: "Запасная", zipCode: null, isDefault: true, reviewUrl: "https://g.page/r/sp/review" });

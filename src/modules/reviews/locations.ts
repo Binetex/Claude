@@ -73,6 +73,17 @@ export async function saveGoogleLocation(input: LocationInput, id: string | null
   const { zip, error: zipError } = parseLocationZip(input.zipRaw);
   if (zipError) return { ok: false, error: zipError };
 
+  // Точка без индекса не участвует в расчёте расстояния — то есть не достанется ни одному
+  // заказу. Сохранить такую молча значит отдать владельцу мёртвую строку, которая в списке
+  // выглядит рабочей. Запасной точке индекс действительно не нужен: она достаётся не по
+  // географии, а по решению.
+  if (!zip && !input.isDefault) {
+    return {
+      ok: false,
+      error: "Укажите индекс точки — без него ни один заказ к ней не попадёт. Либо сделайте её запасной.",
+    };
+  }
+
   // Правим существующую точку — убеждаемся, что она есть и принадлежит ЭТОМУ магазину.
   // Без проверки исчезнувшая точка роняла действие ошибкой Prisma, а форма молча зависала:
   // ошибка всплывала мимо возвращаемого значения, и сообщения владелец не видел.
@@ -131,7 +142,20 @@ export type SiteLocations = {
   siteId: string;
   siteName: string;
   siteReviewUrl: string | null;
-  locations: Array<{ id: string; name: string; reviewUrl: string; zipCode: string | null; isDefault: boolean; isActive: boolean }>;
+  locations: Array<{
+    id: string;
+    name: string;
+    reviewUrl: string;
+    zipCode: string | null;
+    isDefault: boolean;
+    isActive: boolean;
+    /**
+     * Есть ли индекс точки в справочнике координат. Проверка при сохранении не покрывает
+     * данные, пришедшие мимо формы (перенос из прежней модели), а точка с ненайденным индексом
+     * молча не участвует в выборе — в списке она обязана выглядеть сломанной.
+     */
+    zipKnown: boolean;
+  }>;
 };
 
 export async function listLocationsBySite(): Promise<SiteLocations[]> {
@@ -148,7 +172,10 @@ export async function listLocationsBySite(): Promise<SiteLocations[]> {
     siteId: s.id,
     siteName: s.name,
     siteReviewUrl: s.reviewUrl,
-    locations: s.googleLocations,
+    locations: s.googleLocations.map((l) => ({
+      ...l,
+      zipKnown: !!l.zipCode && !!zipCoords(normalizeZip(l.zipCode)),
+    })),
   }));
 }
 

@@ -7,7 +7,7 @@
  */
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import { prisma } from "@/lib/db";
-import { saveGoogleLocation, deleteGoogleLocation, parseLocationZip, resolveLocationForZip, resolveLocationForOrder } from "./locations";
+import { saveGoogleLocation, deleteGoogleLocation, parseLocationZip, listLocationsBySite, resolveLocationForZip, resolveLocationForOrder } from "./locations";
 
 const RUN = `gloc-${Date.now()}`;
 let siteId = "";
@@ -96,6 +96,29 @@ describe("целостность справочника", () => {
     // Раньше это был конфликт; теперь каждый заказ достаётся ближайшей, и запрещать нечего.
     expect(await save({ name: "Первая", zipRaw: "90210" })).toMatchObject({ ok: true });
     expect(await save({ name: "Вторая", zipRaw: "90210" })).toMatchObject({ ok: true });
+  });
+
+  it("точка без индекса не сохраняется, если она не запасная", async () => {
+    // Без координат она не досталась бы ни одному заказу, но в списке выглядела бы рабочей.
+    const res = await save({ name: "Без индекса", zipRaw: "" });
+    expect(res).toMatchObject({ ok: false });
+    if (!res.ok) expect(res.error).toContain("индекс");
+  });
+
+  it("а запасной точке индекс не нужен — она достаётся не по географии", async () => {
+    expect(await save({ name: "Запасная", zipRaw: "", isDefault: true })).toMatchObject({ ok: true });
+  });
+
+  it("нерабочий индекс виден в списке точек", async () => {
+    // Данные могли прийти мимо формы (перенос из прежней модели), а молчащая точка обязана
+    // выглядеть сломанной.
+    const created = await save({ name: "Живая", zipRaw: "90066" });
+    if (!created.ok) throw new Error("не создалась");
+    await prisma.googleLocation.update({ where: { id: created.id }, data: { zipCode: "00000" } });
+
+    const blocks = await listLocationsBySite();
+    const row = blocks.flatMap((b) => b.locations).find((l) => l.id === created.id)!;
+    expect(row.zipKnown).toBe(false);
   });
 
   it("несуществующий индекс не сохраняется", async () => {
