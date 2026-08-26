@@ -4,7 +4,7 @@ import { MapPin, Plus, Trash2, Pencil } from "lucide-react";
 import { Card, CardHeader, CardTitle, CardBody } from "@/components/ui/Card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { saveLocationAction, deleteLocationAction, checkZipAction } from "./actions";
+import { saveLocationAction, deleteLocationAction, checkZipAction, saveSiteReviewUrlAction } from "./actions";
 
 type Loc = { id: string; name: string; reviewUrl: string; zipCode: string | null; isDefault: boolean; isActive: boolean; zipKnown: boolean };
 type SiteBlock = { siteId: string; siteName: string; siteReviewUrl: string | null; locations: Loc[] };
@@ -64,22 +64,72 @@ function SiteCard({ site }: { site: SiteBlock }) {
           </Button>
         )}
 
-        {/* Пока справочник пуст, заказы получают старую ссылку магазина. Сказать об этом
-            прямо — единственный способ объяснить, почему клиентам всё ещё что-то уходит. */}
-        {site.locations.length === 0 && (
-          <p className="pt-1 text-xs text-slate-500">
-            {site.siteReviewUrl
-              ? "Точек нет — используется общая ссылка магазина из раздела «Автоматизации»."
-              : "Точек нет и общей ссылки у магазина тоже нет: просить отзыв по заказам этого магазина не получится."}
-          </p>
-        )}
         {site.locations.length > 0 && !hasDefault && (
           <p className="pt-1 text-xs text-amber-700">
             Нет запасной точки: заказ с незнакомым индексом уйдёт на общую ссылку магазина.
           </p>
         )}
+
+        <SiteFallbackUrl siteId={site.siteId} current={site.siteReviewUrl} hasLocations={site.locations.length > 0} />
       </CardBody>
     </Card>
+  );
+}
+
+/**
+ * Общая ссылка магазина. Последний запас: её получает заказ, чей индекс неизвестен и у которого
+ * нет запасной точки. Она же кормит {{review_url}} в рассылках, пока точек нет вовсе, — поэтому
+ * поле и переехало сюда из «Автоматизаций», где было вторым местом для той же ссылки.
+ */
+function SiteFallbackUrl({
+  siteId,
+  current,
+  hasLocations,
+}: {
+  siteId: string;
+  current: string | null;
+  hasLocations: boolean;
+}) {
+  const [value, setValue] = useState(current ?? "");
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [pending, start] = useTransition();
+  const dirty = value.trim() !== (current ?? "");
+
+  return (
+    <div className="mt-1 border-t border-slate-100 pt-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xs text-slate-500">Общая ссылка магазина</span>
+        <Input
+          value={value}
+          onChange={(e) => {
+            setValue(e.target.value);
+            setMsg(null);
+          }}
+          placeholder="https://g.page/r/…/review"
+          className="h-8 min-w-[220px] flex-1 text-xs"
+        />
+        {dirty && (
+          <Button
+            size="sm"
+            disabled={pending}
+            onClick={() =>
+              start(async () => {
+                const res = await saveSiteReviewUrlAction(siteId, value);
+                setMsg(res.error ? { ok: false, text: res.error } : { ok: true, text: "Сохранено" });
+              })
+            }
+          >
+            Сохранить
+          </Button>
+        )}
+        {msg && <span className={`text-xs ${msg.ok ? "text-emerald-700" : "text-red-600"}`}>{msg.text}</span>}
+      </div>
+      <p className="mt-1 text-[11px] text-slate-500">
+        {hasLocations
+          ? "Достаётся заказу, чей индекс неизвестен, когда запасной точки нет."
+          : "Точек нет — пока все заказы этого магазина получают эту ссылку. Без неё просить отзыв не получится."}
+      </p>
+    </div>
   );
 }
 

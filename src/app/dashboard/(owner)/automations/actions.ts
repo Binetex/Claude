@@ -66,13 +66,20 @@ async function resolveSiteIds(siteIds: string[]): Promise<{ ids: string[] } | { 
   return { ids: unique };
 }
 
-/** Мягкое предупреждение (не блокирует сохранение): review_url используется, но не задан у магазинов. */
+/**
+ * Мягкое предупреждение (не блокирует сохранение): шаблон использует {{review_url}}, а взять
+ * ссылку неоткуда. Смотрим и на точки раздела «Отзывы», и на общую ссылку магазина: переменная
+ * берёт ближайшую точку, а общая ссылка осталась запасом.
+ */
 async function reviewUrlWarning(siteIds: string[], template: string): Promise<string | undefined> {
   if (!/\{\{\s*review_url\s*\}\}/.test(template)) return undefined;
-  const sites = await prisma.site.findMany({ where: { id: { in: siteIds } }, select: { name: true, reviewUrl: true } });
-  const missing = sites.filter((s) => !s.reviewUrl).map((s) => s.name);
+  const sites = await prisma.site.findMany({
+    where: { id: { in: siteIds } },
+    select: { name: true, reviewUrl: true, googleLocations: { where: { isActive: true }, select: { id: true } } },
+  });
+  const missing = sites.filter((s) => !s.reviewUrl && s.googleLocations.length === 0).map((s) => s.name);
   if (missing.length === 0) return undefined;
-  return `Шаблон использует {{review_url}}, но ссылка на отзыв не задана у магазинов: ${missing.join(", ")} — такие сообщения не будут отправлены, пока вы её не заполните.`;
+  return `Шаблон использует {{review_url}}, но у магазинов ${missing.join(", ")} нет ни одной точки в разделе «Отзывы» — такие сообщения не уйдут, пока точку не заведёте.`;
 }
 
 function normalizeConditions(c: SmsConditions): SmsConditions {
@@ -279,18 +286,6 @@ export async function sendTestSms(siteId: string, toPhoneRaw: string, template: 
     return { error: "QUO отклонил тестовую отправку." };
   }
 }
-
-export async function saveSiteReviewUrl(siteId: string, reviewUrl: string): Promise<ActionResult> {
-  await requireRole("OWNER");
-  const value = reviewUrl.trim();
-  if (value && !/^https?:\/\//i.test(value)) return { error: "Ссылка должна начинаться с http:// или https://" };
-  const site = await prisma.site.findUnique({ where: { id: siteId }, select: { id: true } });
-  if (!site) return { error: "Магазин не найден." };
-  await prisma.site.update({ where: { id: siteId }, data: { reviewUrl: value || null } });
-  revalidatePath("/dashboard/automations");
-  return { ok: true };
-}
-
 /**
  * Время ежедневных триггеров магазина ("HH:mm" локального времени). Используется триггером
  * «Доставка сегодня»: задача публикуется отложенно на это время локального дня доставки.

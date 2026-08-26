@@ -2,11 +2,15 @@ import "server-only";
 /** Общий маппер Prisma-заказа (+Site) в срез переменных шаблона. Используют handler и preview. */
 import type { Prisma } from "@/generated/prisma/client";
 import { resolveSupportEmail, type OrderVariableSource } from "./variables";
+import { pickLocation, pickedReviewUrl } from "@/modules/reviews/locationPick";
 
 // emailSettings нужны ради {{support_email}} (reply-to магазина, иначе адрес отправителя).
-// Включаем здесь, а не в каждом вызове: источник переменных должен быть один на всех
-// потребителей — движок правил, движок цепочек и preview.
-export const SMS_ORDER_INCLUDE = { site: { include: { emailSettings: true } } } as const;
+// googleLocations — ради {{review_url}}: ссылка на отзыв больше не одна на магазин, её решает
+// адрес доставки (ближайшая точка). Включаем здесь, а не в каждом вызове: источник переменных
+// должен быть один на всех потребителей — движок правил, движок цепочек и preview.
+export const SMS_ORDER_INCLUDE = {
+  site: { include: { emailSettings: true, googleLocations: true } },
+} as const;
 export type OrderWithSite = Prisma.OrderGetPayload<{ include: typeof SMS_ORDER_INCLUDE }>;
 
 export function orderToVariableSource(order: OrderWithSite): OrderVariableSource {
@@ -27,7 +31,10 @@ export function orderToVariableSource(order: OrderWithSite): OrderVariableSource
     customerTotal: order.customerTotal != null ? Number(order.customerTotal) : null,
     storeName: order.site.name,
     storePhone: order.site.quoPhoneNumber,
-    reviewUrl: order.site.reviewUrl,
+    // Ссылка на отзыв — ТА ЖЕ, что показывает раздел «Отзывы»: ближайшая к адресу точка, а
+    // если её нет — общая ссылка магазина. Второго способа получить {{review_url}} быть не
+    // должно: рассылка и карточка запроса обязаны вести клиента в одно и то же место.
+    reviewUrl: pickedReviewUrl(pickLocation(order.zip, order.site.googleLocations, order.site.reviewUrl)),
     timezone: order.site.timezone,
     supportEmail: resolveSupportEmail(order.site.emailSettings),
   };
