@@ -12,6 +12,11 @@ import {
   ShoppingBasket,
   MapPin,
   Printer,
+  Truck,
+  Zap,
+  Star,
+  Receipt,
+  Send,
   Circle,
 } from "lucide-react";
 import { cn } from "@/lib/cn";
@@ -32,6 +37,13 @@ function iconFor(href: string) {
   if (href.includes("/finance")) return Wallet;
   if (href.includes("/florists")) return Flower2;
   if (href.includes("/users")) return Users;
+  if (href.includes("/burq")) return Truck;
+  if (href.includes("/automations")) return Zap;
+  if (href.includes("/reviews")) return Star;
+  if (href.includes("/expenses")) return Receipt;
+  if (href.includes("/telegram")) return Send;
+  // Кружок остаётся запасным вариантом для пунктов, которые появятся позже: пустое место на
+  // их строке ломало бы выравнивание всего списка.
   return Circle;
 }
 
