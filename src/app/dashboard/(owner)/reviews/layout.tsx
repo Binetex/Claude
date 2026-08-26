@@ -20,6 +20,7 @@ export default async function ReviewsLayout({ children }: { children: React.Reac
           // редко, когда что-то меняется на картах.
           { href: "/dashboard/reviews/requests", label: "Запросы", badge: funnel.overdue, alarming: funnel.overdue > 0 },
           { href: "/dashboard/reviews", label: "Точки" },
+          { href: "/dashboard/reviews/messages", label: "Сообщения" },
         ]}
       />
       {children}
