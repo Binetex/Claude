@@ -28,12 +28,21 @@ import { SMS_ORDER_INCLUDE, orderToVariableSource } from "@/modules/automations/
 import { resolveCustomerEmail } from "@/modules/automations/emailAudience";
 import { recordLinkSent, recordLinkFailed, type RequestActor } from "./requests";
 
-/** Текст по умолчанию. Магазин может задать свой в настройках модуля. */
+/**
+ * Тексты по умолчанию. Магазин может задать свои в настройках модуля.
+ *
+ * ПО-АНГЛИЙСКИ: это сообщения КЛИЕНТУ, а клиенты у всех магазинов американские. Русский здесь
+ * язык интерфейса владельца и оператора, но не язык переписки с покупателем.
+ *
+ * Переменные — только из `SMS_VARIABLES`. Неизвестное имя рендер молча заменяет пустой строкой,
+ * поэтому опечатка в переменной не падает, а тихо съедает часть текста: клиент получил бы
+ * сообщение, начинающееся с запятой.
+ */
 export const DEFAULT_ASK_SMS =
-  "{{customer_first_name}}, спасибо за заказ! Если всё понравилось, оставьте, пожалуйста, отзыв: {{review_url}}";
+  "Hi {{sender_name}}, thank you for your order with {{store_name}}! If you were happy with it, would you mind leaving us a quick review? {{review_url}}";
 
 export const DEFAULT_REMINDER_SMS =
-  "{{customer_first_name}}, напоминаем про отзыв — это займёт минуту: {{review_url}}";
+  "Hi {{sender_name}}, a gentle reminder about the review you kindly promised — it only takes a minute: {{review_url}}";
 
 export type SendLinkKind = "ASK" | "REMINDER";
 
