@@ -21,6 +21,7 @@ import "server-only";
 import type { OrderMarketingMark, Role } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
 import { publishTelegramNotification } from "@/integrations/telegram/events";
+import { createReviewRequest } from "@/modules/reviews/requests";
 
 export type MarkResult = { ok: true; mark: OrderMarketingMark | null } | { ok: false; error: string };
 
@@ -49,9 +50,14 @@ export async function setOrderMarketingMark(
     });
   });
 
-  // Задача колл-центру ставится ПОСЛЕ фиксации пометки: уведомление о том, чего нет в базе,
-  // хуже отсутствия уведомления. Публикация best-effort и заказ не роняет.
   if (mark === "ASK_REVIEW") {
+    // Карточка запроса создаётся ДО уведомления: оператор откроет ссылку из телеграма и должен
+    // застать заказ уже в своей очереди, а не пустую страницу. Повторная пометка второго
+    // запроса не заводит — иначе клиенту звонили бы дважды.
+    await createReviewRequest(prisma, orderId, actor);
+
+    // Уведомление — ПОСЛЕ фиксации: сообщение о том, чего нет в базе, хуже отсутствия
+    // сообщения. Публикация best-effort и заказ не роняет.
     await publishTelegramNotification(prisma, {
       type: "order.ask_review",
       orderId,

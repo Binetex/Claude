@@ -51,6 +51,7 @@ import { syncOpenDeliveryStatuses } from "@/integrations/delivery/burq/statusSyn
 import { isBurqRuntimeEnabled, featureFlags } from "@/lib/featureFlags";
 import { MessagingService } from "@/messaging/service";
 import { createMockProviders } from "@/messaging/providers/mock";
+import { processPromisedDeadlines } from "@/modules/reviews/deadlines";
 
 function log(event: string, extra: Record<string, unknown> = {}) {
   console.log(JSON.stringify({ ts: new Date().toISOString(), level: "info", event, ...extra }));
@@ -231,6 +232,18 @@ async function main() {
     kickoffMs: 65_000,
     run: () => ingestInboundEmails(prisma),
     report: (r) => r.stored > 0 || (r.skipped !== null && r.skipped !== "no_token"),
+  });
+
+  // Сроки воронки отзывов: клиент обещал оставить отзыв и пропал — напоминаем один раз.
+  // Раз в час, потому что срок измеряется днями: попасть в него минута в минуту не нужно, а
+  // частый проход по индексу (status, nextActionAt) в спокойное время не находит ничего.
+  schedule({
+    name: "reviews.deadlines",
+    enabled: true,
+    intervalMs: Number(process.env.REVIEWS_DEADLINE_MS ?? 3_600_000), // 1ч
+    kickoffMs: 80_000,
+    run: () => processPromisedDeadlines(prisma),
+    report: (r) => r.moved > 0,
   });
 
   // Диспетчер Airwallex: один индексированный SELECT, LIMIT 50, задачи — в outbox.

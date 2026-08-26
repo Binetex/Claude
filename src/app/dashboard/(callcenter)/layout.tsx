@@ -1,7 +1,10 @@
 import { requireRole } from "@/lib/rbac";
 import { AppShell, type NavItem } from "@/components/AppShell";
 
-const nav: NavItem[] = [{ href: "/dashboard/cc", label: "Заказы" }];
+const nav: NavItem[] = [
+  { href: "/dashboard/cc", label: "Заказы" },
+  { href: "/dashboard/cc/reviews", label: "Отзывы" },
+];
 
 export default async function CallCenterLayout({ children }: { children: React.ReactNode }) {
   const user = await requireRole("CALL_CENTER");

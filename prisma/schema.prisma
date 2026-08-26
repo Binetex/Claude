@@ -271,6 +271,49 @@ enum AirwallexNormalizedStatus {
   UNKNOWN
 }
 
+/// Шаг воронки запроса отзыва. Порядок значений — порядок движения по воронке.
+enum ReviewRequestStatus {
+  NEW // владелец пометил заказ, оператор ещё не брался
+  CALLING // звонили, не дозвонились — ждём следующей попытки
+  LINK_SENT // ссылка у клиента, ждём его слова
+  PROMISED // клиент обещал оставить отзыв
+  FORGOT // обещал и пропал; отправлено напоминание
+  READY_TO_CHECK // клиент говорит, что оставил, — нужна проверка
+  CONFIRMED // отзыв засчитан
+  DECLINED // клиент отказался
+  GAVE_UP // исчерпаны попытки и сроки
+}
+
+/// Чем ушла ссылка на отзыв. SMS — основной путь, письмо — когда SMS не смогла.
+enum ReviewLinkChannel {
+  SMS
+  EMAIL
+}
+
+/// Чем подтверждён отзыв. Различать обязательно: подтверждение по слову клиента не должно
+/// выглядеть в статистике так же достоверно, как найденное в Google.
+enum ReviewConfirmVia {
+  GOOGLE_MATCH
+  MANUAL
+}
+
+/// Запись в журнале запроса. Журнал только пополняется: «звонили трижды за неделю» должно быть
+/// видно, а не стёрто последним статусом.
+enum ReviewEventKind {
+  CREATED
+  CALL_NO_ANSWER
+  CALL_TALKED
+  LINK_SENT
+  LINK_FAILED
+  PROMISED
+  REMINDED
+  CONFIRMED
+  DECLINED
+  GAVE_UP
+  LOCATION_CHANGED
+  REOPENED
+}
+
 /// Пометка владельца о работе с клиентом по конкретному заказу (см. Order.marketingMark).
 enum OrderMarketingMark {
   MUTED // не писать клиенту маркетинговые цепочки
@@ -311,6 +354,8 @@ model User {
 
   florist            Florist?
   orderAudits        OrderAudit[]
+  reviewEvents       ReviewRequestEvent[]
+  reviewsConfirmed   OrderReviewRequest[] @relation("ReviewConfirmedBy")
   financeAudits      FinanceAudit[]
   ledgerEntriesAdded LedgerEntry[]
 
@@ -445,6 +490,7 @@ model Site {
   ownerTaxPolicies   OwnerTaxPolicy[]
   financeIssues      FinanceIssue[]
   googleLocations    GoogleLocation[]
+  reviewSettings     SiteReviewSettings?
 
   // Запрет двух активных Site одного платформенного домена (двойное подключение).
   @@unique([platform, normalizedShopDomain])
@@ -1238,6 +1284,7 @@ model Order {
   updatedAt DateTime @updatedAt
 
   items              OrderItem[]
+  reviewRequest      OrderReviewRequest?
   assignments        OrderAssignment[]
   messages           Message[]
   communications     OrderCommunication[]
@@ -1542,10 +1589,101 @@ model GoogleLocation {
   lastScanAt        DateTime?
   lastScanErrorSafe String?
 
+  reviewRequests OrderReviewRequest[]
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([siteId])
+}
+
+/// Запрос отзыва по заказу: одна строка на заказ, создаётся пометкой владельца «Попросить
+/// отзыв». Дальше её ведёт колл-центр.
+///
+/// Очередь оператора строится по `nextActionAt`, а НЕ по статусу: «перезвонить завтра» иначе
+/// негде хранить, и вкладка «сегодня» не собралась бы. Пустое поле означает «ждём клиента, сами
+/// ничего не делаем».
+model OrderReviewRequest {
+  id      String @id @default(cuid())
+  orderId String @unique
+  order   Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  /// Точка, на которую просим отзыв. Снимок решения: подставляется по ZIP при создании, но
+  /// оператор может сменить, а разметку ZIP владелец может позже поправить — запрос должен
+  /// помнить, куда мы отправляли клиента на самом деле.
+  locationId String?
+  location   GoogleLocation? @relation(fields: [locationId], references: [id], onDelete: SetNull)
+  /// Ссылка на момент отправки. Точку могут удалить, а знать, что получил клиент, надо всегда.
+  reviewUrlSnapshot String?
+
+  status       ReviewRequestStatus @default(NEW)
+  callAttempts Int                 @default(0)
+  /// Когда оператору вернуться к этому запросу. NULL — ждём клиента.
+  nextActionAt DateTime?
+
+  linkSentAt  DateTime?
+  linkChannel ReviewLinkChannel?
+
+  promisedAt DateTime?
+  remindedAt DateTime?
+
+  confirmedAt       DateTime?
+  confirmedVia      ReviewConfirmVia?
+  confirmedByUserId String?
+  confirmedBy       User?             @relation("ReviewConfirmedBy", fields: [confirmedByUserId], references: [id], onDelete: SetNull)
+
+  closedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  events ReviewRequestEvent[]
+
+  @@index([status, nextActionAt])
+  @@index([locationId])
+}
+
+/// Журнал запроса — только добавление, как книга операций в финансах.
+model ReviewRequestEvent {
+  id        String             @id @default(cuid())
+  requestId String
+  request   OrderReviewRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+
+  kind ReviewEventKind
+  /// Кто сделал. Пусто у автоматики (напоминание, переход по сроку).
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+  /// Безопасная деталь: код канала, причина отказа отправки. Без PII сверх нужного.
+  detailSafe String?
+
+  createdAt DateTime @default(now())
+
+  @@index([requestId, createdAt])
+}
+
+/// Настройки модуля отзывов на магазин. Строки может не быть — это «работаем по умолчанию»,
+/// а не поломка: тот же принцип, что у настроек печати.
+model SiteReviewSettings {
+  siteId String @id
+  site   Site   @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  /// Текст SMS со ссылкой. {{review_url}} и остальные переменные заказа доступны как обычно.
+  askSmsTemplate     String?
+  /// Brevo Template ID для письма со ссылкой, когда SMS не смогла уйти.
+  askBrevoTemplateId Int?
+
+  reminderSmsTemplate     String?
+  reminderBrevoTemplateId Int?
+
+  /// Сколько ждать обещанного отзыва, прежде чем напомнить.
+  promiseWaitDays Int @default(14)
+  /// Сколько раз звонить, прежде чем отправить ссылку самим.
+  maxCallAttempts Int @default(2)
+  /// Через сколько дней перезванивать после неудачного звонка.
+  callRetryDays   Int @default(1)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model FloristPickupLocation {
