@@ -19,7 +19,6 @@ import "server-only";
  * его выразить только развёл бы правду по двум местам.
  */
 import type { Prisma, PrismaClient, ReviewEventKind, ReviewRequestStatus } from "@/generated/prisma/client";
-import { prisma } from "@/lib/db";
 import { pickLocation, pickedReviewUrl } from "./locationPick";
 
 export type RequestActor = { userId: string } | null;
@@ -360,15 +359,4 @@ export async function changeRequestLocation(
     location.name
   );
   return { ok: true };
-}
-
-/** Запрос по заказу — для карточки заказа и для очереди. */
-export async function getRequestByOrder(orderId: string) {
-  return prisma.orderReviewRequest.findUnique({
-    where: { orderId },
-    include: {
-      location: { select: { id: true, name: true } },
-      events: { orderBy: { createdAt: "desc" }, include: { user: { select: { name: true } } } },
-    },
-  });
 }

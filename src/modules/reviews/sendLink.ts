@@ -6,10 +6,16 @@ import "server-only";
  * карточки заказа, письмо — тем же `ChannelSender`, что обслуживает автоматизации. Второй путь
  * наружу означал бы второе место, где чинить отправку.
  *
- * Граница «SMS не смогла» — та же `SMS_UNAVAILABLE_CODES`, что у автоматизаций: письмо уходит,
- * когда телефона нет, номер не разобрался или QUO ответил ошибкой. Когда владелец сам выключил
- * SMS у магазина, письма НЕ будет — иначе один снятый флажок превратил бы всю очередь звонков
- * в почтовую рассылку.
+ * Граница «SMS не смогла» здесь ШИРЕ, чем у автоматизаций, и это осознанно.
+ *
+ * В рассылках выключенный у магазина QUO означает «не собирались писать», и подменять его почтой
+ * нельзя: один снятый флажок разослал бы письма по всем заказам. Здесь же отправка — следствие
+ * решения человека по КОНКРЕТНОМУ заказу: оператор нажал кнопку или система дошла до второй
+ * неудачной попытки дозвониться. Отказать словами «SMS у магазина выключены» значит оставить
+ * его без единого способа отправить ссылку, хотя почта настроена.
+ *
+ * Не пробуем почту только там, где сломано само сообщение (пустой текст, длина, потерянный
+ * заказ): письмо собирается из СВОЕГО шаблона и отправило бы другой текст, спрятав ошибку.
  *
  * Ссылка берётся ИЗ СНИМКА запроса, а не подбирается заново: между созданием запроса и звонком
  * владелец мог переразметить ZIP, а клиенту надо отправить ровно ту точку, которую оператор
@@ -20,7 +26,6 @@ import { featureFlags } from "@/lib/featureFlags";
 import { getQuoConfig } from "@/integrations/quo/config";
 import { createQuoClient } from "@/integrations/quo/client";
 import { sendOrderSms } from "@/integrations/quo/send";
-import { SMS_UNAVAILABLE_CODES } from "@/modules/automations/channels/sms";
 import { createEmailChannelSender } from "@/modules/automations/channels/email";
 import { buildOrderVariables } from "@/modules/automations/variables";
 import { renderTemplate } from "@/modules/automations/template";
@@ -50,12 +55,27 @@ export type SendLinkResult =
   | { ok: true; channel: "SMS" | "EMAIL" }
   | { ok: false; code: string; error: string };
 
+/**
+ * Коды, при которых почта НЕ пробуется: испорчено само сообщение, а не канал. Всё остальное —
+ * включая выключенный у магазина QUO — повод отправить письмо, потому что человек уже решил,
+ * что этому клиенту пишем. Список — противоположность `SMS_UNAVAILABLE_CODES` у автоматизаций
+ * и намеренно не совпадает с ним: там правило про массовую рассылку, здесь про один заказ.
+ */
+const BROKEN_MESSAGE_CODES = new Set([
+  "empty_text",
+  "too_long",
+  "order_not_found",
+  "missing_idempotency_key",
+  "previous_attempt_failed",
+]);
+
 const ERRORS: Record<string, string> = {
   no_review_url: "У заказа нет ссылки на отзыв: заведите точку для этого магазина или задайте запасную.",
   request_not_found: "Запрос не найден.",
   no_customer_contact: "У заказчика нет ни телефона, ни email — отправить нечем.",
   email_not_configured: "SMS не ушла, а письмо отправить нечем: у магазина не настроен Email.",
-  sms_disabled: "SMS у магазина выключены — включите QUO или отправьте ссылку вручную.",
+  store_quo_disabled: "SMS у магазина выключены, а письмо отправить нечем: не настроен Email.",
+  quo_not_configured: "SMS недоступны, а письмо отправить нечем: не настроен Email.",
 };
 
 function humanize(code: string): string {
@@ -106,8 +126,8 @@ export async function sendReviewLink(
 
   if (sms.ok) return { ok: true, channel: "SMS" };
 
-  // Владелец сам выключил канал — это не «не смогли», а «не собирались».
-  if (!SMS_UNAVAILABLE_CODES.has(sms.code)) {
+  // Сломано само сообщение — почта его не спасёт и отправила бы другой текст.
+  if (BROKEN_MESSAGE_CODES.has(sms.code)) {
     return { ok: false, code: sms.code, error: humanize(sms.code) };
   }
 

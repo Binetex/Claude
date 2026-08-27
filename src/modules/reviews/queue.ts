@@ -93,10 +93,6 @@ export async function queueCounts(now = new Date()) {
   return { today, waiting, toCheck };
 }
 
-export async function getQueueCard(requestId: string) {
-  return prisma.orderReviewRequest.findUnique({ where: { id: requestId }, select: CARD });
-}
-
 /**
  * Конец текущих суток. Берём именно конец дня, а не «сейчас»: запрос, назначенный на сегодня
  * на 18:00, оператор должен видеть с утра, а не ждать вечера.

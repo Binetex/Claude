@@ -222,13 +222,23 @@ function EmailTimeline({ items }: { items: EmailItem[] }) {
     return <p className="py-3 text-center text-xs text-slate-400">Писем по этому заказу пока нет — можно написать первым.</p>;
   }
 
+  // Показывать ли тему, решаем ДО отрисовки, одним проходом по списку.
+  //
+  // Раньше это была переменная, которую map мутировал по ходу рендера. React вправе рисовать
+  // элементы списка порознь и переиспользовать уже посчитанные — тогда сосед сравнивался бы с
+  // чужим значением, и тема письма то пропадала бы, то дублировалась в каждой строке треда.
+  const showSubjectAt = new Map<string, boolean>();
   let prevSubject: string | null = null;
+  for (const m of items) {
+    showSubjectAt.set(m.id, !!m.subject && m.subject !== prevSubject);
+    prevSubject = m.subject ?? prevSubject;
+  }
+
   return (
     <ul className="space-y-2">
       {items.map((m) => {
         const outbound = m.direction === "OUTBOUND";
-        const showSubject = !!m.subject && m.subject !== prevSubject;
-        prevSubject = m.subject ?? prevSubject;
+        const showSubject = showSubjectAt.get(m.id) ?? false;
         return (
           <li key={m.id} className={"rounded-md border p-2 " + (outbound ? "border-sky-100 bg-sky-50/60" : "border-slate-200 bg-white")}>
             <div className="flex flex-wrap items-baseline justify-between gap-2">
