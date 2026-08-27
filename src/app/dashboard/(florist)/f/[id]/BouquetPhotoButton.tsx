@@ -23,6 +23,12 @@ export function BouquetPhotoButton({ orderId, photoUrl }: { orderId: string; pho
     const file = e.target.files?.[0];
     if (!file) return;
     e.target.value = ""; // одно и то же фото можно выбрать повторно
+    // Из «Файлов» на телефоне можно выбрать что угодно, включая PDF и видео. Сказать об этом
+    // сразу понятнее, чем уронить обработку картинки и показать «не удалось загрузить».
+    if (!file.type.startsWith("image/")) {
+      toast.error("Это не изображение — выберите фотографию.");
+      return;
+    }
     let dataUrl: string;
     try {
       dataUrl = await compressImage(file);
@@ -47,7 +53,9 @@ export function BouquetPhotoButton({ orderId, photoUrl }: { orderId: string; pho
         ref={fileRef}
         type="file"
         accept="image/*"
-        capture="environment"
+        // Атрибута `capture` здесь БЫТЬ НЕ ДОЛЖНО: он заставляет телефон открывать камеру сразу,
+        // минуя выбор источника, — и снять букет заново было единственным способом приложить
+        // фото. Без него телефон сам предлагает камеру, галерею и файлы.
         onChange={onPick}
         className="hidden"
         aria-hidden

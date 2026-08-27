@@ -17,7 +17,9 @@ export function compressImage(file: File): Promise<string> {
     reader.onerror = () => reject(reader.error ?? new Error("Не удалось прочитать файл"));
     reader.onload = () => {
       const img = new Image();
-      img.onerror = () => reject(new Error("Не удалось загрузить изображение"));
+      // Формат, который браузер не умеет рисовать (HEIC на Android, RAW, битый файл). Айфон
+      // при выборе из библиотеки отдаёт JPEG сам, но из «Файлов» может прийти что угодно.
+      img.onerror = () => reject(new Error("Этот формат фото не поддерживается — попробуйте JPEG или PNG"));
       img.onload = () => {
         const scale = Math.min(1, MAX_DIMENSION / Math.max(img.width, img.height));
         const canvas = document.createElement("canvas");
