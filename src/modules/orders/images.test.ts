@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { getOrderItemImages } from "./images";
+import { getOrderItemImages, orderPhotoUrls } from "./images";
 
 const PARENT = "https://cdn.example/parent.jpg";
 const VARIANT = "https://cdn.example/variant.jpg";
@@ -60,5 +60,43 @@ describe("getOrderItemImages — основное фото + фото вариа
       primary: PARENT,
       variant: VARIANT,
     });
+  });
+});
+
+/**
+ * Фотографии, которые уходят наружу — сегодня это карточка флориста в Telegram.
+ *
+ * История: наружу собирались ТОЛЬКО основные фото позиций, и флорист, работающий по телеграму,
+ * не видел вазу вовсе — хотя в панели заказа она есть (THEFLOW-20598). Класть в букет не ту
+ * вазу дешевле всего именно так: молча.
+ */
+describe("фотографии заказа наружу", () => {
+  const BOUQUET = "https://img/bouquet.jpg";
+  const VASE = "https://img/vase.jpg";
+
+  it("фото вариации уходит наружу вместе с товаром", () => {
+    expect(orderPhotoUrls([{ parentImageUrl: BOUQUET, variantImageUrl: VASE }])).toEqual([BOUQUET, VASE]);
+  });
+
+  it("ваза идёт следом за своим букетом, а не в конце списка", () => {
+    // Флорист читает карточку сверху вниз: «вот букет, вот его ваза».
+    const photos = orderPhotoUrls([
+      { parentImageUrl: BOUQUET, variantImageUrl: VASE },
+      { parentImageUrl: "https://img/second.jpg" },
+    ]);
+    expect(photos).toEqual([BOUQUET, VASE, "https://img/second.jpg"]);
+  });
+
+  it("одинаковые позиции не дают одинаковых картинок", () => {
+    expect(orderPhotoUrls([{ parentImageUrl: BOUQUET }, { parentImageUrl: BOUQUET }])).toEqual([BOUQUET]);
+  });
+
+  it("вариация, совпадающая с товаром, вторым фото не идёт", () => {
+    expect(orderPhotoUrls([{ parentImageUrl: BOUQUET, variantImageUrl: BOUQUET }])).toEqual([BOUQUET]);
+  });
+
+  it("позиции без фото пропускаются, пустой заказ даёт пустой список", () => {
+    expect(orderPhotoUrls([{}, { parentImageUrl: "  " }, { parentImageUrl: BOUQUET }])).toEqual([BOUQUET]);
+    expect(orderPhotoUrls([])).toEqual([]);
   });
 });

@@ -20,7 +20,7 @@ import {
   renderOwnerPaymentNotFound,
   type OrderSnapshot,
 } from "./templates";
-import { getOrderItemImages } from "@/modules/orders/images";
+import { orderPhotoUrls } from "@/modules/orders/images";
 import type { TelegramAudience } from "./config";
 import type { TelegramNotifyPayload } from "./events";
 
@@ -269,10 +269,9 @@ async function loadOrderSnapshot(prisma: PrismaClient, orderId: string): Promise
     },
   });
   if (!o) return null;
-  // По одному фото на позицию заказа, в порядке позиций и без повторов (две одинаковые позиции
-  // не должны давать две одинаковые картинки). Первое идёт основным сообщением с подписью и
-  // кнопками, остальные — альбомом следом.
-  const photos = [...new Set(o.items.map((i) => getOrderItemImages(i).primary).filter((u): u is string => !!u))];
+  // Фото позиций: товар и его вариация (ваза) — по общему правилу `orderPhotoUrls`. Первое идёт
+  // основным сообщением с подписью и кнопками, остальные — альбомом следом.
+  const photos = orderPhotoUrls(o.items);
   return {
     id: o.id,
     orderNumber: o.orderNumber,
