@@ -14,6 +14,13 @@ import { floristUploadBouquetPhoto } from "@/app/dashboard/(florist)/actions";
  * самостоятельное действие: статус флорист ставит сам, а фото приложить можно в любой
  * момент — в том числе после того, как заказ уже отмечен готовым.
  */
+const IMAGE_EXT = /\.(jpe?g|png|gif|webp|heic|heif|bmp|avif)$/i;
+
+/** Тип браузер иногда не сообщает (HEIC с айфона), поэтому расширение — второй признак. */
+export function looksLikeImage(file: File): boolean {
+  return file.type.startsWith("image/") || IMAGE_EXT.test(file.name);
+}
+
 export function BouquetPhotoButton({ orderId, photoUrl }: { orderId: string; photoUrl: string | null }) {
   const fileRef = useRef<HTMLInputElement>(null);
   const [preview, setPreview] = useState(photoUrl);
@@ -25,7 +32,11 @@ export function BouquetPhotoButton({ orderId, photoUrl }: { orderId: string; pho
     e.target.value = ""; // одно и то же фото можно выбрать повторно
     // Из «Файлов» на телефоне можно выбрать что угодно, включая PDF и видео. Сказать об этом
     // сразу понятнее, чем уронить обработку картинки и показать «не удалось загрузить».
-    if (!file.type.startsWith("image/")) {
+    //
+    // Смотрим и на расширение: у HEIC с айфона браузер нередко отдаёт ПУСТОЙ тип, и проверка
+    // по одному только `file.type` отсекала бы нормальную фотографию словами «это не
+    // изображение» — самая обидная разновидность ошибки, когда система врёт про исправное.
+    if (!looksLikeImage(file)) {
       toast.error("Это не изображение — выберите фотографию.");
       return;
     }
@@ -52,7 +63,7 @@ export function BouquetPhotoButton({ orderId, photoUrl }: { orderId: string; pho
       <input
         ref={fileRef}
         type="file"
-        accept="image/*"
+        accept="image/*,.heic,.heif"
         // Атрибута `capture` здесь БЫТЬ НЕ ДОЛЖНО: он заставляет телефон открывать камеру сразу,
         // минуя выбор источника, — и снять букет заново было единственным способом приложить
         // фото. Без него телефон сам предлагает камеру, галерею и файлы.
