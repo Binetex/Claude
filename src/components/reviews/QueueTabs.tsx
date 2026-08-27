@@ -5,9 +5,12 @@ import Link from "next/link";
 export function QueueTabs({
   active,
   counts,
+  basePath,
 }: {
   active: string;
   counts: { today: number; waiting: number; toCheck: number };
+  /** Один компонент на два экрана: очередь оператора и её вкладку у владельца. */
+  basePath: string;
 }) {
   const tabs = [
     { key: "today", label: "Сегодня", count: counts.today, hot: counts.today > 0 },
@@ -23,7 +26,7 @@ export function QueueTabs({
         return (
           <Link
             key={t.key}
-            href={`/dashboard/cc/reviews?tab=${t.key}`}
+            href={`${basePath}?tab=${t.key}`}
             className={`inline-flex items-center gap-2 rounded-lg border px-3 py-1.5 text-sm transition-colors ${
               on ? "border-slate-900 bg-slate-900 text-white" : "border-slate-200 bg-white text-slate-700 hover:border-slate-300"
             }`}

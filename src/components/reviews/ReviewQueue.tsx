@@ -15,7 +15,7 @@ import {
   reopenAction,
   sendLinkAction,
   changeLocationAction,
-} from "./actions";
+} from "@/modules/reviews/queueActions";
 
 export type CardVM = {
   id: string;
@@ -31,6 +31,8 @@ export type CardVM = {
   hasLink: boolean;
   linkChannelLabel: string | null;
   orderId: string;
+  /** Куда ведёт номер заказа: у оператора своя карточка, у владельца своя. */
+  orderHref: string;
   orderNumber: string;
   siteName: string;
   customerName: string | null;
@@ -127,7 +129,7 @@ function RequestCard({
       className={`rounded-xl border bg-white px-4 py-3 ${card.overdue ? "border-amber-300 bg-amber-50/40" : "border-slate-200"}`}
     >
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
-        <Link href={`/dashboard/cc/${card.orderId}`} className="font-mono text-xs font-medium text-sky-700 hover:underline">
+        <Link href={card.orderHref} className="font-mono text-xs font-medium text-sky-700 hover:underline">
           {card.orderNumber}
         </Link>
         <span className="text-slate-800">{card.customerName ?? "без имени"}</span>

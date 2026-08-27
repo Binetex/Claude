@@ -1,12 +1,16 @@
 "use server";
 /**
- * Работа оператора с очередью отзывов.
+ * Работа с очередью отзывов: то, что нажимает человек, разобравшись с клиентом.
  *
- * Доступ — колл-центр И владелец: владелец должен уметь закрыть или засчитать запрос сам, не
- * дожидаясь оператора. Флорист сюда не ходит вовсе.
+ * Доступ — колл-центр И владелец. Один и тот же набор действий обслуживает два экрана:
+ * очередь оператора (`/dashboard/cc/reviews`) и её же вкладку в разделе владельца
+ * (`/dashboard/reviews/queue`) — оператор может заболеть, а запрос закрыть надо. Флорист сюда
+ * не ходит вовсе.
  *
- * Вся логика переходов — в modules/reviews; здесь права, ключ идемпотентности и обновление
- * страницы.
+ * Лежит в модуле, а не рядом со страницей, именно поэтому: страниц две, правда одна.
+ *
+ * Вся логика переходов — в соседних файлах модуля; здесь права, ключ идемпотентности и
+ * обновление обеих страниц.
  */
 import { randomUUID } from "node:crypto";
 import { revalidatePath } from "next/cache";
@@ -22,10 +26,11 @@ import {
   giveUpReview,
   reopenReview,
   changeRequestLocation,
-} from "@/modules/reviews/requests";
-import { sendReviewLinkAndRecord } from "@/modules/reviews/sendLink";
+} from "./requests";
+import { sendReviewLinkAndRecord } from "./sendLink";
 
-const PATH = "/dashboard/cc/reviews";
+const OPERATOR_PATH = "/dashboard/cc/reviews";
+const OWNER_PATH = "/dashboard/reviews/queue";
 
 export type ReviewActionResult = { ok?: true; message?: string; error?: string };
 
@@ -36,9 +41,11 @@ async function requireOperator() {
   return user;
 }
 
+/** Обновляем ОБА экрана: одно и то же действие видно и оператору, и владельцу. */
 function refresh() {
-  revalidatePath(PATH);
-  revalidatePath("/dashboard/reviews");
+  revalidatePath(OPERATOR_PATH);
+  revalidatePath(OWNER_PATH);
+  revalidatePath("/dashboard/reviews/requests");
 }
 
 export async function noAnswerAction(requestId: string): Promise<ReviewActionResult> {

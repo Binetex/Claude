@@ -73,9 +73,19 @@ const ERRORS: Record<string, string> = {
   no_review_url: "У заказа нет ссылки на отзыв: заведите точку для этого магазина или задайте запасную.",
   request_not_found: "Запрос не найден.",
   no_customer_contact: "У заказчика нет ни телефона, ни email — отправить нечем.",
-  email_not_configured: "SMS не ушла, а письмо отправить нечем: у магазина не настроен Email.",
   store_quo_disabled: "SMS у магазина выключены, а письмо отправить нечем: не настроен Email.",
   quo_not_configured: "SMS недоступны, а письмо отправить нечем: не настроен Email.",
+  // Коды почтового канала. Без перевода оператор видел «Не удалось отправить
+  // (site_email_disabled)» — фразу, из которой непонятно ни что случилось, ни к кому идти.
+  site_email_disabled: "У магазина выключен Email — включите его в настройках сайта.",
+  site_email_not_configured: "У магазина не настроен Email: нет отправителя или ключа.",
+  site_domain_not_verified: "Домен магазина для писем не подтверждён — письмо не уйдёт.",
+  site_template_missing: "Для письма не выбран шаблон Brevo — задайте его в «Отзывы → Сообщения».",
+  email_not_configured: "Brevo не настроен: письма отправлять нечем.",
+  invalid_recipient_email: "Адрес заказчика не похож на почтовый — письмо отправить некуда.",
+  invalid_sender_email: "Адрес отправителя магазина задан неверно.",
+  invalid_template_id: "Шаблон Brevo указан неверно — проверьте номер.",
+  email_missing: "У заказчика не указана почта.",
 };
 
 function humanize(code: string): string {
