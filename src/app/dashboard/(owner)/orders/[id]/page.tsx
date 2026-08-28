@@ -291,7 +291,7 @@ export default async function OwnerOrderPage({ params }: { params: Promise<{ id:
                  отношения не имеют, и в потоке основных карточек только мешали. ── */}
           {order.airwallex && (
             <div className="space-y-2">
-              <AirwallexPanel aw={order.airwallex} refund={refundSummary} />
+              <AirwallexPanel aw={order.airwallex} refund={refundSummary} orderId={order.id} />
               {/* Возврат живёт рядом с платежом, а не среди «быстрых действий»: он необратим
                   и не должен стоять в одном ряду с картой и переназначением флориста.
                   Доступность и суммы модалка спрашивает у Airwallex при открытии. */}

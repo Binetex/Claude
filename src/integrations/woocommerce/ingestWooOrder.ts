@@ -205,7 +205,15 @@ export async function ingestWooOrder(
     const reconciled = await applyUpdate(existing.id, prev);
     await autoAssignWooIfConfirmed(existing.id, prev, reconciled);
     // Airwallex-мониторинг: держим intent id свежим и на update (новая попытка оплаты).
-    await onWooOrderIngestedForAirwallex(prisma, { orderId: existing.id, siteId: site.id, paymentMethod: wooOrder.payment_method ?? null, meta: wooOrder.meta_data });
+    await onWooOrderIngestedForAirwallex(prisma, {
+      orderId: existing.id,
+      siteId: site.id,
+      paymentMethod: wooOrder.payment_method ?? null,
+      meta: wooOrder.meta_data,
+      // Магазин говорит «деньги получены» — если Airwallex у нас записан неуспешным, это повод
+      // переспросить сейчас, а не через шесть часов по расписанию.
+      paidByStore: reconciled.paymentStatus === "PAID",
+    });
     if (opts.emitLifecycle) {
       // Триггеры оплаты — строго на ПЕРЕХОДЕ состояния, иначе каждый resync слал бы повтор.
       const trigger = paymentTriggerFor(payment, reconciled.paymentStatus);

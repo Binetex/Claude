@@ -116,6 +116,58 @@ describe("приём заказа", () => {
     expect(jobs).toHaveLength(1);
   });
 
+  it("магазин сказал «оплачено», а Airwallex у нас неуспешный → сверяем сейчас, а не через 6 часов", async () => {
+    // THEFLOW-20612: клиент дожал оплату в рамках той же попытки (3-D Secure не меняет
+    // идентификатор платежа). Расписание после неудачи уходит на шесть часов, и всё это время
+    // владелец видел «Платёж не прошёл» при фактически прошедшем платеже.
+    const siteId = await makeSite();
+    const order = await makeOrder(siteId);
+    const meta = [{ key: "_tmp_airwallex_payment_intent", value: "int_same" }];
+
+    await onWooOrderIngestedForAirwallex(prisma, { orderId: order.id, siteId, paymentMethod: "airwallex_card", meta });
+    await prisma.outboxEvent.deleteMany({ where: { aggregateId: order.id, eventType: AIRWALLEX_VERIFY_EVENT } });
+    await prisma.airwallexPayment.update({ where: { orderId: order.id }, data: { normalizedStatus: "FAILED" } });
+
+    // Тот же intent, ничего нового — но магазин сообщает об оплате.
+    await onWooOrderIngestedForAirwallex(prisma, {
+      orderId: order.id, siteId, paymentMethod: "airwallex_card", meta, paidByStore: true,
+    });
+
+    const jobs = await prisma.outboxEvent.findMany({ where: { aggregateId: order.id, eventType: AIRWALLEX_VERIFY_EVENT } });
+    expect(jobs).toHaveLength(1);
+  });
+
+  it("магазин сказал «оплачено», и у нас уже оплачено → лишней сверки не заказываем", async () => {
+    // Иначе каждый resync оплаченного заказа дёргал бы чужой API без повода.
+    const siteId = await makeSite();
+    const order = await makeOrder(siteId);
+    const meta = [{ key: "_tmp_airwallex_payment_intent", value: "int_ok" }];
+
+    await onWooOrderIngestedForAirwallex(prisma, { orderId: order.id, siteId, paymentMethod: "airwallex_card", meta });
+    await prisma.outboxEvent.deleteMany({ where: { aggregateId: order.id, eventType: AIRWALLEX_VERIFY_EVENT } });
+    await prisma.airwallexPayment.update({ where: { orderId: order.id }, data: { normalizedStatus: "PAID" } });
+
+    await onWooOrderIngestedForAirwallex(prisma, {
+      orderId: order.id, siteId, paymentMethod: "airwallex_card", meta, paidByStore: true,
+    });
+
+    expect(await prisma.outboxEvent.count({ where: { aggregateId: order.id, eventType: AIRWALLEX_VERIFY_EVENT } })).toBe(0);
+  });
+
+  it("обычный resync без сигнала об оплате сверку не заказывает", async () => {
+    const siteId = await makeSite();
+    const order = await makeOrder(siteId);
+    const meta = [{ key: "_tmp_airwallex_payment_intent", value: "int_quiet" }];
+
+    await onWooOrderIngestedForAirwallex(prisma, { orderId: order.id, siteId, paymentMethod: "airwallex_card", meta });
+    await prisma.outboxEvent.deleteMany({ where: { aggregateId: order.id, eventType: AIRWALLEX_VERIFY_EVENT } });
+    await prisma.airwallexPayment.update({ where: { orderId: order.id }, data: { normalizedStatus: "FAILED" } });
+
+    await onWooOrderIngestedForAirwallex(prisma, { orderId: order.id, siteId, paymentMethod: "airwallex_card", meta });
+
+    expect(await prisma.outboxEvent.count({ where: { aggregateId: order.id, eventType: AIRWALLEX_VERIFY_EVENT } })).toBe(0);
+  });
+
   it("backfill старого заказа: потолок считается от даты заказа, а не от момента вставки", async () => {
     const siteId = await makeSite();
     const order = await makeOrder(siteId);

@@ -270,9 +270,31 @@ export function extractIntentId(meta: { key?: string; value?: unknown }[] | unde
  * Мониторим только заказы, у которых ТЕКУЩИЙ payment_method относится к Airwallex: наличие
  * старого _tmp_airwallex_payment_intent само по себе не основание (см. #20295 — оплата PayPal).
  */
+/**
+ * Противоречит ли последний известный ответ Airwallex тому, что магазин считает заказ
+ * оплаченным. Пустой статус (ещё ни разу не проверяли) противоречием не считаем — такую сверку
+ * и так закажет ветка «новый заказ».
+ */
+const NOT_PAID_STATUSES = new Set(["FAILED", "CANCELLED", "NOT_STARTED", "NOT_FOUND", "UNKNOWN"]);
+
+async function lastStatusContradictsPayment(prisma: PrismaClient, orderId: string): Promise<boolean> {
+  const row = await prisma.airwallexPayment.findUnique({
+    where: { orderId },
+    select: { normalizedStatus: true },
+  });
+  return !!row?.normalizedStatus && NOT_PAID_STATUSES.has(row.normalizedStatus);
+}
+
 export async function onWooOrderIngestedForAirwallex(
   prisma: PrismaClient,
-  input: { orderId: string; siteId: string; paymentMethod: string | null; meta: { key?: string; value?: unknown }[] | undefined }
+  input: {
+    orderId: string;
+    siteId: string;
+    paymentMethod: string | null;
+    meta: { key?: string; value?: unknown }[] | undefined;
+    /** Магазин сообщил, что деньги получены (processing/completed). */
+    paidByStore?: boolean;
+  }
 ): Promise<void> {
   try {
     if (!isAirwallexMethod(input.paymentMethod)) return;
@@ -288,9 +310,16 @@ export async function onWooOrderIngestedForAirwallex(
     const { created, intentChanged } = await upsertAirwallexPayment(prisma, {
       orderId: input.orderId, siteId: input.siteId, paymentIntentId: intentId, paymentMethod: input.paymentMethod,
     });
-    // Немедленная сверка только для нового заказа или новой попытки оплаты; на обычном resync
-    // задачу не плодим — дальше расписание ведёт диспетчер по nextCheckAt.
-    if (created || intentChanged) {
+    // Немедленная сверка: новый заказ, новая попытка оплаты — либо магазин сказал «оплачено»,
+    // а наш последний ответ Airwallex говорит обратное.
+    //
+    // Последнее добавлено не для полноты. После неудачной попытки расписание опроса уходит на
+    // шесть часов, и заказ, который клиент дожал в рамках ТОЙ ЖЕ попытки (обычное дело при
+    // подтверждении по 3-D Secure — идентификатор платежа не меняется), всё это время показывал
+    // владельцу «Платёж не прошёл» при фактически прошедшем платеже (THEFLOW-20612). Сообщение
+    // магазина об оплате — самый сильный признак, что наш платёжный статус протух.
+    const staleFailure = input.paidByStore ? await lastStatusContradictsPayment(prisma, input.orderId) : false;
+    if (created || intentChanged || staleFailure) {
       const { publishAirwallexVerify } = await import("./events");
       await publishAirwallexVerify(prisma, input.orderId, null);
     }

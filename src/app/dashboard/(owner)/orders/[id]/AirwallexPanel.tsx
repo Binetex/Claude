@@ -1,5 +1,6 @@
 import { Card, CardHeader, CardTitle, CardBody } from "@/components/ui/Card";
 import type { RefundSummary } from "@/integrations/airwallex/refund";
+import { AirwallexVerifyButton } from "./AirwallexVerifyButton";
 
 /**
  * Состояние сверки платежа с Airwallex. Только для владельца — флористам и колл-центру этот
@@ -63,7 +64,15 @@ function Row({ label, value }: { label: string; value: React.ReactNode }) {
  * платёж и одновременно ложь про деньги. Возврат показываем рядом отдельной плашкой, а не
  * подменяем ею статус: подмена скрыла бы, что списание было и прошло успешно.
  */
-export function AirwallexPanel({ aw, refund }: { aw: AirwallexView; refund?: RefundSummary | null }) {
+export function AirwallexPanel({
+  aw,
+  refund,
+  orderId,
+}: {
+  aw: AirwallexView;
+  refund?: RefundSummary | null;
+  orderId: string;
+}) {
   const norm = aw.normalizedStatus ?? "UNKNOWN";
   return (
     <Card>
@@ -90,6 +99,8 @@ export function AirwallexPanel({ aw, refund }: { aw: AirwallexView; refund?: Ref
         <Row label="В ожидании" value={aw.pendingSinceMinutes != null ? `${aw.pendingSinceMinutes} мин` : "—"} />
         <Row label="Проверено" value={fmt(aw.lastCheckedAt)} />
         <Row label="Следующая проверка" value={aw.monitoringActive ? fmt(aw.nextCheckAt) : "—"} />
+
+        <AirwallexVerifyButton orderId={orderId} />
 
         {refund && (
           <>
