@@ -117,12 +117,15 @@ export async function DeliveryStatusCard({
   const courierCalledAt: Date | null = startedEvt ? (startedEvt.occurredAt ?? startedEvt.receivedAt) : null;
   const deliveryCompletedAt: Date | null = deliveredEvt ? (deliveredEvt.occurredAt ?? deliveredEvt.receivedAt) : (currentDelivery?.deliveredAt ?? null);
 
-  // Фото курьера: первое из подтверждения доставки Burq. Прежнее поле заказа оставлено вторым
-  // источником — его никто не заполняет с переезда на Burq, но у старых заказов оно есть.
+  // Фото курьера показывает панель Burq ниже — «Proof of delivery». Дублировать его здесь
+  // незачем: одна и та же картинка дважды на экране читается как две разные доставки.
+  //
+  // Этот блок остаётся ТОЛЬКО для старых заказов: до переезда на Burq фото лежало в поле
+  // заказа, и подтверждения доставки у них нет вовсе — без блока оно пропало бы с экрана.
   const podUrls = Array.isArray(currentDelivery?.proofOfDeliveryUrls)
     ? (currentDelivery.proofOfDeliveryUrls as string[])
     : [];
-  const deliveryProofUrl = podUrls[0] ?? deliveryPhotoUrl;
+  const legacyDeliveryPhoto = podUrls.length === 0 ? deliveryPhotoUrl : null;
 
   return (
     <Card>
@@ -143,12 +146,8 @@ export async function DeliveryStatusCard({
           {bouquetPhotoUrl && !bouquetPhotoAction && (
             <div><div className="mb-1 text-xs text-slate-400">Фото букета</div><ZoomableImage src={bouquetPhotoUrl} alt="" className="h-24 w-24 rounded-lg object-cover" /></div>
           )}
-          {/* Фото курьера приходит от Burq в доставку (proofOfDeliveryUrls). Order.deliveryPhotoUrl
-              — поле прежней модели, его давно никто не заполняет; оставлено запасным источником
-              ради исторических заказов. Без этого блок «Фото доставки» был вечно пустым, и фото
-              курьера видел только владелец в панели Burq. */}
-          {deliveryProofUrl && (
-            <div><div className="mb-1 text-xs text-slate-400">Фото доставки</div><ZoomableImage src={deliveryProofUrl} alt="" className="h-24 w-24 rounded-lg object-cover" /></div>
+          {legacyDeliveryPhoto && (
+            <div><div className="mb-1 text-xs text-slate-400">Фото доставки</div><ZoomableImage src={legacyDeliveryPhoto} alt="" className="h-24 w-24 rounded-lg object-cover" /></div>
           )}
         </div>
 
