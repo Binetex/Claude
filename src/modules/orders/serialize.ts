@@ -9,7 +9,7 @@ import { getOrderItemImages } from "./images";
  * поэтому исторические заказы, где чаевые попали в снимок, показываются правильно без
  * правки данных. У новых заказов поправка нулевая.
  */
-function floristMoney(o: OrderWithRelations) {
+function floristMoney(o: OrderListRow) {
   const items = o.items.map((i) => ({
     name: i.name,
     productId: i.productId,
@@ -18,7 +18,7 @@ function floristMoney(o: OrderWithRelations) {
   }));
   return {
     total: effectiveFloristTotal(toNumber(o.floristTotal), items),
-    itemPrice: (i: OrderWithRelations["items"][number]) => (isTipItem(i) ? 0 : toNumber(i.floristItemPrice)),
+    itemPrice: (i: OrderListRow["items"][number]) => (isTipItem(i) ? 0 : toNumber(i.floristItemPrice)),
     /**
      * Цена флориста НЕ ЗАДАНА в каталоге. Ноль сам по себе валиден («делаем бесплатно»),
      * но у оплаченной позиции он почти всегда означает незаполненный прайс — и молчаливый
@@ -27,7 +27,7 @@ function floristMoney(o: OrderWithRelations) {
      *
      * Служебные позиции (чаевые) обнуляются намеренно и признаком не считаются.
      */
-    priceMissing: (i: OrderWithRelations["items"][number]) =>
+    priceMissing: (i: OrderListRow["items"][number]) =>
       !isTipItem(i) && toNumber(i.floristItemPrice) === 0 && toNumber(i.externalPrice) > 0,
   };
 }
@@ -36,6 +36,24 @@ function floristMoney(o: OrderWithRelations) {
 function shortIntent(id: string): string {
   return id.length <= 14 ? id : `${id.slice(0, 4)}…${id.slice(-6)}`;
 }
+
+/**
+ * ЛЁГКИЙ набор связей для СПИСКОВ: ровно то, что рендерят таблицы трёх ролей.
+ *
+ * Ни messages, ни assignments, ни airwallexPayment здесь нет намеренно: раньше include был
+ * один на карточку и списки, и страница на пятьдесят заказов загружала и сериализовала полную
+ * SMS-историю каждого — сотни сообщений, которых список не показывает. Это была самая дорогая
+ * лишняя работа в проекте.
+ */
+export const orderListInclude = {
+  site: true,
+  items: true,
+  currentFlorist: {
+    select: { id: true, avatarUrl: true, financeVisibility: true, user: { select: { name: true } } },
+  },
+} satisfies Prisma.OrderInclude;
+
+export type OrderListRow = Prisma.OrderGetPayload<{ include: typeof orderListInclude }>;
 
 // Полный набор связей для карточки заказа.
 export const orderInclude = {
@@ -56,7 +74,7 @@ export type OrderWithRelations = Prisma.OrderGetPayload<{
 }>;
 
 // ── Общие (нефинансовые) поля, безопасные для всех ролей ──
-function baseFields(o: OrderWithRelations) {
+function baseFields(o: OrderListRow) {
   return {
     id: o.id,
     orderNumber: o.orderNumber,
@@ -134,28 +152,9 @@ export function serializeForOwner(o: OrderWithRelations) {
         }
       : null,
     // Служебная строка «Tip» из Shopify в список не идёт: это не товар, а способ прислать
-    // чаевые. Флористу за неё не платят, в закупку она не попадает, и уже поэтому в перечне
-    // товаров ей делать нечего. Деньги не теряются — сумма чаевых живёт в Order.tip и
-    // показывается отдельной строкой в финансах; ни один экран не суммирует этот список.
-    items: compensableItems(o.items).map((i) => ({
-      id: i.id,
-      name: i.name,
-      variantName: i.variantName,
-      // NULL — позиция ручного заказа «своим текстом»: каталога у неё нет, и действия,
-      // которые тянут данные из каталога, ей показывать незачем.
-      productId: i.productId,
-      // image — основное фото (parent ?? legacy); variantImage — доп. фото вариации,
-      // уже отфильтрованное от дублей. Общие списки читают только image.
-      image: getOrderItemImages(i).primary,
-      variantImage: getOrderItemImages(i).variant,
-      floristComposition: i.floristCompositionSnapshot,
-      quantity: i.quantity,
-      options: i.options,
-      externalPrice: toNumber(i.externalPrice),
-      // У чаевых цены флориста быть не может — строка остаётся видимой, но с нулём.
-      floristItemPrice: florist.itemPrice(i),
-      floristPriceMissing: florist.priceMissing(i),
-    })),
+    // чаевые. Деньги не теряются — сумма чаевых живёт в Order.tip. Состав позиции общий со
+    // строкой списка (ownerItems ниже).
+    items: ownerItems(o),
     finance: {
       itemsTotal: toNumber(o.itemsTotal),
       tax: toNumber(o.tax),
@@ -189,6 +188,81 @@ export function serializeForOwner(o: OrderWithRelations) {
   };
 }
 export type OwnerOrder = ReturnType<typeof serializeForOwner>;
+
+/** Позиции с ценами владельца — общий кусок карточки и строки списка. */
+function ownerItems(o: OrderListRow) {
+  const florist = floristMoney(o);
+  return compensableItems(o.items).map((i) => ({
+    id: i.id,
+    name: i.name,
+    variantName: i.variantName,
+    productId: i.productId,
+    image: getOrderItemImages(i).primary,
+    variantImage: getOrderItemImages(i).variant,
+    floristComposition: i.floristCompositionSnapshot,
+    quantity: i.quantity,
+    options: i.options,
+    externalPrice: toNumber(i.externalPrice),
+    floristItemPrice: florist.itemPrice(i),
+    floristPriceMissing: florist.priceMissing(i),
+  }));
+}
+
+// ─────────────── СТРОКИ СПИСКОВ: без переписки, назначений и Airwallex ───────────────
+//
+// Отдельные сериализаторы, а не «полный минус лишнее»: состав строки списка определяется тем,
+// что таблица реально показывает, и TypeScript отлавливает попытку прочитать поле, которого
+// в строке больше нет.
+
+export function serializeOwnerListRow(o: OrderListRow) {
+  const florist = floristMoney(o);
+  return {
+    ...baseFields(o),
+    currentFloristName: o.currentFlorist?.user.name ?? null,
+    currentFloristAvatarUrl: o.currentFlorist?.avatarUrl ?? null,
+    items: ownerItems(o),
+    finance: {
+      customerTotal: toNumber(o.customerTotal),
+      floristTotal: florist.total,
+    },
+  };
+}
+export type OwnerListRowVM = ReturnType<typeof serializeOwnerListRow>;
+
+export function serializeCallCenterListRow(o: OrderListRow) {
+  return {
+    ...baseFields(o),
+    currentFloristName: o.currentFlorist?.user.name ?? null,
+    currentFloristAvatarUrl: o.currentFlorist?.avatarUrl ?? null,
+    // Без цен: правило то же, что у полной карточки колл-центра.
+    items: compensableItems(o.items).map((i) => ({
+      id: i.id,
+      name: i.name,
+      variantName: i.variantName,
+      image: getOrderItemImages(i).primary,
+      quantity: i.quantity,
+    })),
+  };
+}
+
+export function serializeFloristListRow(o: OrderListRow) {
+  const isFull = o.currentFlorist?.financeVisibility === "FULL";
+  const florist = floristMoney(o);
+  return {
+    ...baseFields(o),
+    items: compensableItems(o.items).map((i) => ({
+      id: i.id,
+      name: i.name,
+      variantName: i.variantName,
+      image: getOrderItemImages(i).primary,
+      quantity: i.quantity,
+    })),
+    floristTotal: florist.total,
+    financeVisibility: isFull ? ("FULL" as const) : ("MAKER_ONLY" as const),
+    // Раскладка не нужна: страница берёт из неё одну сумму заказчика — её и отдаём.
+    ...(isFull ? { finance: { customerTotal: toNumber(o.customerTotal) } } : {}),
+  };
+}
 
 // ─────────────── КОЛЛ-ЦЕНТР: всё для общения, БЕЗ финансов ───────────────
 export function serializeForCallCenter(o: OrderWithRelations) {

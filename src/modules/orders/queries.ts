@@ -6,9 +6,13 @@ import { DEFAULT_STORE_TZ, utcDayRangeForLocalToday } from "@/lib/tz";
 import { ACCEPTED_ORDER_STATUSES } from "@/lib/statuses";
 import {
   orderInclude,
+  orderListInclude,
   serializeForOwner,
   serializeForCallCenter,
   serializeForFlorist,
+  serializeOwnerListRow,
+  serializeCallCenterListRow,
+  serializeFloristListRow,
 } from "./serialize";
 
 export type OrderFilters = {
@@ -118,11 +122,13 @@ function buildPage(f: OrderFilters): { take?: number; skip?: number } {
 export async function listForOwner(f: OrderFilters = {}) {
   const orders = await prisma.order.findMany({
     where: buildWhere(f),
-    include: orderInclude,
+    // Списки ходят с ЛЁГКИМ include: без переписки, назначений и Airwallex. Полный — только
+    // у карточек (getFor*), где эти связи действительно показываются.
+    include: orderListInclude,
     orderBy: buildOrderBy(f),
     ...buildPage(f),
   });
-  return orders.map(serializeForOwner);
+  return orders.map(serializeOwnerListRow);
 }
 
 /** Сколько заказов под фильтр всего — для пейджера и счётчика в заголовке. */
@@ -139,11 +145,11 @@ export async function getForOwner(id: string) {
 export async function listForCallCenter(f: OrderFilters = {}) {
   const orders = await prisma.order.findMany({
     where: buildWhere(f),
-    include: orderInclude,
+    include: orderListInclude,
     orderBy: buildOrderBy(f),
     ...buildPage(f),
   });
-  return orders.map(serializeForCallCenter);
+  return orders.map(serializeCallCenterListRow);
 }
 
 export async function getForCallCenter(id: string) {
@@ -164,11 +170,11 @@ function floristWhere(floristId: string, f: OrderFilters): Prisma.OrderWhereInpu
 export async function listForFlorist(floristId: string, f: OrderFilters = {}) {
   const orders = await prisma.order.findMany({
     where: floristWhere(floristId, f),
-    include: orderInclude,
+    include: orderListInclude,
     orderBy: buildOrderBy(f),
     ...buildPage(f),
   });
-  return orders.map(serializeForFlorist);
+  return orders.map(serializeFloristListRow);
 }
 
 /** Сколько заказов флориста под фильтр всего — для пейджера и счётчика в заголовке. */
