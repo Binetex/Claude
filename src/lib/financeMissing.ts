@@ -28,3 +28,12 @@ export function incompleteSummary(o: { missing: string[]; noFloristPrice: boolea
     .filter(Boolean)
     .join("; ");
 }
+
+/**
+ * Куда ведёт строка списка «нужно дополнить» — одна дверь на все экраны.
+ * Расходные пробелы чинятся в финансовом разборе заказа; цена работы второстепенного
+ * флориста — в самой карточке заказа (финансовый разбор для второстепенных недоступен).
+ */
+export function incompleteOrderHref(o: { id: string; missing: string[]; noFloristPrice: boolean }): string {
+  return o.missing.length > 0 ? `/dashboard/finance/orders/${o.id}` : `/dashboard/orders/${o.id}`;
+}

@@ -11,7 +11,10 @@ import { prisma } from "@/lib/db";
 import { detectFinanceIssues, getIssueSummary } from "./issues";
 
 const RUN = `setupc-${Date.now()}`;
-const DAY = new Date("2026-08-12T00:00:00.000Z");
+// День недавний: окно детектора — 60 дней от «сейчас», жёсткая дата протухла бы к октябрю
+// и тест начал бы ложно краснеть (правило: любое падение — настоящий сигнал).
+const DAY = new Date(`${new Date(Date.now() - 5 * 86400_000).toISOString().slice(0, 10)}T00:00:00.000Z`);
+const DAY_STR = DAY.toISOString().slice(0, 10);
 let siteId = "";
 let floristId = "";
 let ownerId = "";
@@ -20,8 +23,8 @@ beforeAll(async () => {
   // Гейты расчёта задаём сами: без них детектор молчит по построению, и тест проверял бы
   // тишину вместо поведения. Соседние финансовые тесты делают так же.
   process.env.FINANCE_ACCRUAL_ENABLED = "true";
-  process.env.FINANCE_ACCRUAL_START_DATE = "2026-08-01";
-  process.env.FINANCE_PRIMARY_SHARE_START_DATE = "2026-08-01";
+  process.env.FINANCE_ACCRUAL_START_DATE = DAY_STR;
+  process.env.FINANCE_PRIMARY_SHARE_START_DATE = DAY_STR;
 
   const site = await prisma.site.create({
     data: { name: `${RUN}-site`, shortName: "STC", platform: "SHOPIFY", connectionStatus: "CONNECTED" },
@@ -61,6 +64,12 @@ afterAll(async () => {
   delete process.env.FINANCE_ACCRUAL_START_DATE;
   delete process.env.FINANCE_PRIMARY_SHARE_START_DATE;
 
+  // Первым делом ГАСИМ профиль: оборванный посередине afterAll не должен оставить в общей
+  // БД активный PRIMARY — глобальный findFirst детектора привяжется к трупу во всех
+  // последующих прогонах.
+  await prisma.floristFinanceProfile
+    .updateMany({ where: { floristId }, data: { active: false, effectiveTo: new Date() } })
+    .catch(() => {});
   await prisma.financeIssue.deleteMany({ where: { siteId } }).catch(() => {});
   await prisma.order.deleteMany({ where: { siteId } }).catch(() => {});
   await prisma.floristFinanceProfile.deleteMany({ where: { floristId } }).catch(() => {});

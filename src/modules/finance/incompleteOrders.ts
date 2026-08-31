@@ -23,7 +23,7 @@ import { prisma } from "@/lib/db";
 import { computeOrderContribution, type MissingInput } from "./dayCalc";
 import { toDayOrderInputs } from "./orderInput";
 import { resolveItemsFinance } from "./itemFinance";
-import { loadFinanceSettings, loadTaxPolicies } from "./settingsBatch";
+import { loadFinanceSettings } from "./settingsBatch";
 import { accrualGate } from "./config";
 
 export type IncompleteOrder = {
@@ -46,8 +46,11 @@ export type IncompleteScope = {
 
 /**
  * Ядро без политики: какие заказы области не дают посчитать деньги. Гейты и границы области —
- * ответственность вызывающего: у публичного списка это accrualGate, у детектора — его окно и
- * primaryShareGate. Формула пробелов при этом одна на всех.
+ * ответственность вызывающего: разбор дня читает без гейта (его баннер готовности не гейтится),
+ * публичный список — через accrualGate, детектор — своё окно и primaryShareGate. Формула
+ * пробелов при этом одна на всех. ВНИМАНИЕ: в проде даты обоих гейтов совпадают (2026-08-01);
+ * если их развести, гейтнутые потребители разойдутся по краю периода — единая граница по виду
+ * пробела возможна, но это решение владельца (см. CLAUDE.md, «Один ответ»).
  */
 export async function collectIncompleteOrders(scope: IncompleteScope): Promise<IncompleteOrder[]> {
   const orders = await prisma.order.findMany({
@@ -84,14 +87,13 @@ export async function collectIncompleteOrders(scope: IncompleteScope): Promise<I
   if (orders.length === 0) return [];
 
   const siteIds = [...new Set(orders.map((o) => o.siteId))];
-  const [additional, itemFinance, settings, taxShareBp] = await Promise.all([
+  const [additional, itemFinance, settings] = await Promise.all([
     prisma.orderAdditionalExpense.findMany({
       where: { orderId: { in: orders.map((o) => o.id) }, reversedAt: null },
       select: { orderId: true, amountCents: true },
     }),
     resolveItemsFinance(orders.flatMap((o) => o.items)),
     loadFinanceSettings(siteIds),
-    loadTaxPolicies(siteIds),
   ]);
 
   const additionalByOrder = new Map<string, number>();
@@ -99,7 +101,9 @@ export async function collectIncompleteOrders(scope: IncompleteScope): Promise<I
     additionalByOrder.set(a.orderId, (additionalByOrder.get(a.orderId) ?? 0) + a.amountCents);
   }
 
-  const inputs = toDayOrderInputs(orders, { additionalByOrder, itemFinance, settings, taxShareBp });
+  // taxShareBp не передаётся: налог не рождает пробелов (missing выводится из четырёх
+  // nullable-расходов, см. dayCalc), а вклад заказа ядро не использует.
+  const inputs = toDayOrderInputs(orders, { additionalByOrder, itemFinance, settings });
   const missingByOrder = new Map(inputs.map((i) => [i.orderId, computeOrderContribution(i).missing]));
 
   // Модель оплаты флориста определяет, что считать пробелом: у второстепенного цена работы

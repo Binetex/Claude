@@ -26,7 +26,7 @@ import { toDayOrderInputs } from "./orderInput";
 import { loadFinanceSettings, loadTaxPolicies } from "./settingsBatch";
 import { resolveItemsFinance } from "./itemFinance";
 import { primaryShareGate, accrualGate } from "./config";
-import { listIncompleteOrders, type IncompleteOrder } from "./incompleteOrders";
+import { collectIncompleteOrders, type IncompleteOrder } from "./incompleteOrders";
 import { getExpenseDailyTotals } from "@/modules/expenses/read";
 
 export type OwnerDay = {
@@ -221,14 +221,11 @@ export type OwnerDayDetail = {
   blockers: DayBlocker[];
   /** Что именно не заполнено по заказам — чтобы список говорил, куда идти чинить. */
   missing: MissingInput[];
-  /**
-   * Заказы, из-за которых день не считается, — с номерами и тем, чего в каждом не хватает.
-   *
-   * Без номеров сообщение «по заказам не хватает данных» отправляло владельца искать виновника
-   * вручную среди всех заказов дня: система знает ответ, но не называет его.
-   */
-  /** Из единого источника (incompleteOrders.ts) — тот же список, что видят обзор флористов
-   *  и детектор очереди. Свой способ собрать его здесь разошёлся бы с ними. */
+  /** Заказы, которые нужно дополнить, — поимённо: без номеров сообщение «данных не хватает»
+   *  отправляло искать виновника вручную. Из единого источника (incompleteOrders.ts), БЕЗ
+   *  гейта — как и баннер готовности дня: страница дня обязана называть виновников и для
+   *  исторических дней. Обзор флористов показывает гейтнутый срез того же источника;
+   *  детектор очереди — срез по основному флористу. */
   incompleteOrders: IncompleteOrder[];
   ordersTotal: number;
 
@@ -301,7 +298,7 @@ export async function getOwnerDay(day: Date): Promise<OwnerDayDetail | null> {
       where: { day, complete: true },
       select: { distributableCents: true, financeProfile: { select: { sharePercentBp: true, floristId: true } } },
     }),
-    listIncompleteOrders(day, day),
+    collectIncompleteOrders({ from: day, to: day }),
   ]);
 
   const [additional, itemFinance, settings] = await Promise.all([

@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/Badge";
 import { formatCents } from "@/lib/cents";
 import { getOwnerDay } from "@/modules/finance/ownerDashboard";
-import { incompleteSummary } from "@/lib/financeMissing";
+import { incompleteSummary, incompleteOrderHref } from "@/lib/financeMissing";
 
 export const dynamic = "force-dynamic";
 
@@ -68,22 +68,26 @@ export default async function OwnerFinanceDayPage({ params }: { params: Promise<
           <p className="mt-1 text-xs text-amber-700">
             Пока данных не хватает, прибыль за этот день не считается и в итог месяца не входит.
           </p>
+        </div>
+      )}
 
-          {/* Называем заказы поимённо. Без этого сообщение отправляло искать виновника вручную
-              среди всех заказов дня — при том что система знает ответ. Ссылка ведёт в разбор
-              заказа: там же видно, чего не хватает, и оттуда это чинится. */}
-          {detail.incompleteOrders.length > 0 && (
-            <ul className="mt-2 space-y-1">
-              {detail.incompleteOrders.map((o) => (
-                <li key={o.id} className="text-xs text-amber-900">
-                  <Link href={`/dashboard/finance/orders/${o.id}`} className="font-medium underline underline-offset-2">
-                    {o.orderNumber}
-                  </Link>
-                  <span className="text-amber-700"> — {incompleteSummary(o)}</span>
-                </li>
-              ))}
-            </ul>
-          )}
+      {/* Называем заказы поимённо — ОТДЕЛЬНО от баннера готовности: «не задана цена флориста»
+          день не блокирует, но дополнить её всё равно нужно, и прятать строку на готовом дне
+          значило бы спорить с обзором флористов. Дверь у каждой причины своя (см.
+          incompleteOrderHref): расходы чинятся в финансовом разборе, цена — в карточке заказа. */}
+      {detail.incompleteOrders.length > 0 && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50/60 px-4 py-3">
+          <div className="text-xs font-medium text-amber-900">Заказы, которые нужно дополнить</div>
+          <ul className="mt-2 space-y-1">
+            {detail.incompleteOrders.map((o) => (
+              <li key={o.id} className="text-xs text-amber-900">
+                <Link href={incompleteOrderHref(o)} className="font-medium underline underline-offset-2">
+                  {o.orderNumber}
+                </Link>
+                <span className="text-amber-700"> — {incompleteSummary(o)}</span>
+              </li>
+            ))}
+          </ul>
         </div>
       )}
 

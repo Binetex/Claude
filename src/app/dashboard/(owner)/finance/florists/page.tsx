@@ -16,7 +16,7 @@ import { accrualGate } from "@/modules/finance/config";
 import { resolvePeriod } from "@/modules/finance/period";
 import { getFloristsEarnings, countDeliveredByFlorist } from "@/modules/finance/floristsEarnings";
 import { listIncompleteOrders } from "@/modules/finance/incompleteOrders";
-import { incompleteSummary } from "@/lib/financeMissing";
+import { incompleteSummary, incompleteOrderHref } from "@/lib/financeMissing";
 import { pluralRu } from "@/lib/plural";
 import { formatDayShort } from "@/modules/finance/earningsFormat";
 import { FloristsChart } from "./FloristsChart";
@@ -113,7 +113,7 @@ export default async function FinanceFloristsPage({
               <ul className="space-y-1">
                 {incomplete.map((o) => (
                   <li key={o.id} className="text-xs">
-                    <Link href={`/dashboard/orders/${o.id}`} className="font-medium underline underline-offset-2">
+                    <Link href={incompleteOrderHref(o)} className="font-medium underline underline-offset-2">
                       {o.orderNumber}
                     </Link>
                     <span className="text-amber-700">

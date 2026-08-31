@@ -24,6 +24,7 @@ let siteId = "";
 let primaryFloristId = "";
 let secondaryFloristId = "";
 let primaryProfileId = "";
+let gapOrderId = "";
 const orderIds: string[] = [];
 
 async function makeDelivered(
@@ -112,6 +113,14 @@ afterAll(async () => {
   delete process.env.FINANCE_ACCRUAL_START_DATE;
   delete process.env.FINANCE_PRIMARY_SHARE_START_DATE;
 
+  // Первым делом ГАСИМ профили: оборванный посередине afterAll не должен оставить в общей
+  // БД активный PRIMARY — глобальный findFirst детектора привяжется к трупу.
+  await prisma.floristFinanceProfile
+    .updateMany({
+      where: { floristId: { in: [primaryFloristId, secondaryFloristId] } },
+      data: { active: false, effectiveTo: new Date() },
+    })
+    .catch(() => {});
   await prisma.financeIssue.deleteMany({ where: { OR: [{ siteId }, { orderId: { in: orderIds } }] } }).catch(() => {});
   await prisma.orderAcquiringFee.deleteMany({ where: { orderId: { in: orderIds } } }).catch(() => {});
   await prisma.order.deleteMany({ where: { siteId } }).catch(() => {});
@@ -128,6 +137,7 @@ afterAll(async () => {
 describe("три потребителя называют одни и те же заказы", () => {
   it("список, разбор дня и детектор согласны на общих данных", async () => {
     const gapOrder = await makeDelivered(`${RUN}-GAP`, primaryFloristId); // нет фактической доставки
+    gapOrderId = gapOrder.id;
     const noPriceOrder = await makeDelivered(`${RUN}-NOPRICE`, secondaryFloristId, {
       actualCost: "10.00",
       floristTotal: "0.00", // у второстепенного ноль означает «цена не задана»
@@ -144,7 +154,9 @@ describe("три потребителя называют одни и те же �
     expect(noPriceRow.missing).toEqual([]);
     expect(noPriceRow.noFloristPrice).toBe(true);
 
-    // 2. Разбор дня называет тот же набор с теми же причинами.
+    // 2. Разбор дня называет тот же набор с теми же причинами. После унификации это почти
+    //    тавтология (getOwnerDay читает то же ядро) — ассерт стоит против будущей
+    //    СОБСТВЕННОЙ фильтрации поверх источника, а не как независимая сверка.
     const detail = await getOwnerDay(DAY);
     const detailRows = detail!.incompleteOrders.filter((o) => orderIds.includes(o.id));
     expect(detailRows.map((o) => ({ id: o.id, missing: o.missing, noFloristPrice: o.noFloristPrice }))).toEqual(
@@ -163,9 +175,12 @@ describe("три потребителя называют одни и те же �
     });
     expect(issues).toEqual([{ orderId: gapOrder.id, type: "DELIVERY_ACTUAL_COST_MISSING" }]);
 
-    // Пересечение областей формально: заказы основного флориста с пробелами данных.
+    // Пересечение областей формально: заказы ОСНОВНОГО флориста с пробелами данных.
+    // Фильтр позитивный, по известным id основного — а не «все, кроме noPrice»: расходный
+    // пробел у заказа второстепенного не должен незаметно попасть в ожидание детектора.
+    const primaryIds = new Set([gapOrder.id, completeOrder.id]);
     const sharedPrimaryGapIds = shared
-      .filter((o) => o.missing.length > 0 && o.id !== noPriceOrder.id)
+      .filter((o) => o.missing.length > 0 && primaryIds.has(o.id))
       .map((o) => o.id)
       .sort();
     expect(issues.map((i) => i.orderId).sort()).toEqual(sharedPrimaryGapIds);
@@ -178,24 +193,19 @@ describe("три потребителя называют одни и те же �
   });
 
   it("заполнение пробела убирает заказ у всех троих разом", async () => {
-    const gap = orderIds.length
-      ? await prisma.order.findFirst({ where: { orderNumber: `${RUN}-GAP` }, select: { id: true } })
-      : null;
-    expect(gap).not.toBeNull();
-
     await prisma.order.update({
-      where: { id: gap!.id },
+      where: { id: gapOrderId },
       data: { deliveryActualCost: "12.00", deliveryActualCostConfirmedAt: new Date() },
     });
 
     const shared = (await listIncompleteOrders(DAY, DAY)).filter((o) => orderIds.includes(o.id));
-    expect(shared.some((o) => o.id === gap!.id)).toBe(false);
+    expect(shared.some((o) => o.id === gapOrderId)).toBe(false);
 
     const detail = await getOwnerDay(DAY);
-    expect(detail!.incompleteOrders.some((o) => o.id === gap!.id)).toBe(false);
+    expect(detail!.incompleteOrders.some((o) => o.id === gapOrderId)).toBe(false);
 
     await detectFinanceIssues();
-    const open = await prisma.financeIssue.findMany({ where: { orderId: gap!.id, status: "OPEN" } });
+    const open = await prisma.financeIssue.findMany({ where: { orderId: gapOrderId, status: "OPEN" } });
     expect(open).toHaveLength(0);
   });
 });

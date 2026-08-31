@@ -90,10 +90,12 @@ export async function detectFinanceIssues(now: Date = new Date()): Promise<Detec
   for (const { deliveryDate } of days) {
     const result = await computeDay(profile.id, deliveryDate);
     if (!result) continue;
-    const dayGaps = gapsByDay.get(dayKey(deliveryDate)) ?? [];
+    // Строки «только нет цены флориста» до карточек не доходят: в области детектора
+    // (основной флорист) их не бывает по построению, фильтр — единственный и здесь.
+    const dayGaps = (gapsByDay.get(dayKey(deliveryDate)) ?? []).filter((g) => g.missing.length > 0);
     // Подробности нужны только по проблемным заказам, и запрашиваются только для них:
-    // на здоровом дне детектор не платит ни одного лишнего запроса.
-    const meta = await metaForOrders(dayGaps.filter((g) => g.missing.length > 0).map((g) => g.id));
+    // на здоровом дне metaForOrders не зовётся вовсе.
+    const meta = await metaForOrders(dayGaps.map((g) => g.id));
     drafts.push(...draftsForDay(result, dayGaps, meta, profile.id, profile.floristId, deliveryDate));
   }
   drafts.push(...(await globalDrafts(profile.floristId)));
@@ -202,14 +204,19 @@ function draftsForDay(
 
   // Поштучные проблемы заказов. Пока хоть одна не разобрана, день не считается целиком:
   // подставить ноль вместо неизвестного расхода значило бы завысить прибыль.
-  // Строки «только нет цены флориста» (missing пуст) — вне области детектора: цена работы
-  // второстепенного не мешает считать долю основного, и карточки в очереди у неё нет.
+  //
+  // Снимок gaps сделан до цикла и мог устареть: заказ, заполненный ПОКА идёт прогон, не
+  // должен переоткрыть только что решённую карточку. result — та же формула, посчитанная
+  // этой итерацией, — служит проверкой свежести, не вторым источником: черпаем коды из
+  // gap, но только те, что всё ещё числятся пробелом.
+  const freshMissing = new Map(result.orders.map((o) => [o.orderId, o.missing]));
   for (const gap of gaps) {
-    if (gap.missing.length === 0) continue;
+    const fresh = freshMissing.get(gap.id) ?? [];
     const m = meta.get(gap.id);
     if (!m) continue;
 
     for (const missing of gap.missing) {
+      if (!fresh.includes(missing)) continue;
       if (missing === "DELIVERY_ACTUAL_COST") {
         out.push({
           type: "DELIVERY_ACTUAL_COST_MISSING",

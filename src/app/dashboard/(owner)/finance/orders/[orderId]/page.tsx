@@ -30,6 +30,14 @@ export default async function OrderFinancePage({ params }: { params: Promise<{ o
   // Ревизий здесь нет и не будет: они объясняли историю пересчётов, а объяснять нужно
   // историю денег — она видна в книге, где у каждой записи свои цифры.
   const calc = await readOrderContribution(orderId);
+  // calc=null у второстепенных — это не «не назначен»: дневной расчёт ведётся по заказам
+  // основного, а у второстепенного считается только цена работы. Текст обязан говорить правду.
+  const secondaryProfile = !calc && order.currentFloristId
+    ? await prisma.floristFinanceProfile.findFirst({
+        where: { floristId: order.currentFloristId, model: "SECONDARY", active: true, effectiveTo: null },
+        select: { id: true },
+      })
+    : null;
 
   return (
     <div className="space-y-4">
@@ -58,10 +66,22 @@ export default async function OrderFinancePage({ params }: { params: Promise<{ o
       {!calc ? (
         <Card>
           <CardBody>
-            <EmptyState
-              title="Расчёт по заказу недоступен"
-              description="Заказ не назначен основному флористу или ещё не доставлен."
-            />
+            {secondaryProfile ? (
+              <EmptyState
+                title="Дневной расчёт ведётся по заказам основного флориста"
+                description="У этого заказа считается только цена работы флориста — она задаётся в карточке заказа."
+                action={
+                  <Link href={`/dashboard/orders/${order.id}`} className="text-sm font-medium underline underline-offset-2">
+                    Открыть карточку заказа
+                  </Link>
+                }
+              />
+            ) : (
+              <EmptyState
+                title="Расчёт по заказу недоступен"
+                description="Заказ не назначен основному флористу или ещё не доставлен."
+              />
+            )}
           </CardBody>
         </Card>
       ) : (
