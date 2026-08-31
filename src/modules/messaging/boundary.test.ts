@@ -10,66 +10,84 @@
  *   messaging ──▶ reviews/locationPick            (единственное исключение, см. ниже)
  *
  * Исключение одно и намеренное: {{review_url}} обязан совпадать с разделом «Отзывы»,
- * поэтому orderSource зовёт чистую locationPick. Второго импорта из reviews в messaging
- * быть не должно — появился новый, значит граница поплыла.
+ * поэтому orderSource зовёт чистую locationPick. Второй импорт из reviews в messaging —
+ * граница поплыла.
  *
- * Тесты (*.test.ts) из проверки исключены: интеграционный тест законно собирает обе
- * стороны вместе.
+ * Импорты достаёт ts.preProcessFile: он видит static, side-effect `import "..."`,
+ * динамический `import()` и `require()`, а комментарии не считает — самописный регекс
+ * прокалывался на всех этих формах разом. Принадлежность модулю решается резолвом пути,
+ * а не подстрокой: modules/automations-ui не считается automations. Тесты (*.test.ts)
+ * из проверки исключены: интеграционный тест законно собирает обе стороны вместе.
  */
 import { describe, it, expect } from "vitest";
 import fs from "fs";
 import path from "path";
+import { fileURLToPath } from "node:url";
+import ts from "typescript";
 
-function walk(dir: string): string[] {
-  return fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
-    const full = path.join(dir, e.name);
-    return e.isDirectory() ? walk(full) : [full];
-  });
+// Якорь от самого файла, не от process.cwd(): vitest не делает chdir воркера,
+// и запуск не из корня репо ронял бы тест посторонним ENOENT.
+const MODULES_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const SRC_DIR = path.resolve(MODULES_DIR, "..");
+
+function sources(mod: string): string[] {
+  return fs
+    .readdirSync(path.join(MODULES_DIR, mod), { recursive: true, withFileTypes: true })
+    .filter((e) => e.isFile() && /\.tsx?$/.test(e.name) && !/\.test\.tsx?$/.test(e.name))
+    .map((e) => path.join(e.parentPath, e.name));
 }
 
-const sources = (dir: string) =>
-  walk(path.join(process.cwd(), `src/modules/${dir}`)).filter(
-    (f) => /\.(ts|tsx)$/.test(f) && !/\.test\.tsx?$/.test(f)
-  );
-
+/** Все импортируемые файлом пути: static, side-effect, dynamic import(), require(). */
 const importsOf = (file: string) =>
-  [...fs.readFileSync(file, "utf8").matchAll(/from\s+["']([^"']+)["']/g)].map((m) => m[1]);
+  ts.preProcessFile(fs.readFileSync(file, "utf8"), true, true).importedFiles.map((f) => f.fileName);
+
+/** Абсолютный путь цели импорта; null для пакетов из node_modules. */
+function resolveImport(file: string, imp: string): string | null {
+  if (imp.startsWith("@/")) return path.join(SRC_DIR, imp.slice(2));
+  if (imp.startsWith(".")) return path.resolve(path.dirname(file), imp);
+  return null;
+}
+
+/** Импорт ведёт внутрь src/modules/<mod>? Сравнение по границе каталога, не по подстроке. */
+function pointsInto(file: string, imp: string, mod: string): boolean {
+  const target = resolveImport(file, imp);
+  if (!target) return false;
+  const root = path.join(MODULES_DIR, mod);
+  return target === root || target.startsWith(root + path.sep);
+}
+
+const rel = (file: string) => path.relative(SRC_DIR, file);
 
 describe("граница messaging / automations / reviews", () => {
-  it("модуль messaging на месте и не пуст", () => {
-    expect(sources("messaging").length).toBeGreaterThanOrEqual(7);
-  });
+  const FORBIDDEN: ReadonlyArray<readonly [string, string]> = [
+    ["reviews", "automations"],
+    ["messaging", "automations"],
+    ["automations", "reviews"],
+  ];
 
-  it("reviews не импортирует automations — общий слой берётся из messaging", () => {
-    for (const file of sources("reviews")) {
+  it.each(FORBIDDEN)("%s не импортирует %s", (from, into) => {
+    const files = sources(from);
+    // Пустой скан означал бы вакуумный «зелёный» проход при переименованном каталоге.
+    expect(files.length).toBeGreaterThan(0);
+    for (const file of files) {
       for (const imp of importsOf(file)) {
         expect(
-          /modules\/automations|\.\.\/automations/.test(imp),
-          `${path.relative(process.cwd(), file)} импортирует «${imp}» — reviews не должен знать про automations`
-        ).toBe(false);
-      }
-    }
-  });
-
-  it("messaging не импортирует automations — слой ниже, а не сбоку", () => {
-    for (const file of sources("messaging")) {
-      for (const imp of importsOf(file)) {
-        expect(
-          /modules\/automations|\.\.\/automations/.test(imp),
-          `${path.relative(process.cwd(), file)} импортирует «${imp}» — messaging не должен знать про automations`
+          pointsInto(file, imp, into),
+          `${rel(file)} импортирует «${imp}» — ${from} не должен знать про ${into}`
         ).toBe(false);
       }
     }
   });
 
   it("из reviews в messaging входит только locationPick", () => {
+    const allowed = path.join(MODULES_DIR, "reviews", "locationPick");
     for (const file of sources("messaging")) {
       for (const imp of importsOf(file)) {
-        if (!/modules\/reviews|\.\.\/reviews/.test(imp)) continue;
+        if (!pointsInto(file, imp, "reviews")) continue;
         expect(
-          imp,
-          `${path.relative(process.cwd(), file)} импортирует «${imp}» — из reviews разрешена только чистая locationPick (ради {{review_url}})`
-        ).toBe("@/modules/reviews/locationPick");
+          resolveImport(file, imp),
+          `${rel(file)} импортирует «${imp}» — из reviews разрешена только чистая locationPick (ради {{review_url}})`
+        ).toBe(allowed);
       }
     }
   });

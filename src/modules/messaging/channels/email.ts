@@ -6,7 +6,7 @@ import "server-only";
  * (config-проблема, не сбой отправки) — так же, как store_no_quo_number у SMS. Шаблон — override
  * правила (ctx.emailTemplateIdOverride), если задан, иначе общий шаблон магазина (Stage 2.1).
  *
- * Идемпотентность — по ctx.idempotencyKey, ключ формирует движок (handlers.ts) per-attempt.
+ * Идемпотентность — по ctx.idempotencyKey, ключ формирует вызывающий (automations/handlers.ts, reviews/sendLink.ts) per-attempt.
  */
 import type { PrismaClient } from "@/generated/prisma/client";
 import { createBrevoProvider } from "@/integrations/email/brevo";

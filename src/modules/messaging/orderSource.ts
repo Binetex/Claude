@@ -1,5 +1,6 @@
 import "server-only";
-/** Общий маппер Prisma-заказа (+Site) в срез переменных шаблона. Используют handler и preview.
+/** Общий маппер Prisma-заказа (+Site) в срез переменных шаблона. Используют движки правил
+ *  и цепочек, preview и reviews/sendLink.
  *  Импорт locationPick — единственная разрешённая ссылка messaging → reviews (boundary.test.ts). */
 import type { Prisma } from "@/generated/prisma/client";
 import { resolveSupportEmail, type OrderVariableSource } from "./variables";
@@ -8,7 +9,8 @@ import { pickLocation, pickedReviewUrl } from "@/modules/reviews/locationPick";
 // emailSettings нужны ради {{support_email}} (reply-to магазина, иначе адрес отправителя).
 // googleLocations — ради {{review_url}}: ссылка на отзыв больше не одна на магазин, её решает
 // адрес доставки (ближайшая точка). Включаем здесь, а не в каждом вызове: источник переменных
-// должен быть один на всех потребителей — движок правил, движок цепочек и preview.
+// должен быть один на всех потребителей — движок правил, движок цепочек, preview и
+// отправка ссылок на отзыв.
 export const SMS_ORDER_INCLUDE = {
   site: { include: { emailSettings: true, googleLocations: true } },
 } as const;

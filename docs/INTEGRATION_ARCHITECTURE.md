@@ -49,7 +49,7 @@ UI / modules ──▶ Normalized types + Adapter interfaces ──▶ Registry 
 | `CatalogAdapter` | импорт товаров/вариантов (stream) | ✅ есть, Shopify+WooCommerce реальные |
 | `OrderAdapter` | parseWebhook → `NormalizedOrder`, pushUpdate | ✅ есть; замышлявшийся `OrderSourceAdapter` — **удалён** (был неиспользуемой заглушкой) |
 | `DeliveryAdapter` | createDelivery, getStatus, parseWebhook → `NormalizedDeliveryEvent` | ⚠️ этот интерфейс (в `integrations/types.ts`) — **удалён** вместе с заглушкой; реальная доставка — `integrations/delivery/burq/*`, свой контракт |
-| `MessagingAdapter` | send(command) → `MessageResult` по каналам | ⚠️ **удалён** как неиспользуемая заглушка. Реальная отправка сейчас: `modules/automations/channels/*` (`ChannelSender`, SMS/Email автоматизаций, реальный) + `src/messaging/*` (mock-only, используется одним обработчиком `order.delivery.completed` — см. HANDOFF §8, техдолг) |
+| `MessagingAdapter` | send(command) → `MessageResult` по каналам | ⚠️ **удалён** как неиспользуемая заглушка. Реальная отправка сейчас: `modules/messaging/channels/*` (`ChannelSender`, SMS/Email автоматизаций, реальный) + `src/messaging/*` (mock-only, используется одним обработчиком `order.delivery.completed` — см. HANDOFF §8, техдолг) |
 | `WebhookAdapter` | verify(raw, headers, secret) → ok/replay/invalid; extractEventId | ✅ есть |
 | `ConnectionAdapter` | connect/disconnect/status, credential shape | ✅ есть |
 
@@ -94,7 +94,7 @@ credentials не используются**; провайдер возвраща
 Единый `MessagingAdapter`/`MessageCommand` так и не стал точкой входа для реальной отправки.
 Вместо этого сложились два независимых пути:
 
-- **`modules/automations/channels/*`** (`ChannelSender`) — реальный, рабочий: SMS через QUO,
+- **`modules/messaging/channels/*`** (`ChannelSender`) — реальный, рабочий: SMS через QUO,
   Email через Brevo (per-Site настройки + опциональный override шаблона на уровне правила).
   Питает Automation Engine (`modules/automations/handlers.ts` + `outbox`).
 - **`src/messaging/*`** (`MessagingService`, `subscribers.ts`, `templates.ts`) — обслуживает

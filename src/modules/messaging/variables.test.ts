@@ -114,3 +114,24 @@ describe("остальные переменные", () => {
     expect(v.delivery_address).toBe("1 Main St, Portland");
   });
 });
+
+describe("variables.buildOrderVariables", () => {
+  it("форматирует адрес/дату/деньги и пустые поля → ''", () => {
+    const v = buildOrderVariables({
+      orderNumber: "#1001", senderName: "Anna", recipientName: "Maria",
+      senderPhone: "+15551112222", recipientPhone: "+15553334444",
+      addressLine: "1 Main St", apartment: "4", city: "Portland",
+      deliveryDate: new Date("2026-07-25T12:00:00Z"), deliveryWindow: "14:00 – 18:00",
+      trackingUrl: null, cardMessage: "", deliveryInstructions: "Leave at door",
+      customerTotal: 115, storeName: "Floremart", storePhone: "+15550000000",
+      reviewUrl: "https://rev", timezone: "UTC", supportEmail: "help@shop.com",
+    });
+    expect(v.order_number).toBe("#1001");
+    expect(v.delivery_address).toBe("1 Main St, 4, Portland");
+    expect(v.delivery_date).toBe("2026-07-25");
+    expect(v.order_total).toBe("$115.00");
+    expect(v.tracking_url).toBe(""); // null → ""
+    expect(v.card_message).toBe("");
+    expect(v.review_url).toBe("https://rev");
+  });
+});

@@ -2177,7 +2177,7 @@ model Automation {
   active Boolean @default(false) // после deploy все правила выключены
 
   // Каналы доставки — независимые флаги (расширяется без изменения модели через
-  // ChannelSender-реестр, src/modules/automations/channels). Значения по умолчанию НЕ случайны:
+  // ChannelSender-реестр, src/modules/messaging/channels). Значения по умолчанию НЕ случайны:
   // это ровно то поведение, что было до появления Email (SMS вкл, Email и fallback выкл).
   smsEnabled           Boolean @default(true)
   emailEnabled         Boolean @default(false)

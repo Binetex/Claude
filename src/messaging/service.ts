@@ -1,8 +1,9 @@
 /**
- * Сервис уведомлений: маршрутизирует `MessageCommand` в провайдер нужного канала,
- * рендерит шаблон, обеспечивает идемпотентность (дедуп по `idempotencyKey`) и
- * классифицирует ошибки для повторов. Провайдеры регистрируются по каналу — реальные
- * или mock. Единая точка, через которую бизнес-код отправляет сообщения.
+ * СТАРЫЙ mock-сервис уведомлений (эпоха до Automation Engine). Маршрутизирует
+ * `MessageCommand` в провайдер канала, но зарегистрированы только MOCK-провайдеры —
+ * реальных отправок отсюда не уходит. Обслуживает единственный обработчик
+ * `order.delivery.completed` (src/outbox/handlers.ts); subscribers.ts никуда не подключён.
+ * Боевой слой отправки — modules/messaging. Новый код сюда не добавлять.
  */
 import { renderMessage } from "./templates";
 import type { MessageChannel, MessageCommand, MessageProvider, MessageResult } from "./types";
