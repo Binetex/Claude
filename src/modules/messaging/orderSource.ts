@@ -1,5 +1,6 @@
 import "server-only";
-/** Общий маппер Prisma-заказа (+Site) в срез переменных шаблона. Используют handler и preview. */
+/** Общий маппер Prisma-заказа (+Site) в срез переменных шаблона. Используют handler и preview.
+ *  Импорт locationPick — единственная разрешённая ссылка messaging → reviews (boundary.test.ts). */
 import type { Prisma } from "@/generated/prisma/client";
 import { resolveSupportEmail, type OrderVariableSource } from "./variables";
 import { pickLocation, pickedReviewUrl } from "@/modules/reviews/locationPick";

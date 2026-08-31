@@ -26,11 +26,11 @@ import { featureFlags } from "@/lib/featureFlags";
 import { getQuoConfig } from "@/integrations/quo/config";
 import { createQuoClient } from "@/integrations/quo/client";
 import { sendOrderSms } from "@/integrations/quo/send";
-import { createEmailChannelSender } from "@/modules/automations/channels/email";
-import { buildOrderVariables } from "@/modules/automations/variables";
-import { renderTemplate } from "@/modules/automations/template";
-import { SMS_ORDER_INCLUDE, orderToVariableSource } from "@/modules/automations/orderSource";
-import { resolveCustomerEmail } from "@/modules/automations/emailAudience";
+import { createEmailChannelSender } from "@/modules/messaging/channels/email";
+import { buildOrderVariables } from "@/modules/messaging/variables";
+import { renderTemplate } from "@/modules/messaging/template";
+import { SMS_ORDER_INCLUDE, orderToVariableSource } from "@/modules/messaging/orderSource";
+import { resolveCustomerEmail } from "@/modules/messaging/emailAudience";
 import { recordLinkSent, recordLinkFailed, type RequestActor } from "./requests";
 
 /**

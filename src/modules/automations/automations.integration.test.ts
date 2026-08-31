@@ -5,7 +5,7 @@ import type { OutboxRecord } from "@/outbox/types";
 import type { QuoClient } from "@/integrations/quo/client";
 import { quoErrorFromStatus } from "@/integrations/quo/errors";
 import { buildAutomationTriggerHandler, buildAutomationSendHandler } from "./handlers";
-import { createSmsChannelSender } from "./channels/sms";
+import { createSmsChannelSender } from "@/modules/messaging/channels/sms";
 import { setAutomationsGloballyDisabled } from "./settings";
 import { todayStrInTz, DEFAULT_STORE_TZ } from "@/lib/tz";
 

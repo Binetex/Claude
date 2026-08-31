@@ -8,8 +8,8 @@ import "server-only";
  */
 import { prisma } from "@/lib/db";
 import { SMS_MAX_LENGTH } from "@/integrations/quo/send";
-import { SMS_VARIABLES } from "@/modules/automations/variables";
-import { extractVariables } from "@/modules/automations/template";
+import { SMS_VARIABLES } from "@/modules/messaging/variables";
+import { extractVariables } from "@/modules/messaging/template";
 import { DEFAULT_ASK_SMS, DEFAULT_REMINDER_SMS } from "./sendLink";
 import { DEFAULT_REVIEW_SETTINGS } from "./requests";
 

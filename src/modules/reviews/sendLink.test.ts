@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { DEFAULT_ASK_SMS, DEFAULT_REMINDER_SMS } from "./sendLink";
-import { SMS_VARIABLES } from "@/modules/automations/variables";
-import { extractVariables, renderTemplate } from "@/modules/automations/template";
+import { SMS_VARIABLES } from "@/modules/messaging/variables";
+import { extractVariables, renderTemplate } from "@/modules/messaging/template";
 
 /**
  * Тексты, которые уходят КЛИЕНТУ. Проверяется два свойства, каждое из которых ломалось молча:

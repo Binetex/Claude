@@ -1,6 +1,6 @@
 import { requireRole } from "@/lib/rbac";
 import { listReviewSettings, DEFAULT_TEXTS } from "@/modules/reviews/settings";
-import { SMS_VARIABLES } from "@/modules/automations/variables";
+import { SMS_VARIABLES } from "@/modules/messaging/variables";
 import { MessagesPanel } from "./MessagesPanel";
 
 export const dynamic = "force-dynamic";

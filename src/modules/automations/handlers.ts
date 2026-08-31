@@ -37,16 +37,16 @@ import { getSmsTrigger } from "./triggers";
 import { evaluateConditions, type SmsConditions } from "./conditions";
 import { isDeliveryToday } from "./dailySchedule";
 import { planSmsRecipients, DUPLICATE_PHONE_REASON, DUPLICATE_EMAIL_REASON, type SmsAudience, type SmsRecipientType } from "./audience";
-import { resolveCustomerEmail } from "./emailAudience";
+import { resolveCustomerEmail } from "@/modules/messaging/emailAudience";
 import { computeScheduledAt, type SmsDelayUnit } from "./delay";
-import { buildOrderVariables } from "./variables";
-import { renderTemplate, extractVariables } from "./template";
-import { SMS_ORDER_INCLUDE, orderToVariableSource } from "./orderSource";
+import { buildOrderVariables } from "@/modules/messaging/variables";
+import { renderTemplate, extractVariables } from "@/modules/messaging/template";
+import { SMS_ORDER_INCLUDE, orderToVariableSource } from "@/modules/messaging/orderSource";
 import { isAutomationsGloballyDisabled } from "./settings";
 import { logExecution } from "./executionLog";
 import { startFlowsForTrigger } from "./flows/engine";
-import type { ChannelSender } from "./channels/types";
-import { SMS_UNAVAILABLE_CODES } from "./channels/sms";
+import type { ChannelSender } from "@/modules/messaging/channels/types";
+import { SMS_UNAVAILABLE_CODES } from "@/modules/messaging/channels/sms";
 import { isP2002 } from "@/lib/prismaErrors";
 
 /** Триггеры, для которых заказ ИМЕННО отменён/возвращён — дефолтное исключение не применяем. */

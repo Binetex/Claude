@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/db";
 import { listSmsTriggers } from "@/modules/automations/triggers";
-import { SMS_VARIABLES } from "@/modules/automations/variables";
+import { SMS_VARIABLES } from "@/modules/messaging/variables";
 import { AutomationForm } from "../AutomationForm";
 
 export const dynamic = "force-dynamic";

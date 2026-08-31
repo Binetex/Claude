@@ -23,12 +23,12 @@ import type { OutboxHandler } from "@/outbox/worker";
 import type { OutboxRecord } from "@/outbox/types";
 import { PrismaOutboxRepository } from "@/outbox/prismaRepository";
 import { resolveRecipients } from "../audience";
-import { resolveCustomerEmail } from "../emailAudience";
-import { buildOrderVariables } from "../variables";
-import { renderTemplate, extractVariables } from "../template";
-import { SMS_ORDER_INCLUDE, orderToVariableSource } from "../orderSource";
+import { resolveCustomerEmail } from "@/modules/messaging/emailAudience";
+import { buildOrderVariables } from "@/modules/messaging/variables";
+import { renderTemplate, extractVariables } from "@/modules/messaging/template";
+import { SMS_ORDER_INCLUDE, orderToVariableSource } from "@/modules/messaging/orderSource";
 import { isAutomationsGloballyDisabled } from "../settings";
-import type { ChannelSender } from "../channels/types";
+import type { ChannelSender } from "@/modules/messaging/channels/types";
 import type { FlowStepPayload } from "./events";
 import { advanceRun, type FlowStepRow } from "./engine";
 

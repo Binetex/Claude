@@ -6,7 +6,7 @@ import { buildAutomationTriggerHandler } from "../handlers";
 import { AUTOMATION_TRIGGER_EVENT } from "../events";
 import { buildFlowStepHandler } from "./handler";
 import { FLOW_STEP_EVENT } from "./events";
-import type { ChannelSender, ChannelSendResult } from "../channels/types";
+import type { ChannelSender, ChannelSendResult } from "@/modules/messaging/channels/types";
 import { ingestWooOrder, type WooIngestConfig } from "@/integrations/woocommerce/ingestWooOrder";
 
 /**

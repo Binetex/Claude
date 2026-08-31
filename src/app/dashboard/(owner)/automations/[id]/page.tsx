@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/db";
 import { listSmsTriggers } from "@/modules/automations/triggers";
-import { SMS_VARIABLES } from "@/modules/automations/variables";
+import { SMS_VARIABLES } from "@/modules/messaging/variables";
 import { AutomationForm, type AutomationFormInitial } from "../AutomationForm";
 import { AutomationDetailTabs } from "./AutomationDetailTabs";
 import { JobsPanel, parseFilter, parsePage } from "./JobsPanel";

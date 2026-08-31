@@ -11,7 +11,7 @@ import { describe, it, expect } from "vitest";
  * Тест держит два списка врозь: они намеренно НЕ совпадают, и совпадение означало бы, что
  * кто-то свёл их «для порядка».
  */
-import { SMS_UNAVAILABLE_CODES } from "@/modules/automations/channels/sms";
+import { SMS_UNAVAILABLE_CODES } from "@/modules/messaging/channels/sms";
 
 // Тот же список, что в sendLink.ts. Держим копию здесь осознанно: он не экспортируется, а
 // проверять надо именно решение «когда пробуем письмо», а не внутренности модуля.

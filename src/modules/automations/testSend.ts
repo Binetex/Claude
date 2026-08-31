@@ -5,8 +5,8 @@ import "server-only";
  * прямой вызов QUO-клиента. Так гарантируется, что «Отправить тест» не создаёт production-задачу.
  */
 import type { QuoClient } from "@/integrations/quo/client";
-import { buildOrderVariables, SMS_VARIABLES } from "./variables";
-import { renderTemplate } from "./template";
+import { buildOrderVariables, SMS_VARIABLES } from "@/modules/messaging/variables";
+import { renderTemplate } from "@/modules/messaging/template";
 
 export type TestSendSite = { name: string | null; quoPhoneNumber: string | null; reviewUrl: string | null };
 

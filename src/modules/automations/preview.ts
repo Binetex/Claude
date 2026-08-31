@@ -5,10 +5,10 @@ import "server-only";
  * и не меняет. Используется формой редактора («Показать preview»).
  */
 import type { PrismaClient } from "@/generated/prisma/client";
-import { buildOrderVariables } from "./variables";
-import { renderTemplate } from "./template";
+import { buildOrderVariables } from "@/modules/messaging/variables";
+import { renderTemplate } from "@/modules/messaging/template";
 import { resolveRecipients, type SmsAudience } from "./audience";
-import { SMS_ORDER_INCLUDE, orderToVariableSource } from "./orderSource";
+import { SMS_ORDER_INCLUDE, orderToVariableSource } from "@/modules/messaging/orderSource";
 
 export type PreviewResult =
   | { ok: false; error: string }

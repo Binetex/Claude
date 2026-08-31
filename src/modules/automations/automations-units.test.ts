@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { renderTemplate, extractVariables } from "./template";
-import { buildOrderVariables, SMS_VARIABLES } from "./variables";
+import { renderTemplate, extractVariables } from "@/modules/messaging/template";
+import { buildOrderVariables, SMS_VARIABLES } from "@/modules/messaging/variables";
 import { audienceLabel } from "./display";
 import { evaluateConditions } from "./conditions";
 import { computeScheduledAt } from "./delay";

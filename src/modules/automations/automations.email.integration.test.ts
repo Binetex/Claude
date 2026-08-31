@@ -11,8 +11,8 @@ import type { OutboxRecord } from "@/outbox/types";
 import type { QuoClient } from "@/integrations/quo/client";
 import { quoErrorFromStatus } from "@/integrations/quo/errors";
 import { buildAutomationTriggerHandler, buildAutomationSendHandler } from "./handlers";
-import { createSmsChannelSender } from "./channels/sms";
-import { createEmailChannelSender } from "./channels/email";
+import { createSmsChannelSender } from "@/modules/messaging/channels/sms";
+import { createEmailChannelSender } from "@/modules/messaging/channels/email";
 import { setAutomationsGloballyDisabled } from "./settings";
 import { saveBrevoApiKey } from "@/integrations/email/accountKey";
 
