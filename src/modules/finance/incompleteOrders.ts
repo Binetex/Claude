@@ -14,6 +14,10 @@ import "server-only";
  *
  * Своей формулы «чего не хватает» здесь нет: используется та же `computeOrderContribution`,
  * что и в расчёте дня. Второй способ ответить на этот вопрос разошёлся бы с первым.
+ *
+ * ЕДИНСТВЕННЫЙ источник ответа: отсюда читают обзор флористов, разбор дня и детектор
+ * очереди «Требует заполнения». Что все трое называют одни и те же заказы, закреплено
+ * incompleteConsistency.integration.test.ts.
  */
 import { prisma } from "@/lib/db";
 import { computeOrderContribution, type MissingInput } from "./dayCalc";
@@ -33,14 +37,25 @@ export type IncompleteOrder = {
   noFloristPrice: boolean;
 };
 
-export async function listIncompleteOrders(from: Date, to: Date): Promise<IncompleteOrder[]> {
-  const gate = accrualGate();
-  if (!gate.enabled) return [];
+export type IncompleteScope = {
+  from: Date;
+  to: Date;
+  /** Ограничить одним флористом: детектор смотрит только основного — доля считается по его дням. */
+  floristId?: string;
+};
 
-  const start = from > gate.startDate ? from : gate.startDate;
-
+/**
+ * Ядро без политики: какие заказы области не дают посчитать деньги. Гейты и границы области —
+ * ответственность вызывающего: у публичного списка это accrualGate, у детектора — его окно и
+ * primaryShareGate. Формула пробелов при этом одна на всех.
+ */
+export async function collectIncompleteOrders(scope: IncompleteScope): Promise<IncompleteOrder[]> {
   const orders = await prisma.order.findMany({
-    where: { orderStatus: "DELIVERED", deliveryDate: { gte: start, lte: to } },
+    where: {
+      orderStatus: "DELIVERED",
+      deliveryDate: { gte: scope.from, lte: scope.to },
+      ...(scope.floristId ? { currentFloristId: scope.floristId } : {}),
+    },
     select: {
       id: true,
       orderNumber: true,
@@ -115,4 +130,11 @@ export async function listIncompleteOrders(from: Date, to: Date): Promise<Incomp
     });
   }
   return out;
+}
+
+/** Публичный список «что дополнить»: всё доставленное в периоде, не раньше гейта начислений. */
+export async function listIncompleteOrders(from: Date, to: Date): Promise<IncompleteOrder[]> {
+  const gate = accrualGate();
+  if (!gate.enabled) return [];
+  return collectIncompleteOrders({ from: from > gate.startDate ? from : gate.startDate, to });
 }

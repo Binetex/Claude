@@ -26,6 +26,7 @@ import { toDayOrderInputs } from "./orderInput";
 import { loadFinanceSettings, loadTaxPolicies } from "./settingsBatch";
 import { resolveItemsFinance } from "./itemFinance";
 import { primaryShareGate, accrualGate } from "./config";
+import { listIncompleteOrders, type IncompleteOrder } from "./incompleteOrders";
 import { getExpenseDailyTotals } from "@/modules/expenses/read";
 
 export type OwnerDay = {
@@ -226,7 +227,9 @@ export type OwnerDayDetail = {
    * Без номеров сообщение «по заказам не хватает данных» отправляло владельца искать виновника
    * вручную среди всех заказов дня: система знает ответ, но не называет его.
    */
-  incompleteOrders: { id: string; orderNumber: string; missing: MissingInput[] }[];
+  /** Из единого источника (incompleteOrders.ts) — тот же список, что видят обзор флористов
+   *  и детектор очереди. Свой способ собрать его здесь разошёлся бы с ними. */
+  incompleteOrders: IncompleteOrder[];
   ordersTotal: number;
 
   /** Выручка по магазинам — первый вопрос «откуда деньги». */
@@ -268,7 +271,7 @@ export async function getOwnerDay(day: Date): Promise<OwnerDayDetail | null> {
   const shareGate = primaryShareGate();
   const accrual = accrualGate();
 
-  const [orders, sites, profiles, flowerExpense, dayFinances] = await Promise.all([
+  const [orders, sites, profiles, flowerExpense, dayFinances, incomplete] = await Promise.all([
     prisma.order.findMany({
       where: { orderStatus: "DELIVERED", deliveryDate: day },
       select: {
@@ -298,6 +301,7 @@ export async function getOwnerDay(day: Date): Promise<OwnerDayDetail | null> {
       where: { day, complete: true },
       select: { distributableCents: true, financeProfile: { select: { sharePercentBp: true, floristId: true } } },
     }),
+    listIncompleteOrders(day, day),
   ]);
 
   const [additional, itemFinance, settings] = await Promise.all([
@@ -321,11 +325,7 @@ export async function getOwnerDay(day: Date): Promise<OwnerDayDetail | null> {
   // Сколько налога собрали с клиентов — это уже не расход, а пояснение к нему.
   const taxCollectedCents = orders.reduce((a, o) => a + toCents(o.tax), 0);
   const contributionByOrder = new Map(calc.orders.map((o) => [o.orderId, o.contributionCents]));
-  const orderNumberById = new Map(orders.map((o) => [o.id, o.orderNumber]));
-  const incompleteOrders = calc.orders
-    .filter((o) => o.missing.length > 0)
-    .map((o) => ({ id: o.orderId, orderNumber: orderNumberById.get(o.orderId) ?? o.orderId, missing: o.missing }))
-    .sort((a, b) => a.orderNumber.localeCompare(b.orderNumber));
+  const incompleteOrders = [...incomplete].sort((a, b) => a.orderNumber.localeCompare(b.orderNumber));
 
   const siteName = new Map(sites.map((s) => [s.id, s.name]));
   const revenueBySite = new Map<string, number>();

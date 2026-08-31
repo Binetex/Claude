@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/Badge";
 import { formatCents } from "@/lib/cents";
 import { getOwnerDay } from "@/modules/finance/ownerDashboard";
-import { missingLabel } from "@/lib/financeMissing";
+import { incompleteSummary } from "@/lib/financeMissing";
 
 export const dynamic = "force-dynamic";
 
@@ -79,7 +79,7 @@ export default async function OwnerFinanceDayPage({ params }: { params: Promise<
                   <Link href={`/dashboard/finance/orders/${o.id}`} className="font-medium underline underline-offset-2">
                     {o.orderNumber}
                   </Link>
-                  <span className="text-amber-700"> — не заполнено: {o.missing.map(missingLabel).join(", ")}</span>
+                  <span className="text-amber-700"> — {incompleteSummary(o)}</span>
                 </li>
               ))}
             </ul>

@@ -16,6 +16,7 @@ import { toNumber } from "@/lib/money";
 import { computeDay, dayKey } from "./dayFinance";
 import type { DayFinanceResult } from "./dayCalc";
 import { resolveItemsFinance } from "./itemFinance";
+import { collectIncompleteOrders, type IncompleteOrder } from "./incompleteOrders";
 import { resolveOwnerTaxPolicy } from "./settings";
 import { primaryShareGate } from "./config";
 import { todayStrInTz } from "@/lib/tz";
@@ -74,14 +75,26 @@ export async function detectFinanceIssues(now: Date = new Date()): Promise<Detec
     orderBy: { deliveryDate: "desc" },
   });
 
+  // Пробелы по заказам — из единого источника (incompleteOrders), а не из result:
+  // второй способ ответить «чего не хватает» разошёлся бы с обзором флористов и разбором
+  // дня. computeDay ниже остаётся ради блокеров дня и числа заказов.
+  const gaps = await collectIncompleteOrders({ from, to: now, floristId: profile.floristId });
+  const gapsByDay = new Map<string, IncompleteOrder[]>();
+  for (const g of gaps) {
+    const list = gapsByDay.get(g.deliveryDate) ?? [];
+    list.push(g);
+    gapsByDay.set(g.deliveryDate, list);
+  }
+
   const drafts: Draft[] = [];
   for (const { deliveryDate } of days) {
     const result = await computeDay(profile.id, deliveryDate);
     if (!result) continue;
+    const dayGaps = gapsByDay.get(dayKey(deliveryDate)) ?? [];
     // Подробности нужны только по проблемным заказам, и запрашиваются только для них:
     // на здоровом дне детектор не платит ни одного лишнего запроса.
-    const meta = await metaForOrders(result.orders.filter((o) => o.missing.length > 0).map((o) => o.orderId));
-    drafts.push(...draftsForDay(result, meta, profile.id, profile.floristId, deliveryDate));
+    const meta = await metaForOrders(dayGaps.filter((g) => g.missing.length > 0).map((g) => g.id));
+    drafts.push(...draftsForDay(result, dayGaps, meta, profile.id, profile.floristId, deliveryDate));
   }
   drafts.push(...(await globalDrafts(profile.floristId)));
 
@@ -155,6 +168,7 @@ async function metaForOrders(orderIds: string[]): Promise<Map<string, OrderMeta>
 /** Проблемы одного дня: сначала блокеры дня, затем поштучные по заказам. */
 function draftsForDay(
   result: DayFinanceResult,
+  gaps: IncompleteOrder[],
   meta: Map<string, OrderMeta>,
   profileId: string,
   floristId: string,
@@ -188,23 +202,25 @@ function draftsForDay(
 
   // Поштучные проблемы заказов. Пока хоть одна не разобрана, день не считается целиком:
   // подставить ноль вместо неизвестного расхода значило бы завысить прибыль.
-  for (const computed of result.orders) {
-    if (computed.missing.length === 0) continue;
-    const m = meta.get(computed.orderId);
+  // Строки «только нет цены флориста» (missing пуст) — вне области детектора: цена работы
+  // второстепенного не мешает считать долю основного, и карточки в очереди у неё нет.
+  for (const gap of gaps) {
+    if (gap.missing.length === 0) continue;
+    const m = meta.get(gap.id);
     if (!m) continue;
 
-    for (const missing of computed.missing) {
+    for (const missing of gap.missing) {
       if (missing === "DELIVERY_ACTUAL_COST") {
         out.push({
           type: "DELIVERY_ACTUAL_COST_MISSING",
           severity: "BLOCKING",
-          deduplicationKey: `DELIVERY_ACTUAL_COST_MISSING:${computed.orderId}`,
+          deduplicationKey: `DELIVERY_ACTUAL_COST_MISSING:${gap.id}`,
           scopeDate: day,
           siteId: m.siteId,
-          orderId: computed.orderId,
+          orderId: gap.id,
           floristId,
           sourceEntity: "Order",
-          sourceEntityId: computed.orderId,
+          sourceEntityId: gap.id,
           suggestedActionType: "SET_DELIVERY_ACTUAL_COST",
           detailJson: { orderNumber: m.orderNumber, site: m.siteShortName, day: key },
           estimatedImpactCents: null,
@@ -243,7 +259,7 @@ function draftsForDay(
             deduplicationKey: `${linkMissing ? "VASE_LINK_MISSING" : "VASE_COST_MISSING"}:${item.id}`,
             scopeDate: day,
             siteId: m.siteId,
-            orderId: computed.orderId,
+            orderId: gap.id,
             floristId,
             sourceEntity: "OrderItem",
             sourceEntityId: item.id,

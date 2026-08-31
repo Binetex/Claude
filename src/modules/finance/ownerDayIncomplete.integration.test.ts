@@ -47,6 +47,11 @@ async function makeDeliveredOrder(num: string, opts: { actualCost?: string | nul
 }
 
 beforeAll(async () => {
+  // Список «что дополнить» идёт из единого источника и подчиняется гейту начислений —
+  // без него разбор дня по построению отвечает «пусто».
+  process.env.FINANCE_ACCRUAL_ENABLED = "true";
+  process.env.FINANCE_ACCRUAL_START_DATE = "2026-08-01";
+
   const site = await prisma.site.create({
     data: { name: `${RUN}-site`, shortName: "ODI", platform: "SHOPIFY", connectionStatus: "CONNECTED" },
   });
@@ -59,6 +64,8 @@ beforeEach(async () => {
 });
 
 afterAll(async () => {
+  delete process.env.FINANCE_ACCRUAL_ENABLED;
+  delete process.env.FINANCE_ACCRUAL_START_DATE;
   await prisma.order.deleteMany({ where: { siteId } }).catch(() => {});
   await prisma.site.delete({ where: { id: siteId } }).catch(() => {});
 });

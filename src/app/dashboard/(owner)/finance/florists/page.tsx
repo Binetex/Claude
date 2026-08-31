@@ -16,7 +16,7 @@ import { accrualGate } from "@/modules/finance/config";
 import { resolvePeriod } from "@/modules/finance/period";
 import { getFloristsEarnings, countDeliveredByFlorist } from "@/modules/finance/floristsEarnings";
 import { listIncompleteOrders } from "@/modules/finance/incompleteOrders";
-import { missingLabel } from "@/lib/financeMissing";
+import { incompleteSummary } from "@/lib/financeMissing";
 import { pluralRu } from "@/lib/plural";
 import { formatDayShort } from "@/modules/finance/earningsFormat";
 import { FloristsChart } from "./FloristsChart";
@@ -121,12 +121,7 @@ export default async function FinanceFloristsPage({
                       {formatDayShort(o.deliveryDate)}
                       {o.floristName ? ` · ${o.floristName}` : ""}
                       {" — "}
-                      {[
-                        o.noFloristPrice ? "не задана цена флориста" : null,
-                        o.missing.length > 0 ? `не заполнено: ${o.missing.map(missingLabel).join(", ")}` : null,
-                      ]
-                        .filter(Boolean)
-                        .join("; ")}
+                      {incompleteSummary(o)}
                     </span>
                   </li>
                 ))}
