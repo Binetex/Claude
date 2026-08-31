@@ -5,10 +5,11 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { ZoomableImage } from "@/components/ImageLightbox";
 import { compressImage } from "@/lib/imageCompress";
-import { floristUploadBouquetPhoto } from "@/app/dashboard/(florist)/actions";
+import { uploadBouquetPhotoAction } from "@/modules/orders/bouquetPhotoActions";
 
 /**
- * Фото готового букета внутри блока доставки.
+ * Фото готового букета внутри блока доставки. Одна кнопка на три кабинета: флорист, колл-центр
+ * и владелец — заказ ведёт кто угодно, и букет иногда собирает сам владелец.
  *
  * Раньше загрузка жила внутри кнопки «Готово» и вместе с ней меняла статус. Теперь это
  * самостоятельное действие: статус флорист ставит сам, а фото приложить можно в любой
@@ -49,7 +50,7 @@ export function BouquetPhotoButton({ orderId, photoUrl }: { orderId: string; pho
     }
     setPreview(dataUrl); // показываем сразу, не дожидаясь загрузки
     start(async () => {
-      const res = await floristUploadBouquetPhoto(orderId, dataUrl);
+      const res = await uploadBouquetPhotoAction(orderId, dataUrl);
       if (res.ok) toast.success("Фото букета сохранено");
       else {
         setPreview(photoUrl);

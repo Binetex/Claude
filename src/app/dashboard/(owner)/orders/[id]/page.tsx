@@ -39,6 +39,7 @@ import { loadOrderEmailPanel } from "@/integrations/emailFactory/read";
 import { FloristAvatar } from "@/components/FloristAvatar";
 import { ChargesDialog } from "./ChargesDialog";
 import { MarketingMarkCard } from "./MarketingMarkCard";
+import { BouquetPhotoButton } from "@/components/orders/BouquetPhotoButton";
 
 export const dynamic = "force-dynamic";
 
@@ -282,6 +283,7 @@ export default async function OwnerOrderPage({ params }: { params: Promise<{ id:
             deliveryInstructions={order.deliveryInstructions}
             trackingUrl={order.trackingUrl}
             bouquetPhotoUrl={order.bouquetPhotoUrl}
+            bouquetPhotoAction={<BouquetPhotoButton orderId={order.id} photoUrl={order.bouquetPhotoUrl} />}
             deliveryPhotoUrl={order.deliveryPhotoUrl}
             storeTimeZone={storeTimeZone}
             pickup={<OrderPickupCard orderId={order.id} />}

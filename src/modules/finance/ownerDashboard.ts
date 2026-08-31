@@ -220,6 +220,13 @@ export type OwnerDayDetail = {
   blockers: DayBlocker[];
   /** Что именно не заполнено по заказам — чтобы список говорил, куда идти чинить. */
   missing: MissingInput[];
+  /**
+   * Заказы, из-за которых день не считается, — с номерами и тем, чего в каждом не хватает.
+   *
+   * Без номеров сообщение «по заказам не хватает данных» отправляло владельца искать виновника
+   * вручную среди всех заказов дня: система знает ответ, но не называет его.
+   */
+  incompleteOrders: { id: string; orderNumber: string; missing: MissingInput[] }[];
   ordersTotal: number;
 
   /** Выручка по магазинам — первый вопрос «откуда деньги». */
@@ -314,6 +321,11 @@ export async function getOwnerDay(day: Date): Promise<OwnerDayDetail | null> {
   // Сколько налога собрали с клиентов — это уже не расход, а пояснение к нему.
   const taxCollectedCents = orders.reduce((a, o) => a + toCents(o.tax), 0);
   const contributionByOrder = new Map(calc.orders.map((o) => [o.orderId, o.contributionCents]));
+  const orderNumberById = new Map(orders.map((o) => [o.id, o.orderNumber]));
+  const incompleteOrders = calc.orders
+    .filter((o) => o.missing.length > 0)
+    .map((o) => ({ id: o.orderId, orderNumber: orderNumberById.get(o.orderId) ?? o.orderId, missing: o.missing }))
+    .sort((a, b) => a.orderNumber.localeCompare(b.orderNumber));
 
   const siteName = new Map(sites.map((s) => [s.id, s.name]));
   const revenueBySite = new Map<string, number>();
@@ -367,6 +379,7 @@ export async function getOwnerDay(day: Date): Promise<OwnerDayDetail | null> {
     ready: row.ready,
     blockers: row.blockers,
     missing: row.missing,
+    incompleteOrders,
     ordersTotal: row.ordersTotal,
     revenueBySite: [...revenueBySite.entries()]
       .map(([siteId, cents]) => ({ siteId, name: siteName.get(siteId) ?? siteId, cents }))

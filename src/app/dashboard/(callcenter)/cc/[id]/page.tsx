@@ -25,6 +25,7 @@ import { recipientAddressLines, recipientMapsUrl } from "@/components/orders/add
 import { OrderStatusBadge } from "@/components/StatusBadge";
 import { FloristAvatar } from "@/components/FloristAvatar";
 import { MARKETING_MARK_META } from "@/lib/marketingMark";
+import { BouquetPhotoButton } from "@/components/orders/BouquetPhotoButton";
 
 export const dynamic = "force-dynamic";
 
@@ -158,6 +159,7 @@ export default async function CallCenterOrderPage({ params }: { params: Promise<
             deliveryInstructions={order.deliveryInstructions}
             trackingUrl={order.trackingUrl}
             bouquetPhotoUrl={order.bouquetPhotoUrl}
+            bouquetPhotoAction={<BouquetPhotoButton orderId={order.id} photoUrl={order.bouquetPhotoUrl} />}
             deliveryPhotoUrl={order.deliveryPhotoUrl}
             storeTimeZone={comm.storeTimeZone}
             pickup={<OrderPickupCard orderId={order.id} />}

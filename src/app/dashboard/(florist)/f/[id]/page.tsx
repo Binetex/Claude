@@ -27,7 +27,7 @@ import { OrderQuickActions } from "@/components/orders/OrderQuickActions";
 import { OrderFinanceBreakdown } from "@/components/orders/OrderFinanceBreakdown";
 import { OrderStatusBadge } from "@/components/StatusBadge";
 import { recipientMapsUrl, recipientAddressLines } from "@/components/orders/address";
-import { BouquetPhotoButton } from "./BouquetPhotoButton";
+import { BouquetPhotoButton } from "@/components/orders/BouquetPhotoButton";
 
 export const dynamic = "force-dynamic";
 

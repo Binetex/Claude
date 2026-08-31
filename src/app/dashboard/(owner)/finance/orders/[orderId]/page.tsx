@@ -7,15 +7,9 @@ import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/Card";
 import { EmptyState } from "@/components/ui/states";
 import { formatCents } from "@/lib/cents";
 import { readOrderContribution } from "@/modules/finance/dayFinance";
+import { missingLabel } from "@/lib/financeMissing";
 
 export const dynamic = "force-dynamic";
-
-const missingLabels: Record<string, string> = {
-  DELIVERY_ACTUAL_COST: "фактическая доставка",
-  ACQUIRING_FEE: "комиссия эквайринга",
-  VASE_GIFT_COST: "закупка вазы или подарка",
-  CONSUMABLES_RATE: "ставка расходников",
-};
 
 export default async function OrderFinancePage({ params }: { params: Promise<{ orderId: string }> }) {
   await requireRole("OWNER");
@@ -79,7 +73,7 @@ export default async function OrderFinancePage({ params }: { params: Promise<{ o
             {calc.order.missing.length > 0 && (
               <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
                 Заказ не участвует в расчёте. Не хватает:{" "}
-                {calc.order.missing.map((m) => missingLabels[m] ?? m).join(", ")}.
+                {calc.order.missing.map(missingLabel).join(", ")}.
                 <div className="mt-1 text-xs">
                   Пока данных нет, весь день не считается: подставить ноль вместо неизвестного расхода значило бы
                   завысить прибыль.
