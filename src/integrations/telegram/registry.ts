@@ -21,7 +21,9 @@ export const TELEGRAM_EVENTS = [
   "payment.status_mismatch",
   "payment.not_found",
   "delivery.problem",
+  "delivery.problem_florist",
   "delivery.no_couriers",
+  "delivery.no_couriers_florist",
   "order.ask_review",
 ] as const;
 
@@ -94,7 +96,15 @@ const REGISTRY: Record<TelegramEventType, TelegramEventDef> = {
     audience: "OWNER",
     perFlorist: false,
     dedupeKey: ({ orderId }) => `order:${orderId}:owner.delivery`,
-    description: "Доставка перешла в FAILED / CANCELLED / PROBLEM.",
+    description: "Доставка перешла в FAILED / CANCELLED / PROBLEM — владельцу.",
+  },
+  "delivery.problem_florist": {
+    type: "delivery.problem_florist",
+    audience: "FLORIST",
+    perFlorist: true,
+    // Зеркало owner-события: та же проблема, но личным ботом флориста в его чат.
+    dedupeKey: ({ orderId, floristId }) => `order:${orderId}:florist:${floristId}:delivery`,
+    description: "Проблема доставки — флористу заказа его личным ботом.",
   },
   "order.ask_review": {
     type: "order.ask_review",
@@ -112,7 +122,14 @@ const REGISTRY: Record<TelegramEventType, TelegramEventDef> = {
     // Ключ включает попытку: новая попытка доставки — это новая проверка и новый повод
     // сказать, а не редактирование старого сообщения.
     dedupeKey: ({ orderId }) => `order:${orderId}:owner.no_couriers`,
-    description: "При создании черновика Burq не вернул ни одного провайдера на маршрут.",
+    description: "При создании черновика Burq не вернул ни одного провайдера на маршрут — владельцу.",
+  },
+  "delivery.no_couriers_florist": {
+    type: "delivery.no_couriers_florist",
+    audience: "FLORIST",
+    perFlorist: true,
+    dedupeKey: ({ orderId, floristId }) => `order:${orderId}:florist:${floristId}:no_couriers`,
+    description: "Курьеров на маршрут не нашлось — флористу заказа: букет остаётся у него.",
   },
 };
 

@@ -190,13 +190,37 @@ export function renderOwnerPaymentNotFound(o: OrderSnapshot): string {
   ).trimEnd();
 }
 
+/**
+ * Проблемные статусы — человеческими словами. Сырой код статуса (FAILED) в сообщении не
+ * показывается: получатель уведомления должен понять, что случилось, не зная словаря Burq.
+ */
+const DELIVERY_PROBLEM_LABEL: Record<string, string> = {
+  FAILED: "курьер не смог доставить заказ",
+  CANCELLED: "доставка отменена",
+  PROBLEM: "у курьера возникла проблема с доставкой",
+};
+
+function deliveryProblemLabel(status: string): string {
+  return DELIVERY_PROBLEM_LABEL[status] ?? `доставка в статусе ${status}`;
+}
+
+/**
+ * Тексты проблем доставки построены одинаково: что случилось → что за заказ → что делать.
+ * Требование владельца: максимально просто, без словаря статусов, с действием в конце —
+ * и ОДИН И ТОТ ЖЕ текст владельцу и флористу (florist-события рендерят эти же функции,
+ * различаются только бот, чат и кнопки).
+ */
 export function renderOwnerDeliveryProblem(o: OrderSnapshot, status: string, safeReason: string | null): string {
   return (
     `🚨 <b>Проблема с доставкой</b>\n` +
     `<b>${esc(o.orderNumber)}</b> · ${esc(o.siteName)}\n\n` +
-    line("Статус", status) +
-    line("Деталь", safeReason) +
-    line("Получатель", o.recipientName)
+    `Что случилось: ${esc(deliveryProblemLabel(status))}.\n` +
+    line("Причина от службы доставки", safeReason) +
+    `\n` +
+    line("Получатель", o.recipientName) +
+    line("Адрес", addressText(o)) +
+    line("Доставка", [fmtDate(o.deliveryDate), fmtTimeWindow(o.deliveryWindow)].filter(Boolean).join(", ")) +
+    `\nЧто делать: проверьте доставку в Burq — что случилось и что с ней дальше.`
   ).trimEnd();
 }
 
@@ -210,14 +234,16 @@ export function renderOwnerDeliveryProblem(o: OrderSnapshot, status: string, saf
  */
 export function renderOwnerNoCouriers(o: OrderSnapshot, checkedAtLabel: string | null): string {
   return (
-    `🚕 <b>Нет курьеров на маршрут</b>\n` +
+    `🚕 <b>Не нашлось курьеров на маршрут</b>\n` +
     `<b>${esc(o.orderNumber)}</b> · ${esc(o.siteName)}\n\n` +
+    `Что случилось: служба доставки не нашла ни одного курьера на этот адрес` +
+    (checkedAtLabel ? ` (проверено в ${esc(checkedAtLabel)})` : "") +
+    `. Проверка была при создании черновика — ближе к доставке курьеры могут появиться.\n\n` +
     line("Получатель", o.recipientName) +
     line("Адрес", addressText(o)) +
-    line("Доставка", fmtTimeWindow(o.deliveryWindow)) +
-    line("Проверено", checkedAtLabel) +
-    `\nBurq не вернул ни одного провайдера. Проверка сделана при создании черновика — ` +
-    `ближе к доставке курьеры могут появиться.`
+    line("Доставка", [fmtDate(o.deliveryDate), fmtTimeWindow(o.deliveryWindow)].filter(Boolean).join(", ")) +
+    `\nЧто делать: выберите другой адрес пикапа — в кабинете флориста, раздел ` +
+    `«Мои точки забора», кнопка у нужного адреса.`
   ).trimEnd();
 }
 
@@ -248,7 +274,11 @@ export function renderAskReview(o: OrderSnapshot): string {
 export function buttonsFor(type: TelegramEventType, o: OrderSnapshot): TelegramButton[] {
   // Оператор открывает СВОЮ карточку заказа: в кабинет владельца у него нет доступа.
   if (type === "order.ask_review") return [{ text: "Open Order", url: callCenterOrderUrl(o.id) }];
-  const forFlorist = type === "order.assigned" || type === "order.handed_over";
+  const forFlorist =
+    type === "order.assigned" ||
+    type === "order.handed_over" ||
+    type === "delivery.problem_florist" ||
+    type === "delivery.no_couriers_florist";
   if (!forFlorist) return [{ text: "Open Order", url: ownerOrderUrl(o.id) }];
   const buttons: TelegramButton[] = [{ text: "🧾 Open Order", url: floristOrderUrl(o.id) }];
   const addr = addressText(o);

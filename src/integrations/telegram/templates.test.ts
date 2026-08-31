@@ -3,7 +3,18 @@
  * и ссылки ведут в правильные разделы.
  */
 import { describe, it, expect } from "vitest";
-import { renderFloristMessage, renderFloristHandedOver, renderOwnerCreated, buttonsFor, googleMapsUrl, floristOrderUrl, ownerOrderUrl, type OrderSnapshot } from "./templates";
+import {
+  renderFloristMessage,
+  renderFloristHandedOver,
+  renderOwnerCreated,
+  buttonsFor,
+  googleMapsUrl,
+  floristOrderUrl,
+  ownerOrderUrl,
+  type OrderSnapshot,
+  renderOwnerDeliveryProblem,
+  renderOwnerNoCouriers,
+} from "./templates";
 
 const order: OrderSnapshot = {
   id: "o1",
@@ -119,5 +130,42 @@ describe("кнопки под сообщением", () => {
 describe("сообщение владельцу", () => {
   it("показывает статус оплаты — владелец видит и неоплаченные", () => {
     expect(renderOwnerCreated(order, "UNPAID")).toContain("UNPAID");
+  });
+});
+
+/**
+ * Тексты проблем доставки: формула «что случилось → что за заказ → что делать».
+ * Требование владельца: без словаря статусов, с понятным действием в конце.
+ */
+describe("проблемы доставки", () => {
+  it("статус переведён на человеческий, действие — проверить в Burq", () => {
+    const t = renderOwnerDeliveryProblem(order, "FAILED", null);
+    expect(t).toContain("курьер не смог доставить заказ");
+    expect(t).not.toContain("FAILED"); // сырой код статуса читателю не нужен
+    expect(t).toContain("проверьте доставку в Burq");
+    expect(t).toContain(order.orderNumber);
+  });
+
+  it("причина от службы доставки показывается, когда есть", () => {
+    const t = renderOwnerDeliveryProblem(order, "CANCELLED", "recipient unavailable");
+    expect(t).toContain("доставка отменена");
+    expect(t).toContain("recipient unavailable");
+  });
+
+  it("неизвестный статус не роняет текст и виден как есть", () => {
+    expect(renderOwnerDeliveryProblem(order, "WEIRD_STATE", null)).toContain("WEIRD_STATE");
+  });
+
+  it("нет курьеров: действие — выбрать другой адрес пикапа, и сказано где", () => {
+    const t = renderOwnerNoCouriers(order, "03:15");
+    expect(t).toContain("не нашла ни одного курьера");
+    expect(t).toContain("03:15");
+    expect(t).toContain("другой адрес пикапа");
+    expect(t).toContain("Мои точки забора");
+  });
+
+  it("кнопки флористских событий доставки — как у карточки флориста", () => {
+    const btns = buttonsFor("delivery.problem_florist", order);
+    expect(btns[0].url).toMatch(/\/dashboard\/f\/o1$/);
   });
 });

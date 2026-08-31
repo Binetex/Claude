@@ -148,16 +148,30 @@ export async function applyDeliveryStatusUpdate(
     if (ord) await publishTrackingAvailableTrigger(prisma, { orderId: delivery.orderId, siteId: ord.siteId, deliveryId: delivery.id });
   }
 
-  // Владельцу — о проблеме доставки. Отдельное срочное сообщение: у него собственный dedupeKey,
-  // основное уведомление о новом заказе оно не затирает.
+  // О проблеме доставки — владельцу И флористу заказа (если назначен): букет, скорее всего,
+  // вернётся к флористу, и узнать он должен сразу, а не от владельца задним числом.
   if (becameProblem) {
+    const context = { status: normalized, safeReason: input.safeReason ?? input.rawStatus ?? null };
     await publishTelegramNotification(prisma, {
       type: "delivery.problem",
       orderId: delivery.orderId,
       // Один переход в проблемный статус на попытку доставки → одно уведомление.
       occurrenceKey: `${delivery.id}:${normalized}`,
-      context: { status: normalized, safeReason: input.safeReason ?? input.rawStatus ?? null },
+      context,
     });
+    const withFlorist = await prisma.order.findUnique({
+      where: { id: delivery.orderId },
+      select: { currentFloristId: true },
+    });
+    if (withFlorist?.currentFloristId) {
+      await publishTelegramNotification(prisma, {
+        type: "delivery.problem_florist",
+        orderId: delivery.orderId,
+        floristId: withFlorist.currentFloristId,
+        occurrenceKey: `${delivery.id}:${normalized}`,
+        context,
+      });
+    }
   }
 
   // Захват фактической стоимости доставки Uber (Path A). Best-effort: сбой стоимости НЕ ломает

@@ -179,6 +179,20 @@ export function createPrismaDraftPort(prisma: PrismaClient): DraftCreatePort {
         occurrenceKey: `${input.orderId}:a${input.attemptNumber}`,
         context: { checkedAt: checkedAt.toISOString().slice(11, 16) },
       });
+      // Флористу — то же событие его личным ботом: букет остаётся у него до новой попытки.
+      // Черновик может создаваться до назначения флориста — тогда сообщать пока некому.
+      const order = await prisma.order.findUnique({
+        where: { id: input.orderId },
+        select: { currentFloristId: true },
+      });
+      if (order?.currentFloristId) {
+        await publishTelegramNotification(prisma, {
+          type: "delivery.no_couriers_florist",
+          orderId: input.orderId,
+          floristId: order.currentFloristId,
+          occurrenceKey: `${input.orderId}:a${input.attemptNumber}`,
+        });
+      }
     },
   };
 }

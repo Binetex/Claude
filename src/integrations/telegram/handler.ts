@@ -248,9 +248,12 @@ function renderFor(type: TelegramNotifyPayload["type"], order: OrderSnapshot, ct
       return renderOwnerStatusMismatch(order, ctx.mismatchType ?? null, ctx.normalized ?? null);
     case "payment.not_found":
       return renderOwnerPaymentNotFound(order);
+    // Текст у владельца и флориста ОДИН (решение владельца): различаются только бот и чат.
     case "delivery.problem":
+    case "delivery.problem_florist":
       return renderOwnerDeliveryProblem(order, ctx.status ?? "PROBLEM", ctx.safeReason ?? null);
     case "delivery.no_couriers":
+    case "delivery.no_couriers_florist":
       return renderOwnerNoCouriers(order, ctx.checkedAt ?? null);
     case "order.ask_review":
       return renderAskReview(order);
