@@ -37,6 +37,23 @@ const th = "px-3 py-2.5 text-right font-medium";
  * дат сверху, «за всё время» — нет. Долг периодом не измеряется: он складывается из всей
  * истории заработка и выплат, и «К выплате за неделю» было бы числом ни о чём.
  */
+/** Русское склонение после числа: «5 дней», но «2 дня». */
+function plural(n: number, one: string, few: string, many: string): string {
+  const mod10 = n % 10;
+  const mod100 = n % 100;
+  if (mod10 === 1 && mod100 !== 11) return one;
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return few;
+  return many;
+}
+
+const DAY_MONTHS = ["янв", "фев", "мар", "апр", "мая", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"];
+
+/** «2026-08-14» → «14 авг». Даты в списке читаются глазами, а не сверяются посимвольно. */
+function formatDay(iso: string): string {
+  const [y, m, d] = iso.split("-").map(Number);
+  return `${d} ${DAY_MONTHS[m - 1]}${y === new Date().getFullYear() ? "" : ` ${y}`}`;
+}
+
 export default async function FinanceFloristsPage({
   searchParams,
 }: {
@@ -94,21 +111,55 @@ export default async function FinanceFloristsPage({
             <StatCard label="Средний заработок на заказ" value={formatDollars(earnings.avgCents)} />
           </div>
 
-          {/* Молчать об этом нельзя: и то и другое занижает все три числа выше, а причина не
-              видна. Ссылка ведёт туда, где это чинится. */}
+          {/* Молчать об этом нельзя: и то и другое занижает все три числа выше. Раньше здесь
+              стояло «5 дн. без полных данных» — фраза, которая не говорит ни какие это дни, ни
+              чего в них не хватает, ни что от этого меняется в деньгах. Теперь говорим прямо и
+              называем дни и заказы поимённо: ответ у нас есть, искать их вручную незачем. */}
           {(earnings.pending.days > 0 || earnings.pending.orders > 0) && (
-            <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-              В расчёт не вошло:{" "}
-              {[
-                earnings.pending.days > 0 && `${earnings.pending.days} дн. без полных данных`,
-                earnings.pending.orders > 0 && `${earnings.pending.orders} заказ(ов) без цены флориста`,
-              ]
-                .filter(Boolean)
-                .join(", ")}
-              .{" "}
-              <Link href="/dashboard/finance/setup" className="font-medium underline">
-                Требует заполнения
-              </Link>
+            <div className="space-y-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm text-amber-900">
+              <p className="font-medium">Числа выше занижены — часть работы ещё не посчитана.</p>
+
+              {earnings.pending.days > 0 && (
+                <div>
+                  <p>
+                    <b>{earnings.pending.days}</b>{" "}
+                    {plural(earnings.pending.days, "день", "дня", "дней")} ещё не посчитано: по заказам
+                    этих дней не заполнены расходы — фактическая доставка, комиссия эквайринга или
+                    закупка вазы. Пока их нет, доля основного флориста за эти дни не начислена.
+                  </p>
+                  <p className="mt-1 flex flex-wrap gap-x-2 gap-y-1 text-xs">
+                    {earnings.pending.dayList.map((d) => (
+                      <Link key={d} href={`/dashboard/finance/day/${d}`} className="underline underline-offset-2">
+                        {formatDay(d)}
+                      </Link>
+                    ))}
+                  </p>
+                </div>
+              )}
+
+              {earnings.pending.orders > 0 && (
+                <div>
+                  <p>
+                    <b>{earnings.pending.orders}</b>{" "}
+                    {plural(earnings.pending.orders, "заказ", "заказа", "заказов")} без цены флориста:
+                    сколько платим за работу, не задано, поэтому в заработок{" "}
+                    {plural(earnings.pending.orders, "он не вошёл", "они не вошли", "они не вошли")}.
+                  </p>
+                  <p className="mt-1 flex flex-wrap gap-x-2 gap-y-1 text-xs">
+                    {earnings.pending.orderList.map((o) => (
+                      <Link key={o.id} href={`/dashboard/orders/${o.id}`} className="underline underline-offset-2">
+                        {o.orderNumber}
+                      </Link>
+                    ))}
+                  </p>
+                </div>
+              )}
+
+              <p className="text-xs">
+                <Link href="/dashboard/finance/setup" className="font-medium underline">
+                  Открыть список того, что нужно заполнить
+                </Link>
+              </p>
             </div>
           )}
 
