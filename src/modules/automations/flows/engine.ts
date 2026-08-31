@@ -18,6 +18,7 @@ import type { PrismaClient } from "@/generated/prisma/client";
 import type { OutboxRepository } from "@/outbox/types";
 import { computeScheduledAt, type SmsDelayUnit } from "../delay";
 import { publishFlowStep } from "./events";
+import { isP2002 } from "@/lib/prismaErrors";
 
 /** Шаг цепочки в объёме, нужном движку (не тащим весь Prisma-объект в сигнатуры). */
 export type FlowStepRow = {
@@ -33,10 +34,6 @@ export type FlowForStart = {
   id: string;
   steps: FlowStepRow[];
 };
-
-function isP2002(err: unknown): boolean {
-  return !!err && typeof err === "object" && "code" in err && (err as { code?: string }).code === "P2002";
-}
 
 /** Канал шага для истории/маршрутизации отправки. У WAIT канала нет. */
 export function channelOfStepType(type: FlowStepRow["type"]): string | null {

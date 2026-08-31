@@ -1,3 +1,4 @@
+import { pluralRu } from "@/lib/plural";
 /** Человекочитаемые подписи для UI (чистый модуль, годится и на сервере, и в клиенте). */
 
 export function audienceLabel(a: string): string {
@@ -12,19 +13,12 @@ const UNIT_RU: Record<string, [string, string, string]> = {
   MONTH: ["месяц", "месяца", "месяцев"],
 };
 
-function plural(n: number, forms: [string, string, string]): string {
-  const mod10 = n % 10;
-  const mod100 = n % 100;
-  if (mod10 === 1 && mod100 !== 11) return forms[0];
-  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) return forms[1];
-  return forms[2];
-}
 
 export function delayLabel(amount: number, unit: string): string {
   if (unit === "IMMEDIATE" || amount <= 0) return "Сразу";
   const forms = UNIT_RU[unit];
   if (!forms) return `${amount} ${unit}`;
-  return `Через ${amount} ${plural(amount, forms)}`;
+  return `Через ${amount} ${pluralRu(amount, ...forms)}`;
 }
 
 export function jobStatusLabel(s: string): string {

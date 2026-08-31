@@ -80,10 +80,10 @@ export async function detectFinanceIssues(now: Date = new Date()): Promise<Detec
     if (!result) continue;
     // Подробности нужны только по проблемным заказам, и запрашиваются только для них:
     // на здоровом дне детектор не платит ни одного лишнего запроса.
-    const meta = await metaForOrders(result.orders.filter((o) => o.missing.length > 0).map((o) => o.orderId), deliveryDate);
+    const meta = await metaForOrders(result.orders.filter((o) => o.missing.length > 0).map((o) => o.orderId));
     drafts.push(...draftsForDay(result, meta, profile.id, profile.floristId, deliveryDate));
   }
-  drafts.push(...(await globalDrafts(profile.floristId, now)));
+  drafts.push(...(await globalDrafts(profile.floristId)));
 
   return reconcile(drafts, gate.startDate);
 }
@@ -116,7 +116,7 @@ type OrderMeta = {
 };
 
 /** Подробности проблемных заказов: название магазина и разбор позиций. */
-async function metaForOrders(orderIds: string[], day: Date): Promise<Map<string, OrderMeta>> {
+async function metaForOrders(orderIds: string[]): Promise<Map<string, OrderMeta>> {
   const out = new Map<string, OrderMeta>();
   if (orderIds.length === 0) return out;
 
@@ -289,7 +289,7 @@ function draftsForDay(
  * Это WARNING, а не блокер — база флориста берёт 100% налога независимо от политики,
  * поэтому её отсутствие искажает только картину прибыли владельца.
  */
-async function globalDrafts(floristId: string, now: Date): Promise<Draft[]> {
+async function globalDrafts(floristId: string): Promise<Draft[]> {
   const sites = await prisma.site.findMany({ select: { id: true, shortName: true } });
   const out: Draft[] = [];
 

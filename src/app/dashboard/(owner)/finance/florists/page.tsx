@@ -11,12 +11,14 @@ import { OrdersNavProvider, OrdersPendingArea } from "@/app/dashboard/(owner)/or
 import { formatDollars } from "@/lib/cents";
 import { floristBalances } from "@/modules/finance/balance";
 import { listCurrentProfiles } from "@/modules/finance/profile";
-import { countDeliveredByFlorist } from "@/modules/finance/review";
+
 import { accrualGate } from "@/modules/finance/config";
 import { resolvePeriod } from "@/modules/finance/period";
-import { getFloristsEarnings } from "@/modules/finance/floristsEarnings";
+import { getFloristsEarnings, countDeliveredByFlorist } from "@/modules/finance/floristsEarnings";
 import { listIncompleteOrders } from "@/modules/finance/incompleteOrders";
 import { missingLabel } from "@/lib/financeMissing";
+import { pluralRu } from "@/lib/plural";
+import { formatDayShort } from "@/modules/finance/earningsFormat";
 import { FloristsChart } from "./FloristsChart";
 
 export const dynamic = "force-dynamic";
@@ -39,23 +41,6 @@ const th = "px-3 py-2.5 text-right font-medium";
  * дат сверху, «за всё время» — нет. Долг периодом не измеряется: он складывается из всей
  * истории заработка и выплат, и «К выплате за неделю» было бы числом ни о чём.
  */
-/** Русское склонение после числа: «5 дней», но «2 дня». */
-function plural(n: number, one: string, few: string, many: string): string {
-  const mod10 = n % 10;
-  const mod100 = n % 100;
-  if (mod10 === 1 && mod100 !== 11) return one;
-  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return few;
-  return many;
-}
-
-const DAY_MONTHS = ["янв", "фев", "мар", "апр", "мая", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"];
-
-/** «2026-08-14» → «14 авг». Даты в списке читаются глазами, а не сверяются посимвольно. */
-function formatDay(iso: string): string {
-  const [y, m, d] = iso.split("-").map(Number);
-  return `${d} ${DAY_MONTHS[m - 1]}${y === new Date().getFullYear() ? "" : ` ${y}`}`;
-}
-
 export default async function FinanceFloristsPage({
   searchParams,
 }: {
@@ -123,7 +108,7 @@ export default async function FinanceFloristsPage({
             <div className="space-y-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm text-amber-900">
               <p className="font-medium">
                 Числа выше занижены: {incomplete.length}{" "}
-                {plural(incomplete.length, "заказ", "заказа", "заказов")} нужно дополнить.
+                {pluralRu(incomplete.length, "заказ", "заказа", "заказов")} нужно дополнить.
               </p>
               <ul className="space-y-1">
                 {incomplete.map((o) => (
@@ -133,7 +118,7 @@ export default async function FinanceFloristsPage({
                     </Link>
                     <span className="text-amber-700">
                       {" · "}
-                      {formatDay(o.deliveryDate)}
+                      {formatDayShort(o.deliveryDate)}
                       {o.floristName ? ` · ${o.floristName}` : ""}
                       {" — "}
                       {[

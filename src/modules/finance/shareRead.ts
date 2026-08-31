@@ -11,7 +11,6 @@ import "server-only";
  */
 import { prisma } from "@/lib/db";
 import { dayShareCents } from "./dayCalc";
-import { primaryShareGate } from "./config";
 import { dayKey } from "./dayFinance";
 
 

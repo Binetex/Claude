@@ -36,7 +36,6 @@ let profileId = "";
 let primaryOrder = "";
 let secOrderDay1 = "";
 let secOrderDay1b = "";
-let secOrderDay2 = "";
 
 async function makeOrder(n: string, cents: number, day: Date, floristId: string, floristTotal?: string) {
   const o = await prisma.order.create({
@@ -112,7 +111,7 @@ beforeAll(async () => {
   primaryOrder = await makeOrder("P1", 20000, DAY1, primaryId);
   secOrderDay1 = await makeOrder("S1", 15000, DAY1, secondaryId, "118.00");
   secOrderDay1b = await makeOrder("S2", 12000, DAY1, secondaryId, "90.00");
-  secOrderDay2 = await makeOrder("S3", 10000, DAY2, secondaryId, "70.00");
+  await makeOrder("S3", 10000, DAY2, secondaryId, "70.00");
   // Заказ ДО даты старта — не должен попасть ни в один период.
   await makeOrder("S0", 9000, BEFORE_START, secondaryId, "60.00");
 

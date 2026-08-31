@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { prisma } from "@/lib/db";
-import { Card, CardHeader, CardTitle, CardBody } from "@/components/ui/Card";
+import { Card } from "@/components/ui/Card";
 import { FinanceVisibilityToggle } from "./FinanceVisibilityToggle";
 import { PickupLocationsEditor } from "./PickupLocationsEditor";
 import { AvailabilityEditor } from "./AvailabilityEditor";

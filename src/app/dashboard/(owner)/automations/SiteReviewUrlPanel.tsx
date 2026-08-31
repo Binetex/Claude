@@ -9,7 +9,7 @@ type SiteRow = { id: string; name: string; quoEnabled: boolean; automationDailyL
 function Row({ site }: { site: SiteRow }) {
   const [time, setTime] = useState(site.automationDailyLocalTime || DEFAULT_DAILY_LOCAL_TIME);
   const [timeMsg, setTimeMsg] = useState<{ ok: boolean; text: string } | null>(null);
-  const [pending, start] = useTransition();
+  const [, start] = useTransition();
 
   return (
     <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 py-2 last:border-0">

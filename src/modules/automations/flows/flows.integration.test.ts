@@ -493,7 +493,7 @@ describe("гейты запуска и остановки", () => {
     // Спутать их значило бы молча отменить рассылку там, где владелец её как раз хотел.
     const site = await makeSite();
     const order = await makeOrder(site.id);
-    const flow = await makeFlow(site.id, [{ type: "EMAIL", brevoTemplateId: 3 }]);
+    await makeFlow(site.id, [{ type: "EMAIL", brevoTemplateId: 3 }]);
 
     await prisma.order.update({ where: { id: order.id }, data: { marketingMark: "ASK_REVIEW" } });
     await fireTrigger(order);

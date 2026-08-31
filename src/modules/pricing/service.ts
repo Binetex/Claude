@@ -1,5 +1,4 @@
 import "server-only";
-import { prisma } from "@/lib/db";
 import { Prisma } from "@/generated/prisma/client";
 import { toNumber } from "@/lib/money";
 import { computeEstimatedProfit } from "./profit";
@@ -96,31 +95,6 @@ async function resolveUnitPrices(
     unitById.set(item.id, unit ?? ZERO);
   }
   return unitById;
-}
-
-/**
- * Считает авто-цену флориста по позициям заказа. Возвращает суммарную стоимость
- * и цену по каждой позиции (для предпросмотра до фиксации снимка).
- */
-export async function computeAutoFloristPrice(
-  orderId: string,
-  floristId: string
-): Promise<{ total: Prisma.Decimal; perItem: Map<string, Prisma.Decimal> }> {
-  const allItems = await prisma.orderItem.findMany({ where: { orderId }, select: PRICING_SELECT });
-  // Чаевые — деньги владельца: в цену флориста не входят и в перечень цен идут нулём,
-  // иначе фолбэк «цена не задана» подставил бы им полную стоимость клиента.
-  const items = compensableItems(allItems);
-  const unitById = await resolveUnitPrices(prisma, items, floristId);
-
-  let total = new Prisma.Decimal(0);
-  const perItem = new Map<string, Prisma.Decimal>();
-  for (const item of allItems) perItem.set(item.id, ZERO);
-  for (const item of items) {
-    const line = (unitById.get(item.id) ?? ZERO).mul(item.quantity);
-    perItem.set(item.id, line);
-    total = total.add(line);
-  }
-  return { total, perItem };
 }
 
 /**

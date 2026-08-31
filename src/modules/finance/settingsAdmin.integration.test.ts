@@ -21,7 +21,6 @@ import {
   listSettingRecords,
   previewSettingChange,
   settingHistory,
-  SettingsAdminError,
 } from "./settingsAdmin";
 
 const RUN = `sad${crypto.randomBytes(3).toString("hex")}`;

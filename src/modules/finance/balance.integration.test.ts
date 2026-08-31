@@ -27,7 +27,6 @@ const DAY = new Date("2026-07-28T00:00:00.000Z");
 const SHARE_START = new Date("2026-07-01T00:00:00.000Z");
 const DAY2 = new Date("2026-07-29T00:00:00.000Z");
 const NOW = new Date("2026-07-30T12:00:00.000Z");
-const START = new Date("2026-07-01T00:00:00.000Z");
 
 let siteId = "";
 let productId = "";

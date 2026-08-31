@@ -13,6 +13,7 @@ import type { QuoClient } from "./client";
 import { QuoApiError } from "./errors";
 import { toE164 } from "@/lib/phone";
 import { maskPhone, quoLog } from "./logging";
+import { isP2002 } from "@/lib/prismaErrors";
 
 export const SMS_MAX_LENGTH = 1600;
 export type SendTarget = "CUSTOMER" | "RECIPIENT";
@@ -22,9 +23,6 @@ export type SendSmsResult =
   | { ok: true; communicationId: string; status: "PENDING" | "SENT"; duplicate: boolean }
   | { ok: false; code: string; communicationId?: string };
 
-function isP2002(err: unknown): boolean {
-  return !!err && typeof err === "object" && "code" in err && (err as { code?: string }).code === "P2002";
-}
 
 export async function sendOrderSms(prisma: PrismaClient, client: QuoClient | null, input: SendSmsInput): Promise<SendSmsResult> {
   const text = (input.text ?? "").trim();

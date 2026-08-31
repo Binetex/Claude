@@ -21,7 +21,6 @@ const RUN = `shr${crypto.randomBytes(3).toString("hex")}`;
 const OWNER = { userId: "", role: "OWNER" as const };
 const NOW = new Date("2026-07-31T12:00:00.000Z");
 const SHARE_START = new Date("2026-07-01T00:00:00.000Z");
-const START = new Date("2026-07-01T00:00:00.000Z");
 
 /** Три дня: два посчитанных и один без снимков. */
 const D1 = new Date("2026-07-28T00:00:00.000Z");

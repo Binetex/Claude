@@ -1,3 +1,4 @@
+import { pluralRu } from "@/lib/plural";
 /**
  * Подписи цепочек для UI. Чистый модуль (без server-only) — используется и серверными
  * страницами, и клиентским редактором, чтобы шаг назывался одинаково везде.
@@ -17,18 +18,10 @@ const WAIT_UNIT_LABELS: Record<FlowWaitUnit, [string, string, string]> = {
   DAY: ["день", "дня", "дней"],
 };
 
-export function pluralRu(n: number, forms: [string, string, string]): string {
-  const abs = Math.abs(n) % 100;
-  const last = abs % 10;
-  if (abs > 10 && abs < 20) return forms[2];
-  if (last > 1 && last < 5) return forms[1];
-  if (last === 1) return forms[0];
-  return forms[2];
-}
 
 export function waitLabel(amount: number | null, unit: string | null): string {
   if (!amount || !unit || !(unit in WAIT_UNIT_LABELS)) return "—";
-  return `${amount} ${pluralRu(amount, WAIT_UNIT_LABELS[unit as FlowWaitUnit])}`;
+  return `${amount} ${pluralRu(amount, ...WAIT_UNIT_LABELS[unit as FlowWaitUnit])}`;
 }
 
 /** Однострочное описание шага для списков и истории. */

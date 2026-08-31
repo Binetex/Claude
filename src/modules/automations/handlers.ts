@@ -47,13 +47,11 @@ import { logExecution } from "./executionLog";
 import { startFlowsForTrigger } from "./flows/engine";
 import type { ChannelSender } from "./channels/types";
 import { SMS_UNAVAILABLE_CODES } from "./channels/sms";
+import { isP2002 } from "@/lib/prismaErrors";
 
 /** Триггеры, для которых заказ ИМЕННО отменён/возвращён — дефолтное исключение не применяем. */
 const ALLOW_CANCELLED_REFUNDED = new Set(["ORDER_REFUNDED", "PAYMENT_FAILED", "ORDER_CANCELLED"]);
 
-function isP2002(err: unknown): boolean {
-  return !!err && typeof err === "object" && "code" in err && (err as { code?: string }).code === "P2002";
-}
 
 /** `automationId:orderId:recipientType:occurrenceKey:channel` — единый формат ключа для всех job'ов. */
 function jobIdempotencyKey(automationId: string, orderId: string, recipientType: string, occurrenceKey: string, channel: string): string {

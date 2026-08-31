@@ -20,16 +20,13 @@ import "server-only";
 import type { PrismaClient } from "@/generated/prisma/client";
 import { resolveEmailFactoryToken } from "./token";
 import { replyToThread, sendNewMessage, listDomains, type SentMessage, type ClientResult } from "./client";
+import { isP2002 } from "@/lib/prismaErrors";
 
 export const EMAIL_REPLY_MAX_LENGTH = 10_000;
 
 export type SendReplyResult =
   | { ok: true; messageId: string; duplicate?: true }
   | { ok: false; code: string; messageId?: string };
-
-function isP2002(err: unknown): boolean {
-  return typeof err === "object" && err !== null && (err as { code?: string }).code === "P2002";
-}
 
 /** Тема первого письма. Номер заказа — единственное, что клиент точно узнает в списке писем. */
 function firstSubject(orderNumber: string): string {

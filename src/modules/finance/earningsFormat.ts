@@ -1,3 +1,4 @@
+import { pluralRu } from "@/lib/plural";
 /**
  * Подписи экранов заработка. Обычный модуль (не "use server", не "server-only"):
  * одни и те же строки нужны и серверным страницам, и клиентским кускам.
@@ -20,12 +21,15 @@ export function formatMonthTitle(date: Date): string {
 
 /** «3 заказа» — русские окончания, иначе интерфейс выглядит машинным переводом. */
 export function pluralOrders(n: number): string {
-  const mod100 = n % 100;
-  const mod10 = n % 10;
-  if (mod100 >= 11 && mod100 <= 14) return `${n} заказов`;
-  if (mod10 === 1) return `${n} заказ`;
-  if (mod10 >= 2 && mod10 <= 4) return `${n} заказа`;
-  return `${n} заказов`;
+  return `${n} ${pluralRu(n, "заказ", "заказа", "заказов")}`;
+}
+
+const DAY_SHORT_MONTHS = ["янв", "фев", "мар", "апр", "мая", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"];
+
+/** «2026-08-14» → «14 авг» (год добавляется, только если он не текущий). */
+export function formatDayShort(iso: string): string {
+  const [y, m, d] = iso.split("-").map(Number);
+  return `${d} ${DAY_SHORT_MONTHS[m - 1]}${y === new Date().getFullYear() ? "" : ` ${y}`}`;
 }
 
 /**
