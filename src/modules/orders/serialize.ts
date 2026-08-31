@@ -152,9 +152,8 @@ export function serializeForOwner(o: OrderWithRelations) {
         }
       : null,
     // Служебная строка «Tip» из Shopify в список не идёт: это не товар, а способ прислать
-    // чаевые. Деньги не теряются — сумма чаевых живёт в Order.tip. Состав позиции общий со
-    // строкой списка (ownerItems ниже).
-    items: ownerItems(o),
+    // чаевые. Деньги не теряются — сумма чаевых живёт в Order.tip.
+    items: ownerItems(o, florist),
     finance: {
       itemsTotal: toNumber(o.itemsTotal),
       tax: toNumber(o.tax),
@@ -189,16 +188,34 @@ export function serializeForOwner(o: OrderWithRelations) {
 }
 export type OwnerOrder = ReturnType<typeof serializeForOwner>;
 
-/** Позиции с ценами владельца — общий кусок карточки и строки списка. */
-function ownerItems(o: OrderListRow) {
-  const florist = floristMoney(o);
+function imagesOf(i: OrderListRow["items"][number]) {
+  const images = getOrderItemImages(i);
+  return { image: images.primary, variantImage: images.variant };
+}
+
+/**
+ * Позиции для СТРОКИ СПИСКА — ровно то, что таблица рендерит: id, название, вариация, фото,
+ * количество. Один маппинг на все три роли; составы, options и цены остаются карточке —
+ * иначе список снова тихо толстеет по мере заполнения составов флористами.
+ */
+function lightItems(o: OrderListRow) {
+  return compensableItems(o.items).map((i) => ({
+    id: i.id,
+    name: i.name,
+    variantName: i.variantName,
+    image: getOrderItemImages(i).primary,
+    quantity: i.quantity,
+  }));
+}
+
+/** Позиции с ценами владельца — карточка. `florist` передаётся, а не считается заново. */
+function ownerItems(o: OrderListRow, florist: ReturnType<typeof floristMoney>) {
   return compensableItems(o.items).map((i) => ({
     id: i.id,
     name: i.name,
     variantName: i.variantName,
     productId: i.productId,
-    image: getOrderItemImages(i).primary,
-    variantImage: getOrderItemImages(i).variant,
+    ...imagesOf(i),
     floristComposition: i.floristCompositionSnapshot,
     quantity: i.quantity,
     options: i.options,
@@ -215,19 +232,17 @@ function ownerItems(o: OrderListRow) {
 // в строке больше нет.
 
 export function serializeOwnerListRow(o: OrderListRow) {
-  const florist = floristMoney(o);
   return {
     ...baseFields(o),
     currentFloristName: o.currentFlorist?.user.name ?? null,
     currentFloristAvatarUrl: o.currentFlorist?.avatarUrl ?? null,
-    items: ownerItems(o),
+    items: lightItems(o),
     finance: {
       customerTotal: toNumber(o.customerTotal),
-      floristTotal: florist.total,
+      floristTotal: floristMoney(o).total,
     },
   };
 }
-export type OwnerListRowVM = ReturnType<typeof serializeOwnerListRow>;
 
 export function serializeCallCenterListRow(o: OrderListRow) {
   return {
@@ -235,13 +250,7 @@ export function serializeCallCenterListRow(o: OrderListRow) {
     currentFloristName: o.currentFlorist?.user.name ?? null,
     currentFloristAvatarUrl: o.currentFlorist?.avatarUrl ?? null,
     // Без цен: правило то же, что у полной карточки колл-центра.
-    items: compensableItems(o.items).map((i) => ({
-      id: i.id,
-      name: i.name,
-      variantName: i.variantName,
-      image: getOrderItemImages(i).primary,
-      quantity: i.quantity,
-    })),
+    items: lightItems(o),
   };
 }
 
@@ -250,13 +259,7 @@ export function serializeFloristListRow(o: OrderListRow) {
   const florist = floristMoney(o);
   return {
     ...baseFields(o),
-    items: compensableItems(o.items).map((i) => ({
-      id: i.id,
-      name: i.name,
-      variantName: i.variantName,
-      image: getOrderItemImages(i).primary,
-      quantity: i.quantity,
-    })),
+    items: lightItems(o),
     floristTotal: florist.total,
     financeVisibility: isFull ? ("FULL" as const) : ("MAKER_ONLY" as const),
     // Раскладка не нужна: страница берёт из неё одну сумму заказчика — её и отдаём.

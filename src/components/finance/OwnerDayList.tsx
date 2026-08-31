@@ -23,30 +23,18 @@ import { formatDollars } from "@/lib/cents";
 import { shareOfRevenue } from "@/modules/finance/earningsFormat";
 import { Badge } from "@/components/ui/Badge";
 import type { OwnerDay } from "@/modules/finance/ownerDashboard";
+import { RU_MONTHS_SHORT } from "@/lib/ruMonths";
+import { pluralOrders } from "@/modules/finance/earningsFormat";
+import { missingLabel } from "@/lib/financeMissing";
 
-const MONTHS_SHORT = ["янв", "фев", "мар", "апр", "мая", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"];
-
-/** Что именно не заполнено. Формулировки — короткие существительные, как в списке дел. */
-const MISSING_LABEL: Record<string, string> = {
-  DELIVERY_ACTUAL_COST: "стоимость доставки",
-  ACQUIRING_FEE: "комиссия эквайринга",
-  VASE_GIFT_COST: "закупка ваз и подарков",
-  CONSUMABLES_RATE: "ставка расходников",
-};
-
-function ordersLabel(n: number): string {
-  const last = n % 10;
-  const teen = n % 100 >= 11 && n % 100 <= 14;
-  if (!teen && last === 1) return `${n} заказ`;
-  if (!teen && last >= 2 && last <= 4) return `${n} заказа`;
-  return `${n} заказов`;
-}
 
 /** Чего не хватает дню: закупка цветов и/или конкретные поля заказов. */
 function missingList(day: OwnerDay): string[] {
   const out: string[] = [];
   if (day.blockers.includes("DAILY_FLOWER_EXPENSE_MISSING")) out.push("закупка цветов");
-  for (const m of day.missing) out.push(MISSING_LABEL[m] ?? m);
+  // Подписи — общие с разбором дня и обзором флористов: одно и то же поле не должно
+  // называться на трёх экранах тремя разными словами.
+  for (const m of day.missing) out.push(missingLabel(m));
   return out;
 }
 
@@ -109,11 +97,11 @@ export function OwnerDayList({ days }: { days: OwnerDay[] }) {
               >
                 <div className="w-9 shrink-0 text-center">
                   <div className="text-lg leading-none font-semibold text-slate-900">{date.getUTCDate()}</div>
-                  <div className="mt-0.5 text-xs text-slate-400">{MONTHS_SHORT[date.getUTCMonth()]}</div>
+                  <div className="mt-0.5 text-xs text-slate-400">{RU_MONTHS_SHORT[date.getUTCMonth()]}</div>
                 </div>
 
                 <div className="hidden w-24 shrink-0 text-xs text-slate-400 sm:block">
-                  {ordersLabel(d.ordersTotal)}
+                  {pluralOrders(d.ordersTotal)}
                 </div>
 
                 <div className="min-w-0 flex-1">
@@ -133,7 +121,7 @@ export function OwnerDayList({ days }: { days: OwnerDay[] }) {
                     </div>
                   )}
 
-                  <div className="mt-1 text-xs text-slate-400 sm:hidden">{ordersLabel(d.ordersTotal)}</div>
+                  <div className="mt-1 text-xs text-slate-400 sm:hidden">{pluralOrders(d.ordersTotal)}</div>
                 </div>
 
                 {/* Стрелка только на большом экране: на телефоне она вместе с отступом

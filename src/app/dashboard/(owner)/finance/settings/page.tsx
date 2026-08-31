@@ -6,7 +6,6 @@ import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/Card";
 import { EmptyState } from "@/components/ui/states";
 import { formatCents } from "@/lib/cents";
 import { listSettingRecords, type SettingRecord } from "@/modules/finance/settingsAdmin";
-import {} from "@/modules/finance/config";
 import { CorrectSettingDialog, DeleteSettingDialog, type SettingRowDto } from "@/components/finance/SettingRowActions";
 import { ConsumablesForm, FeeModelForm, FlowerExpenseForm, TaxPolicyForm } from "./SettingsForms";
 import { correctSettingAction, deleteSettingAction, previewSettingAction } from "./settingsAdminActions";

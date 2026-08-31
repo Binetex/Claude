@@ -5,7 +5,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { prisma } from "@/lib/db";
 import { Prisma } from "@/generated/prisma/client";
-import { listForOwner, countOrders } from "./queries";
+import { listForOwner, listForCallCenter, listForFlorist, countForFlorist, countOrders } from "./queries";
 
 const suffix = `q-${Date.now()}`;
 let siteId = "";
@@ -184,6 +184,40 @@ describe("вкладки «Сегодня» и «Завтра» — по дню 
     const rows = mine(await listForOwner({ siteId, preset: "today" }));
     for (const r of rows) {
       expect(new Date(r.deliveryDate).toISOString().slice(0, 10)).toBe(todayLa);
+    }
+  });
+});
+
+/**
+ * Списки колл-центра и флориста ходят тем же include, что и владельческий, — если лёгкий
+ * include списков разойдётся со схемой, чистые тесты сериализаторов этого не заметят,
+ * а реальный SQL упадёт здесь.
+ */
+describe("списки колл-центра и флориста на живой БД", () => {
+  it("колл-центр видит заказы сайта: без цен, но с составом", async () => {
+    const rows = mine(await listForCallCenter({ siteId, search: "#20211" }));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).not.toHaveProperty("finance");
+    expect(rows[0]).not.toHaveProperty("customerTotal");
+  });
+
+  it("флорист видит только заказы, где он текущий исполнитель", async () => {
+    const user = await prisma.user.create({
+      data: { name: `Флорист ${suffix}`, email: `florist-${suffix}@test.local`, role: "FLORIST", passwordHash: "x" },
+    });
+    const florist = await prisma.florist.create({ data: { userId: user.id } });
+    try {
+      const my = await makeOrder(`FLW-${suffix}`, "2026-07-26", { currentFloristId: florist.id });
+
+      const rows = mine(await listForFlorist(florist.id, { siteId }));
+      expect(rows.map((r) => r.id)).toEqual([my.id]);
+      // MAKER_ONLY по умолчанию: суммы заказчика в строке быть не должно.
+      expect(rows[0].financeVisibility).toBe("MAKER_ONLY");
+      expect(rows[0]).not.toHaveProperty("finance");
+      expect(await countForFlorist(florist.id, { siteId })).toBe(1);
+    } finally {
+      await prisma.florist.delete({ where: { id: florist.id } });
+      await prisma.user.delete({ where: { id: user.id } });
     }
   });
 });

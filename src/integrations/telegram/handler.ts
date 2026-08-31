@@ -23,6 +23,7 @@ import {
 import { orderPhotoUrls } from "@/modules/orders/images";
 import type { TelegramAudience } from "./config";
 import type { TelegramNotifyPayload } from "./events";
+import { isP2002 } from "@/lib/prismaErrors";
 
 /**
  * Единый обработчик ВСЕХ внутренних Telegram-уведомлений: тип события → запись реестра →
@@ -227,7 +228,7 @@ async function sendAlbumOnce(
     });
   } catch (err) {
     // Гонка двух событий по одному заказу: альбом уже зафиксирован другим проходом.
-    if (!(err && typeof err === "object" && "code" in err && (err as { code?: string }).code === "P2002")) throw err;
+    if (!isP2002(err)) throw err;
   }
 }
 

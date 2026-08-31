@@ -13,14 +13,11 @@ import { formatCents } from "@/lib/cents";
 import { ExpenseRow } from "./ExpenseRow";
 import type { ExpenseActions, ExpenseCategoryDto } from "./ExpenseForms";
 import type { MonthCategory } from "@/modules/expenses/read";
+import { pluralRu } from "@/lib/plural";
 
 /** «3 записи» — подсказка, стоит ли вообще раскрывать. */
 function countLabel(n: number): string {
-  const last = n % 10;
-  const teen = n % 100 >= 11 && n % 100 <= 14;
-  if (!teen && last === 1) return `${n} запись`;
-  if (!teen && last >= 2 && last <= 4) return `${n} записи`;
-  return `${n} записей`;
+  return `${n} ${pluralRu(n, "запись", "записи", "записей")}`;
 }
 
 export function CategoryList({

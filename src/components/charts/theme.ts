@@ -10,6 +10,7 @@
  * акцентный цвет на серию. Разноцветье здесь ничего не объясняет: серия всё равно одна.
  */
 import { formatDollars } from "@/lib/cents";
+import { RU_MONTHS_SHORT } from "@/lib/ruMonths";
 
 /**
  * Акцент одиночных графиков — голова той же палитры. Emerald интерфейса рядом с индиго
@@ -96,7 +97,6 @@ export const AXIS_PROPS = {
   tick: { fill: CHART_LABEL, fontSize: 12 },
 } as const;
 
-const MONTHS_SHORT = ["янв", "фев", "мар", "апр", "мая", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"];
 
 /**
  * Подпись дня на оси: «2026-08-06» → «6 авг». Дата читается как КАЛЕНДАРНАЯ, в UTC —
@@ -105,5 +105,5 @@ const MONTHS_SHORT = ["янв", "фев", "мар", "апр", "мая", "июн"
  */
 export function formatDayLabel(iso: string): string {
   const d = new Date(`${iso}T00:00:00.000Z`);
-  return `${d.getUTCDate()} ${MONTHS_SHORT[d.getUTCMonth()]}`;
+  return `${d.getUTCDate()} ${RU_MONTHS_SHORT[d.getUTCMonth()]}`;
 }

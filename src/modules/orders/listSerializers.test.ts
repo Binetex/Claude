@@ -132,6 +132,16 @@ describe("строки списков", () => {
     expect(r.finance?.customerTotal).toBe(124.5);
   });
 
+  it("позиции в строках списков лёгкие: пять полей, без снапшотов и цен", () => {
+    for (const serialized of [
+      serializeOwnerListRow(row),
+      serializeCallCenterListRow(row),
+      serializeFloristListRow(row),
+    ]) {
+      expect(Object.keys(serialized.items[0]).sort()).toEqual(["id", "image", "name", "quantity", "variantName"]);
+    }
+  });
+
   it("служебная строка Tip не попадает в позиции списка", () => {
     const withTip = {
       ...row,

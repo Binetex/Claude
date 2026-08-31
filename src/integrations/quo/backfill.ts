@@ -23,6 +23,7 @@ import { planQuoEvent } from "./plan";
 import { createRateLimiter, type RateLimiter } from "./rateLimiter";
 import { quoLog } from "./logging";
 import type { NormalizedQuoEvent, QuoMessageObject, QuoCallObject, QuoRecordingObject, QuoTranscriptObject, QuoSummaryObject } from "./types";
+import { isP2002 } from "@/lib/prismaErrors";
 
 export class BackfillConcurrentError extends Error {
   constructor() {
@@ -46,7 +47,6 @@ export type BackfillOptions = {
 export type BackfillCounters = { found: number; created: number; updated: number; skipped: number; unlinked: number; errors: number };
 export type BackfillReport = { runId: string; mode: BackfillMode; counters: BackfillCounters; breakdown: { byType: Record<string, number>; bySite: Record<string, number> }; sites: string[] };
 
-const P2002 = (e: unknown) => !!e && typeof e === "object" && "code" in e && (e as { code?: string }).code === "P2002";
 
 function safeError(err: unknown): string {
   if (err instanceof QuoApiError) return err.message; // без секретов
@@ -115,7 +115,7 @@ export async function runBackfill(prisma: PrismaClient, client: QuoClient, opts:
       select: { id: true },
     });
   } catch (err) {
-    if (opts.mode === "LIVE" && P2002(err)) throw new BackfillConcurrentError();
+    if (opts.mode === "LIVE" && isP2002(err)) throw new BackfillConcurrentError();
     throw err;
   }
 

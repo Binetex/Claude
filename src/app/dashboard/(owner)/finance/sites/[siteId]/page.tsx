@@ -11,10 +11,10 @@ import { getSiteDetail } from "@/modules/finance/sitesRevenue";
 import { resolvePeriod } from "@/modules/finance/period";
 import { FinancePeriodBar } from "@/components/finance/PeriodBar";
 import { SiteDaysChart } from "./SiteDaysChart";
+import { RU_MONTHS_SHORT } from "@/lib/ruMonths";
 
 export const dynamic = "force-dynamic";
 
-const MONTHS_SHORT = ["янв", "фев", "мар", "апр", "мая", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"];
 
 /**
  * Один магазин за период: те же три числа и разбивка по дням.
@@ -96,7 +96,7 @@ export default async function FinanceSiteDetailPage({
                           {date.getUTCDate()}
                         </div>
                         <div className="mt-0.5 text-xs text-slate-400">
-                          {MONTHS_SHORT[date.getUTCMonth()]}
+                          {RU_MONTHS_SHORT[date.getUTCMonth()]}
                         </div>
                       </div>
                       <div className="grid flex-1 grid-cols-2 gap-x-4 sm:gap-x-6">

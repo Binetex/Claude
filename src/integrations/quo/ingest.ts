@@ -15,6 +15,7 @@ import { toE164 } from "@/lib/phone";
 import { matchCommunicationToOrder, type CommOrderCandidate } from "./matching";
 import { maskPhone, quoLog } from "./logging";
 import type { NormalizedQuoEvent } from "./types";
+import { isP2002 } from "@/lib/prismaErrors";
 
 /** Временная (ретраибельная) ошибка обработки — outbox повторит, событие не теряется. */
 export class QuoIngestRetryableError extends Error {
@@ -213,7 +214,7 @@ export async function ingestQuoEvent(prisma: PrismaClient, event: NormalizedQuoE
     return { outcome: "created", communicationId: created.id, orderId };
   } catch (err) {
     // Гонка: параллельная доставка того же события успела создать запись → это не ошибка.
-    if (err && typeof err === "object" && "code" in err && (err as { code?: string }).code === "P2002") {
+    if (isP2002(err)) {
       const again = await prisma.orderCommunication.findUnique({ where: { provider_providerEventId: { provider: "QUO", providerEventId: event.providerEventId } } });
       if (again) return { outcome: "duplicate", communicationId: again.id, orderId: again.orderId };
     }

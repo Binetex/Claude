@@ -6,14 +6,14 @@
  * одного дня не существует вовсе, поэтому там стоит периодичность, а не выдуманная дата.
  */
 import type { ExpenseKind } from "@/modules/expenses/spread";
+import { RU_MONTHS_SHORT } from "@/lib/ruMonths";
 
-const MONTHS_SHORT = ["янв", "фев", "мар", "апр", "мая", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"];
 
 /** «04 авг» — день с ведущим нулём, чтобы даты стояли ровным столбцом. */
 export function shortDate(iso: string): string {
   const d = new Date(`${iso}T00:00:00.000Z`);
   if (Number.isNaN(d.getTime())) return iso;
-  return `${String(d.getUTCDate()).padStart(2, "0")} ${MONTHS_SHORT[d.getUTCMonth()]}`;
+  return `${String(d.getUTCDate()).padStart(2, "0")} ${RU_MONTHS_SHORT[d.getUTCMonth()]}`;
 }
 
 export function entryDateLabel(entry: { kind: ExpenseKind; startDay: string; endDay: string | null }): string {
