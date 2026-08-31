@@ -9,6 +9,7 @@ import { linkBurqOrder } from "@/integrations/delivery/burq/linkService";
 import { makeCompletedPublisher } from "@/integrations/delivery/burq/webhookHandler";
 import { onOrderDeliveryChange } from "@/integrations/delivery/burq/scheduleService";
 import { fixDeliveryActualCost, FinanceFixError } from "@/modules/finance/fix";
+import { burqErrorMessage } from "@/integrations/delivery/burq/errorMessage";
 
 type FormState = { error?: string; ok?: boolean; message?: string } | null;
 type LinkFormState = { error?: string; ok?: boolean; message?: string; needsConfirm?: boolean } | null;
@@ -149,8 +150,11 @@ export async function refetchPodAction(_prev: FormState, formData: FormData): Pr
       default:
         return { error: "Не удалось обновить фото (доставка не найдена)." };
     }
-  } catch {
-    return { error: "Ошибка обращения к Burq. Попробуйте позже." };
+  } catch (err) {
+    // Логируем причину: без этого разобраться в жалобе «была какая-то ошибка Burq» нечем —
+    // сообщение показывалось пользователю и нигде не оставалось.
+    console.error(`[burq] refetch POD failed for delivery ${deliveryId}:`, err instanceof Error ? err.message : String(err));
+    return { error: burqErrorMessage(err) };
   }
 }
 
@@ -183,8 +187,9 @@ export async function linkBurqOrderAction(_prev: LinkFormState, formData: FormDa
   let res;
   try {
     res = await linkBurqOrder(prisma, makeCompletedPublisher(prisma), { orderId, burqOrderId, replaceActive: confirm });
-  } catch {
-    return { error: "Ошибка обращения к Burq. Попробуйте позже." };
+  } catch (err) {
+    console.error(`[burq] link order ${burqOrderId} to ${orderId} failed:`, err instanceof Error ? err.message : String(err));
+    return { error: burqErrorMessage(err) };
   }
   revalidatePath(`/dashboard/orders/${orderId}`);
   switch (res.outcome) {
