@@ -77,13 +77,6 @@ export type FloristsEarnings = {
     days: number;
     /** Заказы второстепенных без заданной цены (`floristTotal` = 0). */
     orders: number;
-    /**
-     * Какие именно дни и заказы. Число само по себе отправляло владельца искать их вручную,
-     * хотя ответ у нас есть: «5 дн. без полных данных» не говорит ни какие это дни, ни что
-     * в них не заполнено.
-     */
-    dayList: string[];
-    orderList: { id: string; orderNumber: string }[];
   };
 };
 
@@ -164,7 +157,7 @@ export async function getFloristsEarnings(from: Date, to: Date, now: Date = new 
             orderStatus: "DELIVERED",
             deliveryDate: { gte: startFrom(from, accrual.startDate), lte: to },
           },
-          select: { id: true, orderNumber: true, currentFloristId: true, deliveryDate: true, floristTotal: true },
+          select: { currentFloristId: true, deliveryDate: true, floristTotal: true },
         })
       : Promise.resolve([]),
   ]);
@@ -172,7 +165,7 @@ export async function getFloristsEarnings(from: Date, to: Date, now: Date = new 
   // день → флорист → { заработок, заказы }
   const byDay = new Map<string, Map<string, Cell>>();
   const byFlorist = new Map<string, FloristEarningsRow>();
-  const pending = { days: 0, orders: 0, dayList: [] as string[], orderList: [] as { id: string; orderNumber: string }[] };
+  const pending = { days: 0, orders: 0 };
 
   const add = (day: string, floristId: string, earned: number, orders: number) => {
     const cells = byDay.get(day) ?? new Map<string, Cell>();
@@ -195,12 +188,7 @@ export async function getFloristsEarnings(from: Date, to: Date, now: Date = new 
       // Будущий день (предзаказ) неполон по построению — доставки ещё не было. Это не
       // «недостающие данные», поэтому в pending.days не идёт и в «Требует заполнения» не
       // отправляет: там для него всё равно нечего разбирать.
-      if (d.day <= today) {
-        pending.days += 1;
-        // Один и тот же день считается по каждому профилю флориста — в списке он нужен один раз.
-        const key = dayKey(d.day);
-        if (!pending.dayList.includes(key)) pending.dayList.push(key);
-      }
+      if (d.day <= today) pending.days += 1;
       continue;
     }
     const share = d.financeProfile.sharePercentBp;
@@ -215,7 +203,6 @@ export async function getFloristsEarnings(from: Date, to: Date, now: Date = new 
     // и ждёт разбора.
     if (cents === 0) {
       pending.orders += 1;
-      pending.orderList.push({ id: o.id, orderNumber: o.orderNumber });
       continue;
     }
     add(dayKey(o.deliveryDate), o.currentFloristId, cents, 1);
@@ -253,10 +240,6 @@ export async function getFloristsEarnings(from: Date, to: Date, now: Date = new 
     series,
     points,
     byFlorist,
-    pending: {
-      ...pending,
-      dayList: [...pending.dayList].sort(),
-      orderList: [...pending.orderList].sort((a, b) => a.orderNumber.localeCompare(b.orderNumber)),
-    },
+    pending,
   };
 }

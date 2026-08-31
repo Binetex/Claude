@@ -15,6 +15,8 @@ import { countDeliveredByFlorist } from "@/modules/finance/review";
 import { accrualGate } from "@/modules/finance/config";
 import { resolvePeriod } from "@/modules/finance/period";
 import { getFloristsEarnings } from "@/modules/finance/floristsEarnings";
+import { listIncompleteOrders } from "@/modules/finance/incompleteOrders";
+import { missingLabel } from "@/lib/financeMissing";
 import { FloristsChart } from "./FloristsChart";
 
 export const dynamic = "force-dynamic";
@@ -69,11 +71,12 @@ export default async function FinanceFloristsPage({
   });
   const ids = florists.map((f) => f.id);
 
-  const [balances, profiles, delivered, earnings] = await Promise.all([
+  const [balances, profiles, delivered, earnings, incomplete] = await Promise.all([
     floristBalances(ids),
     listCurrentProfiles(),
     countDeliveredByFlorist(ids),
     getFloristsEarnings(period.from, period.to),
+    listIncompleteOrders(period.from, period.to),
   ]);
 
   const gate = accrualGate();
@@ -111,61 +114,42 @@ export default async function FinanceFloristsPage({
             <StatCard label="Средний заработок на заказ" value={formatDollars(earnings.avgCents)} />
           </div>
 
-          {/* Молчать об этом нельзя: и то и другое занижает все три числа выше. Раньше здесь
-              стояло «5 дн. без полных данных» — фраза, которая не говорит ни какие это дни, ни
-              чего в них не хватает, ни что от этого меняется в деньгах. Теперь говорим прямо и
-              называем дни и заказы поимённо: ответ у нас есть, искать их вручную незачем. */}
-          {(earnings.pending.days > 0 || earnings.pending.orders > 0) && (
+          {/* Что дополнить, чтобы деньги посчитались.
+              Здесь ЗАКАЗЫ, а не дни. День не считается не сам по себе, а из-за заказа с
+              незаполненными данными: показывать даты значило заставлять зайти в день, чтобы там
+              узнать заказы, — лишний шаг ради сущности, которую и починить-то напрямую нельзя.
+              Чинится заказ. */}
+          {incomplete.length > 0 && (
             <div className="space-y-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm text-amber-900">
-              <p className="font-medium">Числа выше занижены — часть работы ещё не посчитана.</p>
-
-              {earnings.pending.days > 0 && (
-                <div>
-                  <p>
-                    <b>{earnings.pending.days}</b>{" "}
-                    {plural(earnings.pending.days, "день", "дня", "дней")} ещё не посчитано: по заказам
-                    этих дней не заполнены расходы — фактическая доставка, комиссия эквайринга или
-                    закупка вазы. Пока их нет, доля основного флориста за эти дни не начислена.
-                  </p>
-                  <p className="mt-1 flex flex-wrap gap-x-2 gap-y-1 text-xs">
-                    {earnings.pending.dayList.map((d) => (
-                      <Link key={d} href={`/dashboard/finance/day/${d}`} className="underline underline-offset-2">
-                        {formatDay(d)}
-                      </Link>
-                    ))}
-                  </p>
-                </div>
-              )}
-
-              {earnings.pending.orders > 0 && (
-                <div>
-                  <p>
-                    <b>{earnings.pending.orders}</b>{" "}
-                    {plural(earnings.pending.orders, "заказ", "заказа", "заказов")} без цены флориста:
-                    сколько платим за работу, не задано, поэтому в заработок{" "}
-                    {plural(earnings.pending.orders, "он не вошёл", "они не вошли", "они не вошли")}.
-                  </p>
-                  <p className="mt-1 flex flex-wrap gap-x-2 gap-y-1 text-xs">
-                    {earnings.pending.orderList.map((o) => (
-                      <Link key={o.id} href={`/dashboard/orders/${o.id}`} className="underline underline-offset-2">
-                        {o.orderNumber}
-                      </Link>
-                    ))}
-                  </p>
-                </div>
-              )}
-
-              {/* Ссылка — только про ДНИ. Заказы без цены флориста в ту очередь не попадают:
-                  детектор проверяет данные основного флориста, а такого типа проблемы там нет
-                  вовсе. Отправлять туда за ними значило бы обещать список, в котором их нет —
-                  поэтому к каждому заказу выше стоит прямая ссылка. */}
-              {earnings.pending.days > 0 && (
-                <p className="text-xs">
-                  <Link href="/dashboard/finance/setup" className="font-medium underline">
-                    Открыть список того, что нужно заполнить по дням
-                  </Link>
-                </p>
-              )}
+              <p className="font-medium">
+                Числа выше занижены: {incomplete.length}{" "}
+                {plural(incomplete.length, "заказ", "заказа", "заказов")} нужно дополнить.
+              </p>
+              <ul className="space-y-1">
+                {incomplete.map((o) => (
+                  <li key={o.id} className="text-xs">
+                    <Link href={`/dashboard/orders/${o.id}`} className="font-medium underline underline-offset-2">
+                      {o.orderNumber}
+                    </Link>
+                    <span className="text-amber-700">
+                      {" · "}
+                      {formatDay(o.deliveryDate)}
+                      {o.floristName ? ` · ${o.floristName}` : ""}
+                      {" — "}
+                      {[
+                        o.noFloristPrice ? "не задана цена флориста" : null,
+                        o.missing.length > 0 ? `не заполнено: ${o.missing.map(missingLabel).join(", ")}` : null,
+                      ]
+                        .filter(Boolean)
+                        .join("; ")}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+              <p className="text-xs text-amber-700">
+                Пока эти заказы не дополнены, их дни не считаются целиком, а доля флориста за них
+                не начислена.
+              </p>
             </div>
           )}
 
