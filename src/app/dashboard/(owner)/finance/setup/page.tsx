@@ -5,7 +5,7 @@ import { PageHeader, StatCard } from "@/components/ui/misc";
 import { Card, CardBody } from "@/components/ui/Card";
 import { EmptyState } from "@/components/ui/states";
 import { formatCents } from "@/lib/cents";
-import { listOpenIssues, getIssueSummary, type IssueGroup } from "@/modules/finance/issues";
+import { listOpenIssues, getIssueSummary, detectFinanceIssues, type IssueGroup } from "@/modules/finance/issues";
 import { listBurqDeliveryCandidates } from "@/modules/finance/fix";
 import { dayKey } from "@/modules/finance/dayFinance";
 import { IssueList, type IssueRow } from "./IssueList";
@@ -37,6 +37,14 @@ export default async function FinanceSetupPage({
 }) {
   await requireRole("OWNER");
   const sp = await searchParams;
+
+  // Детектор прогоняется ПРИ ОТКРЫТИИ страницы, а не только по кнопке.
+  //
+  // Иначе очередь показывала состояние на момент последнего прогона: обзор флористов считает
+  // недостающие данные на лету и говорил «5 дней не посчитано», а эта страница отвечала «всё
+  // заполнено» — и оба экрана были по-своему правы. Два ответа на один вопрос хуже, чем
+  // медленная страница; прогон идемпотентен и без изменений в данных ничего не пишет.
+  await detectFinanceIssues();
 
   const [summary, issues, sites, burqList] = await Promise.all([
     getIssueSummary(),
@@ -112,7 +120,7 @@ export default async function FinanceSetupPage({
               description={
                 summary.disabledReason
                   ? "Задайте FINANCE_PRIMARY_SHARE_START_DATE, чтобы система начала проверять заказы с этой даты."
-                  : "Открытых проблем нет. Если данные изменятся, очередь наполнится сама при следующем прогоне детектора."
+                  : "Открытых проблем нет: список проверяется заново каждый раз, когда вы открываете эту страницу."
               }
             />
           </CardBody>

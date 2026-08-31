@@ -155,11 +155,17 @@ export default async function FinanceFloristsPage({
                 </div>
               )}
 
-              <p className="text-xs">
-                <Link href="/dashboard/finance/setup" className="font-medium underline">
-                  Открыть список того, что нужно заполнить
-                </Link>
-              </p>
+              {/* Ссылка — только про ДНИ. Заказы без цены флориста в ту очередь не попадают:
+                  детектор проверяет данные основного флориста, а такого типа проблемы там нет
+                  вовсе. Отправлять туда за ними значило бы обещать список, в котором их нет —
+                  поэтому к каждому заказу выше стоит прямая ссылка. */}
+              {earnings.pending.days > 0 && (
+                <p className="text-xs">
+                  <Link href="/dashboard/finance/setup" className="font-medium underline">
+                    Открыть список того, что нужно заполнить по дням
+                  </Link>
+                </p>
+              )}
             </div>
           )}
 
