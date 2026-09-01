@@ -1,9 +1,10 @@
 "use client";
 import { useState, useTransition } from "react";
 import Link from "next/link";
-import { Phone, Send, Check, X, RotateCcw, MapPin } from "lucide-react";
+import { Phone, Send, Check, X, RotateCcw, MapPin, History } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
+import { REVIEW_STATUS_BADGE } from "@/lib/reviewStatus";
 import {
   noAnswerAction,
   talkedAction,
@@ -39,13 +40,23 @@ export type CardVM = {
   customerPhone: string | null;
   items: string;
   deliveryLabel: string;
+  /** Журнал запроса, старые сверху: когда кто связывался и что было сделано. */
+  journal: { at: string; label: string; by: string | null; detail: string | null }[];
+  /** Что сейчас делать и что нажать — по состоянию запроса. */
+  guidance: string;
 };
 
 type Tab = "today" | "waiting" | "check" | "closed";
 
+const CLOSED_STATUSES = new Set(["CONFIRMED", "DECLINED", "GAVE_UP"]);
+const CALL_STATUSES = new Set(["NEW", "CALLING"]);
+
 /**
- * Очередь оператора. Каждый исход — одна кнопка: оператор говорит с клиентом и не должен в это
- * время выбирать статус из списка или что-то печатать.
+ * Очередь запросов отзывов. Каждый исход разговора — одна кнопка: оператор говорит с
+ * клиентом и не должен в это время выбирать статус из списка или что-то печатать.
+ *
+ * Кнопки зависят от СОСТОЯНИЯ запроса, а не от вкладки: на карточке «обещал оставить»
+ * кнопкам звонка делать нечего, а «на проверке» главное действие — засчитать отзыв.
  */
 export function ReviewQueue({
   tab,
@@ -92,7 +103,6 @@ export function ReviewQueue({
         <RequestCard
           key={c.id}
           card={c}
-          tab={tab}
           locations={locationsBySite[c.siteId] ?? []}
           onResult={{ setNote, setError }}
         />
@@ -103,12 +113,10 @@ export function ReviewQueue({
 
 function RequestCard({
   card,
-  tab,
   locations,
   onResult,
 }: {
   card: CardVM;
-  tab: Tab;
   locations: { id: string; name: string }[];
   onResult: { setNote: (v: string | null) => void; setError: (v: string | null) => void };
 }) {
@@ -124,11 +132,22 @@ function RequestCard({
     });
   }
 
+  const closed = CLOSED_STATUSES.has(card.status);
+  const calling = CALL_STATUSES.has(card.status);
+  const waitingClient = card.status === "LINK_SENT" || card.status === "PROMISED" || card.status === "FORGOT";
+  const lastEvent = card.journal.length > 0 ? card.journal[card.journal.length - 1] : null;
+
   return (
     <div
       className={`rounded-xl border bg-white px-4 py-3 ${card.overdue ? "border-amber-300 bg-amber-50/40" : "border-slate-200"}`}
     >
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
+        <span
+          className={`rounded-md border px-2 py-0.5 text-xs font-medium ${REVIEW_STATUS_BADGE[card.status] ?? "border-slate-200 bg-slate-100 text-slate-600"}`}
+        >
+          {card.statusLabel}
+        </span>
+        {card.overdue && <span className="rounded bg-amber-100 px-1.5 py-px text-[11px] text-amber-900">просрочено</span>}
         <Link href={card.orderHref} className="font-mono text-xs font-medium text-sky-700 hover:underline">
           {card.orderNumber}
         </Link>
@@ -138,8 +157,6 @@ function RequestCard({
             {card.customerPhone}
           </a>
         )}
-        <span className="rounded bg-slate-100 px-1.5 py-px text-[11px] text-slate-600">{card.statusLabel}</span>
-        {card.overdue && <span className="rounded bg-amber-100 px-1.5 py-px text-[11px] text-amber-900">просрочено</span>}
         <span className="ml-auto text-xs text-slate-500">{card.siteName}</span>
       </div>
 
@@ -147,21 +164,23 @@ function RequestCard({
         <span>{card.items}</span>
         <span>· доставка {card.deliveryLabel}</span>
         {card.nextActionLabel && <span>· {card.nextActionLabel}</span>}
-        {card.callAttempts > 0 && (
-          <span>
-            · попытка {card.callAttempts} из {card.maxAttempts}
-          </span>
-        )}
         {card.linkChannelLabel && <span>· ссылка ушла {card.linkChannelLabel}</span>}
       </div>
 
+      {/* Ответ на «что нужно помечать и как»: карточка сама говорит, чей ход и что нажать. */}
+      {card.guidance && <p className="mt-2 text-xs text-slate-600">{card.guidance}</p>}
+
       <div className="mt-2 flex flex-wrap items-center gap-2">
-        {tab !== "closed" ? (
+        {closed ? (
+          <Button size="sm" variant="outline" disabled={pending} onClick={() => run(() => reopenAction(card.id))}>
+            <RotateCcw className="size-4" /> Вернуть в работу
+          </Button>
+        ) : (
           <>
-            {(tab === "today" || tab === "waiting") && (
+            {calling && (
               <>
                 <Button size="sm" variant="outline" disabled={pending} onClick={() => run(() => noAnswerAction(card.id))}>
-                  <Phone className="size-4" /> Не дозвонилась
+                  <Phone className="size-4" /> Не дозвонились
                 </Button>
                 <Button size="sm" variant="outline" disabled={pending} onClick={() => run(() => talkedAction(card.id))}>
                   Поговорили
@@ -169,16 +188,22 @@ function RequestCard({
                 <Button size="sm" variant="outline" disabled={pending} onClick={() => run(() => promisedAction(card.id))}>
                   Обещал оставить
                 </Button>
+                {/* Сказал «уже оставил» прямо в разговоре — переход есть и отсюда. */}
+                <Button size="sm" variant="outline" disabled={pending} onClick={() => run(() => claimedAction(card.id))}>
+                  Сказал, что оставил
+                </Button>
                 {/* Ссылку слать некуда, пока у магазина нет ни точки, ни запасной. */}
                 <Button size="sm" disabled={pending || !card.hasLink} onClick={() => run(() => sendLinkAction(card.id))}>
                   <Send className="size-4" /> Отправить ссылку
                 </Button>
               </>
             )}
-            <Button size="sm" variant="outline" disabled={pending} onClick={() => run(() => claimedAction(card.id))}>
-              Сказал, что оставил
-            </Button>
-            {tab === "check" && (
+            {waitingClient && (
+              <Button size="sm" disabled={pending} onClick={() => run(() => claimedAction(card.id))}>
+                <Check className="size-4" /> Сказал, что оставил
+              </Button>
+            )}
+            {card.status === "READY_TO_CHECK" && (
               <Button size="sm" disabled={pending} onClick={() => run(() => confirmAction(card.id))}>
                 <Check className="size-4" /> Засчитать отзыв
               </Button>
@@ -190,15 +215,33 @@ function RequestCard({
               Не удалось
             </Button>
           </>
-        ) : (
-          <Button size="sm" variant="outline" disabled={pending} onClick={() => run(() => reopenAction(card.id))}>
-            <RotateCcw className="size-4" /> Вернуть в работу
-          </Button>
         )}
       </div>
 
+      {/* Журнал: «звонили трижды за неделю» должно быть видно, а не стёрто последним статусом. */}
+      {card.journal.length > 0 && (
+        <details className="mt-2 text-xs text-slate-500">
+          <summary className="flex cursor-pointer list-none items-center gap-1.5 hover:text-slate-700">
+            <History className="size-3.5" />
+            <span>
+              Журнал ({card.journal.length}) · последнее: {lastEvent!.label} · {lastEvent!.at}
+            </span>
+          </summary>
+          <ul className="mt-1.5 space-y-0.5 border-l border-slate-200 pl-3">
+            {card.journal.map((e, i) => (
+              <li key={i}>
+                <span className="font-mono text-[11px] text-slate-400">{e.at}</span>{" "}
+                <span className="text-slate-700">{e.label}</span>
+                {e.by && <span className="text-slate-400"> · {e.by}</span>}
+                {e.detail && <span className="text-slate-400"> · {e.detail}</span>}
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+
       {/* Точка подставлена по ZIP — это догадка, а оператор говорит с клиентом и знает лучше. */}
-      {tab !== "closed" && locations.length > 1 && (
+      {!closed && locations.length > 1 && (
         <div className="mt-2 flex items-center gap-2 text-xs text-slate-500">
           <MapPin className="size-3.5" />
           <span>Отзыв на точку</span>

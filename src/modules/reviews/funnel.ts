@@ -36,23 +36,6 @@ export async function getFunnelCounts(now = new Date()): Promise<FunnelCounts> {
 }
 
 /** Последние запросы — лента для владельца, чтобы видеть движение, а не только числа. */
-export async function listRecentRequests(limit = 40) {
-  return prisma.orderReviewRequest.findMany({
-    select: {
-      id: true,
-      status: true,
-      nextActionAt: true,
-      confirmedAt: true,
-      confirmedVia: true,
-      location: { select: { name: true } },
-      order: {
-        select: { id: true, orderNumber: true, senderName: true, site: { select: { name: true } } },
-      },
-    },
-    orderBy: { updatedAt: "desc" },
-    take: limit,
-  });
-}
 
 function startOfToday(now: Date): Date {
   const d = new Date(now);
