@@ -48,6 +48,7 @@ import { getQuoConfig } from "@/integrations/quo/config";
 import { createQuoClient } from "@/integrations/quo/client";
 import { reconcileBurqSchedules } from "@/integrations/delivery/burq/recovery";
 import { syncOpenDeliveryStatuses } from "@/integrations/delivery/burq/statusSync";
+import { recoverWooOrders } from "@/integrations/woocommerce/ordersRecovery";
 import { isBurqRuntimeEnabled, featureFlags } from "@/lib/featureFlags";
 import { MessagingService } from "@/messaging/service";
 import { createMockProviders } from "@/messaging/providers/mock";
@@ -237,6 +238,19 @@ async function main() {
   // Сроки воронки отзывов: клиент обещал оставить отзыв и пропал — напоминаем один раз.
   // Раз в час, потому что срок измеряется днями: попасть в него минута в минуту не нужно, а
   // частый проход по индексу (status, nextActionAt) в спокойное время не находит ничего.
+  // Догоняющий синк заказов Woo: вебхуки магазина уходят через его собственный планировщик и
+  // могут опаздывать на десятки минут (WP-Cron на theflow.la выключен). Без этой страховки
+  // заказ всё это время не виден в дашборде — 03.09.2026 так «пропал» 20654 на 34 минуты.
+  schedule({
+    name: "woo.orders.recovery",
+    enabled: true,
+    intervalMs: Number(process.env.WOO_ORDER_RECOVERY_MS ?? 600_000), // 10 мин
+    kickoffMs: 95_000,
+    run: () => recoverWooOrders(prisma),
+    // Тихо, пока всё хорошо: интересен только сбой синхронизации магазина.
+    report: (r) => r.failed > 0,
+  });
+
   schedule({
     name: "reviews.deadlines",
     enabled: true,
