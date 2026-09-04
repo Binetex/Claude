@@ -29,6 +29,7 @@ import { OrderStatusCard } from "./OrderStatusCard";
 import { DeliveryStatusCard } from "./DeliveryStatusCard";
 import { OrderPickupCard } from "./OrderPickupCard";
 import { OrderCommunications, type CommItem } from "./OrderCommunications";
+import { OrderAssistantCard, type AssistantTurn } from "./OrderAssistantCard";
 import { collapseSendAttempts } from "./collapseAttempts";
 import { OrderExpensesSection } from "@/components/finance/OrderExpensesSection";
 import {
@@ -140,6 +141,49 @@ export default async function OwnerOrderPage({ params }: { params: Promise<{ id:
   } catch {
     // QUO-таблицы недоступны — блок общения просто не покажет историю.
   }
+
+  // Что ассистент сделал с входящими по этому заказу. Экран владельца, поэтому показываем и то,
+  // чего клиент никогда не увидит: запрос к модели и её сырой ответ. Сбой не должен ронять
+  // карточку заказа — ассистент здесь гость.
+  const assistantTurns: AssistantTurn[] = await prisma.aiTurn
+    .findMany({
+      where: { orderId: id },
+      orderBy: { createdAt: "desc" },
+      take: 20,
+      select: {
+        id: true, status: true, source: true, intent: true, important: true, needsHuman: true,
+        replyText: true, skipReason: true, promptText: true, responseText: true, modelName: true,
+        latencyMs: true, createdAt: true,
+        communication: { select: { messageText: true, transcript: true } },
+      },
+    })
+    .then((rows) =>
+      rows.map((t) => ({
+        id: t.id,
+        status: t.status,
+        source: t.source,
+        intent: t.intent,
+        important: t.important,
+        needsHuman: t.needsHuman,
+        replyText: t.replyText,
+        skipReason: t.skipReason,
+        promptText: t.promptText,
+        responseText: t.responseText,
+        modelName: t.modelName,
+        latencyMs: t.latencyMs,
+        createdAt: t.createdAt.toISOString(),
+        incomingText: t.communication.messageText ?? t.communication.transcript ?? null,
+      }))
+    )
+    .catch(() => []);
+  // Сухой прогон читаем отдельным запросом: сериализованный заказ про ассистента ничего не
+  // знает, а тащить поле через общую сериализацию ради одной плашки не стоит.
+  const assistantDryRun = assistantTurns.length
+    ? (await prisma.order
+        .findUnique({ where: { id }, select: { site: { select: { aiDryRun: true } } } })
+        .then((r) => r?.site?.aiDryRun ?? true)
+        .catch(() => true))
+    : true;
 
   return (
     <OrderPageShell
@@ -277,6 +321,9 @@ export default async function OwnerOrderPage({ params }: { params: Promise<{ id:
             storeTimeZone={storeTimeZone}
             unread={commUnread}
           />
+
+          {/* Разборы ассистента: единственное место, где видно его работу во время сухого прогона. */}
+          <OrderAssistantCard turns={assistantTurns} dryRun={assistantDryRun} />
 
           {/* Доставка целиком: курьер, Burq и точка забора. Раньше владелец имел собственную
               копию этого блока вместе с копией трёх запросов Burq — теперь блок один. */}

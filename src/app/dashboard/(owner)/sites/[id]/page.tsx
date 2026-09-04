@@ -319,16 +319,39 @@ export default async function SiteSettingsPage({ params }: { params: Promise<{ i
           </Card>
           {/* Второй почтовый канал магазина, независимый от Brevo: только ручная переписка. */}
           <SiteEmailFactoryPanel siteId={site.id} current={site.emailFactoryDomain} />
-          <SiteAiAssistantPanel
-            siteId={site.id}
-            initial={{
-              mode: site.aiMode,
-              dryRun: site.aiDryRun,
-              knowledgeBase: site.aiKnowledgeBase,
-              unknownKnowledgeBase: site.aiUnknownKnowledgeBase,
-            }}
-          />
         </>
+      ),
+    },
+    {
+      // Своя вкладка, а не угол в Email: ассистент отвечает по SMS, и искать его в почте
+      // владелец не станет — он там его и не нашёл.
+      key: "assistant",
+      label: "Ассистент",
+      state: {
+        ok: site.aiMode !== "OFF",
+        title:
+          site.aiMode === "OFF"
+            ? "Выключен"
+            : site.aiDryRun
+              ? "Сухой прогон: пишет черновики, клиенту ничего не уходит"
+              : site.aiMode === "DRAFT"
+                ? "Готовит черновики"
+                : "Простое отвечает сам",
+      },
+      content: (
+        <Card>
+          <CardBody className="text-sm">
+            <SiteAiAssistantPanel
+              siteId={site.id}
+              initial={{
+                mode: site.aiMode,
+                dryRun: site.aiDryRun,
+                knowledgeBase: site.aiKnowledgeBase,
+                unknownKnowledgeBase: site.aiUnknownKnowledgeBase,
+              }}
+            />
+          </CardBody>
+        </Card>
       ),
     },
     {

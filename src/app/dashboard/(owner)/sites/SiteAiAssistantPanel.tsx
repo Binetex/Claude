@@ -45,7 +45,7 @@ export function SiteAiAssistantPanel({
     });
 
   return (
-    <div className="space-y-3 border-t border-slate-100 pt-3">
+    <div className="space-y-3">
       <div>
         <div className="text-xs text-slate-400">Ассистент клиентской переписки</div>
         <p className="text-[11px] text-slate-400">
