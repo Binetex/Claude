@@ -32,7 +32,7 @@ export function createPrismaDraftPort(prisma: PrismaClient): DraftCreatePort {
           apartment: true,
           city: true,
           zip: true,
-          customerNote: true,
+          courierNote: true,
           pickupLocationOverrideId: true,
           site: { select: { burqDraftAutoCreateEnabled: true, burqDefaultDropoffInstructions: true, timezone: true, quoPhoneNumber: true } },
           deliveryIntent: { select: { scheduleVersion: true } },
@@ -74,8 +74,10 @@ export function createPrismaDraftPort(prisma: PrismaClient): DraftCreatePort {
             // dropoff может требовать штат; см. отчёт о недостающих полях).
             recipientState: null,
             zip: order.zip,
-            // Стандартный dropoff-текст магазина + инструкция заказа (дедуп, пустое → null).
-            dropoffInstructions: combineDropoffNotes(order.site?.burqDefaultDropoffInstructions, order.customerNote),
+            // Стандартный dropoff-текст магазина + инструкция ЭТОГО заказа (дедуп, пустое → null).
+            // Именно courierNote, а не customerNote: заметка — внутренняя запись команды
+            // («Просит пораньше», «Тест»), и курьеру она попадать не должна.
+            dropoffInstructions: combineDropoffNotes(order.site?.burqDefaultDropoffInstructions, order.courierNote),
           },
         },
         floristId: order.currentFloristId,

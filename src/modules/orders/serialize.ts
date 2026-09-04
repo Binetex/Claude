@@ -92,6 +92,7 @@ function baseFields(o: OrderListRow) {
     zip: o.zip,
     cardMessage: o.cardMessage,
     customerNote: o.customerNote,
+    courierNote: o.courierNote,
     deliveryInstructions: o.deliveryInstructions,
     paymentStatus: o.paymentStatus,
     orderStatus: o.orderStatus,

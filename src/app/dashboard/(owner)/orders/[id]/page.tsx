@@ -23,6 +23,7 @@ import { OwnerPriceDialog } from "./OwnerPriceDialog";
 import { ContactEditDialog } from "./ContactEditDialog";
 import { CardNoteCard } from "./CardNoteCard";
 import { CustomerNoteBanner } from "./CustomerNoteBanner";
+import { CourierNoteCard } from "./CourierNoteCard";
 import { DeliveryDateDialog } from "./DeliveryDateDialog";
 import { OrderStatusCard } from "./OrderStatusCard";
 import { DeliveryStatusCard } from "./DeliveryStatusCard";
@@ -290,6 +291,21 @@ export default async function OwnerOrderPage({ params }: { params: Promise<{ id:
             deliveryPhotoUrl={order.deliveryPhotoUrl}
             storeTimeZone={storeTimeZone}
             pickup={<OrderPickupCard orderId={order.id} />}
+            courierNote={
+
+              <CourierNoteCard
+
+                orderId={order.id}
+
+                updatedAt={order.updatedAt}
+
+                courierNote={order.courierNote}
+
+                deliveryAlreadyCreated={order.deliveryStatus !== "PENDING"}
+
+              />
+
+            }
           />
 
           {/* ── Служебное. Держится ОТДЕЛЬНО, в самом низу: к работе с заказом эти два блока

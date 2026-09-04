@@ -1203,8 +1203,14 @@ model Order {
   // Открытка и заметка — с оригиналами, автоматически не меняются
   cardMessage          String @default("")
   originalCardMessage  String @default("")
+  /// ВНУТРЕННЯЯ заметка команды: владелец, колл-центр, флорист. На Woo сюда попадает и то,
+  /// что заказчик написал при оформлении. НАРУЖУ НЕ УХОДИТ — курьеру предназначен courierNote.
   customerNote         String @default("")
   originalCustomerNote String @default("")
+  /// Инструкция КУРЬЕРУ: единственное поле заказа, уезжающее в Burq (поверх стандартного
+  /// текста магазина, Site.burqDefaultDropoffInstructions). Заполняется редко и вручную —
+  /// обычно флористом перед вызовом курьера. Пусто — в запрос Burq не попадает вовсе.
+  courierNote          String @default("")
 
   // Финансы (раздельно) — доступны только владельцу
   itemsTotal                    Decimal   @db.Decimal(10, 2)

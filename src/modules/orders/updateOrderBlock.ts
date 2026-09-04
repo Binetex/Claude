@@ -2,6 +2,7 @@ import { format } from "date-fns";
 import { prisma } from "@/lib/db";
 import { Prisma } from "@/generated/prisma/client";
 import type { OrderStatus, Role } from "@/generated/prisma/enums";
+import { COURIER_NOTE_MAX } from "@/lib/courierNote";
 import { normalizePhone } from "@/lib/phone";
 import { recomputeDaysForOrder } from "@/modules/finance/orderDayHook";
 import { manualOrderStatuses } from "@/lib/statuses";
@@ -20,7 +21,7 @@ import { parseLocalDayToUtcMidnight } from "@/lib/tz";
  * поля (before/after), без секретов/паролей (в этих блоках их нет).
  */
 
-export type OrderBlock = "contacts" | "sender" | "status" | "delivery" | "cardNote";
+export type OrderBlock = "contacts" | "sender" | "status" | "delivery" | "cardNote" | "courierNote";
 
 /** Значения полей блока в «плоском» строковом виде — как их отдаёт/принимает форма UI. */
 export type BlockFormData = Record<string, string | null | undefined>;
@@ -43,6 +44,7 @@ const BLOCK_SELECT: Record<OrderBlock, Prisma.OrderSelect> = {
   status: { orderStatus: true },
   delivery: { deliveryDate: true, deliveryWindow: true },
   cardNote: { cardMessage: true, customerNote: true },
+  courierNote: { courierNote: true },
 };
 
 /** Строит Prisma-`data` только из присланных полей блока (нормализация телефонов/дат). */
@@ -97,6 +99,17 @@ function buildUpdateData(block: OrderBlock, data: BlockFormData): { data: Prisma
       const out: Prisma.OrderUpdateInput = {};
       if (has("cardMessage")) out.cardMessage = str("cardMessage");
       if (has("customerNote")) out.customerNote = str("customerNote");
+      return { data: out };
+    }
+    case "courierNote": {
+      const out: Prisma.OrderUpdateInput = {};
+      // Курьер читает это в приложении доставки: длинный текст там обрезается, поэтому
+      // предел жёсткий, на сервере, а не только в форме.
+      if (has("courierNote")) {
+        const v = str("courierNote").trim();
+        if (v.length > COURIER_NOTE_MAX) return { error: `Инструкция курьеру длиннее ${COURIER_NOTE_MAX} символов` };
+        out.courierNote = v;
+      }
       return { data: out };
     }
   }

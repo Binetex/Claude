@@ -21,6 +21,7 @@ export async function DeliveryStatusCard({
   storeTimeZone,
   pickup,
   bouquetPhotoAction,
+  courierNote,
   canEditActualCost = false,
 }: {
   orderId: string;
@@ -40,6 +41,11 @@ export async function DeliveryStatusCard({
    * «Фото букета», чтобы одна и та же картинка не показывалась дважды.
    */
   bouquetPhotoAction?: React.ReactNode;
+  /**
+   * Инструкция курьеру. Слот: поле правят все три роли, но собирать его должна страница —
+   * блок доставки не знает ни про OCC-версию заказа, ни про наличие черновика Burq.
+   */
+  courierNote?: React.ReactNode;
   /**
    * Можно ли подтвердить фактическую стоимость доставки прямо здесь. Решает СТРАНИЦА: карточка
    * живёт у трёх ролей, а подтверждение стоимости — финансовое решение владельца. Флорист и
@@ -153,6 +159,8 @@ export async function DeliveryStatusCard({
 
         {bouquetPhotoAction}
         {pickup}
+        {/* Перед панелью Burq: инструкцию дописывают там же, где вызывают курьера. */}
+        {courierNote}
 
         <BurqDeliveryPanel
           orderId={orderId}

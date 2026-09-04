@@ -34,6 +34,9 @@ async function runPostSave(block: OrderBlock, orderId: string) {
     } else if (block === "cardNote") {
       await syncOrderToShopify(orderId); // cardMessage уходит в Shopify note
     }
+    // courierNote наружу не синхронизируется и доставку не перепланирует: у созданного
+    // черновика Burq инструкцию уже не изменить, а пересоздавать доставку из-за правки
+    // текста значило бы отменить вызванного курьера.
   } catch (e) {
     console.error(`[saveOrderBlock] post-save hook failed (block=${block}, order=${orderId})`, e);
   }

@@ -16,6 +16,7 @@ import { OrderCommunications } from "@/app/dashboard/(owner)/orders/[id]/OrderCo
 import { ContactEditDialog } from "@/app/dashboard/(owner)/orders/[id]/ContactEditDialog";
 import { CardNoteCard } from "@/app/dashboard/(owner)/orders/[id]/CardNoteCard";
 import { CustomerNoteBanner } from "@/app/dashboard/(owner)/orders/[id]/CustomerNoteBanner";
+import { CourierNoteCard } from "@/app/dashboard/(owner)/orders/[id]/CourierNoteCard";
 import { DeliveryDateDialog } from "@/app/dashboard/(owner)/orders/[id]/DeliveryDateDialog";
 import { OrderStatusCard } from "@/app/dashboard/(owner)/orders/[id]/OrderStatusCard";
 import { DeliveryStatusCard } from "@/app/dashboard/(owner)/orders/[id]/DeliveryStatusCard";
@@ -174,6 +175,21 @@ export default async function FloristOrderPage({ params }: { params: Promise<{ i
             deliveryPhotoUrl={order.deliveryPhotoUrl}
             storeTimeZone={comm.storeTimeZone}
             pickup={<OrderPickupCard orderId={order.id} />}
+            courierNote={
+
+              <CourierNoteCard
+
+                orderId={order.id}
+
+                updatedAt={order.updatedAt}
+
+                courierNote={order.courierNote}
+
+                deliveryAlreadyCreated={order.deliveryStatus !== "PENDING"}
+
+              />
+
+            }
             bouquetPhotoAction={<BouquetPhotoButton orderId={order.id} photoUrl={order.bouquetPhotoUrl} />}
           />
         </>
