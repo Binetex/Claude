@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { PrismaClient } from "@/generated/prisma/client";
 
 const enqueue = vi.fn();
@@ -86,6 +86,14 @@ const record = (over: Record<string, unknown> = {}) => ({
 beforeEach(() => {
   enqueue.mockReset();
   publishAutomationTrigger.mockReset();
+  // Часы замораживаем ВСЕГДА: обработчик сравнивает срок из записи с «сейчас», и тест на
+  // реальном времени работал бы ровно два часа после написания, а потом гас как «опоздавший».
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date(SENT_AT.getTime() + 60 * 60_000)); // ровно срок первого ожидания
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 describe("постановка ожидания", () => {

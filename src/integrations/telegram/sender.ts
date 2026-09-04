@@ -142,6 +142,16 @@ export class TelegramSender {
     }).catch(() => null);
   }
 
+  /**
+   * Прямая ссылка на файл из сообщения (голосовое владельца). Telegram отдаёт путь через getFile,
+   * а сам файл лежит по отдельному адресу с токеном бота — наружу эту ссылку показывать нельзя.
+   */
+  async getFileUrl(fileId: string): Promise<string | null> {
+    const { res } = await this.callWithRetry("getFile", { file_id: fileId });
+    const filePath = (res?.result as { file_path?: string } | undefined)?.file_path;
+    return res?.ok && filePath ? `${API}/file/bot${this.botToken}/${filePath}` : null;
+  }
+
   async sendMessage(chatId: string, text: string, buttons?: TelegramButton[]): Promise<SendResult> {
     return this.toSend(await this.callWithRetry("sendMessage", {
       chat_id: chatId, text, parse_mode: "HTML", disable_web_page_preview: true, ...keyboard(buttons),

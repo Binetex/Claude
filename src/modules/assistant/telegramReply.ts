@@ -15,6 +15,7 @@ import { resolveBotById } from "@/integrations/telegram/bots";
 import { getDeepseekConfig } from "@/integrations/deepseek/config";
 import { createDeepseekClient, type DeepseekClient } from "@/integrations/deepseek/client";
 import { sendAssistantReply, SEND_ACTION_PREFIX } from "./deliver";
+import { getSpeechConfig, createTranscriber, type Transcriber } from "@/integrations/speech/transcribe";
 
 export const TELEGRAM_UPDATE_EVENT = "assistant.telegram.update";
 
@@ -51,7 +52,7 @@ export async function translateForCustomer(client: DeepseekClient, text: string)
   }
 }
 
-type Deps = { client?: DeepseekClient | null };
+type Deps = { client?: DeepseekClient | null; transcriber?: Transcriber | null; fetchImpl?: typeof fetch };
 
 /**
  * Разбор одного обновления Telegram. Возвращает ничего: всё, что нужно сказать человеку,
@@ -67,7 +68,12 @@ export function buildTelegramUpdateHandler(prisma: PrismaClient, deps: Deps = {}
     const sender = new TelegramSender(lookup.bot.token);
     const update = p.update as {
       callback_query?: { id: string; data?: string; message?: { message_id?: number; chat?: { id?: number | string } } };
-      message?: { text?: string; chat?: { id?: number | string }; reply_to_message?: { message_id?: number } };
+      message?: {
+        text?: string;
+        voice?: { file_id: string; mime_type?: string };
+        chat?: { id?: number | string };
+        reply_to_message?: { message_id?: number };
+      };
     };
 
     // ── Нажатие кнопки «Отправить» ──
@@ -89,19 +95,39 @@ export function buildTelegramUpdateHandler(prisma: PrismaClient, deps: Deps = {}
       return;
     }
 
-    // ── Ответ реплаем ──
+    // ── Ответ реплаем: текстом или голосом ──
     const msg = update.message;
     const replyToId = msg?.reply_to_message?.message_id;
-    const text = (msg?.text ?? "").trim();
-    if (!replyToId || !text) return; // сообщение мимо бота нас не касается
+    if (!replyToId) return; // сообщение мимо бота нас не касается
+    const chatId = msg?.chat?.id != null ? String(msg.chat.id) : lookup.bot.chatId;
 
     const turn = await prisma.aiTurn.findFirst({
       where: { telegramMessageId: String(replyToId) },
       select: { id: true, status: true, replyText: true },
       orderBy: { createdAt: "desc" },
     });
-    const chatId = msg?.chat?.id != null ? String(msg.chat.id) : lookup.bot.chatId;
     if (!turn) return;
+
+    let text = (msg?.text ?? "").trim();
+
+    // Голосовое: скачиваем у Telegram, расшифровываем и дальше ведём как напечатанный текст.
+    // Распознавание не подключено или не справилось — просим написать: молча проглотить
+    // голосовое значит оставить владельца в уверенности, что ответ ушёл.
+    if (!text && msg?.voice?.file_id) {
+      const speechCfg = getSpeechConfig();
+      const transcriber = deps.transcriber ?? (speechCfg ? createTranscriber(speechCfg) : null);
+      if (!transcriber) {
+        await sender.sendMessage(chatId, "Голосовые пока не подключены — напишите ответ текстом.");
+        return;
+      }
+      const spoken = await transcribeVoice(sender, msg.voice, transcriber, deps.fetchImpl ?? fetch);
+      if (!spoken) {
+        await sender.sendMessage(chatId, "Не разобрал голосовое. Напишите ответ текстом.");
+        return;
+      }
+      text = spoken;
+    }
+    if (!text) return;
     if (turn.status !== "DRAFT") {
       await sender.sendMessage(chatId, "По этому сообщению уже принято решение.");
       return;
@@ -133,4 +159,20 @@ export function buildTelegramUpdateHandler(prisma: PrismaClient, deps: Deps = {}
     // Подтверждение — новое сообщение бота, и реплаить теперь надо на него.
     if (res.ok) await prisma.aiTurn.update({ where: { id: turn.id }, data: { telegramMessageId: res.messageId, telegramChatId: chatId } });
   };
+}
+
+/** Скачивает голосовое из Telegram и отдаёт расшифровку. Любой сбой — null. */
+async function transcribeVoice(
+  sender: TelegramSender,
+  voice: { file_id: string; mime_type?: string },
+  transcriber: Transcriber,
+  fetchImpl: typeof fetch
+): Promise<string | null> {
+  const url = await sender.getFileUrl(voice.file_id);
+  if (!url) return null;
+  const res = await fetchImpl(url).catch(() => null);
+  if (!res?.ok) return null;
+  const bytes = new Uint8Array(await res.arrayBuffer());
+  if (bytes.length === 0) return null;
+  return transcriber({ bytes, filename: "voice.ogg", mime: voice.mime_type || "audio/ogg" });
 }
