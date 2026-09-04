@@ -2,9 +2,9 @@
 import { revalidatePath } from "next/cache";
 import { requireRole } from "@/lib/rbac";
 import { clampWait, findChainCycle } from "@/modules/automations/chain";
+import { WAIT_FIRST_MIN } from "@/modules/automations/replyWait";
 
 /** Запасное значение, если поле срока пришло пустым при непустой ссылке. */
-const DEFAULT_WAIT_MIN = 60;
 import { prisma } from "@/lib/db";
 import { featureFlags } from "@/lib/featureFlags";
 import { getQuoConfig } from "@/integrations/quo/config";
@@ -163,7 +163,7 @@ export async function createAutomation(input: AutomationInput): Promise<ActionRe
       conditionsJson: normalizeConditions(input.conditions),
       noReplyNextAutomationId: input.noReplyNextAutomationId ?? null,
       // Срок режем на сервере: форму можно обойти, а сломанная пауза видна уже по факту.
-      noReplyAfterMin: input.noReplyNextAutomationId && input.noReplyAfterMin != null ? clampWait(input.noReplyAfterMin, DEFAULT_WAIT_MIN) : null,
+      noReplyAfterMin: input.noReplyNextAutomationId && input.noReplyAfterMin != null ? clampWait(input.noReplyAfterMin, WAIT_FIRST_MIN) : null,
     },
     select: { id: true },
   });
@@ -213,7 +213,7 @@ export async function updateAutomation(id: string, input: AutomationInput): Prom
       conditionsJson: normalizeConditions(input.conditions),
       noReplyNextAutomationId: input.noReplyNextAutomationId ?? null,
       // Срок режем на сервере: форму можно обойти, а сломанная пауза видна уже по факту.
-      noReplyAfterMin: input.noReplyNextAutomationId && input.noReplyAfterMin != null ? clampWait(input.noReplyAfterMin, DEFAULT_WAIT_MIN) : null,
+      noReplyAfterMin: input.noReplyNextAutomationId && input.noReplyAfterMin != null ? clampWait(input.noReplyAfterMin, WAIT_FIRST_MIN) : null,
     },
   });
   revalidatePath("/dashboard/automations");

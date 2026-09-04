@@ -176,14 +176,12 @@ export default async function OwnerOrderPage({ params }: { params: Promise<{ id:
       }))
     )
     .catch(() => []);
-  // Сухой прогон читаем отдельным запросом: сериализованный заказ про ассистента ничего не
-  // знает, а тащить поле через общую сериализацию ради одной плашки не стоит.
-  const assistantDryRun = assistantTurns.length
-    ? (await prisma.order
-        .findUnique({ where: { id }, select: { site: { select: { aiDryRun: true } } } })
-        .then((r) => r?.site?.aiDryRun ?? true)
-        .catch(() => true))
-    : true;
+  // Настройки ассистента читаем отдельным запросом: сериализованный заказ про ассистента ничего
+  // не знает, а тащить поля через общую сериализацию ради одной карточки не стоит.
+  const assistant = await prisma.order
+    .findUnique({ where: { id }, select: { aiDisabled: true, site: { select: { aiDryRun: true, aiMode: true } } } })
+    .then((r) => ({ dryRun: r?.site?.aiDryRun ?? true, enabled: (r?.site?.aiMode ?? "OFF") !== "OFF", disabledOnOrder: r?.aiDisabled ?? false }))
+    .catch(() => ({ dryRun: true, enabled: false, disabledOnOrder: false }));
 
   return (
     <OrderPageShell
@@ -323,7 +321,7 @@ export default async function OwnerOrderPage({ params }: { params: Promise<{ id:
           />
 
           {/* Разборы ассистента: единственное место, где видно его работу во время сухого прогона. */}
-          <OrderAssistantCard turns={assistantTurns} dryRun={assistantDryRun} />
+          <OrderAssistantCard orderId={order.id} turns={assistantTurns} dryRun={assistant.dryRun} enabled={assistant.enabled} disabledOnOrder={assistant.disabledOnOrder} />
 
           {/* Доставка целиком: курьер, Burq и точка забора. Раньше владелец имел собственную
               копию этого блока вместе с копией трёх запросов Burq — теперь блок один. */}

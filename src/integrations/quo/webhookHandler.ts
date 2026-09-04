@@ -36,5 +36,11 @@ export function buildQuoWebhookHandler(prisma: PrismaClient): OutboxHandler {
     if (res.outcome === "created" && (record.payload as NormalizedQuoEvent).direction === "INBOUND") {
       await publishAssistantIncoming(new PrismaOutboxRepository(prisma), res.communicationId);
     }
+    // Расшифровка звонка приходит отдельным событием и позже самого звонка: для ассистента это
+    // и есть «клиент что-то сказал». Свой ключ, иначе дедуп по входящему её проглотит.
+    if (res.outcome === "enriched" && (res.kind === "transcript" || res.kind === "summary")) {
+      const repo = new PrismaOutboxRepository(prisma);
+      for (const id of res.communicationIds) await publishAssistantIncoming(repo, id, `${res.kind}`);
+    }
   };
 }

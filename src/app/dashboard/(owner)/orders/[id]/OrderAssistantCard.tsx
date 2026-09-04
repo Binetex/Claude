@@ -1,5 +1,6 @@
 import { Bot } from "lucide-react";
 import { Card, CardHeader, CardTitle, CardBody } from "@/components/ui/Card";
+import { AssistantOrderToggle } from "./AssistantOrderToggle";
 
 /**
  * Что ассистент сделал с входящими по этому заказу. Видит ТОЛЬКО владелец.
@@ -28,6 +29,7 @@ export type AssistantTurn = {
 /** Человеческие подписи причин молчания: коды в интерфейсе читать невозможно. */
 const SKIP_LABELS: Record<string, string> = {
   order_disabled: "ассистент выключен на этом заказе",
+  assistant_off: "ассистент выключен у магазина",
   order_closed: "заказ отменён",
   delivered_long_ago: "доставлен больше трёх дней назад",
   small_talk: "клиент просто поблагодарил",
@@ -44,8 +46,14 @@ function skipLabel(reason: string | null): string {
   return SKIP_LABELS[reason] ?? reason;
 }
 
-export function OrderAssistantCard({ turns, dryRun }: { turns: AssistantTurn[]; dryRun: boolean }) {
-  if (turns.length === 0) return null;
+/**
+ * Карточка есть, только когда ассистент у магазина включён или по заказу уже есть разборы:
+ * у магазина без ассистента галочка «без ИИ» ничего не выключает.
+ */
+export function OrderAssistantCard({
+  orderId, turns, dryRun, enabled, disabledOnOrder,
+}: { orderId: string; turns: AssistantTurn[]; dryRun: boolean; enabled: boolean; disabledOnOrder: boolean }) {
+  if (turns.length === 0 && !enabled) return null;
 
   return (
     <Card>
@@ -53,14 +61,18 @@ export function OrderAssistantCard({ turns, dryRun }: { turns: AssistantTurn[]; 
         <CardTitle className="flex flex-wrap items-center gap-2">
           <Bot className="size-4 text-slate-400" />
           Ассистент
-          {dryRun && (
+          {dryRun && enabled && (
             <span className="rounded border border-amber-200 bg-amber-50 px-1.5 py-px text-[11px] font-normal text-amber-700">
               сухой прогон — клиенту не уходит ничего
             </span>
           )}
+          <span className="ml-auto">
+            <AssistantOrderToggle orderId={orderId} disabled={disabledOnOrder} />
+          </span>
         </CardTitle>
       </CardHeader>
       <CardBody className="space-y-3">
+        {turns.length === 0 && <p className="text-sm text-slate-500">Входящих по этому заказу ассистент ещё не разбирал.</p>}
         {turns.map((t) => (
           <div key={t.id} className="rounded-lg border border-slate-200 px-3 py-2.5">
             <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-slate-500">

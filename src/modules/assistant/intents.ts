@@ -26,7 +26,14 @@ export type IntentDef = {
   requires: string[];
   /** Текст по умолчанию — его же владелец видит подсказкой в поле. */
   defaultText: string;
+  /**
+   * Состояние заказа, при котором заготовка вообще верна: «ваш заказ доставлен» по
+   * недоставленному заказу — ложь, какие бы переменные ни стояли.
+   */
+  when?: (order: IntentOrderState) => boolean;
 };
+
+export type IntentOrderState = { deliveryStatus: string | null; deliveryIsToday: boolean };
 
 export const INTENTS: readonly IntentDef[] = [
   {
@@ -44,6 +51,8 @@ export const INTENTS: readonly IntentDef[] = [
     phrases: ["what time", "when will it arrive", "when will you deliver", "when are you coming", "delivery time", "eta", "how soon"],
     requires: ["delivery_time"],
     defaultText: "Your delivery is scheduled for {{delivery_time}} today.",
+    // «Сегодня» в тексте — значит только в день доставки и только пока не доставлено.
+    when: (o) => o.deliveryIsToday && o.deliveryStatus !== "DELIVERED",
   },
   {
     key: "photo",
@@ -62,6 +71,7 @@ export const INTENTS: readonly IntentDef[] = [
     phrases: ["was it delivered", "has it been delivered", "did you deliver", "is it delivered", "already delivered"],
     requires: [],
     defaultText: "Your order was delivered. If anything looks wrong, tell us and we will take care of it.",
+    when: (o) => o.deliveryStatus === "DELIVERED",
   },
 ] as const;
 

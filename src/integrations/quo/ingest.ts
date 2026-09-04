@@ -33,7 +33,7 @@ export type QuoIngestDeps = {
 
 export type IngestResult =
   | { outcome: "created" | "updated" | "duplicate"; communicationId: string; orderId: string | null }
-  | { outcome: "enriched"; matched: number }
+  | { outcome: "enriched"; matched: number; kind: "recording" | "transcript" | "summary"; communicationIds: string[] }
   | { outcome: "skipped"; reason: string };
 
 const CANDIDATE_WINDOW_MS = 90 * 24 * 3600 * 1000;
@@ -99,13 +99,17 @@ export async function ingestQuoEvent(prisma: PrismaClient, event: NormalizedQuoE
     } else {
       data.summary = event.summary;
     }
-    const r = await prisma.orderCommunication.updateMany({ where: { provider: "QUO", providerResourceId: event.resourceId, type: { in: ["CALL", "VOICEMAIL"] } }, data });
+    const where: Prisma.OrderCommunicationWhereInput = { provider: "QUO", providerResourceId: event.resourceId, type: { in: ["CALL", "VOICEMAIL"] } };
+    const r = await prisma.orderCommunication.updateMany({ where, data });
     if (r.count === 0) {
       // Обогащение пришло раньше call.completed (гонка) — не теряем: пусть outbox повторит.
       throw new QuoIngestRetryableError(`parent_call_not_found:${event.kind}`);
     }
     quoLog("comm.enriched", { kind: event.kind, resourceId: event.resourceId, matched: r.count });
-    return { outcome: "enriched", matched: r.count };
+    // Кому досталось обогащение — нужно вызывающему: расшифровка входящего звонка это новый
+    // текст клиента, и ассистент обязан его увидеть.
+    const touched = await prisma.orderCommunication.findMany({ where: { ...where, direction: "INBOUND" }, select: { id: true } });
+    return { outcome: "enriched", matched: r.count, kind: event.kind, communicationIds: touched.map((t) => t.id) };
   }
 
   // ── Self-call артефакт QUO: «исходящий» звонок на СОБСТВЕННЫЙ номер магазина — не коммуникация ──

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isConfirmation } from "./telegramReply";
+import { isConfirmation, isDiscard } from "./telegramReply";
 
 /**
  * Что считается «отправляй как есть». Ошибка в обе стороны видна сразу: приняли за подтверждение
@@ -21,5 +21,10 @@ describe("подтверждение отправки", () => {
     ]) {
       expect(isConfirmation(t)).toBe(false);
     }
+  });
+
+  it("«-», «нет», «не надо» — не отвечать; остальное — свой текст", () => {
+    for (const w of ["-", "нет", "No", "не надо", "cancel", "❌"]) expect(isDiscard(w)).toBe(true);
+    for (const w of ["+", "ok", "we deliver at 2pm", "нет, привезём в 5"]) expect(isDiscard(w)).toBe(false);
   });
 });

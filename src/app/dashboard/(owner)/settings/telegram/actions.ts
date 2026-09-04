@@ -59,6 +59,15 @@ export async function verifyBotAction(botId: string): Promise<{ result: VerifyRe
 
 export async function toggleBot(botId: string, enabled: boolean): Promise<ActionResult> {
   await requireRole("OWNER");
+  // Выключенный бот не должен и принимать: иначе Telegram продолжит слать обновления на адрес,
+  // где их некому разбирать, и через сутки бросит вебхук с ошибкой. Сбой снятия не блокирует
+  // выключение — приём и так проверяет, включён ли бот.
+  if (!enabled) {
+    const lookup = await resolveBotById(prisma, botId);
+    if ("bot" in lookup) {
+      await fetch(`https://api.telegram.org/bot${lookup.bot.token}/deleteWebhook`, { method: "POST" }).catch(() => null);
+    }
+  }
   const r = await setBotEnabled(prisma, botId, enabled);
   revalidatePath(PATH);
   if ("error" in r) return { error: r.error };

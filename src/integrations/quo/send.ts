@@ -94,7 +94,14 @@ export async function sendOrderSms(prisma: PrismaClient, client: QuoClient | nul
   }
 }
 
-export type SendUnlinkedSmsInput = { siteId: string; toPhone: string; text: string; idempotencyKey: string };
+export type SendUnlinkedSmsInput = {
+  siteId: string;
+  toPhone: string;
+  text: string;
+  idempotencyKey: string;
+  /** Заказ, к которому отнести запись: разговор привязан, но пишет номер, которого в заказе нет. */
+  orderId?: string | null;
+};
 
 /**
  * SMS человеку, у которого НЕТ заказа: ответ ассистента незнакомому номеру.
@@ -125,7 +132,7 @@ export async function sendUnlinkedSms(prisma: PrismaClient, client: QuoClient | 
   try {
     const pending = await prisma.orderCommunication.create({
       data: {
-        orderId: null, provider: "QUO", type: "SMS", direction: "OUTBOUND",
+        orderId: input.orderId ?? null, provider: "QUO", type: "SMS", direction: "OUTBOUND",
         partyRole: "UNKNOWN", status: "PENDING",
         storePhone: site.quoPhoneNumber ?? null, externalPhone: e164, externalPhoneNormalized: e164,
         messageText: text, providerPhoneNumberId: fromId, occurredAt: new Date(),

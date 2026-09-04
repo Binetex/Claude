@@ -29,16 +29,21 @@ export async function POST(request: Request, ctx: { params: Promise<{ botId: str
 
   const updateId = typeof update.update_id === "number" ? String(update.update_id) : null;
   const repo = new PrismaOutboxRepository(prisma);
-  await repo
-    .enqueue({
+  try {
+    await repo.enqueue({
       eventType: TELEGRAM_UPDATE_EVENT,
       aggregateType: "telegram",
       aggregateId: botId,
       payload: { botId, update },
       // Telegram повторяет доставку при любом сбое — дедуп по номеру обновления.
       idempotencyKey: `telegram.update:${botId}:${updateId ?? crypto.randomUUID()}`,
-    })
-    .catch(() => null);
+    });
+  } catch (err) {
+    // Очередь недоступна — честный 500: Telegram повторит доставку, и нажатие кнопки не
+    // потеряется. Молчаливый 200 означал бы «ушло», хотя ничего не ушло.
+    console.error("[telegram] обновление не поставлено в очередь:", err instanceof Error ? err.message : String(err));
+    return NextResponse.json({ ok: false }, { status: 500 });
+  }
 
   return NextResponse.json({ ok: true }, { status: 200 });
 }

@@ -13,13 +13,13 @@ export const ASSISTANT_INCOMING_EVENT = "assistant.incoming";
 export type AssistantIncomingPayload = { communicationId: string };
 
 /** Идемпотентно по входящему сообщению: одно входящее — один разбор. */
-export async function publishAssistantIncoming(repo: OutboxRepository, communicationId: string): Promise<void> {
+export async function publishAssistantIncoming(repo: OutboxRepository, communicationId: string, keySuffix?: string): Promise<void> {
   await repo.enqueue({
     eventType: ASSISTANT_INCOMING_EVENT,
     aggregateType: "communication",
     aggregateId: communicationId,
     payload: { communicationId } satisfies AssistantIncomingPayload,
-    idempotencyKey: `assistant.incoming:${communicationId}`,
+    idempotencyKey: `assistant.incoming:${communicationId}${keySuffix ? `:${keySuffix}` : ""}`,
   });
 }
 
@@ -29,19 +29,20 @@ export const ASSISTANT_NUDGE_EVENT = "assistant.nudge";
 /** Сколько ждём решения человека, прежде чем сказать клиенту «одну минуту». */
 export const NUDGE_AFTER_MIN = 20;
 
-export type AssistantNudgePayload = { turnId: string };
+export type AssistantNudgePayload = { turnId: string; dueAt: string };
 
 /**
  * Клиент не должен сидеть в тишине, пока черновик ждёт подтверждения. Одно нейтральное
  * сообщение — и всё: второго напоминания нет, иначе это уже назойливость.
  */
 export async function scheduleAssistantNudge(repo: OutboxRepository, turnId: string, from: Date): Promise<void> {
+  const dueAt = new Date(from.getTime() + NUDGE_AFTER_MIN * 60_000);
   await repo.enqueue({
     eventType: ASSISTANT_NUDGE_EVENT,
     aggregateType: "aiTurn",
     aggregateId: turnId,
-    payload: { turnId } satisfies AssistantNudgePayload,
+    payload: { turnId, dueAt: dueAt.toISOString() } satisfies AssistantNudgePayload,
     idempotencyKey: `assistant.nudge:${turnId}`,
-    availableAt: new Date(from.getTime() + NUDGE_AFTER_MIN * 60_000),
+    availableAt: dueAt,
   });
 }

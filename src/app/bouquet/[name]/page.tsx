@@ -1,5 +1,9 @@
+import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { bouquetMediaName } from "@/lib/bouquetPage";
+
+/** Заголовок вкладки и превью ссылки в SMS — клиенту, по-английски, без имени дашборда. */
+export const metadata: Metadata = { title: "Your bouquet", robots: { index: false, follow: false } };
 
 /**
  * Публичная страница с фото букета — по ссылке из SMS клиенту.
@@ -17,6 +21,8 @@ export default async function BouquetPhotoPage({ params }: { params: Promise<{ n
 
   return (
     <main
+      // Корневой layout — интерфейс дашборда на русском; эта страница для клиента.
+      lang="en"
       style={{
         minHeight: "100vh", margin: 0, padding: "24px 16px", background: "#f6f7f9",
         display: "flex", flexDirection: "column", alignItems: "center", gap: 16,

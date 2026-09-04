@@ -49,4 +49,16 @@ describe("применима ли заготовка", () => {
   it("выключенная заготовка не используется", () => {
     expect(templateApplies(tracking, { enabled: false, text: "…" }, { tracking_url: "https://t" })).toBe(false);
   });
+
+  it("заготовка со словом «сегодня» и «доставлен» подчиняются состоянию заказа", () => {
+    const today = INTENTS.find((i) => i.key === "delivery_time")!;
+    const delivered = INTENTS.find((i) => i.key === "delivered_check")!;
+    const on = { enabled: true, text: "x {{delivery_time}}" };
+    const vars = { delivery_time: "2-4pm" };
+    expect(templateApplies(today, on, vars, { deliveryStatus: "PENDING", deliveryIsToday: true })).toBe(true);
+    expect(templateApplies(today, on, vars, { deliveryStatus: "PENDING", deliveryIsToday: false })).toBe(false);
+    expect(templateApplies(today, on, vars, { deliveryStatus: "DELIVERED", deliveryIsToday: true })).toBe(false);
+    expect(templateApplies(delivered, { enabled: true, text: "done" }, {}, { deliveryStatus: "DELIVERED", deliveryIsToday: false })).toBe(true);
+    expect(templateApplies(delivered, { enabled: true, text: "done" }, {}, { deliveryStatus: "PENDING", deliveryIsToday: true })).toBe(false);
+  });
 });

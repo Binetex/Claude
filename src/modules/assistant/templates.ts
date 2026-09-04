@@ -4,7 +4,7 @@
  * Хранится JSON'ом на магазине, но наружу отдаётся уже разобранным: остальному коду не должно
  * быть дела до того, что где-то там `Json?`.
  */
-import { INTENTS, type IntentDef, type IntentKey } from "./intents";
+import { INTENTS, type IntentDef, type IntentKey, type IntentOrderState } from "./intents";
 
 export type TemplateSetting = { enabled: boolean; text: string };
 export type TemplateSettings = Record<string, TemplateSetting>;
@@ -44,7 +44,13 @@ export function writeTemplates(settings: Record<string, TemplateSetting>): Templ
  * Можно ли ответить заготовкой: она включена, текст есть, и все нужные ей значения непустые.
  * «Вот ваш трек» без трека — худший из возможных ответов, поэтому проверка обязательна.
  */
-export function templateApplies(def: IntentDef, setting: TemplateSetting, vars: Record<string, string>): boolean {
+export function templateApplies(
+  def: IntentDef,
+  setting: TemplateSetting,
+  vars: Record<string, string>,
+  state: IntentOrderState = { deliveryStatus: null, deliveryIsToday: false }
+): boolean {
   if (!setting.enabled || !setting.text.trim()) return false;
+  if (def.when && !def.when(state)) return false;
   return def.requires.every((key) => !!vars[key]?.trim());
 }

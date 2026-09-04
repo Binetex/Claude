@@ -10,8 +10,8 @@ import "server-only";
  * Каждый разбор оставляет строку в `AiTurn` — включая отказ отвечать и его причину. Без этого
  * на вопрос «почему по заказу тишина» нечем ответить, кроме догадок.
  */
-import type { PrismaClient } from "@/generated/prisma/client";
-import { TERMINAL_ORDER_STATUSES } from "@/lib/statuses";
+import { Prisma, type PrismaClient } from "@/generated/prisma/client";
+import { parseAttachments } from "@/integrations/quo/communicationsService";
 import { getDeepseekConfig } from "@/integrations/deepseek/config";
 import { createDeepseekClient, type DeepseekClient } from "@/integrations/deepseek/client";
 import { DeepseekError } from "@/integrations/deepseek/errors";
@@ -25,11 +25,12 @@ import { orderToVariableSource, SMS_ORDER_INCLUDE } from "@/modules/messaging/or
 import { shouldConsider, decideDelivery, type AssistantMode } from "./policy";
 import { scheduleAssistantNudge, type AssistantIncomingPayload } from "./events";
 import { PrismaOutboxRepository } from "@/outbox/prismaRepository";
-import { sendAssistantReply, notifyDraft } from "./deliver";
+import { sendAssistantReply, notifyDraft, notifyOwnerText } from "./deliver";
 import { prependReadyTimeNote } from "./note";
 import { findOrderByHint, linkConversation } from "./link";
 import { bouquetPageUrl } from "@/lib/bouquetPage";
 import { publishTelegramNotification } from "@/integrations/telegram/events";
+import { todayStrInTz, zonedLocalTimeToUtc } from "@/lib/tz";
 
 /**
  * Сколько последних сообщений переписки показываем модели. Двадцать — вся живая переписка по
@@ -38,11 +39,20 @@ import { publishTelegramNotification } from "@/integrations/telegram/events";
  */
 const HISTORY_LIMIT = 20;
 
+/** Сигнал «кончился баланс модели» владельцу — не чаще раза в сутки. */
+const NO_BALANCE_ALERT_HOURS = 24;
+
 export type AssistantDeps = {
   /** Инъекция клиента модели — в тестах реального обращения быть не должно. */
   client?: DeepseekClient | null;
   now?: () => Date;
 };
+
+type LoadedOrder = NonNullable<Awaited<ReturnType<typeof loadOrder>>>;
+
+function loadOrder(prisma: PrismaClient, id: string) {
+  return prisma.order.findUnique({ where: { id }, include: SMS_ORDER_INCLUDE });
+}
 
 export function buildAssistantHandler(prisma: PrismaClient, deps: AssistantDeps = {}) {
   const now = deps.now ?? (() => new Date());
@@ -55,58 +65,44 @@ export function buildAssistantHandler(prisma: PrismaClient, deps: AssistantDeps 
       where: { id: p.communicationId },
       select: {
         id: true, orderId: true, direction: true, messageText: true, transcript: true, summary: true,
-        type: true, partyRole: true, externalPhoneNormalized: true, storePhone: true, occurredAt: true,
+        type: true, partyRole: true, externalPhoneNormalized: true, storePhone: true, providerPhoneNumberId: true, occurredAt: true,
+        attachmentsJson: true,
       },
     });
     if (!incoming || incoming.direction !== "INBOUND") return;
+    const text = pickText(incoming);
 
     // Разбор уже был: одно входящее — один разбор, повтор обработчика ничего не создаёт.
-    const existing = await prisma.aiTurn.findUnique({ where: { communicationId: incoming.id }, select: { id: true } });
-    if (existing) return;
+    // Исключение — звонок: его запись создаётся до расшифровки, и первый разбор честно
+    // пропустил пустой текст. Пришла расшифровка — тот разбор снимается, идёт настоящий.
+    const existing = await prisma.aiTurn.findUnique({ where: { communicationId: incoming.id }, select: { id: true, status: true, skipReason: true } });
+    if (existing) {
+      if (!(existing.status === "SKIPPED" && existing.skipReason === "empty_text" && text)) return;
+      await prisma.aiTurn.delete({ where: { id: existing.id } });
+    }
 
     // Тот же срез заказа, что у автоматизаций: переменные шаблонов обязаны считаться одинаково,
     // иначе «во сколько привезут» в заготовке и в правиле разойдутся.
-    const order = incoming.orderId
-      ? await prisma.order.findUnique({ where: { id: incoming.orderId }, include: SMS_ORDER_INCLUDE })
-      : null;
+    const order = incoming.orderId ? await loadOrder(prisma, incoming.orderId) : null;
 
     // Магазин: у привязанного входящего — от заказа, у незнакомого номера — по номеру магазина,
-    // на который написали. Не нашли магазин — разбирать нечего и негде.
-    const site = order?.site
-      ?? (incoming.storePhone
-        ? await prisma.site.findFirst({ where: { quoPhoneNumber: incoming.storePhone } })
-        : null);
+    // на который написали: сначала по id номера в QUO (он стабилен), потом по самому номеру.
+    // Не нашли магазин — разбирать нечего и негде.
+    const site =
+      order?.site
+      ?? (incoming.providerPhoneNumberId ? await prisma.site.findFirst({ where: { quoPhoneNumberId: incoming.providerPhoneNumberId } }) : null)
+      ?? (incoming.storePhone ? await prisma.site.findFirst({ where: { quoPhoneNumber: incoming.storePhone } }) : null);
     if (!site) return;
 
-    const text = pickText(incoming);
-
-    const dayStart = new Date(now());
-    dayStart.setHours(0, 0, 0, 0);
-    const [repliesToday, repliesTotal, lastAutomated] = order
-      ? await Promise.all([
-          prisma.aiTurn.count({ where: { orderId: order.id, status: "SENT", createdAt: { gte: dayStart } } }),
-          prisma.aiTurn.count({ where: { orderId: order.id, status: "SENT" } }),
-          prisma.orderCommunication.findFirst({
-            where: {
-              orderId: order.id,
-              direction: "OUTBOUND",
-              OR: [{ automationJobs: { some: {} } }, { flowRunSteps: { some: {} } }],
-            },
-            orderBy: { occurredAt: "desc" },
-            select: { occurredAt: true },
-          }),
-        ])
-      : [0, 0, null];
-
+    const phone = incoming.externalPhoneNormalized;
     const gate = shouldConsider({
       mode: site.aiMode as AssistantMode,
       orderDisabled: !!order?.aiDisabled,
-      orderClosed: !!order && TERMINAL_ORDER_STATUSES.includes(order.orderStatus) && order.orderStatus === "CANCELLED",
-      deliveredAt: order?.deliveryStatus === "DELIVERED" ? order.updatedAt : null,
+      orderClosed: order?.orderStatus === "CANCELLED",
+      deliveredAt: deliveredMoment(order),
       text,
-      lastAutomatedAt: lastAutomated?.occurredAt ?? null,
-      repliesToday,
-      repliesTotal,
+      lastAutomatedAt: order ? await lastAutomatedAt(prisma, order.id) : null,
+      ...(await countReplies(prisma, site, order?.id ?? null, phone, now())),
       now: now(),
     });
     if (!gate.ok) {
@@ -122,7 +118,11 @@ export function buildAssistantHandler(prisma: PrismaClient, deps: AssistantDeps 
       if (intent) {
         const setting = readTemplates(site.aiTemplatesJson)[intent.key];
         const vars = buildOrderVariables(orderToVariableSource(order));
-        if (templateApplies(intent, setting, vars)) {
+        const state = {
+          deliveryStatus: order.deliveryStatus,
+          deliveryIsToday: !!order.deliveryDate && order.deliveryDate.toISOString().slice(0, 10) === todayStrInTz(site.timezone, now()),
+        };
+        if (templateApplies(intent, setting, vars, state)) {
           const rendered = renderTemplate(setting.text, vars);
           // Незаполненная переменная рендерится пустотой и съедает часть фразы — такой ответ
           // клиенту не уходит, вопрос честнее отдать модели.
@@ -163,7 +163,7 @@ export function buildAssistantHandler(prisma: PrismaClient, deps: AssistantDeps 
     const messages = buildMessages({
       knowledgeBase: order ? site.aiKnowledgeBase : site.aiUnknownKnowledgeBase,
       order: order ? snapshot(order, site.name, incoming.partyRole) : null,
-      history: await loadHistory(prisma, order?.id ?? null, incoming.id),
+      history: await loadHistory(prisma, order?.id ?? null, phone, incoming.storePhone, incoming.id),
       incomingText: text,
       catalog: wantsCatalog ? await loadCatalog(prisma, site.id).catch(() => []) : undefined,
     });
@@ -187,6 +187,9 @@ export function buildAssistantHandler(prisma: PrismaClient, deps: AssistantDeps 
           promptText: renderPrompt(messages),
         },
       });
+      // Кончились деньги — это единственный сбой, который владелец обязан узнать сразу: сам он
+      // ничего не заметит, а ассистент будет молчать по всем заказам. Один сигнал в сутки.
+      if (code === "no_balance") await alertNoBalance(prisma, now()).catch(() => null);
       return;
     }
 
@@ -195,28 +198,43 @@ export function buildAssistantHandler(prisma: PrismaClient, deps: AssistantDeps 
     // Незнакомый номер назвал заказ. Нашли ровно один — привязываем разговор и спрашиваем
     // модель ещё раз, уже с данными заказа: человек ждёт ответа про свой заказ сейчас, а не в
     // следующем сообщении. Один повтор, не рекурсия: второй подсказки в ответе с заказом не бывает.
-    let linkedOrder = order;
-    if (!order && parsed.orderHint) {
+    // В сухом прогоне не привязываем: он ничего не меняет в данных, только смотрит.
+    let linkedOrder: LoadedOrder | null = order;
+    if (!order && parsed.orderHint && !site.aiDryRun) {
       const foundId = await findOrderByHint(prisma, site.id, parsed.orderHint).catch(() => null);
-      if (foundId) {
-        await linkConversation(prisma, foundId, incoming.externalPhoneNormalized).catch(() => null);
-        linkedOrder = await prisma.order.findUnique({ where: { id: foundId }, include: SMS_ORDER_INCLUDE });
-        if (linkedOrder) {
-          const again = buildMessages({
-            knowledgeBase: site.aiKnowledgeBase,
-            order: snapshot(linkedOrder, site.name, incoming.partyRole),
-            history: await loadHistory(prisma, linkedOrder.id, incoming.id),
-            incomingText: text,
-          });
-          try {
-            const res = await client.complete(again);
-            raw = res.text;
-            latencyMs += res.latencyMs;
-            parsed = parseReply(raw);
-            messages.splice(0, messages.length, ...again);
-          } catch {
-            // Не вышло переспросить — остаёмся с ответом «без заказа», он безопасен.
-          }
+      const found = foundId ? await loadOrder(prisma, foundId) : null;
+      // По найденному заказу действуют те же правила, что и по любому другому: выключен,
+      // отменён или давно доставлен — не привязываем и отвечаем как незнакомому.
+      const foundGate = found
+        ? shouldConsider({
+            mode: site.aiMode as AssistantMode,
+            orderDisabled: found.aiDisabled,
+            orderClosed: found.orderStatus === "CANCELLED",
+            deliveredAt: deliveredMoment(found),
+            text,
+            lastAutomatedAt: null,
+            repliesToday: 0,
+            repliesTotal: 0,
+            now: now(),
+          })
+        : null;
+      if (found && foundGate?.ok) {
+        await linkConversation(prisma, found.id, phone, incoming.storePhone).catch(() => null);
+        linkedOrder = found;
+        const again = buildMessages({
+          knowledgeBase: site.aiKnowledgeBase,
+          order: snapshot(found, site.name, incoming.partyRole),
+          history: await loadHistory(prisma, found.id, phone, incoming.storePhone, incoming.id),
+          incomingText: text,
+        });
+        try {
+          const res = await client.complete(again);
+          raw = res.text;
+          latencyMs += res.latencyMs;
+          parsed = parseReply(raw);
+          messages.splice(0, messages.length, ...again);
+        } catch {
+          // Не вышло переспросить — остаёмся с ответом «без заказа», он безопасен.
         }
       }
     }
@@ -267,13 +285,16 @@ export function buildAssistantHandler(prisma: PrismaClient, deps: AssistantDeps 
  * черновик, а черновик в сухом прогоне никуда не показывается — он живёт только в карточке
  * заказа. Так «включу и посмотрю» действительно ничего не отправляет и никого не будит.
  *
+ * Не смогли отправить сами (номер не в заказе, QUO отказал) — черновик идёт человеку: молча
+ * оставить его в карточке значит, что клиент не получит ответа вовсе.
  * Сбой показа не должен ронять разбор: черновик уже записан и виден в карточке заказа.
  */
 async function finishTurn(prisma: PrismaClient, turnId: string, action: "send" | "draft", dryRun: boolean): Promise<void> {
   try {
     if (action === "send") {
-      await sendAssistantReply(prisma, turnId);
-      return;
+      const res = await sendAssistantReply(prisma, turnId);
+      if (res.ok) return;
+      console.warn(`[assistant] автоответ ${turnId} не ушёл (${res.code}) — черновик человеку`);
     }
     if (dryRun) return;
     const shown = await notifyDraft(prisma, turnId);
@@ -285,9 +306,64 @@ async function finishTurn(prisma: PrismaClient, turnId: string, action: "send" |
   }
 }
 
-/** Текст входящего: у SMS — сам текст, у звонка — расшифровка или краткое содержание. */
-function pickText(c: { messageText: string | null; transcript: string | null; summary: string | null }): string {
-  return (c.messageText || c.transcript || c.summary || "").trim();
+/**
+ * Текст входящего: у SMS — сам текст, у звонка — расшифровка или краткое содержание. Фото без
+ * подписи — тоже сообщение: клиент прислал чек или букет и ждёт реакции, а не тишины. Модель
+ * картинку не видит, поэтому ей говорится ровно это.
+ */
+function pickText(c: { messageText: string | null; transcript: string | null; summary: string | null; attachmentsJson?: Prisma.JsonValue | null }): string {
+  const body = (c.messageText || c.transcript || c.summary || "").trim();
+  const photos = parseAttachments(c.attachmentsJson).length;
+  if (!photos) return body;
+  const note = `[The customer sent ${photos === 1 ? "a photo" : `${photos} photos`}${body ? " with this text" : " without text"}. You cannot see images.]`;
+  return body ? `${note}\n${body}` : note;
+}
+
+/**
+ * Момент доставки. Своего поля у заказа нет; день доставки — ближайшая правда: «доставлен три
+ * дня назад» — это про календарь, а не про секунду, когда курьер нажал кнопку.
+ */
+function deliveredMoment(order: { deliveryStatus: string; deliveryDate: Date | null; updatedAt: Date } | null): Date | null {
+  if (!order || order.deliveryStatus !== "DELIVERED") return null;
+  return order.deliveryDate ?? order.updatedAt;
+}
+
+async function lastAutomatedAt(prisma: PrismaClient, orderId: string): Promise<Date | null> {
+  const row = await prisma.orderCommunication.findFirst({
+    where: { orderId, direction: "OUTBOUND", OR: [{ automationJobs: { some: {} } }, { flowRunSteps: { some: {} } }] },
+    orderBy: { occurredAt: "desc" },
+    select: { occurredAt: true },
+  });
+  return row?.occurredAt ?? null;
+}
+
+/**
+ * Потолки: по заказу — на заказ, по незнакомому номеру — на номер: иначе у него потолков нет
+ * вовсе. Сутки — календарные сутки МАГАЗИНА, а не UTC: полночь UTC в LA это 17:00, и по UTC
+ * потолок обнулялся бы посреди рабочего дня.
+ */
+async function countReplies(
+  prisma: PrismaClient,
+  site: { timezone: string | null },
+  orderId: string | null,
+  phone: string,
+  now: Date
+): Promise<{ repliesToday: number; repliesTotal: number }> {
+  const dayStart = zonedLocalTimeToUtc(todayStrInTz(site.timezone, now), "00:00", site.timezone);
+  const scope = orderId ? { orderId } : { communication: { externalPhoneNormalized: phone } };
+  const [repliesToday, repliesTotal] = await Promise.all([
+    prisma.aiTurn.count({ where: { ...scope, status: "SENT", createdAt: { gte: dayStart } } }),
+    prisma.aiTurn.count({ where: { ...scope, status: "SENT" } }),
+  ]);
+  return { repliesToday, repliesTotal };
+}
+
+async function alertNoBalance(prisma: PrismaClient, now: Date): Promise<void> {
+  const since = new Date(now.getTime() - NO_BALANCE_ALERT_HOURS * 3_600_000);
+  const recent = await prisma.aiTurn.count({ where: { status: "FAILED", skipReason: "model_no_balance", createdAt: { gte: since } } });
+  // Текущая строка уже записана — «1» значит, что это первый сбой за сутки.
+  if (recent > 1) return;
+  await notifyOwnerText(prisma, "⚠️ <b>Ассистент остановлен</b>: у DeepSeek закончился баланс. Клиентам не отвечаем, пока баланс не пополнен.");
 }
 
 async function logSkip(prisma: PrismaClient, siteId: string, orderId: string | null, communicationId: string, reason: string) {
@@ -296,25 +372,29 @@ async function logSkip(prisma: PrismaClient, siteId: string, orderId: string | n
   });
 }
 
-/** Переписка по заказу, старые сверху: ассистент не должен отвечать в вакууме. */
-async function loadHistory(prisma: PrismaClient, orderId: string | null, exceptId: string): Promise<HistoryLine[]> {
-  if (!orderId) return [];
+/**
+ * Переписка, старые сверху: ассистент не должен отвечать в вакууме. По заказу — вся переписка
+ * заказа; у незнакомого номера — его разговор с этим номером магазина. Неотправленные и
+ * упавшие исходящие не показываем: клиент их не видел, и модель не должна считать их сказанными.
+ */
+async function loadHistory(prisma: PrismaClient, orderId: string | null, phone: string, storePhone: string | null, exceptId: string): Promise<HistoryLine[]> {
   const rows = await prisma.orderCommunication.findMany({
     where: {
-      orderId,
+      ...(orderId ? { orderId } : { orderId: null, externalPhoneNormalized: phone, ...(storePhone ? { storePhone } : {}) }),
       id: { not: exceptId },
+      OR: [{ direction: "INBOUND" }, { direction: "OUTBOUND", status: { in: ["SENT", "DELIVERED"] } }],
       // Звонок — такая же часть разговора, как SMS: клиент часто ссылается на сказанное голосом.
-      OR: [{ messageText: { not: null } }, { transcript: { not: null } }, { summary: { not: null } }],
+      AND: [{ OR: [{ messageText: { not: null } }, { transcript: { not: null } }, { summary: { not: null } }, { attachmentsJson: { not: Prisma.DbNull } }] }],
     },
     orderBy: { occurredAt: "desc" },
     take: HISTORY_LIMIT,
-    select: { direction: true, messageText: true, transcript: true, summary: true, type: true, occurredAt: true },
+    select: { direction: true, messageText: true, transcript: true, summary: true, type: true, occurredAt: true, attachmentsJson: true },
   });
   return rows
     .reverse()
     .map((r) => {
       const body = r.messageText ?? r.transcript ?? r.summary ?? "";
-      const prefix = r.messageText ? "" : "(call) ";
+      const prefix = parseAttachments(r.attachmentsJson).length ? "(photo) " : r.messageText ? "" : "(call) ";
       return {
         direction: r.direction === "INBOUND" ? ("in" as const) : ("out" as const),
         text: `${prefix}${body}`.slice(0, 400),
