@@ -53,6 +53,12 @@ describe("validateFlow", () => {
   it("неизвестный триггер отклоняется", () => {
     expect(validateFlow({ ...flow([wait2days, emailStep]), triggerType: "ANNIVERSARY" })).toMatch(/триггер/i);
   });
+
+  it("«Запускается по цепочке» маркетинговой цепочке недоступно", () => {
+    // Триггер известный (isSupportedTrigger его пропускает), но своего события у него нет: его
+    // зовёт предыдущее ПРАВИЛО поимённо. Цепочка с ним не сработала бы никогда и молча.
+    expect(validateFlow({ ...flow([wait2days, emailStep]), triggerType: "CHAINED" })).toMatch(/цепочк/i);
+  });
 });
 
 describe("validateFlowStep", () => {

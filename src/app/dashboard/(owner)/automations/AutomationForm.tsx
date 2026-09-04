@@ -14,7 +14,6 @@ import {
   type SiteEmailTemplateStatus,
 } from "./actions";
 import { SiteMultiSelect, type SiteOption } from "./SiteMultiSelect";
-import { canAwaitRecipientReply } from "@/modules/automations/awaitReply";
 
 type TriggerOpt = { type: string; label: string; description: string };
 type VarDef = { key: string; label: string; example: string };
@@ -38,7 +37,7 @@ export type AutomationFormInitial = {
   delayUnit: AutomationInput["delayUnit"];
   template: string;
   conditions: Conditions;
-  awaitRecipientReply?: boolean;
+  noReplyNextAutomationId?: string | null;
 };
 
 const DELAY_UNITS: { value: AutomationInput["delayUnit"]; label: string }[] = [
@@ -56,6 +55,8 @@ export function AutomationForm({
   recentOrders,
   triggers,
   variables,
+  /** Остальные правила — из них выбирается следующий шаг цепочки «не ответили». */
+  otherAutomations = [],
   // На странице правила заголовок и «назад» уже есть над подвкладками — второй был бы дублем.
   showHeader = true,
 }: {
@@ -64,6 +65,7 @@ export function AutomationForm({
   recentOrders: OrderOpt[];
   triggers: TriggerOpt[];
   variables: VarDef[];
+  otherAutomations?: { id: string; name: string; active: boolean; deleted?: boolean; siteNames: string[] }[];
   showHeader?: boolean;
 }) {
   const router = useRouter();
@@ -84,9 +86,10 @@ export function AutomationForm({
   const [delayAmount, setDelayAmount] = useState<number>(initial?.delayAmount ?? 0);
   const [template, setTemplate] = useState(initial?.template ?? "");
   const [cond, setCond] = useState<Conditions>(initial?.conditions ?? { excludeCancelledRefunded: true });
-  const [awaitRecipientReply, setAwaitRecipientReply] = useState(!!initial?.awaitRecipientReply);
-  // Условие доступности галочки — то же самое, что режет сервер при сохранении.
-  const awaitReplyAvailable = canAwaitRecipientReply({ smsEnabled, audience });
+  const [noReplyNextId, setNoReplyNextId] = useState<string>(initial?.noReplyNextAutomationId ?? "");
+  // Ответ узнаём по входящим на номер, поэтому ждать его можно только у SMS. То же условие
+  // режет сервер при сохранении — форму можно обойти.
+  const awaitReplyAvailable = smsEnabled;
 
   const [saveMsg, setSaveMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [preview, setPreview] = useState<PreviewActionResult | null>(null);
@@ -160,15 +163,22 @@ export function AutomationForm({
       delayUnit,
       template,
       conditions: cond,
-      // Ждать ответа имеет смысл только там, где сообщение реально уходит получателю.
-      awaitRecipientReply: awaitReplyAvailable && awaitRecipientReply,
+      // Ждать ответа имеет смысл только там, где сообщение реально уходит по SMS.
+      noReplyNextAutomationId: awaitReplyAvailable && noReplyNextId ? noReplyNextId : null,
     };
   }
 
-  /** Fallback имеет смысл только при включённом SMS — выключаем его вместе с SMS. */
+  /**
+   * Fallback и ожидание ответа имеют смысл только при включённом SMS — гасим их вместе с SMS.
+   * Именно гасим, а не срезаем при сохранении: иначе владелец видит в поле выбранное правило,
+   * жмёт «Сохранить», получает зелёное «Сохранено» — и цепочка исчезает молча.
+   */
   function setSms(v: boolean) {
     setSmsEnabled(v);
-    if (!v) setEmailFallbackEnabled(false);
+    if (!v) {
+      setEmailFallbackEnabled(false);
+      setNoReplyNextId("");
+    }
   }
 
   function save() {
@@ -317,29 +327,40 @@ export function AutomationForm({
             </div>
           </div>
 
-          {/* Ожидание ответа. Отдельно от условий: условия решают, кому слать, а это — что
-              делать, если ответа не будет. Осмысленно только для SMS получателю. */}
+          {/* Цепочка. Отдельно от условий: условия решают, кому слать, а это — что делать,
+              если ответа не будет. Ожидание выражается самой ссылкой: ждать, никого не
+              запуская, смысла нет. */}
           <div className="space-y-1">
-            <span className="text-xs text-slate-500">Если получатель не ответит</span>
-            <label className={`flex items-start gap-2 text-sm ${awaitReplyAvailable ? "text-slate-700" : "text-slate-400"}`}>
-              <input
-                type="checkbox"
-                className="mt-0.5 h-4 w-4"
-                disabled={!awaitReplyAvailable}
-                checked={awaitReplyAvailable && awaitRecipientReply}
-                onChange={(e) => setAwaitRecipientReply(e.target.checked)}
-              />
-              <span>
-                Ждём ответ получателя
-                <span className="block text-xs text-slate-500">
-                  Молчание запускает эскалацию в день доставки: сначала повтор получателю, затем
-                  сообщение заказчику. Сами тексты — отдельные правила на события «Получатель не
-                  ответил» и «С получателем не связались»: пока они выключены, не уйдёт ничего.
-                  Сроки — в списке правил внизу, блок «Настройки по магазинам».
-                  {!awaitReplyAvailable && " Доступно для SMS получателю."}
-                </span>
-              </span>
-            </label>
+            <span className="text-xs text-slate-500">Если не ответят на это сообщение</span>
+            <select
+              value={noReplyNextId}
+              disabled={!awaitReplyAvailable}
+              onChange={(e) => setNoReplyNextId(e.target.value)}
+              className="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm disabled:bg-slate-50 disabled:text-slate-400"
+            >
+              <option value="">Ничего не делать</option>
+              {/* Правил с похожими именами у разных магазинов бывает несколько (кнопка
+                  «Дублировать» плодит копии) — без магазина и состояния выбрать вслепую. */}
+              {otherAutomations.map((a) => (
+                <option key={a.id} value={a.id}>
+                  Запустить: {a.name}
+                  {a.siteNames.length ? ` — ${a.siteNames.join(", ")}` : " — магазины не выбраны"}
+                  {a.deleted ? " (удалено)" : a.active ? "" : " (выключено)"}
+                </option>
+              ))}
+            </select>
+            <p className="text-xs text-slate-500">
+              {awaitReplyAvailable ? (
+                <>
+                  Ответом считается входящее сообщение или звонок с того же номера. Молчит — уйдёт
+                  выбранное правило; у него может быть своё продолжение, так собирается лесенка
+                  любой длины. Сроки ожидания — в списке правил внизу, блок «Настройки по
+                  магазинам».
+                </>
+              ) : (
+                <>Доступно при включённом SMS: ответ мы узнаём по входящим на номер.</>
+              )}
+            </p>
           </div>
 
           {/* Шаблон + переменные */}

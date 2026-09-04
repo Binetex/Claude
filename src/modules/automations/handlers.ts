@@ -44,11 +44,12 @@ import { renderTemplate, extractVariables } from "@/modules/messaging/template";
 import { SMS_ORDER_INCLUDE, orderToVariableSource } from "@/modules/messaging/orderSource";
 import { isAutomationsGloballyDisabled } from "./settings";
 import { logExecution } from "./executionLog";
-import { startFlowsForTrigger } from "./flows/engine";
+import { startFlowsForTrigger, type FlowForStart } from "./flows/engine";
 import type { ChannelSender } from "@/modules/messaging/channels/types";
 import { SMS_UNAVAILABLE_CODES } from "@/modules/messaging/channels/sms";
-import { scheduleRecipientFollowup } from "./recipientFollowup";
-import { shouldScheduleRecipientFollowup } from "./awaitReply";
+import { scheduleReplyWait } from "./replyWait";
+import { isChainOccurrence, shouldWaitForReply } from "./chain";
+import { TERMINAL_ORDER_STATUSES } from "@/lib/statuses";
 import { isP2002 } from "@/lib/prismaErrors";
 
 /** Триггеры, для которых заказ ИМЕННО отменён/возвращён — дефолтное исключение не применяем. */
@@ -235,14 +236,23 @@ export function buildAutomationTriggerHandler(prisma: PrismaClient): OutboxHandl
     // Правило может быть привязано к нескольким Site — выбираем по связи AutomationSite.
     // Цепочки (Automation Flows) отбираются по тем же признакам, но живут в своих моделях:
     // одиночные правила и цепочки не влияют друг на друга.
+    // Шаг цепочки «не ответили» адресует ОДНО правило поимённо (см. replyWait.ts): соседей по
+    // типу события подтягивать нельзя — владелец выбрал конкретное следующее сообщение.
+    // Automation Flows шагами цепочки не запускаются: у них своя механика и свои события.
     const [automations, flows] = await Promise.all([
       prisma.automation.findMany({
-        where: { sites: { some: { siteId: p.siteId } }, triggerType: p.triggerType, active: true, deletedAt: null },
+        where: p.automationId
+          ? { id: p.automationId, sites: { some: { siteId: p.siteId } }, active: true, deletedAt: null }
+          : { sites: { some: { siteId: p.siteId } }, triggerType: p.triggerType, active: true, deletedAt: null },
       }),
-      prisma.automationFlow.findMany({
-        where: { sites: { some: { siteId: p.siteId } }, triggerType: p.triggerType, active: true, deletedAt: null },
-        include: { steps: { orderBy: { position: "asc" } } },
-      }),
+      // Шаг цепочки запускает ОДНО правило поимённо — маркетинговые цепочки к нему отношения
+      // не имеют, поэтому за ними даже не ходим.
+      p.automationId
+        ? Promise.resolve<FlowForStart[]>([])
+        : prisma.automationFlow.findMany({
+            where: { sites: { some: { siteId: p.siteId } }, triggerType: p.triggerType, active: true, deletedAt: null },
+            include: { steps: { orderBy: { position: "asc" } } },
+          }),
     ]);
     if (automations.length === 0 && flows.length === 0) return;
 
@@ -264,7 +274,10 @@ export function buildAutomationTriggerHandler(prisma: PrismaClient): OutboxHandl
           deliveryDate: order.deliveryDate,
           apartment: order.apartment,
           timezone: order.site.timezone,
-          allowCancelledRefunded: ALLOW_CANCELLED_REFUNDED.has(p.triggerType),
+          // Тип события берём у ПРАВИЛА: у шага цепочки в payload всегда CHAINED, а правило
+          // может быть заведено на «Оформлен возврат» — тогда его собственное условие про
+          // отменённые заказы обязано читаться так же, как при обычном срабатывании.
+          allowCancelledRefunded: ALLOW_CANCELLED_REFUNDED.has(a.triggerType),
           now,
         }).ok
     );
@@ -445,6 +458,14 @@ export function buildAutomationSendHandler(prisma: PrismaClient, deps: Automatio
     });
     if (!stillLinked) return skip("automation_not_enabled_for_site");
 
+    // Сообщение ЦЕПОЧКИ говорит «мы так и не получили от вас ответа», поэтому закрытый заказ
+    // отменяет его смысл. Проверка при публикации шага (replyWait.ts) стоит на входе в окно, а
+    // задержка правила это окно продлевает: заказ успевает доставиться между решением отправить
+    // и самой отправкой, и человек получает тревогу о букете, который уже у него на столе.
+    if (isChainOccurrence(job.occurrenceKey) && (TERMINAL_ORDER_STATUSES.includes(order.orderStatus) || order.deliveryStatus === "DELIVERED")) {
+      return skip("chain_order_closed");
+    }
+
     const cond = evaluateConditions(automation.conditionsJson as SmsConditions | null, {
       orderStatus: order.orderStatus,
       paymentStatus: order.paymentStatus,
@@ -512,17 +533,18 @@ export function buildAutomationSendHandler(prisma: PrismaClient, deps: Automatio
       await logExecution(prisma, { jobId: job.id, automationId: automation.id, orderId: order.id, stage: "provider_accepted", detailSafe: result.providerMessageId ?? null });
       await logExecution(prisma, { jobId: job.id, automationId: automation.id, orderId: order.id, stage: "sent" });
 
-      // Эскалацию запускает ТОЛЬКО правило с галочкой «Ждём ответ получателя» — обычно это
-      // вопрос «готовы принять букет?». Флаг на правиле, а не на типе события: на одно событие
-      // правил бывает несколько, и цеплялась бы цепочка к любому SMS получателю — в том числе к
-      // сообщению, которое вопросом не является, а значит и ждать по нему ответа бессмысленно.
-      // Якорь — фактическая отправка, а не расписание правила: сбой сдвинул бы всю линию.
-      if (shouldScheduleRecipientFollowup(job, automation)) {
-        await scheduleRecipientFollowup(prisma, {
+      // Ждём ответ, если у правила указано, что запускать при молчании. Ожидание — свойство
+      // ЭТОГО сообщения, поэтому якорь — фактическая отправка, а не расписание правила: сбой
+      // сдвинул бы всю линию. Только SMS: ответ мы узнаём по входящим с того же номера.
+      if (shouldWaitForReply(job, automation)) {
+        await scheduleReplyWait(prisma, {
           orderId: order.id,
+          automationId: automation.id,
+          jobId: job.id,
           phoneNormalized: job.phoneNormalized,
           sentAt: new Date(),
-          automationId: automation.id,
+          senderCase: job.occurrenceKey,
+          isChainStep: isChainOccurrence(job.occurrenceKey),
         });
       }
       return;

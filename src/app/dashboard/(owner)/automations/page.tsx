@@ -2,7 +2,7 @@ import Link from "next/link";
 import { prisma } from "@/lib/db";
 import { Card, CardBody } from "@/components/ui/Card";
 import { Button } from "@/components/ui/button";
-import { getSmsTrigger } from "@/modules/automations/triggers";
+import { getSmsTrigger, CHAINED_TRIGGER } from "@/modules/automations/triggers";
 import { audienceLabel, delayLabel } from "@/modules/automations/display";
 import { getAutomationSettings } from "@/modules/automations/settings";
 import { AutomationsTabs } from "./AutomationsTabs";
@@ -17,15 +17,26 @@ export default async function AutomationsPage() {
   const [automations, statRows, channelRows, lastRuns, sites, settings] = await Promise.all([
     prisma.automation.findMany({
       where: { deletedAt: null },
-      include: { sites: { select: { site: { select: { name: true } } }, orderBy: { createdAt: "asc" } } },
+      include: { sites: { select: { siteId: true, site: { select: { name: true } } }, orderBy: { createdAt: "asc" } } },
       orderBy: [{ createdAt: "desc" }],
     }),
     prisma.automationJob.groupBy({ by: ["automationId", "status"], _count: { _all: true } }),
     prisma.automationJob.groupBy({ by: ["channel", "status"], _count: { _all: true } }),
     prisma.automationJob.groupBy({ by: ["automationId"], _max: { sentAt: true } }),
-    prisma.site.findMany({ select: { id: true, name: true, quoEnabled: true, automationDailyLocalTime: true, recipientRetryAfterMin: true, recipientAlertAfterMin: true }, orderBy: { name: "asc" } }),
+    prisma.site.findMany({ select: { id: true, name: true, quoEnabled: true, automationDailyLocalTime: true, awaitReplyFirstMin: true, awaitReplyNextMin: true }, orderBy: { name: "asc" } }),
     getAutomationSettings(prisma),
   ]);
+
+  // Цепочка хранится ссылками по id, а читать её должен человек: показываем и «куда ведёт»,
+  // и «кто ведёт сюда» — иначе шаг цепочки выглядит правилом, которое просто не срабатывает.
+  const ruleById = new Map(automations.map((a) => [a.id, a]));
+  const calledBy = new Map<string, string[]>();
+  for (const a of automations) {
+    if (!a.noReplyNextAutomationId) continue;
+    const list = calledBy.get(a.noReplyNextAutomationId) ?? [];
+    list.push(a.name);
+    calledBy.set(a.noReplyNextAutomationId, list);
+  }
 
   // Метрики по каждому правилу из групп статусов.
   const stats = new Map<string, { sent: number; failed: number; skipped: number; cancelled: number; scheduled: number }>();
@@ -158,16 +169,45 @@ export default async function AutomationsPage() {
                       ) : (
                         <span className="rounded border border-amber-200 bg-amber-50 px-1.5 py-px text-[11px] text-amber-700">Unsupported: {a.triggerType}</span>
                       )}
+                      {/* Шаг цепочки сам не срабатывает — без этой строки он выглядит сломанным.
+                          Показываем «← из» и у обычного правила: если на него ссылаются, оно
+                          уходит ЕЩЁ И по цепочке, и это должно быть видно снаружи карточки. */}
+                      {(a.triggerType === CHAINED_TRIGGER || calledBy.get(a.id)?.length) && (
+                        <span className="mt-0.5 block text-[11px] text-slate-500">
+                          {calledBy.get(a.id)?.length
+                            ? `← из: ${calledBy.get(a.id)!.join(", ")}`
+                            : "⚠ никто не запускает — правило не сработает"}
+                        </span>
+                      )}
                     </td>
                     <td className="px-3 py-2 text-slate-600">
                       {audienceLabel(a.audience)}
-                      {/* Флаг меняет поведение правила молча — из списка должно быть видно,
-                          какое именно правило заводит цепочку «получатель не ответил». */}
-                      {a.awaitRecipientReply && (
-                        <span className="ml-1 whitespace-nowrap rounded border border-amber-200 bg-amber-50 px-1.5 py-px text-[11px] text-amber-700" title="Молчание получателя запускает повтор ему и сообщение заказчику">
-                          ждём ответ
-                        </span>
-                      )}
+                      {/* Цепочка иначе видна только внутри карточки: снаружи должно читаться,
+                          что правило ждёт ответа и кого позовёт, если ответа не будет. */}
+                      {a.noReplyNextAutomationId && (() => {
+                        const nextRule = ruleById.get(a.noReplyNextAutomationId);
+                        // Третий способ сломать цепочку — потерять общий магазин: шаг запускается
+                        // в магазине заказа, и без пересечения он молча не дойдёт ни разу.
+                        const shared = nextRule
+                          ? a.sites.some((x) => nextRule.sites.some((y) => y.siteId === x.siteId))
+                          : false;
+                        const problem = !nextRule
+                          ? "правило удалено"
+                          : !nextRule.active
+                            ? "выключено"
+                            : !shared
+                              ? "нет общего магазина"
+                              : null;
+                        return (
+                          <span
+                            className={`ml-1 whitespace-nowrap rounded border px-1.5 py-px text-[11px] ${problem ? "border-red-200 bg-red-50 text-red-700" : "border-amber-200 bg-amber-50 text-amber-700"}`}
+                            title="Если не ответят — запустится это правило"
+                          >
+                            → {nextRule ? nextRule.name : "правило удалено"}
+                            {problem && nextRule ? ` (${problem})` : ""}
+                          </span>
+                        );
+                      })()}
                     </td>
                     <td className="px-3 py-2 text-slate-600">{delayLabel(a.delayAmount, a.delayUnit)}</td>
                     <td className="px-3 py-2">

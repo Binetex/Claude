@@ -106,6 +106,11 @@ async function fireTrigger(order: { id: string; siteId: string }, triggerType: s
   await triggerHandler(rec({ orderId: order.id, siteId: order.siteId, triggerType, occurrenceKey: occurrenceKey ?? order.id }));
 }
 
+/** Шаг цепочки: событие адресует ОДНО правило поимённо (см. modules/automations/replyWait.ts). */
+async function fireChainStep(order: { id: string; siteId: string }, automationId: string, occurrenceKey: string) {
+  await triggerHandler(rec({ orderId: order.id, siteId: order.siteId, triggerType: "CHAINED", occurrenceKey, automationId }));
+}
+
 function jobsFor(automationId: string, orderId: string) {
   return prisma.automationJob.findMany({ where: { automationId, orderId } });
 }
@@ -281,6 +286,55 @@ describe("SMS engine — trigger → job", () => {
     expect(await jobsFor(auto.id, orderA.id)).toHaveLength(1);
     expect(await jobsFor(auto.id, orderB.id)).toHaveLength(1);
     expect(await jobsFor(auto.id, orderC.id)).toHaveLength(0);
+  });
+});
+
+describe("шаг цепочки «не ответили» — адресный запуск одного правила", () => {
+  it("запускает ТОЛЬКО названное правило, соседей по событию не трогает", async () => {
+    // Владелец выбирает следующее правило поимённо. Подтянуть заодно всех, кто висит на том же
+    // событии, значит отправить человеку сообщения, которых он не просил.
+    const site = await makeSite();
+    const target = await makeAutomation(site.id, { triggerType: "ORDER_DELIVERED", template: "Please let us know" });
+    const neighbour = await makeAutomation(site.id, { triggerType: "ORDER_DELIVERED", template: "Neighbour" });
+    const order = await makeOrder(site.id);
+
+    await fireChainStep(order, target.id, `chain:${target.id}:${order.id}:case1`);
+
+    expect(await jobsFor(target.id, order.id)).toHaveLength(1);
+    expect(await jobsFor(neighbour.id, order.id)).toHaveLength(0);
+  });
+
+  it("повторный заход по тому же случаю второго сообщения не создаёт", async () => {
+    const site = await makeSite();
+    const target = await makeAutomation(site.id, { triggerType: "ORDER_DELIVERED" });
+    const order = await makeOrder(site.id);
+    const occurrence = `chain:${target.id}:${order.id}:case1`;
+
+    await fireChainStep(order, target.id, occurrence);
+    await fireChainStep(order, target.id, occurrence);
+
+    expect(await jobsFor(target.id, order.id)).toHaveLength(1);
+  });
+
+  it("выключенное правило шагом не запускается", async () => {
+    const site = await makeSite();
+    const target = await makeAutomation(site.id, { triggerType: "ORDER_DELIVERED", active: false });
+    const order = await makeOrder(site.id);
+
+    await fireChainStep(order, target.id, `chain:${target.id}:${order.id}:case1`);
+
+    expect(await jobsFor(target.id, order.id)).toHaveLength(0);
+  });
+
+  it("правило чужого магазина шагом не запускается", async () => {
+    const siteA = await makeSite();
+    const siteB = await makeSite();
+    const target = await makeAutomation(siteB.id, { triggerType: "ORDER_DELIVERED" });
+    const order = await makeOrder(siteA.id);
+
+    await fireChainStep(order, target.id, `chain:${target.id}:${order.id}:case1`);
+
+    expect(await jobsFor(target.id, order.id)).toHaveLength(0);
   });
 });
 

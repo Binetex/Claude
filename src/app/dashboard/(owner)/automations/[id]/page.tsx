@@ -57,9 +57,21 @@ export default async function EditAutomationPage({
 
 /** Справочники формы грузим только на вкладке настройки — на статистике они не нужны. */
 async function SettingsTab({ automation }: { automation: AutomationWithSites }) {
-  const [sites, recentOrders] = await Promise.all([
+  const [sites, recentOrders, otherAutomations] = await Promise.all([
     prisma.site.findMany({ select: { id: true, name: true, quoEnabled: true }, orderBy: { name: "asc" } }),
     prisma.order.findMany({ select: { id: true, orderNumber: true, siteId: true }, orderBy: { createdAt: "desc" }, take: 50 }),
+    // Кандидаты на «если не ответят» — живые правила, кроме самого себя: правило, запускающее
+    // само себя, писало бы человеку по кругу (сервер это тоже отвергает). Плюс ТЕКУЩАЯ ссылка,
+    // даже если то правило уже удалено: иначе поле выглядит пустым, сохранение падает с
+    // «правило не найдено», и владельцу нечего снять.
+    prisma.automation.findMany({
+      where: {
+        id: { not: automation.id },
+        OR: [{ deletedAt: null }, ...(automation.noReplyNextAutomationId ? [{ id: automation.noReplyNextAutomationId }] : [])],
+      },
+      select: { id: true, name: true, active: true, deletedAt: true, sites: { select: { site: { select: { name: true } } } } },
+      orderBy: { name: "asc" },
+    }),
   ]);
 
   const triggers = listSmsTriggers().map((t) => ({ type: t.type, label: t.label, description: t.description }));
@@ -80,7 +92,7 @@ async function SettingsTab({ automation }: { automation: AutomationWithSites }) 
     delayUnit: automation.delayUnit,
     template: automation.template,
     conditions: (automation.conditionsJson as SmsConditions | null) ?? { excludeCancelledRefunded: true },
-    awaitRecipientReply: automation.awaitRecipientReply,
+    noReplyNextAutomationId: automation.noReplyNextAutomationId,
   };
 
   return (
@@ -90,6 +102,13 @@ async function SettingsTab({ automation }: { automation: AutomationWithSites }) 
       recentOrders={recentOrders}
       triggers={triggers}
       variables={variables}
+      otherAutomations={otherAutomations.map((a) => ({
+        id: a.id,
+        name: a.name,
+        active: a.active,
+        deleted: !!a.deletedAt,
+        siteNames: a.sites.map((x) => x.site.name),
+      }))}
       showHeader={false}
     />
   );

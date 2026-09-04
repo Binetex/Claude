@@ -4,7 +4,7 @@
  *
  * Сообщения возвращаются готовыми к показу владельцу (по-русски), первая ошибка — итог.
  */
-import { isSupportedTrigger } from "../triggers";
+import { isSupportedTrigger, CHAINED_TRIGGER } from "../triggers";
 
 /** Единицы ожидания, доступные в редакторе цепочек (минуты/часы/дни). */
 export const FLOW_WAIT_UNITS = ["MINUTE", "HOUR", "DAY"] as const;
@@ -76,6 +76,9 @@ export function validateFlow(input: FlowInput): string | null {
   if (!input.name?.trim()) return "Укажите название цепочки.";
   if (!Array.isArray(input.siteIds) || input.siteIds.length === 0) return "Выберите хотя бы один магазин.";
   if (!isSupportedTrigger(input.triggerType)) return "Неизвестный триггер.";
+  // «Запускается по цепочке» — свойство ОДИНОЧНОГО правила: его зовёт предыдущее правило
+  // поимённо. Маркетинговая цепочка с таким событием не запустилась бы никогда.
+  if (input.triggerType === CHAINED_TRIGGER) return "Событие «Запускается по цепочке» доступно только одиночным правилам.";
 
   const steps = input.steps ?? [];
   if (steps.length === 0) return "Добавьте хотя бы один шаг.";

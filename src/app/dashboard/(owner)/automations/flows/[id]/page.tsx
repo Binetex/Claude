@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { prisma } from "@/lib/db";
-import { listSmsTriggers } from "@/modules/automations/triggers";
+import { listFlowTriggers } from "@/modules/automations/triggers";
 import { SMS_VARIABLES } from "@/modules/messaging/variables";
 import { AutomationsTabs } from "../../AutomationsTabs";
 import { FlowForm } from "../FlowForm";
@@ -24,7 +24,7 @@ export default async function EditFlowPage({ params }: { params: Promise<{ id: s
   ]);
   if (!flow || flow.deletedAt) notFound();
 
-  const triggers = listSmsTriggers().map((t) => ({ type: t.type, label: t.label, description: t.description }));
+  const triggers = listFlowTriggers().map((t) => ({ type: t.type, label: t.label, description: t.description }));
   const variables = SMS_VARIABLES.map((v) => ({ key: v.key, label: v.label, example: v.example }));
 
   return (

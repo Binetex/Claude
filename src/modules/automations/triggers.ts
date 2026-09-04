@@ -14,8 +14,11 @@ export type SmsTriggerDef = {
   type: string;
   label: string;
   description: string;
-  /** Доменное событие outbox, которое запускает этот триггер. */
-  domainEvent: DomainEventName;
+  /**
+   * Доменное событие outbox, которое запускает этот триггер. Пусто у шага цепочки: его запускает
+   * не событие заказа, а предыдущее правило, поимённо (см. modules/automations/replyWait.ts).
+   */
+  domainEvent?: DomainEventName;
   /** Обязательные непустые переменные (иначе SKIP). */
   requiredVars?: string[];
 };
@@ -55,16 +58,10 @@ export const SMS_TRIGGERS: readonly SmsTriggerDef[] = [
     domainEvent: "order.delivery.today",
   },
   {
-    type: "RECIPIENT_NO_REPLY",
-    label: "Получатель не ответил",
-    description: "Через час после вопроса о готовности принять букет получатель не ответил — переспрашиваем его.",
-    domainEvent: "order.recipient.no_reply",
-  },
-  {
-    type: "RECIPIENT_UNREACHABLE",
-    label: "С получателем не связались",
-    description: "Получатель молчит и после повтора — сообщаем заказчику, чтобы он связался сам.",
-    domainEvent: "order.recipient.unreachable",
+    type: "CHAINED",
+    label: "Запускается по цепочке",
+    description:
+      "Само по себе правило не срабатывает: его запускает другое правило, когда на его сообщение не ответили. Кто именно запускает — видно в том правиле, в поле «Если не ответят».",
   },
   {
     type: "PAYMENT_PENDING",
@@ -97,6 +94,18 @@ const BY_TYPE = new Map(SMS_TRIGGERS.map((t) => [t.type, t]));
 
 export function listSmsTriggers(): readonly SmsTriggerDef[] {
   return SMS_TRIGGERS;
+}
+
+/** Тип-заглушка шага цепочки: правило с ним запускает не событие, а другое правило. */
+export const CHAINED_TRIGGER = "CHAINED";
+
+/**
+ * Триггеры для МАРКЕТИНГОВЫХ ЦЕПОЧЕК (Automation Flows). Шага цепочки правил здесь нет:
+ * Flows запускаются только событиями заказа, и цепочка с `CHAINED` не сработала бы никогда —
+ * владелец выбрал бы её, сохранил и ждал впустую.
+ */
+export function listFlowTriggers(): readonly SmsTriggerDef[] {
+  return SMS_TRIGGERS.filter((t) => t.type !== CHAINED_TRIGGER);
 }
 
 export function getSmsTrigger(type: string): SmsTriggerDef | null {

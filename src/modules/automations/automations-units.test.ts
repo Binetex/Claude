@@ -213,9 +213,8 @@ describe("triggers registry", () => {
       "ORDER_CANCELLED",
       "TRACKING_LINK_AVAILABLE",
       "DELIVERY_TODAY",
-      // Эскалация «получатель молчит»: переспросить его, затем сказать заказчику.
-      "RECIPIENT_NO_REPLY",
-      "RECIPIENT_UNREACHABLE",
+      // Шаг цепочки: своего события у него нет, его запускает предыдущее правило.
+      "CHAINED",
       "PAYMENT_PENDING",
       "PAYMENT_FAILED",
       "ORDER_REFUNDED",

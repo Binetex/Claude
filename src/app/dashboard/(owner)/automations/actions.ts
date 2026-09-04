@@ -1,8 +1,8 @@
 "use server";
 import { revalidatePath } from "next/cache";
 import { requireRole } from "@/lib/rbac";
-import { clampWait, WAIT_AFTER_ASK_MIN, WAIT_AFTER_RETRY_MIN } from "@/modules/automations/recipientFollowup";
-import { resolveAwaitRecipientReply } from "@/modules/automations/awaitReply";
+import { WAIT_FIRST_MIN, WAIT_NEXT_MIN } from "@/modules/automations/replyWait";
+import { clampWait, findChainCycle } from "@/modules/automations/chain";
 import { prisma } from "@/lib/db";
 import { featureFlags } from "@/lib/featureFlags";
 import { getQuoConfig } from "@/integrations/quo/config";
@@ -35,8 +35,8 @@ export type AutomationInput = {
   delayUnit: "IMMEDIATE" | "MINUTE" | "HOUR" | "DAY" | "WEEK" | "MONTH";
   template: string;
   conditions: SmsConditions;
-  /** «Ждём ответ получателя»: молчание после этого сообщения запускает эскалацию. */
-  awaitRecipientReply?: boolean;
+  /** «Если не ответят — запустить это правило». null = цепочка на этом правиле заканчивается. */
+  noReplyNextAutomationId?: string | null;
 };
 
 export type ActionResult = { ok?: true; id?: string; error?: string; warning?: string };
@@ -95,10 +95,50 @@ function normalizeConditions(c: SmsConditions): SmsConditions {
   return out;
 }
 
+/**
+ * Проверяет ссылку «если не ответят — запустить это правило».
+ *
+ * Три отказа, и каждый из них — про живого человека на том конце: без SMS ответ узнать неоткуда
+ * (входящие приходят на номер), правило, запускающее само себя, и кольцо дальше по цепочке
+ * означают бесконечную рассылку. Потолок сообщений на заказ в замке цепочки — последний рубеж,
+ * а не оправдание пускать кольцо в настройку.
+ */
+async function validateNoReplyLink(input: AutomationInput, selfId: string | null): Promise<string | null> {
+  const nextId = input.noReplyNextAutomationId ?? null;
+  if (!nextId) return null;
+  if (!input.smsEnabled) return "Ожидание ответа работает только для SMS: ответ мы узнаём по входящим сообщениям и звонкам с номера.";
+  if (selfId && nextId === selfId) return "Правило не может запускать само себя.";
+
+  const rows = await prisma.automation.findMany({
+    where: { deletedAt: null },
+    select: { id: true, name: true, noReplyNextAutomationId: true, sites: { select: { siteId: true } } },
+  });
+  const next = rows.find((r) => r.id === nextId);
+  if (!next) return "Следующее правило не найдено — возможно, его удалили.";
+
+  // Шаг запускается в магазине заказа, поэтому у правил обязан быть общий магазин: иначе форма
+  // сохранит связь, а цепочка молча оборвётся на первом же шаге.
+  const nextSites = new Set(next.sites.map((x) => x.siteId));
+  if (input.siteIds.length && !input.siteIds.some((id) => nextSites.has(id))) {
+    return `Правило «${next.name}» не подключено ни к одному из выбранных магазинов — цепочка до него не дойдёт.`;
+  }
+
+  const nextById = new Map(rows.map((r) => [r.id, r.noReplyNextAutomationId]));
+  const nameById = new Map(rows.map((r) => [r.id, r.name]));
+  const cycle = findChainCycle(nextById, selfId ?? "__new__", nextId);
+  if (cycle) {
+    const names = cycle.map((id) => nameById.get(id) ?? (input.name.trim() || "это правило")).join(" → ");
+    return `Цепочка замыкается в кольцо: ${names}. Человек получал бы сообщения без конца.`;
+  }
+  return null;
+}
+
 export async function createAutomation(input: AutomationInput): Promise<ActionResult> {
   await requireRole("OWNER");
   const err = validate(input);
   if (err) return { error: err };
+  const linkErr = await validateNoReplyLink(input, null);
+  if (linkErr) return { error: linkErr };
   const resolved = await resolveSiteIds(input.siteIds);
   if ("error" in resolved) return { error: resolved.error };
 
@@ -117,7 +157,7 @@ export async function createAutomation(input: AutomationInput): Promise<ActionRe
       delayUnit: input.delayUnit,
       template: input.template,
       conditionsJson: normalizeConditions(input.conditions),
-      awaitRecipientReply: resolveAwaitRecipientReply(input),
+      noReplyNextAutomationId: input.noReplyNextAutomationId ?? null,
     },
     select: { id: true },
   });
@@ -134,6 +174,8 @@ export async function updateAutomation(id: string, input: AutomationInput): Prom
     select: { id: true, deletedAt: true, sites: { select: { siteId: true } } },
   });
   if (!existing || existing.deletedAt) return { error: "Автоматизация не найдена." };
+  const linkErr = await validateNoReplyLink(input, id);
+  if (linkErr) return { error: linkErr };
   const resolved = await resolveSiteIds(input.siteIds);
   if ("error" in resolved) return { error: resolved.error };
 
@@ -163,7 +205,7 @@ export async function updateAutomation(id: string, input: AutomationInput): Prom
       delayUnit: input.delayUnit,
       template: input.template,
       conditionsJson: normalizeConditions(input.conditions),
-      awaitRecipientReply: resolveAwaitRecipientReply(input),
+      noReplyNextAutomationId: input.noReplyNextAutomationId ?? null,
     },
   });
   revalidatePath("/dashboard/automations");
@@ -199,7 +241,7 @@ export async function duplicateAutomation(id: string): Promise<ActionResult> {
       delayUnit: src.delayUnit,
       template: src.template,
       conditionsJson: src.conditionsJson ?? undefined,
-      awaitRecipientReply: src.awaitRecipientReply,
+      noReplyNextAutomationId: src.noReplyNextAutomationId,
     },
     select: { id: true },
   });
@@ -311,9 +353,9 @@ export async function saveSiteAutomationDailyTime(siteId: string, value: string)
 }
 
 /**
- * Тайминги эскалации «получатель молчит»: через сколько переспросить его и через сколько
- * после этого сказать заказчику. Границы режутся на сервере (`clampWait`), а не только в форме:
- * минута превращает нормальную паузу в тревогу, а сутки приходят уже после доставки.
+ * Сроки ожидания ответа: сколько ждать на первое сообщение и сколько на каждое следующее в
+ * цепочке. Границы режутся на сервере (`clampWait`), а не только в форме: минута превращает
+ * нормальную паузу в тревогу, а сутки приходят уже после доставки.
  */
 export async function saveSiteRecipientTimings(
   siteId: string,
@@ -326,8 +368,8 @@ export async function saveSiteRecipientTimings(
   await prisma.site.update({
     where: { id: siteId },
     data: {
-      recipientRetryAfterMin: clampWait(retryAfterMin, WAIT_AFTER_ASK_MIN),
-      recipientAlertAfterMin: clampWait(alertAfterMin, WAIT_AFTER_RETRY_MIN),
+      awaitReplyFirstMin: clampWait(retryAfterMin, WAIT_FIRST_MIN),
+      awaitReplyNextMin: clampWait(alertAfterMin, WAIT_NEXT_MIN),
     },
   });
   revalidatePath("/dashboard/automations");

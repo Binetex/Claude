@@ -33,7 +33,7 @@ import { buildBurqPodRefetchHandler, BURQ_POD_REFETCH_EVENT } from "@/integratio
 import { buildQuoWebhookHandler, QUO_WEBHOOK_EVENT } from "@/integrations/quo/webhookHandler";
 import { buildAutomationTriggerHandler, buildAutomationSendHandler } from "@/modules/automations/handlers";
 import { AUTOMATION_TRIGGER_EVENT, AUTOMATION_SEND_EVENT } from "@/modules/automations/events";
-import { RECIPIENT_FOLLOWUP_EVENT, buildRecipientFollowupHandler } from "@/modules/automations/recipientFollowup";
+import { REPLY_WAIT_EVENT, buildReplyWaitHandler } from "@/modules/automations/replyWait";
 import { buildFlowStepHandler } from "@/modules/automations/flows/handler";
 import { FLOW_STEP_EVENT } from "@/modules/automations/flows/events";
 import { ingestInboundEmails } from "@/integrations/emailFactory/ingest";
@@ -116,9 +116,10 @@ async function main() {
     [AUTOMATION_TRIGGER_EVENT]: buildAutomationTriggerHandler(prisma),
     [AUTOMATION_SEND_EVENT]: buildAutomationSendHandler(prisma, { channels: automationChannels }),
     [FLOW_STEP_EVENT]: buildFlowStepHandler(prisma, { channels: automationChannels }),
-    // «Получатель молчит»: через час после вопроса — повтор ему, ещё через 20 минут — заказчику.
+    // Ожидание ответа: срок вышел — если человек молчит, запускается следующее правило цепочки
+    // (какое именно — указано в самом правиле; см. modules/automations/replyWait.ts).
     // Отправкой занимаются обычные правила, здесь только проверка тишины и публикация триггера.
-    [RECIPIENT_FOLLOWUP_EVENT]: buildRecipientFollowupHandler(prisma),
+    [REPLY_WAIT_EVENT]: buildReplyWaitHandler(prisma),
     // Внутренние Telegram-уведомления сотрудникам: один обработчик на все типы событий.
     [TELEGRAM_NOTIFY_EVENT]: buildTelegramNotifyHandler(prisma),
     // Сверка платежа с Airwallex (режим наблюдения: business status заказа не меняется).
