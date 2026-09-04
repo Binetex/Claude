@@ -25,11 +25,38 @@ function errorText(res: Exclude<SaveOrderBlockResult, { status: "ok" } | { statu
 /**
  * Хук сохранения блока: держит версию записи (expectedUpdatedAt) и состояние конфликта.
  * При конфликте введённые данные НЕ сбрасываются — пользователь сам решает, обновить ли.
+ *
+ * `hasUnsavedChanges` — есть ли в форме несохранённое. Версия OCC принадлежит ВСЕЙ строке
+ * заказа (`Order.updatedAt`), а не полю: сохранение соседнего блока сдвигает её, и
+ * замороженная версия давала ЛОЖНЫЙ конфликт у того, кто правит заказ один — «сохранил
+ * заметку → правлю открытку → заказ изменён другим пользователем», причём единственный
+ * выход («Обновить данные») затирал набранный текст. Поэтому свежую версию, пришедшую
+ * пропом после перерисовки страницы, подхватываем — но ТОЛЬКО пока форма чистая: иначе
+ * молча перезаписали бы чужую правку того же поля, ради чего OCC и существует.
+ * Флаг не передан — поведение прежнее, версия не двигается.
  */
-export function useBlockSave(orderId: string, block: OrderBlock, initialUpdatedAt: string) {
+export function useBlockSave(
+  orderId: string,
+  block: OrderBlock,
+  initialUpdatedAt: string,
+  opts?: { hasUnsavedChanges?: boolean }
+) {
   const [pending, start] = useTransition();
   const [expectedUpdatedAt, setExpectedUpdatedAt] = useState(initialUpdatedAt);
   const [conflict, setConflict] = useState<ConflictState | null>(null);
+  // Проп-версия, на которой стоит наш expectedUpdatedAt: сравниваем с ней, а не с самим
+  // expectedUpdatedAt, иначе после нашего же сохранения (оно уходит вперёд пропа) мы
+  // откатили бы версию назад и получили конфликт на ровном месте.
+  const [seenProp, setSeenProp] = useState(initialUpdatedAt);
+  if (initialUpdatedAt !== seenProp) {
+    // Правка состояния во время рендера СВОЕГО компонента — штатный React-приём для
+    // «подстроиться под изменившийся проп»: рендер перезапустится сразу, без эффекта.
+    setSeenProp(initialUpdatedAt);
+    if (!opts?.hasUnsavedChanges) {
+      setExpectedUpdatedAt(initialUpdatedAt);
+      setConflict(null);
+    }
+  }
 
   function save(data: BlockFormData, opts?: { successMessage?: string; onOk?: () => void }) {
     start(async () => {

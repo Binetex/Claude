@@ -15,6 +15,7 @@ import {
 import { OrderCommunications } from "@/app/dashboard/(owner)/orders/[id]/OrderCommunications";
 import { ContactEditDialog } from "@/app/dashboard/(owner)/orders/[id]/ContactEditDialog";
 import { CardNoteCard } from "@/app/dashboard/(owner)/orders/[id]/CardNoteCard";
+import { CustomerNoteBanner } from "@/app/dashboard/(owner)/orders/[id]/CustomerNoteBanner";
 import { DeliveryDateDialog } from "@/app/dashboard/(owner)/orders/[id]/DeliveryDateDialog";
 import { OrderStatusCard } from "@/app/dashboard/(owner)/orders/[id]/OrderStatusCard";
 import { DeliveryStatusCard } from "@/app/dashboard/(owner)/orders/[id]/DeliveryStatusCard";
@@ -73,6 +74,9 @@ export default async function FloristOrderPage({ params }: { params: Promise<{ i
           deliveryDate={format(new Date(order.deliveryDate), "yyyy-MM-dd")}
           deliveryWindow={order.deliveryWindow}
         />
+      }
+      belowDelivery={
+        <CustomerNoteBanner orderId={order.id} updatedAt={order.updatedAt} customerNote={order.customerNote} />
       }
       left={
         <>
@@ -137,12 +141,12 @@ export default async function FloristOrderPage({ params }: { params: Promise<{ i
           {/* Полная раскладка — только если владелец включил режим FULL для этого флориста. */}
           {order.finance && <OrderFinanceBreakdown title="Полная раскладка заказа" finance={order.finance} />}
 
-          {/* Открытка и заметки — сворачиваемо: пустая открытка не должна занимать экран. */}
+          {/* Текст открытки — сворачиваемо: пустая открытка не должна занимать экран.
+              Заметка заказчика живёт отдельной плашкой под полосой доставки. */}
           <CardNoteCard
             orderId={order.id}
             updatedAt={order.updatedAt}
             cardMessage={order.cardMessage}
-            customerNote={order.customerNote}
             showPrint
             collapsible
           />

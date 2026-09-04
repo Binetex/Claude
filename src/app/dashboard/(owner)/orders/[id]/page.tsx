@@ -22,6 +22,7 @@ import { UpdateCompositionButton } from "../UpdateCompositionButton";
 import { OwnerPriceDialog } from "./OwnerPriceDialog";
 import { ContactEditDialog } from "./ContactEditDialog";
 import { CardNoteCard } from "./CardNoteCard";
+import { CustomerNoteBanner } from "./CustomerNoteBanner";
 import { DeliveryDateDialog } from "./DeliveryDateDialog";
 import { OrderStatusCard } from "./OrderStatusCard";
 import { DeliveryStatusCard } from "./DeliveryStatusCard";
@@ -171,6 +172,9 @@ export default async function OwnerOrderPage({ params }: { params: Promise<{ id:
           deliveryWindow={order.deliveryWindow}
         />
       }
+      belowDelivery={
+        <CustomerNoteBanner orderId={order.id} updatedAt={order.updatedAt} customerNote={order.customerNote} />
+      }
       left={
         <>
           <OrderItemsCard
@@ -257,7 +261,6 @@ export default async function OwnerOrderPage({ params }: { params: Promise<{ id:
             orderId={order.id}
             updatedAt={order.updatedAt}
             cardMessage={order.cardMessage}
-            customerNote={order.customerNote}
             collapsible
           />
 

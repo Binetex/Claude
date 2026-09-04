@@ -7,6 +7,7 @@ import { loadOrderEmailPanel } from "@/integrations/emailFactory/read";
 import { OrderCommunications } from "@/app/dashboard/(owner)/orders/[id]/OrderCommunications";
 import { ContactEditDialog } from "@/app/dashboard/(owner)/orders/[id]/ContactEditDialog";
 import { CardNoteCard } from "@/app/dashboard/(owner)/orders/[id]/CardNoteCard";
+import { CustomerNoteBanner } from "@/app/dashboard/(owner)/orders/[id]/CustomerNoteBanner";
 import { DeliveryDateDialog } from "@/app/dashboard/(owner)/orders/[id]/DeliveryDateDialog";
 import { OrderStatusCard } from "@/app/dashboard/(owner)/orders/[id]/OrderStatusCard";
 import { DeliveryStatusCard } from "@/app/dashboard/(owner)/orders/[id]/DeliveryStatusCard";
@@ -80,6 +81,9 @@ export default async function CallCenterOrderPage({ params }: { params: Promise<
           deliveryWindow={order.deliveryWindow}
         />
       }
+      belowDelivery={
+        <CustomerNoteBanner orderId={order.id} updatedAt={order.updatedAt} customerNote={order.customerNote} />
+      }
       left={
         <>
           {/* Цен нет: колл-центру они не отдаются (в serializeForCallCenter их физически нет). */}
@@ -137,7 +141,6 @@ export default async function CallCenterOrderPage({ params }: { params: Promise<
             orderId={order.id}
             updatedAt={order.updatedAt}
             cardMessage={order.cardMessage}
-            customerNote={order.customerNote}
             collapsible
           />
 

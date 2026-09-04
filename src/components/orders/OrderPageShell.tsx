@@ -19,6 +19,7 @@ export function OrderPageShell({
   deliveryDate,
   deliveryWindow,
   deliveryAction,
+  belowDelivery,
   left,
   right,
   rightFirstOnMobile = false,
@@ -36,6 +37,11 @@ export function OrderPageShell({
    * ни про роли, ни про OCC.
    */
   deliveryAction?: React.ReactNode;
+  /**
+   * Полоса под доставкой — на всю ширину, до колонок. Здесь живёт то, что должно быть
+   * прочитано ПЕРВЫМ и одинаково у всех ролей: сейчас это заметка заказчика.
+   */
+  belowDelivery?: React.ReactNode;
   left: React.ReactNode;
   /** Узкая колонка управления. Прилипает при прокрутке — как у владельца. */
   right: React.ReactNode;
@@ -78,6 +84,8 @@ export function OrderPageShell({
         )}
         {deliveryAction && <span className="ml-auto">{deliveryAction}</span>}
       </div>
+
+      {belowDelivery}
 
       {/* min-w-0 на колонках обязателен. У элемента сетки минимальная ширина по умолчанию —
           auto, то есть не меньше min-content содержимого. Один широкий блок внутри (таблица,
