@@ -110,6 +110,21 @@ describe("serializeForOwner — видит всё", () => {
     expect(o.items[0].floristItemPrice).toBe(70);
   });
   it("включает email отправителя", () => expect(o.senderEmail).toBe("sender@example.com"));
+
+  it("оплата другим способом после брошенной попытки Airwallex видна как «оплачено через PayPal»", () => {
+    const aw = {
+      paymentMethod: "airwallex_card", paymentIntentId: "int_123456789", lastRawStatus: "REQUIRES_CUSTOMER_ACTION",
+      lastAttemptStatus: "AUTHENTICATION_REDIRECTED", normalizedStatus: "ACTION_REQUIRED", firstPendingAt: null,
+      lastCheckedAt: null, nextCheckAt: null, monitoringActive: false, safeError: null,
+    };
+    const base = makeOrder() as unknown as Record<string, unknown>;
+    const paypal = serializeForOwner({ ...base, paymentStatus: "PAID", paymentMethod: "ppcp-gateway", paymentMethodTitle: "PayPal", airwallexPayment: aw } as unknown as OrderWithRelations);
+    expect(paypal.airwallex?.paidElsewhere).toBe("PayPal");
+    const stillAw = serializeForOwner({ ...base, paymentStatus: "PAID", paymentMethod: "airwallex_card", paymentMethodTitle: "Card", airwallexPayment: aw } as unknown as OrderWithRelations);
+    expect(stillAw.airwallex?.paidElsewhere).toBeNull();
+    const unpaid = serializeForOwner({ ...base, paymentStatus: "UNPAID", paymentMethod: "ppcp-gateway", paymentMethodTitle: "PayPal", airwallexPayment: aw } as unknown as OrderWithRelations);
+    expect(unpaid.airwallex?.paidElsewhere).toBeNull();
+  });
 });
 
 describe("serializeForCallCenter — без финансов", () => {

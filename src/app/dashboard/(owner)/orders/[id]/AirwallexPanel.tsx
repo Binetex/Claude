@@ -9,6 +9,8 @@ import { AirwallexVerifyButton } from "./AirwallexVerifyButton";
  */
 export type AirwallexView = {
   paymentMethod: string | null;
+  /** Заказ оплачен другим способом (например «PayPal») после брошенной попытки Airwallex. */
+  paidElsewhere: string | null;
   intentIdShort: string | null;
   rawStatus: string | null;
   normalizedStatus: string | null;
@@ -78,8 +80,17 @@ export function AirwallexPanel({
     <Card>
       <CardHeader><CardTitle>Airwallex</CardTitle></CardHeader>
       <CardBody className="space-y-1.5">
+        {/* Оплата прошла другим способом: статус intent'а ниже — история брошенной попытки, а
+            не состояние денег. Говорим это первым и прямо, иначе «Нужно действие клиента» на
+            оплаченном заказе читается как проблема. */}
+        {aw.paidElsewhere && (
+          <div className="rounded-md border border-emerald-200 bg-emerald-50 px-2.5 py-2 text-xs text-emerald-900">
+            <span className="font-semibold">Оплачено через {aw.paidElsewhere}.</span>{" "}
+            Попытка Airwallex брошена — в Airwallex искать нечего.
+          </div>
+        )}
         <div className="flex flex-wrap items-center gap-2">
-          <span className={`rounded border px-1.5 py-px text-[11px] font-medium ${TONE[norm] ?? TONE.UNKNOWN}`}>
+          <span className={`rounded border px-1.5 py-px text-[11px] font-medium ${aw.paidElsewhere ? "border-slate-200 bg-slate-50 text-slate-500 line-through" : TONE[norm] ?? TONE.UNKNOWN}`}>
             {LABEL[norm] ?? norm}
           </span>
           {refund && (

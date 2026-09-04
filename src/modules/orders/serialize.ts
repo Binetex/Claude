@@ -138,6 +138,7 @@ export function serializeForOwner(o: OrderWithRelations) {
     airwallex: o.airwallexPayment
       ? {
           paymentMethod: o.airwallexPayment.paymentMethod,
+          paidElsewhere: paidElsewhere(o),
           // Intent показываем сокращённо — полный id владельцу не нужен в списке.
           intentIdShort: o.airwallexPayment.paymentIntentId ? shortIntent(o.airwallexPayment.paymentIntentId) : null,
           rawStatus: o.airwallexPayment.lastRawStatus,
@@ -365,4 +366,22 @@ function serializeMessage(m: OrderWithRelations["messages"][number]) {
     body: m.body,
     createdAt: m.createdAt,
   };
+}
+
+/**
+ * Клиент заплатил другим способом после брошенной попытки Airwallex: заказ оплачен, а способ
+ * оплаты в магазине уже не Airwallex (Woo переписывает `payment_method` при повторной оплате).
+ * Тогда статус intent'а — история, а не состояние денег, и панель обязана сказать это прямо.
+ * Возвращает подпись способа («PayPal») или null.
+ */
+function paidElsewhere(o: {
+  paymentStatus: string;
+  paymentMethod: string | null;
+  paymentMethodTitle: string | null;
+  airwallexPayment: { paymentMethod: string | null } | null;
+}): string | null {
+  if (o.paymentStatus !== "PAID" || !o.paymentMethod || !o.airwallexPayment) return null;
+  if (o.paymentMethod.toLowerCase().startsWith("airwallex")) return null;
+  if (o.paymentMethod === o.airwallexPayment.paymentMethod) return null;
+  return o.paymentMethodTitle?.trim() || o.paymentMethod;
 }
