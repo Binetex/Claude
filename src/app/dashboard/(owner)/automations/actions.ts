@@ -2,6 +2,7 @@
 import { revalidatePath } from "next/cache";
 import { requireRole } from "@/lib/rbac";
 import { clampWait, WAIT_AFTER_ASK_MIN, WAIT_AFTER_RETRY_MIN } from "@/modules/automations/recipientFollowup";
+import { resolveAwaitRecipientReply } from "@/modules/automations/awaitReply";
 import { prisma } from "@/lib/db";
 import { featureFlags } from "@/lib/featureFlags";
 import { getQuoConfig } from "@/integrations/quo/config";
@@ -34,6 +35,8 @@ export type AutomationInput = {
   delayUnit: "IMMEDIATE" | "MINUTE" | "HOUR" | "DAY" | "WEEK" | "MONTH";
   template: string;
   conditions: SmsConditions;
+  /** «Ждём ответ получателя»: молчание после этого сообщения запускает эскалацию. */
+  awaitRecipientReply?: boolean;
 };
 
 export type ActionResult = { ok?: true; id?: string; error?: string; warning?: string };
@@ -114,6 +117,7 @@ export async function createAutomation(input: AutomationInput): Promise<ActionRe
       delayUnit: input.delayUnit,
       template: input.template,
       conditionsJson: normalizeConditions(input.conditions),
+      awaitRecipientReply: resolveAwaitRecipientReply(input),
     },
     select: { id: true },
   });
@@ -159,6 +163,7 @@ export async function updateAutomation(id: string, input: AutomationInput): Prom
       delayUnit: input.delayUnit,
       template: input.template,
       conditionsJson: normalizeConditions(input.conditions),
+      awaitRecipientReply: resolveAwaitRecipientReply(input),
     },
   });
   revalidatePath("/dashboard/automations");
@@ -194,6 +199,7 @@ export async function duplicateAutomation(id: string): Promise<ActionResult> {
       delayUnit: src.delayUnit,
       template: src.template,
       conditionsJson: src.conditionsJson ?? undefined,
+      awaitRecipientReply: src.awaitRecipientReply,
     },
     select: { id: true },
   });

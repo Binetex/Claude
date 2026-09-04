@@ -14,6 +14,7 @@ import {
   type SiteEmailTemplateStatus,
 } from "./actions";
 import { SiteMultiSelect, type SiteOption } from "./SiteMultiSelect";
+import { canAwaitRecipientReply } from "@/modules/automations/awaitReply";
 
 type TriggerOpt = { type: string; label: string; description: string };
 type VarDef = { key: string; label: string; example: string };
@@ -37,6 +38,7 @@ export type AutomationFormInitial = {
   delayUnit: AutomationInput["delayUnit"];
   template: string;
   conditions: Conditions;
+  awaitRecipientReply?: boolean;
 };
 
 const DELAY_UNITS: { value: AutomationInput["delayUnit"]; label: string }[] = [
@@ -82,6 +84,9 @@ export function AutomationForm({
   const [delayAmount, setDelayAmount] = useState<number>(initial?.delayAmount ?? 0);
   const [template, setTemplate] = useState(initial?.template ?? "");
   const [cond, setCond] = useState<Conditions>(initial?.conditions ?? { excludeCancelledRefunded: true });
+  const [awaitRecipientReply, setAwaitRecipientReply] = useState(!!initial?.awaitRecipientReply);
+  // Условие доступности галочки — то же самое, что режет сервер при сохранении.
+  const awaitReplyAvailable = canAwaitRecipientReply({ smsEnabled, audience });
 
   const [saveMsg, setSaveMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [preview, setPreview] = useState<PreviewActionResult | null>(null);
@@ -155,6 +160,8 @@ export function AutomationForm({
       delayUnit,
       template,
       conditions: cond,
+      // Ждать ответа имеет смысл только там, где сообщение реально уходит получателю.
+      awaitRecipientReply: awaitReplyAvailable && awaitRecipientReply,
     };
   }
 
@@ -308,6 +315,31 @@ export function AutomationForm({
                 Указан номер квартиры/юнита
               </label>
             </div>
+          </div>
+
+          {/* Ожидание ответа. Отдельно от условий: условия решают, кому слать, а это — что
+              делать, если ответа не будет. Осмысленно только для SMS получателю. */}
+          <div className="space-y-1">
+            <span className="text-xs text-slate-500">Если получатель не ответит</span>
+            <label className={`flex items-start gap-2 text-sm ${awaitReplyAvailable ? "text-slate-700" : "text-slate-400"}`}>
+              <input
+                type="checkbox"
+                className="mt-0.5 h-4 w-4"
+                disabled={!awaitReplyAvailable}
+                checked={awaitReplyAvailable && awaitRecipientReply}
+                onChange={(e) => setAwaitRecipientReply(e.target.checked)}
+              />
+              <span>
+                Ждём ответ получателя
+                <span className="block text-xs text-slate-500">
+                  Молчание запускает эскалацию в день доставки: сначала повтор получателю, затем
+                  сообщение заказчику. Сами тексты — отдельные правила на события «Получатель не
+                  ответил» и «С получателем не связались»: пока они выключены, не уйдёт ничего.
+                  Сроки — в списке правил внизу, блок «Настройки по магазинам».
+                  {!awaitReplyAvailable && " Доступно для SMS получателю."}
+                </span>
+              </span>
+            </label>
           </div>
 
           {/* Шаблон + переменные */}

@@ -48,6 +48,7 @@ import { startFlowsForTrigger } from "./flows/engine";
 import type { ChannelSender } from "@/modules/messaging/channels/types";
 import { SMS_UNAVAILABLE_CODES } from "@/modules/messaging/channels/sms";
 import { scheduleRecipientFollowup } from "./recipientFollowup";
+import { shouldScheduleRecipientFollowup } from "./awaitReply";
 import { isP2002 } from "@/lib/prismaErrors";
 
 /** Триггеры, для которых заказ ИМЕННО отменён/возвращён — дефолтное исключение не применяем. */
@@ -511,14 +512,17 @@ export function buildAutomationSendHandler(prisma: PrismaClient, deps: Automatio
       await logExecution(prisma, { jobId: job.id, automationId: automation.id, orderId: order.id, stage: "provider_accepted", detailSafe: result.providerMessageId ?? null });
       await logExecution(prisma, { jobId: job.id, automationId: automation.id, orderId: order.id, stage: "sent" });
 
-      // Вопрос получателю «готовы принять букет?» — единственное сообщение, на которое мы
-      // ЖДЁМ ответ. Молчание запускает эскалацию: переспросить, потом сказать заказчику.
+      // Эскалацию запускает ТОЛЬКО правило с галочкой «Ждём ответ получателя» — обычно это
+      // вопрос «готовы принять букет?». Флаг на правиле, а не на типе события: на одно событие
+      // правил бывает несколько, и цеплялась бы цепочка к любому SMS получателю — в том числе к
+      // сообщению, которое вопросом не является, а значит и ждать по нему ответа бессмысленно.
       // Якорь — фактическая отправка, а не расписание правила: сбой сдвинул бы всю линию.
-      if (job.channel === "SMS" && job.recipientType === "RECIPIENT" && automation.triggerType === "DELIVERY_TODAY") {
+      if (shouldScheduleRecipientFollowup(job, automation)) {
         await scheduleRecipientFollowup(prisma, {
           orderId: order.id,
           phoneNormalized: job.phoneNormalized,
           sentAt: new Date(),
+          automationId: automation.id,
         });
       }
       return;

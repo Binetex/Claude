@@ -80,6 +80,7 @@ async function SettingsTab({ automation }: { automation: AutomationWithSites }) 
     delayUnit: automation.delayUnit,
     template: automation.template,
     conditions: (automation.conditionsJson as SmsConditions | null) ?? { excludeCancelledRefunded: true },
+    awaitRecipientReply: automation.awaitRecipientReply,
   };
 
   return (

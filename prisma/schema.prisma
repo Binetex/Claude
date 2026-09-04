@@ -2207,6 +2207,12 @@ model Automation {
 
   triggerType    String // валидируется app-registry; строкой — для расширяемости без миграции
   audience       SmsAudience
+  /// «Ждём ответ получателя»: молчание после ЭТОГО сообщения запускает эскалацию — переспросить
+  /// получателя, затем сказать заказчику (modules/automations/recipientFollowup.ts). Флаг стоит
+  /// на конкретном правиле, а не на типе события: на одно событие правил бывает несколько, и по
+  /// типу цепочка цеплялась бы к любому SMS получателю — в том числе к сообщению, которое
+  /// вопросом не является. Осмыслен только для SMS получателю — проверяется при сохранении.
+  awaitRecipientReply Boolean @default(false)
   delayAmount    Int          @default(0)
   delayUnit      SmsDelayUnit @default(IMMEDIATE)
   template       String // текст шаблона inline (отдельная Template-сущность — фаза 2)

@@ -159,7 +159,16 @@ export default async function AutomationsPage() {
                         <span className="rounded border border-amber-200 bg-amber-50 px-1.5 py-px text-[11px] text-amber-700">Unsupported: {a.triggerType}</span>
                       )}
                     </td>
-                    <td className="px-3 py-2 text-slate-600">{audienceLabel(a.audience)}</td>
+                    <td className="px-3 py-2 text-slate-600">
+                      {audienceLabel(a.audience)}
+                      {/* Флаг меняет поведение правила молча — из списка должно быть видно,
+                          какое именно правило заводит цепочку «получатель не ответил». */}
+                      {a.awaitRecipientReply && (
+                        <span className="ml-1 whitespace-nowrap rounded border border-amber-200 bg-amber-50 px-1.5 py-px text-[11px] text-amber-700" title="Молчание получателя запускает повтор ему и сообщение заказчику">
+                          ждём ответ
+                        </span>
+                      )}
+                    </td>
                     <td className="px-3 py-2 text-slate-600">{delayLabel(a.delayAmount, a.delayUnit)}</td>
                     <td className="px-3 py-2">
                       {a.active ? (
