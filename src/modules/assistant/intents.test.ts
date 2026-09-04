@@ -45,4 +45,11 @@ describe("сами заготовки", () => {
     expect(getIntent("delivery_time")?.requires).toContain("delivery_time");
     expect(getIntent("photo")?.requires).toContain("bouquet_photo_url");
   });
+
+  it("просьба о конкретном раннем времени — не заготовка «во сколько привезут», а модель", () => {
+    expect(matchIntent("what time will it arrive?")?.key).toBe("delivery_time");
+    for (const t of ["Hi! Can you get there by 12?", "what time? can you come at 9 am", "delivery time in the morning please", "what time, ideally before noon"]) {
+      expect(matchIntent(t)).toBeNull();
+    }
+  });
 });

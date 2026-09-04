@@ -31,6 +31,12 @@ export type IntentDef = {
    * недоставленному заказу — ложь, какие бы переменные ни стояли.
    */
   when?: (order: IntentOrderState) => boolean;
+  /**
+   * Когда заготовка НЕ подходит, хотя оборот совпал: «can you get there by 12» содержит «what
+   * time»-подобный вопрос, но это просьба о конкретном времени, и на неё отвечает модель по
+   * правилу владельца (утром не обещаем, спрашиваем, до какого времени примут).
+   */
+  unless?: RegExp;
 };
 
 export type IntentOrderState = { deliveryStatus: string | null; deliveryIsToday: boolean };
@@ -49,6 +55,7 @@ export const INTENTS: readonly IntentDef[] = [
     label: "Во сколько привезут",
     hint: "Клиент спрашивает время доставки.",
     phrases: ["what time", "when will it arrive", "when will you deliver", "when are you coming", "delivery time", "eta", "how soon"],
+    unless: /\b(by|at|before|around|till|until|between)\s+\d{1,2}(:\d{2})?\s*(am|pm|a\.m\.|p\.m\.)?\b|\bmorning\b|\bnoon\b|\bfirst thing\b|\bearly\b/i,
     requires: ["delivery_time"],
     defaultText: "Your delivery is scheduled for {{delivery_time}} today.",
     // «Сегодня» в тексте — значит только в день доставки и только пока не доставлено.
@@ -90,6 +97,6 @@ export function getIntent(key: string): IntentDef | null {
  */
 export function matchIntent(raw: string): IntentDef | null {
   const text = raw.toLowerCase();
-  const hits = INTENTS.filter((i) => i.phrases.some((p) => text.includes(p)));
+  const hits = INTENTS.filter((i) => i.phrases.some((p) => text.includes(p)) && !i.unless?.test(text));
   return hits.length === 1 ? hits[0] : null;
 }

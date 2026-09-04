@@ -100,7 +100,7 @@ export function buildAssistantHandler(prisma: PrismaClient, deps: AssistantDeps 
       orderClosed: order?.orderStatus === "CANCELLED",
       deliveredAt: deliveredMoment(order),
       text,
-      lastAutomatedAt: order ? await lastAutomatedAt(prisma, order.id) : null,
+      lastAutomatedAt: order ? await lastAutomatedAfter(prisma, order.id, incoming.occurredAt) : null,
       ...(await countReplies(prisma, site, order?.id ?? null, phone, now())),
       now: now(),
     });
@@ -329,9 +329,14 @@ function deliveredMoment(order: { deliveryStatus: string; deliveryDate: Date | n
   return order.deliveryDate ?? order.updatedAt;
 }
 
-async function lastAutomatedAt(prisma: PrismaClient, orderId: string): Promise<Date | null> {
+/**
+ * Автоматическое сообщение, ушедшее ПОСЛЕ входящего: тогда ответ ассистента лёг бы вторым
+ * подряд, и правило тишины его гасит. Автоматика ДО входящего не считается: клиент отвечает на
+ * наш же вопрос («до какого времени будете дома?»), и молчать в ответ — ровно то, чего нельзя.
+ */
+async function lastAutomatedAfter(prisma: PrismaClient, orderId: string, since: Date): Promise<Date | null> {
   const row = await prisma.orderCommunication.findFirst({
-    where: { orderId, direction: "OUTBOUND", OR: [{ automationJobs: { some: {} } }, { flowRunSteps: { some: {} } }] },
+    where: { orderId, direction: "OUTBOUND", occurredAt: { gt: since }, OR: [{ automationJobs: { some: {} } }, { flowRunSteps: { some: {} } }] },
     orderBy: { occurredAt: "desc" },
     select: { occurredAt: true },
   });
