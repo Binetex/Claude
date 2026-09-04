@@ -93,3 +93,71 @@ export async function sendOrderSms(prisma: PrismaClient, client: QuoClient | nul
     return { ok: false, code: `quo_${kind}`, communicationId: pendingId };
   }
 }
+
+export type SendUnlinkedSmsInput = { siteId: string; toPhone: string; text: string; idempotencyKey: string };
+
+/**
+ * SMS человеку, у которого НЕТ заказа: ответ ассистента незнакомому номеру.
+ *
+ * Тот же путь, что у `sendOrderSms` — PENDING-запись с уникальным sendKey, вызов QUO, SENT или
+ * FAILED, — только без заказа: запись остаётся в «Нераспознанных» и привяжется, когда заказ
+ * найдётся. Второго способа отправить SMS в проекте нет и не должно быть.
+ */
+export async function sendUnlinkedSms(prisma: PrismaClient, client: QuoClient | null, input: SendUnlinkedSmsInput): Promise<SendSmsResult> {
+  const text = (input.text ?? "").trim();
+  if (!text) return { ok: false, code: "empty_text" };
+  if (text.length > SMS_MAX_LENGTH) return { ok: false, code: "too_long" };
+  if (!input.idempotencyKey) return { ok: false, code: "missing_idempotency_key" };
+
+  const e164 = toE164(input.toPhone);
+  if (!e164) return { ok: false, code: "invalid_target_phone" };
+
+  const site = await prisma.site.findUnique({
+    where: { id: input.siteId },
+    select: { quoPhoneNumberId: true, quoPhoneNumber: true, quoEnabled: true },
+  });
+  const fromId = site?.quoPhoneNumberId ?? null;
+  if (!fromId) return { ok: false, code: "store_no_quo_number" };
+  if (!site?.quoEnabled) return { ok: false, code: "store_quo_disabled" };
+  if (!client) return { ok: false, code: "quo_not_configured" };
+
+  let pendingId: string;
+  try {
+    const pending = await prisma.orderCommunication.create({
+      data: {
+        orderId: null, provider: "QUO", type: "SMS", direction: "OUTBOUND",
+        partyRole: "UNKNOWN", status: "PENDING",
+        storePhone: site.quoPhoneNumber ?? null, externalPhone: e164, externalPhoneNormalized: e164,
+        messageText: text, providerPhoneNumberId: fromId, occurredAt: new Date(),
+        sendKey: input.idempotencyKey,
+      },
+      select: { id: true },
+    });
+    pendingId = pending.id;
+  } catch (err) {
+    if (isP2002(err)) {
+      const existing = await prisma.orderCommunication.findUnique({ where: { sendKey: input.idempotencyKey }, select: { id: true, status: true } });
+      if (existing) {
+        if (existing.status === "FAILED") return { ok: false, code: "previous_attempt_failed", communicationId: existing.id };
+        return { ok: true, communicationId: existing.id, status: existing.status === "PENDING" ? "PENDING" : "SENT", duplicate: true };
+      }
+    }
+    throw err;
+  }
+
+  try {
+    const res = await client.sendMessage({ content: text, from: fromId, to: [e164] });
+    await prisma.orderCommunication.update({
+      where: { id: pendingId },
+      data: { status: "SENT", providerResourceId: res.id, providerConversationId: res.conversationId, occurredAt: new Date() },
+    });
+    quoLog("sms.sent", { communicationId: pendingId, target: "UNKNOWN", phone: maskPhone(e164), resourceId: res.id, textLen: text.length });
+    return { ok: true, communicationId: pendingId, status: "SENT", duplicate: false };
+  } catch (err) {
+    const kind = err instanceof QuoApiError ? err.kind : "network";
+    const safeCode = err instanceof QuoApiError ? `${err.kind}:${err.status}` : "network:0";
+    await prisma.orderCommunication.update({ where: { id: pendingId }, data: { status: "FAILED", rawMetadata: { error: safeCode } } });
+    quoLog("sms.failed", { communicationId: pendingId, target: "UNKNOWN", phone: maskPhone(e164), errorCode: safeCode });
+    return { ok: false, code: `quo_${kind}`, communicationId: pendingId };
+  }
+}

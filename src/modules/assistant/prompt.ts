@@ -87,8 +87,12 @@ HARD RULES — never break them:
 Set "important": true for complaints, refunds, cancellations, undelivered flowers, or anything
 that sounds urgent.
 
+If the person names the order — the recipient's or sender's name, the delivery address, or an
+order number — put exactly what they said in "order_hint" (for example "Maria Lopez",
+"123 Main St", "20654"), otherwise null. Do not guess.
+
 Answer with JSON only:
-{"reply_en": string, "intent": string, "important": boolean, "needs_human": boolean, "ready_time": null}`;
+{"reply_en": string, "intent": string, "important": boolean, "needs_human": boolean, "ready_time": null, "order_hint": string|null}`;
 
 /** Срез заказа для модели. Отдаём всё, что знаем: решение владельца. */
 function orderBlock(o: OrderSnapshot): string {
@@ -136,6 +140,8 @@ export type ParsedReply = {
   important: boolean;
   needsHuman: boolean;
   readyTime: string | null;
+  /** Незнакомый номер назвал заказ: имя, адрес или номер — как сказал, без догадок модели. */
+  orderHint: string | null;
 };
 
 /** Кириллица в тексте наружу — запрещена жёстко, а не «нежелательна». */
@@ -152,7 +158,7 @@ export function parseReply(raw: string): ParsedReply {
     const cleaned = raw.trim().replace(/^```(?:json)?/i, "").replace(/```$/, "").trim();
     data = JSON.parse(cleaned) as Record<string, unknown>;
   } catch {
-    return { replyEn: "", intent: "unparsed", important: false, needsHuman: true, readyTime: null };
+    return { replyEn: "", intent: "unparsed", important: false, needsHuman: true, readyTime: null, orderHint: null };
   }
 
   const replyEn = typeof data.reply_en === "string" ? data.reply_en.trim() : "";
@@ -160,10 +166,11 @@ export function parseReply(raw: string): ParsedReply {
   const important = data.important === true;
   const needsHuman = data.needs_human === true || !replyEn;
   const readyTime = typeof data.ready_time === "string" && data.ready_time.trim() ? data.ready_time.trim() : null;
+  const orderHint = typeof data.order_hint === "string" && data.order_hint.trim() ? data.order_hint.trim().slice(0, 120) : null;
 
   // Русский текст клиенту не уходит ни при каких условиях: правило владельца, и оно жёстче
   // любой инструкции в промпте — инструкцию модель может проигнорировать, эту проверку нет.
-  if (CYRILLIC.test(replyEn)) return { replyEn: "", intent, important, needsHuman: true, readyTime };
+  if (CYRILLIC.test(replyEn)) return { replyEn: "", intent, important, needsHuman: true, readyTime, orderHint };
 
-  return { replyEn, intent, important, needsHuman, readyTime };
+  return { replyEn, intent, important, needsHuman, readyTime, orderHint };
 }

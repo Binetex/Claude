@@ -59,6 +59,7 @@ describe("разбор ответа модели", () => {
       important: false,
       needsHuman: false,
       readyTime: null,
+      orderHint: null,
     });
   });
 
@@ -95,5 +96,17 @@ describe("разбор ответа модели", () => {
     const r = parseReply('{"reply_en":"A team member will follow up.","intent":"refund","important":true,"needs_human":true,"ready_time":null}');
     expect(r.important).toBe(true);
     expect(r.needsHuman).toBe(true);
+  });
+});
+
+describe("подсказка о заказе от незнакомого номера", () => {
+  it("имя или адрес читаются как сказал человек", () => {
+    const r = parseReply('{"reply_en":"Thanks, one moment.","intent":"other","important":false,"needs_human":false,"ready_time":null,"order_hint":"Maria Lopez"}');
+    expect(r.orderHint).toBe("Maria Lopez");
+  });
+
+  it("нет подсказки — нет привязки", () => {
+    const r = parseReply('{"reply_en":"Hi","intent":"other","important":false,"needs_human":false}');
+    expect(r.orderHint).toBeNull();
   });
 });

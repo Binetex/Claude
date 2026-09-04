@@ -9,7 +9,7 @@ import "server-only";
 import type { PrismaClient } from "@/generated/prisma/client";
 import { getQuoConfig } from "@/integrations/quo/config";
 import { createQuoClient } from "@/integrations/quo/client";
-import { sendOrderSms } from "@/integrations/quo/send";
+import { sendOrderSms, sendUnlinkedSms } from "@/integrations/quo/send";
 import { resolveOwnerBot, resolveFloristBot } from "@/integrations/telegram/bots";
 import { TelegramSender } from "@/integrations/telegram/sender";
 import { pickRecipient, storeHour } from "./routing";
@@ -27,7 +27,7 @@ export async function sendAssistantReply(prisma: PrismaClient, turnId: string, d
   const turn = await prisma.aiTurn.findUnique({
     where: { id: turnId },
     select: {
-      id: true, status: true, replyText: true, orderId: true,
+      id: true, status: true, replyText: true, orderId: true, siteId: true,
       site: { select: { aiDryRun: true } },
       communication: { select: { partyRole: true, externalPhoneNormalized: true } },
     },
@@ -36,9 +36,25 @@ export async function sendAssistantReply(prisma: PrismaClient, turnId: string, d
   // Повторное нажатие кнопки или гонка двух воркеров: отправляем только из черновика.
   if (turn.status !== "DRAFT") return { ok: false, code: "already_decided" };
   if (!turn.replyText?.trim()) return { ok: false, code: "no_text" };
-  if (!turn.orderId) return { ok: false, code: "no_order" };
   // Сухой прогон означает «наружу не уходит ничего» — включая нажатие кнопки.
   if (turn.site.aiDryRun) return { ok: false, code: "dry_run" };
+
+  // Незнакомый номер: заказа нет, отвечаем в тот же номер от номера магазина.
+  if (!turn.orderId) {
+    const cfg = getQuoConfig();
+    const res = await sendUnlinkedSms(prisma, cfg ? createQuoClient(cfg) : null, {
+      siteId: turn.siteId,
+      toPhone: turn.communication.externalPhoneNormalized,
+      text: turn.replyText.trim(),
+      idempotencyKey: `ai-turn:${turn.id}`,
+    });
+    if (!res.ok) return { ok: false, code: res.code };
+    await prisma.aiTurn.update({
+      where: { id: turn.id },
+      data: { status: "SENT", sentCommunicationId: res.communicationId ?? null, decidedAt: new Date(), decidedByUserId: decidedByUserId ?? null },
+    });
+    return { ok: true };
+  }
 
   const order = await prisma.order.findUnique({
     where: { id: turn.orderId },
@@ -95,18 +111,19 @@ export async function notifyDraft(prisma: PrismaClient, turnId: string, now = ne
     where: { id: turnId },
     select: {
       id: true, replyText: true, important: true, needsHuman: true, intent: true,
+      site: { select: { name: true, timezone: true } },
       order: { select: { orderNumber: true, currentFloristId: true, site: { select: { timezone: true } } } },
-      communication: { select: { messageText: true, transcript: true } },
+      communication: { select: { messageText: true, transcript: true, externalPhone: true } },
     },
   });
-  if (!turn?.order) return false;
+  if (!turn) return false;
 
-  const who = pickRecipient({
-    storeHour: storeHour(turn.order.site?.timezone, now),
-    hasFlorist: !!turn.order.currentFloristId,
-  });
+  // Незнакомый номер идёт только владельцу: флориста у разговора без заказа нет.
+  const who = turn.order
+    ? pickRecipient({ storeHour: storeHour(turn.order.site?.timezone, now), hasFlorist: !!turn.order.currentFloristId })
+    : "OWNER";
   const lookup =
-    who === "FLORIST" && turn.order.currentFloristId
+    who === "FLORIST" && turn.order?.currentFloristId
       ? await resolveFloristBot(prisma, turn.order.currentFloristId)
       : await resolveOwnerBot(prisma);
   if (!("bot" in lookup)) return false;
@@ -114,8 +131,11 @@ export async function notifyDraft(prisma: PrismaClient, turnId: string, now = ne
   const incoming = clip(turn.communication.messageText ?? turn.communication.transcript ?? "", 400);
   const draft = turn.replyText?.trim();
   const head = turn.important ? "❗ Важное сообщение от клиента" : "Сообщение от клиента";
+  const where = turn.order
+    ? `заказ ${turn.order.orderNumber}`
+    : `незнакомый номер ${turn.communication.externalPhone} · ${turn.site.name}`;
   const lines = [
-    `<b>${head}</b> · заказ ${turn.order.orderNumber}`,
+    `<b>${head}</b> · ${where}`,
     "",
     `Клиент: ${incoming}`,
     "",
@@ -140,7 +160,7 @@ export async function notifyDraft(prisma: PrismaClient, turnId: string, now = ne
   // Важное владелец узнаёт всегда, даже когда черновик ушёл флористу: отмена, возврат, жалоба —
   // это его решения. Копия без кнопки: подтверждает тот, у кого черновик, а владелец при желании
   // открывает заказ. Сбой копии черновик не отменяет.
-  if (turn.important && who === "FLORIST") {
+  if (turn.important && who === "FLORIST" && turn.order) {
     const owner = await resolveOwnerBot(prisma);
     if ("bot" in owner) {
       await new TelegramSender(owner.bot.token)
@@ -168,14 +188,21 @@ export function buildAssistantNudgeHandler(prisma: PrismaClient) {
     const turn = await prisma.aiTurn.findUnique({
       where: { id: p.turnId },
       select: {
-        id: true, status: true, orderId: true,
+        id: true, status: true, orderId: true, siteId: true,
         site: { select: { aiDryRun: true } },
         communication: { select: { partyRole: true, externalPhoneNormalized: true } },
         order: { select: { senderPhone: true, recipientPhone: true, orderStatus: true, deliveryStatus: true } },
       },
     });
     // Ответили, отказались или сухой прогон — говорить «одну минуту» уже незачем.
-    if (!turn || turn.status !== "DRAFT" || !turn.orderId || turn.site.aiDryRun || !turn.order) return;
+    if (!turn || turn.status !== "DRAFT" || turn.site.aiDryRun) return;
+    if (!turn.orderId || !turn.order) {
+      const cfg = getQuoConfig();
+      await sendUnlinkedSms(prisma, cfg ? createQuoClient(cfg) : null, {
+        siteId: turn.siteId, toPhone: turn.communication.externalPhoneNormalized, text: NUDGE_TEXT, idempotencyKey: `ai-nudge:${turn.id}`,
+      });
+      return;
+    }
     if (turn.order.deliveryStatus === "DELIVERED") return;
 
     const incomingPhone = turn.communication.externalPhoneNormalized;

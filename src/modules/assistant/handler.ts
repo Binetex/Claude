@@ -27,6 +27,7 @@ import { scheduleAssistantNudge, type AssistantIncomingPayload } from "./events"
 import { PrismaOutboxRepository } from "@/outbox/prismaRepository";
 import { sendAssistantReply, notifyDraft } from "./deliver";
 import { prependReadyTimeNote } from "./note";
+import { findOrderByHint, linkConversation } from "./link";
 import { publishTelegramNotification } from "@/integrations/telegram/events";
 
 /**
@@ -188,7 +189,37 @@ export function buildAssistantHandler(prisma: PrismaClient, deps: AssistantDeps 
       return;
     }
 
-    const parsed = parseReply(raw);
+    let parsed = parseReply(raw);
+
+    // Незнакомый номер назвал заказ. Нашли ровно один — привязываем разговор и спрашиваем
+    // модель ещё раз, уже с данными заказа: человек ждёт ответа про свой заказ сейчас, а не в
+    // следующем сообщении. Один повтор, не рекурсия: второй подсказки в ответе с заказом не бывает.
+    let linkedOrder = order;
+    if (!order && parsed.orderHint) {
+      const foundId = await findOrderByHint(prisma, site.id, parsed.orderHint).catch(() => null);
+      if (foundId) {
+        await linkConversation(prisma, foundId, incoming.externalPhoneNormalized).catch(() => null);
+        linkedOrder = await prisma.order.findUnique({ where: { id: foundId }, include: SMS_ORDER_INCLUDE });
+        if (linkedOrder) {
+          const again = buildMessages({
+            knowledgeBase: site.aiKnowledgeBase,
+            order: snapshot(linkedOrder, site.name, incoming.partyRole),
+            history: await loadHistory(prisma, linkedOrder.id, incoming.id),
+            incomingText: text,
+          });
+          try {
+            const res = await client.complete(again);
+            raw = res.text;
+            latencyMs += res.latencyMs;
+            parsed = parseReply(raw);
+            messages.splice(0, messages.length, ...again);
+          } catch {
+            // Не вышло переспросить — остаёмся с ответом «без заказа», он безопасен.
+          }
+        }
+      }
+    }
+
     const action = decideDelivery({
       mode: site.aiMode as AssistantMode,
       dryRun: site.aiDryRun,
@@ -199,16 +230,17 @@ export function buildAssistantHandler(prisma: PrismaClient, deps: AssistantDeps 
 
     // Клиент назвал время — это данные заказа, а не только реплика: строка в заметку сверху и
     // уведомление владельцу и флористу. В сухом прогоне не пишем и не уведомляем: он пассивный.
-    if (parsed.readyTime && order && !site.aiDryRun) {
-      await recordReadyTime(prisma, order, incoming.id, parsed.readyTime, text).catch((err) =>
-        console.error(`[assistant] заметка о времени по заказу ${order.id} не записана:`, err instanceof Error ? err.message : String(err))
+    if (parsed.readyTime && linkedOrder && !site.aiDryRun) {
+      const forNote = linkedOrder;
+      await recordReadyTime(prisma, forNote, incoming.id, parsed.readyTime, text).catch((err) =>
+        console.error(`[assistant] заметка о времени по заказу ${forNote.id} не записана:`, err instanceof Error ? err.message : String(err))
       );
     }
 
     const turn = await prisma.aiTurn.create({
       data: {
         siteId: site.id,
-        orderId: order?.id ?? null,
+        orderId: linkedOrder?.id ?? null,
         communicationId: incoming.id,
         status: "DRAFT",
         source: "model",
