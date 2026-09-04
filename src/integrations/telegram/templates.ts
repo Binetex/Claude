@@ -210,6 +210,24 @@ function deliveryProblemLabel(status: string): string {
  * и ОДИН И ТОТ ЖЕ текст владельцу и флористу (florist-события рендерят эти же функции,
  * различаются только бот, чат и кнопки).
  */
+/**
+ * Клиент ответил, когда готов принять букет. Текст один у владельца и флориста: тот, кто
+ * везёт, должен увидеть слова клиента, а не пересказ.
+ */
+export function renderCustomerReadyTime(o: OrderSnapshot, readyTime: string, quote: string | null): string {
+  return (
+    `🕒 <b>Клиент назвал время</b>\n` +
+    `<b>${esc(o.orderNumber)}</b> · ${esc(o.siteName)}\n\n` +
+    `Готов принять: <b>${esc(readyTime)}</b>\n` +
+    line("Сообщение", quote) +
+    `\n` +
+    line("Получатель", o.recipientName) +
+    line("Адрес", addressText(o)) +
+    line("Доставка", [fmtDate(o.deliveryDate), fmtTimeWindow(o.deliveryWindow)].filter(Boolean).join(", ")) +
+    `\nЗаписано в заметку заказа.`
+  ).trimEnd();
+}
+
 export function renderOwnerDeliveryProblem(o: OrderSnapshot, status: string, safeReason: string | null): string {
   return (
     `🚨 <b>Проблема с доставкой</b>\n` +
@@ -278,7 +296,8 @@ export function buttonsFor(type: TelegramEventType, o: OrderSnapshot): TelegramB
     type === "order.assigned" ||
     type === "order.handed_over" ||
     type === "delivery.problem_florist" ||
-    type === "delivery.no_couriers_florist";
+    type === "delivery.no_couriers_florist" ||
+    type === "customer.ready_time_florist";
   if (!forFlorist) return [{ text: "Open Order", url: ownerOrderUrl(o.id) }];
   const buttons: TelegramButton[] = [{ text: "🧾 Open Order", url: floristOrderUrl(o.id) }];
   const addr = addressText(o);

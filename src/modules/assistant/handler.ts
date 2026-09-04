@@ -26,6 +26,8 @@ import { shouldConsider, decideDelivery, type AssistantMode } from "./policy";
 import { scheduleAssistantNudge, type AssistantIncomingPayload } from "./events";
 import { PrismaOutboxRepository } from "@/outbox/prismaRepository";
 import { sendAssistantReply, notifyDraft } from "./deliver";
+import { prependReadyTimeNote } from "./note";
+import { publishTelegramNotification } from "@/integrations/telegram/events";
 
 /**
  * Сколько последних сообщений переписки показываем модели. Двадцать — вся живая переписка по
@@ -195,6 +197,14 @@ export function buildAssistantHandler(prisma: PrismaClient, deps: AssistantDeps 
       important: parsed.important,
     });
 
+    // Клиент назвал время — это данные заказа, а не только реплика: строка в заметку сверху и
+    // уведомление владельцу и флористу. В сухом прогоне не пишем и не уведомляем: он пассивный.
+    if (parsed.readyTime && order && !site.aiDryRun) {
+      await recordReadyTime(prisma, order, incoming.id, parsed.readyTime, text).catch((err) =>
+        console.error(`[assistant] заметка о времени по заказу ${order.id} не записана:`, err instanceof Error ? err.message : String(err))
+      );
+    }
+
     const turn = await prisma.aiTurn.create({
       data: {
         siteId: site.id,
@@ -304,4 +314,30 @@ function snapshot(order: Record<string, unknown>, storeName: string, partyRole: 
 /** Полный текст запроса для журнала: владелец должен видеть, что именно спрашивали. */
 function renderPrompt(messages: { role: string; content: string }[]): string {
   return messages.map((m) => `[${m.role}]\n${m.content}`).join("\n\n");
+}
+
+/**
+ * Слова клиента о времени готовности — в заметку заказа и в Telegram тем, кто везёт и кто
+ * отвечает. Заметка перечитывается перед записью: пока шёл запрос к модели, её могли поправить
+ * руками, и затирать чужую правку старой копией нельзя.
+ */
+async function recordReadyTime(
+  prisma: PrismaClient,
+  order: { id: string; currentFloristId: string | null; site: { timezone: string | null } },
+  communicationId: string,
+  readyTime: string,
+  quote: string
+): Promise<void> {
+  const fresh = await prisma.order.findUnique({ where: { id: order.id }, select: { customerNote: true } });
+  await prisma.order.update({
+    where: { id: order.id },
+    data: { customerNote: prependReadyTimeNote(fresh?.customerNote ?? "", readyTime, new Date(), order.site.timezone) },
+  });
+  const context = { readyTime, quote: quote.slice(0, 200) };
+  await publishTelegramNotification(prisma, { type: "customer.ready_time", orderId: order.id, occurrenceKey: communicationId, context });
+  if (order.currentFloristId) {
+    await publishTelegramNotification(prisma, {
+      type: "customer.ready_time_florist", orderId: order.id, floristId: order.currentFloristId, occurrenceKey: communicationId, context,
+    });
+  }
 }

@@ -136,6 +136,18 @@ export async function notifyDraft(prisma: PrismaClient, turnId: string, now = ne
     where: { id: turn.id },
     data: { telegramChatId: lookup.bot.chatId, telegramMessageId: res.messageId },
   });
+
+  // Важное владелец узнаёт всегда, даже когда черновик ушёл флористу: отмена, возврат, жалоба —
+  // это его решения. Копия без кнопки: подтверждает тот, у кого черновик, а владелец при желании
+  // открывает заказ. Сбой копии черновик не отменяет.
+  if (turn.important && who === "FLORIST") {
+    const owner = await resolveOwnerBot(prisma);
+    if ("bot" in owner) {
+      await new TelegramSender(owner.bot.token)
+        .sendMessage(owner.bot.chatId, `<b>❗ Важное от клиента</b> · заказ ${turn.order.orderNumber}\n\n${incoming}\n\nЧерновик ответа ушёл флористу.`)
+        .catch(() => null);
+    }
+  }
   return true;
 }
 

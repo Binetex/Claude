@@ -12,6 +12,7 @@ import {
   renderFloristHandedOver,
   renderOwnerCreated,
   renderOwnerDeliveryProblem,
+  renderCustomerReadyTime,
   renderOwnerNoCouriers,
   renderAskReview,
   renderOwnerPaymentProblem,
@@ -257,6 +258,9 @@ function renderFor(type: TelegramNotifyPayload["type"], order: OrderSnapshot, ct
       return renderOwnerNoCouriers(order, ctx.checkedAt ?? null);
     case "order.ask_review":
       return renderAskReview(order);
+    case "customer.ready_time":
+    case "customer.ready_time_florist":
+      return renderCustomerReadyTime(order, ctx.readyTime ?? "—", ctx.quote ?? null);
   }
 }
 

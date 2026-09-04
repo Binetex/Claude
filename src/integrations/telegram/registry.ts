@@ -25,6 +25,8 @@ export const TELEGRAM_EVENTS = [
   "delivery.no_couriers",
   "delivery.no_couriers_florist",
   "order.ask_review",
+  "customer.ready_time",
+  "customer.ready_time_florist",
 ] as const;
 
 export type TelegramEventType = (typeof TELEGRAM_EVENTS)[number];
@@ -130,6 +132,22 @@ const REGISTRY: Record<TelegramEventType, TelegramEventDef> = {
     perFlorist: true,
     dedupeKey: ({ orderId, floristId }) => `order:${orderId}:florist:${floristId}:no_couriers`,
     description: "Курьеров на маршрут не нашлось — флористу заказа: букет остаётся у него.",
+  },
+  // Клиент ответил, когда готов принять букет. Ключ включает само сообщение (occurrenceKey из
+  // публикации): назвал время дважды — два уведомления, а не правка первого.
+  "customer.ready_time": {
+    type: "customer.ready_time",
+    audience: "OWNER",
+    perFlorist: false,
+    dedupeKey: ({ orderId }) => `order:${orderId}:owner.ready_time`,
+    description: "Клиент написал, когда готов принять доставку — владельцу.",
+  },
+  "customer.ready_time_florist": {
+    type: "customer.ready_time_florist",
+    audience: "FLORIST",
+    perFlorist: true,
+    dedupeKey: ({ orderId, floristId }) => `order:${orderId}:florist:${floristId}:ready_time`,
+    description: "Клиент написал, когда готов принять доставку — флористу, который везёт.",
   },
 };
 
