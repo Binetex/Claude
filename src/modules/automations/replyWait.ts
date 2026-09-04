@@ -22,7 +22,7 @@ import { PrismaOutboxRepository } from "@/outbox/prismaRepository";
 import { publishAutomationTrigger } from "./events";
 import { TERMINAL_ORDER_STATUSES } from "@/lib/statuses";
 import { CHAINED_TRIGGER } from "./triggers";
-import { CHAIN_OCCURRENCE_PREFIX, MAX_CHAIN_MESSAGES, chainOccurrenceKey, clampWait } from "./chain";
+import { CHAIN_OCCURRENCE_PREFIX, MAX_CHAIN_MESSAGES, MAX_WAIT_MIN, chainOccurrenceKey, clampWait, isTooLate } from "./chain";
 
 /**
  * Значение eventType сохранено историческим: в очереди на момент перехода могли лежать уже
@@ -50,6 +50,12 @@ export type ReplyWaitPayload = {
    * продолжение, а не два.
    */
   senderCase?: string | null;
+  /**
+   * Когда проверка должна была сработать. По ней видно опоздание: воркер мог лежать, и
+   * накопленные проверки срабатывают пачкой — сообщение «вы не ответили» через сутки после
+   * вопроса человеку уже не нужно.
+   */
+  dueAt?: string;
 };
 
 /**
@@ -85,6 +91,7 @@ export async function scheduleReplyWait(
       ? clampWait(order?.site.awaitReplyNextMin, WAIT_NEXT_MIN)
       : clampWait(order?.site.awaitReplyFirstMin, WAIT_FIRST_MIN);
 
+    const dueAt = new Date(args.sentAt.getTime() + waitMin * 60_000);
     const repo = new PrismaOutboxRepository(prisma);
     await repo.enqueue({
       eventType: REPLY_WAIT_EVENT,
@@ -97,9 +104,10 @@ export async function scheduleReplyWait(
         phoneNormalized: args.phoneNormalized,
         askedAt: args.sentAt.toISOString(),
         senderCase: args.senderCase,
+        dueAt: dueAt.toISOString(),
       } satisfies ReplyWaitPayload,
       idempotencyKey: `reply-wait:${args.jobId}`,
-      availableAt: new Date(args.sentAt.getTime() + waitMin * 60_000),
+      availableAt: dueAt,
     });
   } catch (err) {
     console.error(`[sms] scheduleReplyWait failed for order ${args.orderId}:`, err instanceof Error ? err.message : String(err));
@@ -163,6 +171,13 @@ export function buildReplyWaitHandler(prisma: PrismaClient) {
     // тому: волна 2 повторила бы получателю уже отправленный вопрос, а заказчик не получил бы
     // ничего. Останавливаемся явно и с записью в лог.
     if (!p.jobId) return stop(p, "запись старого формата (до перехода на цепочки)");
+
+    // Опоздавшая проверка ничего не отправляет: воркер мог лежать часами, и накопленные
+    // проверки срабатывают пачкой. «Вы не ответили» через сутки после вопроса — это уже не
+    // страховка. Записи без dueAt (поставленные до появления поля) считаем по максимальной
+    // паузе от момента вопроса.
+    const dueAt = p.dueAt ? new Date(p.dueAt) : new Date(new Date(p.askedAt).getTime() + MAX_WAIT_MIN * 60_000);
+    if (isTooLate(dueAt, new Date())) return stop(p, "проверка опоздала — отправлять уже поздно");
 
     const order = await prisma.order.findUnique({
       where: { id: p.orderId },

@@ -24,6 +24,20 @@ export const CHAIN_OCCURRENCE_PREFIX = "chain:";
 export const MIN_WAIT_MIN = 5;
 export const MAX_WAIT_MIN = 12 * 60;
 
+/**
+ * Насколько проверка может опоздать и всё ещё что-то отправлять.
+ *
+ * Воркер может лежать (деплой, сбой, перезагрузка сервера), и накопленные проверки срабатывают
+ * пачкой, когда он поднимется. Сообщение «вы не ответили», пришедшее на сутки позже вопроса, —
+ * это уже не страховка, а недоумение у человека, поэтому опоздавшая проверка молча гаснет.
+ */
+export const LATE_TOLERANCE_MIN = 2 * 60;
+
+/** Опоздала ли проверка настолько, что отправлять уже поздно. */
+export function isTooLate(dueAt: Date, now: Date): boolean {
+  return now.getTime() - dueAt.getTime() > LATE_TOLERANCE_MIN * 60_000;
+}
+
 /** Срезает срок ожидания к разумным границам. Зовётся и при сохранении, и при постановке. */
 export function clampWait(value: number | null | undefined, fallback: number): number {
   if (value == null || !Number.isFinite(value)) return fallback;

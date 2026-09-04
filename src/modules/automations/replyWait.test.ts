@@ -79,6 +79,7 @@ const record = (over: Record<string, unknown> = {}) => ({
     phoneNormalized: "+13105550100",
     askedAt: SENT_AT.toISOString(),
     senderCase: "o1:2026-09-04",
+    dueAt: new Date(SENT_AT.getTime() + 60 * 60_000).toISOString(),
     ...over,
   },
 });
@@ -248,5 +249,41 @@ describe("правило-отправитель", () => {
     const prisma = prismaWith({ sender: { active: true, deletedAt: new Date(), noReplyNextAutomationId: "a2" } });
     await buildReplyWaitHandler(prisma)(record());
     expect(publishAutomationTrigger).not.toHaveBeenCalled();
+  });
+});
+
+describe("опоздавшая проверка", () => {
+  it("воркер лежал сутки — накопленная проверка ничего не шлёт", async () => {
+    // Проверки срабатывают пачкой, когда воркер поднимется. Сообщение «вы не ответили» через
+    // сутки после вопроса человеку уже не нужно и читается как сбой.
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(SENT_AT.getTime() + 25 * 60 * 60_000));
+
+    await buildReplyWaitHandler(prismaWith())(record());
+
+    expect(publishAutomationTrigger).not.toHaveBeenCalled();
+    vi.useRealTimers();
+  });
+
+  it("небольшая задержка воркера цепочку не ломает", async () => {
+    vi.useFakeTimers();
+    // Срок был через час после отправки, проверка идёт на полчаса позже срока — это норма.
+    vi.setSystemTime(new Date(SENT_AT.getTime() + 90 * 60_000));
+
+    await buildReplyWaitHandler(prismaWith())(record());
+
+    expect(publishAutomationTrigger).toHaveBeenCalledTimes(1);
+    vi.useRealTimers();
+  });
+
+  it("запись без срока считается по максимальной паузе от вопроса", async () => {
+    // Такие записи могли попасть в очередь до появления поля: 12 часов паузы + допуск.
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(SENT_AT.getTime() + 20 * 60 * 60_000));
+
+    await buildReplyWaitHandler(prismaWith())(record({ dueAt: undefined }));
+
+    expect(publishAutomationTrigger).not.toHaveBeenCalled();
+    vi.useRealTimers();
   });
 });
