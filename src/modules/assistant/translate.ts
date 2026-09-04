@@ -5,7 +5,7 @@ import "server-only";
  */
 import type { DeepseekClient } from "@/integrations/deepseek/client";
 import { extractVariables } from "@/modules/messaging/template";
-import { looksEnglish } from "./prompt";
+import { looksEnglish, stripDashes } from "./prompt";
 
 export async function translateTemplate(client: DeepseekClient, text: string): Promise<string | null> {
   try {
@@ -18,7 +18,7 @@ export async function translateTemplate(client: DeepseekClient, text: string): P
       { role: "user", content: text },
     ]);
     const parsed = JSON.parse(res.text.trim().replace(/^```(?:json)?/i, "").replace(/```$/, "").trim()) as { text?: unknown };
-    const out = typeof parsed.text === "string" ? parsed.text.trim() : "";
+    const out = typeof parsed.text === "string" ? stripDashes(parsed.text.trim()) : "";
     if (!out || !looksEnglish(out)) return null;
     const before = [...extractVariables(text)].sort().join(",");
     const after = [...extractVariables(out)].sort().join(",");

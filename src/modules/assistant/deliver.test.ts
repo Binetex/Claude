@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { pickOrderTarget, escapeHtml } from "./deliver";
+import { pickOrderTarget, escapeHtml, NUDGE_TEXT } from "./deliver";
 
 describe("pickOrderTarget", () => {
   const order = { senderPhone: "+13100000001", recipientPhone: "+13100000002" };
@@ -22,5 +22,11 @@ describe("pickOrderTarget", () => {
 describe("escapeHtml", () => {
   it("текст клиента в Telegram — данные, а не разметка", () => {
     expect(escapeHtml("<3 you & me <b>")).toBe("&lt;3 you &amp; me &lt;b&gt;");
+  });
+});
+
+describe("NUDGE_TEXT", () => {
+  it("без длинных тире и по-английски", () => {
+    expect(NUDGE_TEXT).not.toMatch(/[—–Ѐ-ӿ]/);
   });
 });

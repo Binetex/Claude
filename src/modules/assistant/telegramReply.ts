@@ -15,7 +15,7 @@ import { resolveBotById } from "@/integrations/telegram/bots";
 import { getDeepseekConfig } from "@/integrations/deepseek/config";
 import { createDeepseekClient, type DeepseekClient } from "@/integrations/deepseek/client";
 import { sendAssistantReply, discardAssistantReply, escapeHtml, SEND_ACTION_PREFIX, DISCARD_ACTION_PREFIX } from "./deliver";
-import { looksEnglish } from "./prompt";
+import { looksEnglish, stripDashes } from "./prompt";
 import { getSpeechConfig, createTranscriber, type Transcriber } from "@/integrations/speech/transcribe";
 
 export const TELEGRAM_UPDATE_EVENT = "assistant.telegram.update";
@@ -56,7 +56,7 @@ export async function translateForCustomer(client: DeepseekClient, text: string)
       { role: "user", content: text },
     ]);
     const parsed = JSON.parse(res.text.trim().replace(/^```(?:json)?/i, "").replace(/```$/, "").trim()) as { text?: unknown };
-    const out = typeof parsed.text === "string" ? parsed.text.trim() : "";
+    const out = typeof parsed.text === "string" ? stripDashes(parsed.text.trim()) : "";
     if (!out || !looksEnglish(out)) return null;
     return out;
   } catch {

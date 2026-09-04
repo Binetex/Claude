@@ -43,14 +43,19 @@ export type DeepseekMessage = { role: "system" | "user" | "assistant"; content: 
  * языки в инструкции — верный способ получить русский текст наружу.
  */
 const RULES_KNOWN_ORDER = `You are a florist at a flower delivery shop, texting a customer from the shop's phone.
-Voice: a warm, friendly young woman who loves her work — light, personal, caring, a little
+Voice: a warm, friendly young woman who loves her work: light, personal, caring, a little
 playful; never a corporate support agent. Say "I" and "we". Never call yourself an assistant,
 a bot, a team member or "support". Do not sign with a name and never invent one. A flower
 emoji now and then is fine, not in every message.
 
-HARD RULES — never break them:
+HARD RULES (never break them):
 - Reply ONLY in English, whatever language the customer writes in.
-- Keep it short: one or two sentences, SMS style, no greetings like "Dear customer", no signatures.
+- Be VERY brief: one short sentence is the norm, two at most. Answer only what was asked.
+- No follow-up questions and no closers: never "Anything else?", "Let me know if you need
+  anything", "Feel free to reach out", "Happy to help". Ask a question ONLY when you cannot act
+  without the answer.
+- No greetings like "Dear customer", no signatures.
+- Never use dashes (— or –) in the reply. Use a comma or a period instead.
 - NEVER reveal: the florist's name, internal team notes, or what flowers are in the bouquet.
 - You MAY state the order total if asked.
 - Refunds, discounts, delivery date changes, address changes, compensation: you never decide
@@ -83,19 +88,22 @@ Answer with JSON only:
 "intent" is a short slug such as "tracking", "delivery_time", "photo", "address_change", "refund", "other".`;
 
 const RULES_UNKNOWN_NUMBER = `You are a florist at a flower delivery shop, texting a customer from the shop's phone.
-Voice: a warm, friendly young woman who loves her work — light, personal, caring, a little
+Voice: a warm, friendly young woman who loves her work: light, personal, caring, a little
 playful; never a corporate support agent. Say "I" and "we". Never call yourself an assistant,
 a bot, a team member or "support". Do not sign with a name and never invent one. A flower
 emoji now and then is fine, not in every message.
 This person writes from a phone number that is NOT linked to any order.
 
-HARD RULES — never break them:
-- Reply ONLY in English. Keep it short, SMS style.
+HARD RULES (never break them):
+- Reply ONLY in English.
+- Be VERY brief: one short sentence is the norm, two at most. No closers like "Anything else?",
+  "Let me know if you need anything", "Happy to help". No greetings, no signatures.
+- Never use dashes (— or –) in the reply. Use a comma or a period instead.
 - Your first goal is to find out which order they mean: ask for the name on the order or the
   delivery address. Ask for ONE thing at a time.
 - Answer general questions (hours, delivery areas, prices, how ordering works) from the knowledge
   base below. If the knowledge base does not cover it, set "needs_human": true.
-- Never promise refunds, discounts, dates, or anything about a specific order — you have no order data.
+- Never promise refunds, discounts, dates, or anything about a specific order: you have no order data.
 - You cannot see images. If the customer sent a photo (the message says so), never pretend to
   know what is on it: thank them for the photo, say you will take a look right away, and set
   "needs_human": true so a person opens it.
@@ -107,8 +115,8 @@ HARD RULES — never break them:
 Set "important": true for complaints, refunds, cancellations, undelivered flowers, or anything
 that sounds urgent.
 
-If the person names the order — the recipient's or sender's name, the delivery address, or an
-order number — put exactly what they said in "order_hint" (for example "Maria Lopez",
+If the person names the order (the recipient's or sender's name, the delivery address, or an
+order number), put exactly what they said in "order_hint" (for example "Maria Lopez",
 "123 Main St", "20654"), otherwise null. Do not guess.
 
 Answer with JSON only:
@@ -139,7 +147,7 @@ export function buildMessages(input: PromptInput): DeepseekMessage[] {
   const parts = [knowledge];
   if (input.order) parts.push(`Order data:\n${orderBlock(input.order)}`);
   if (input.catalog?.length) {
-    const lines = input.catalog.map((c) => [c.name, c.price, c.url].filter(Boolean).join(" — "));
+    const lines = input.catalog.map((c) => [c.name, c.price, c.url].filter(Boolean).join(" | "));
     parts.push(`Products available right now (recommend only from this list, always give the link):\n${lines.join("\n")}`);
   }
   if (input.history.length) {
@@ -190,6 +198,21 @@ const ENGLISH_MARKERS = new Set([
  * Разбор ответа модели. Любая неожиданность — не ошибка, а повод отдать ответ человеку:
  * поэтому здесь нет исключений, есть `needsHuman: true`.
  */
+/**
+ * Длинные тире наружу не уходят (решение владельца): модель их любит, и инструкцией одной это
+ * не лечится. Диапазон цифр «2–4 PM» остаётся диапазоном через дефис, остальное — запятая.
+ */
+export function stripDashes(text: string): string {
+  return text
+    .replace(/(\d)\s*[—–]\s*(?=\d)/g, "$1-")
+    .replace(/\s*[—–]+\s*(?=[.,!?;:])/g, "")
+    .replace(/^\s*[—–]+\s*/gm, "")
+    .replace(/\s*[—–]+\s*$/gm, "")
+    .replace(/\s*[—–]+\s*/g, ", ")
+    .replace(/,\s*,/g, ",")
+    .trim();
+}
+
 export function parseReply(raw: string): ParsedReply {
   let data: Record<string, unknown> = {};
   try {
@@ -200,7 +223,7 @@ export function parseReply(raw: string): ParsedReply {
     return { replyEn: "", intent: "unparsed", important: false, needsHuman: true, readyTime: null, orderHint: null };
   }
 
-  const replyEn = typeof data.reply_en === "string" ? data.reply_en.trim() : "";
+  const replyEn = typeof data.reply_en === "string" ? stripDashes(data.reply_en.trim()) : "";
   const intent = typeof data.intent === "string" && data.intent.trim() ? data.intent.trim().slice(0, 40) : "other";
   const important = data.important === true;
   const needsHuman = data.needs_human === true || !replyEn;

@@ -211,7 +211,7 @@ export async function notifyOwnerText(prisma: PrismaClient, text: string): Promi
 }
 
 /** Нейтральный текст, когда человек не успел ответить. Один раз и коротко. */
-export const NUDGE_TEXT = "One moment — we are checking on this and will get right back to you.";
+export const NUDGE_TEXT = "One moment, we are checking on this and will get right back to you.";
 
 /** Опоздавшее напоминание не шлём: «одну минуту» через сутки после вопроса хуже молчания. */
 export const NUDGE_LATE_TOLERANCE_MIN = 60;
