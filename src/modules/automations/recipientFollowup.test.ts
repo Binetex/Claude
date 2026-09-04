@@ -28,23 +28,45 @@ import {
  * а на волне 2 ещё и тревога заказчику по поводу заказа, с которым всё в порядке.
  */
 const ASKED_AT = new Date("2026-09-04T17:00:00.000Z"); // 10:00 в Лос-Анджелесе
+/** Order.deliveryDate — UTC-полночь ЛОКАЛЬНОГО дня доставки. */
+const DELIVERY_DAY = new Date("2026-09-04T00:00:00.000Z");
+
+const baseOrder = (over: Record<string, unknown> = {}) => ({
+  id: "o1",
+  siteId: "s1",
+  orderStatus: "CONFIRMED",
+  deliveryStatus: "PENDING",
+  deliveryDate: DELIVERY_DAY,
+  site: { timezone: "America/Los_Angeles" },
+  ...over,
+});
 
 function prismaWith(opts: {
   order?: Record<string, unknown> | null;
   inboundFound?: boolean;
+  /** Правило, которым задан вопрос: null = удалено. */
+  automation?: Record<string, unknown> | null;
 } = {}): PrismaClient {
-  const order =
-    opts.order === undefined
-      ? { id: "o1", siteId: "s1", orderStatus: "CONFIRMED", deliveryStatus: "PENDING", site: { timezone: "America/Los_Angeles" } }
-      : opts.order;
+  const order = opts.order === undefined ? baseOrder() : opts.order;
+  const automation =
+    opts.automation === undefined ? { active: true, deletedAt: null, awaitRecipientReply: true } : opts.automation;
   return {
     order: { findUnique: vi.fn().mockResolvedValue(order) },
+    automation: { findUnique: vi.fn().mockResolvedValue(automation) },
     orderCommunication: { findFirst: vi.fn().mockResolvedValue(opts.inboundFound ? { id: "c1" } : null) },
   } as unknown as PrismaClient;
 }
 
-const record = (wave: 1 | 2, at = ASKED_AT) => ({
-  payload: { orderId: "o1", wave, askedAt: at.toISOString(), phoneNormalized: "+13105550100" },
+const record = (wave: 1 | 2, over: Record<string, unknown> = {}) => ({
+  payload: {
+    orderId: "o1",
+    wave,
+    askedAt: ASKED_AT.toISOString(),
+    phoneNormalized: "+13105550100",
+    deliveryDay: "2026-09-04",
+    automationId: "a1",
+    ...over,
+  },
 });
 
 beforeEach(() => {
@@ -58,8 +80,36 @@ describe("планирование первой проверки", () => {
     await scheduleRecipientFollowup(prismaWith(), { orderId: "o1", phoneNormalized: "+13105550100", sentAt: ASKED_AT });
 
     const arg = enqueue.mock.calls[0][0];
-    expect(arg.idempotencyKey).toBe("recipient-followup:o1:1");
+    expect(arg.idempotencyKey).toBe("recipient-followup:o1:2026-09-04:1");
     expect(arg.availableAt.getTime()).toBe(ASKED_AT.getTime() + WAIT_AFTER_ASK_MIN * 60_000);
+  });
+
+  it("перенос доставки на другой день начинает цепочку заново — у дня свой ключ", async () => {
+    // История: ключ был `recipient-followup:<заказ>:1`, без дня. Заказ переносили, вопрос уходил
+    // второй раз, а страховка молча не вставала — ровно на тех заказах, где получатель уже один
+    // раз не отозвался и заказ из-за этого и перенесли.
+    await scheduleRecipientFollowup(prismaWith(), { orderId: "o1", phoneNormalized: "+13105550100", sentAt: ASKED_AT });
+    const moved = prismaWith({ order: baseOrder({ deliveryDate: new Date("2026-09-05T00:00:00.000Z") }) });
+    await scheduleRecipientFollowup(moved, { orderId: "o1", phoneNormalized: "+13105550100", sentAt: ASKED_AT });
+
+    expect(enqueue.mock.calls.map((c) => c[0].idempotencyKey)).toEqual([
+      "recipient-followup:o1:2026-09-04:1",
+      "recipient-followup:o1:2026-09-05:1",
+    ]);
+  });
+
+  it("день доставки уезжает в payload — по нему волна поймёт, что устарела", async () => {
+    await scheduleRecipientFollowup(prismaWith(), { orderId: "o1", phoneNormalized: "+13105550100", sentAt: ASKED_AT, automationId: "a1" });
+    expect(enqueue.mock.calls[0][0].payload).toMatchObject({ deliveryDay: "2026-09-04", automationId: "a1" });
+  });
+
+  it("у заказа нет даты доставки — цепочку не к чему привязать, не заводим", async () => {
+    await scheduleRecipientFollowup(prismaWith({ order: baseOrder({ deliveryDate: null }) }), {
+      orderId: "o1",
+      phoneNormalized: "+13105550100",
+      sentAt: ASKED_AT,
+    });
+    expect(enqueue).not.toHaveBeenCalled();
   });
 
   it("без номера получателя цепочка не заводится — отвечать некому", async () => {
@@ -67,7 +117,7 @@ describe("планирование первой проверки", () => {
     expect(enqueue).not.toHaveBeenCalled();
   });
 
-  it("ключ идемпотентности один на заказ — второе правило не заведёт вторую цепочку", async () => {
+  it("ключ идемпотентности один на заказ и день — второе правило не заведёт вторую цепочку", async () => {
     await scheduleRecipientFollowup(prismaWith(), { orderId: "o1", phoneNormalized: "+13105550100", sentAt: ASKED_AT });
     await scheduleRecipientFollowup(prismaWith(), { orderId: "o1", phoneNormalized: "+13105550100", sentAt: ASKED_AT });
     const keys = enqueue.mock.calls.map((c) => c[0].idempotencyKey);
@@ -84,7 +134,7 @@ describe("волна 1 — переспросить получателя", () =>
 
     expect(publishAutomationTrigger.mock.calls[0][1].triggerType).toBe("RECIPIENT_NO_REPLY");
     const next = enqueue.mock.calls[0][0];
-    expect(next.idempotencyKey).toBe("recipient-followup:o1:2");
+    expect(next.idempotencyKey).toBe("recipient-followup:o1:2026-09-04:2");
     expect(next.payload.wave).toBe(2);
     expect(next.availableAt.getTime()).toBe(new Date("2026-09-04T18:00:00.000Z").getTime() + WAIT_AFTER_RETRY_MIN * 60_000);
   });
@@ -116,7 +166,7 @@ describe("когда эскалация гаснет", () => {
   it("заказ доставлен — молчать уже нормально", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-09-04T18:00:00.000Z"));
-    const prisma = prismaWith({ order: { id: "o1", siteId: "s1", orderStatus: "DELIVERED", deliveryStatus: "DELIVERED", site: { timezone: "America/Los_Angeles" } } });
+    const prisma = prismaWith({ order: baseOrder({ orderStatus: "DELIVERED", deliveryStatus: "DELIVERED" }) });
 
     await buildRecipientFollowupHandler(prisma)(record(1));
 
@@ -126,7 +176,7 @@ describe("когда эскалация гаснет", () => {
   it("заказ отменён — не пишем ни получателю, ни заказчику", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-09-04T18:00:00.000Z"));
-    const prisma = prismaWith({ order: { id: "o1", siteId: "s1", orderStatus: "CANCELLED", deliveryStatus: "PENDING", site: { timezone: "America/Los_Angeles" } } });
+    const prisma = prismaWith({ order: baseOrder({ orderStatus: "CANCELLED" }) });
 
     await buildRecipientFollowupHandler(prisma)(record(1));
 
@@ -140,6 +190,61 @@ describe("когда эскалация гаснет", () => {
     await buildRecipientFollowupHandler(prismaWith())(record(1));
 
     expect(publishAutomationTrigger).not.toHaveBeenCalled();
+  });
+
+  it("доставку перенесли на другой день — волна прошлого дня уже никому не нужна", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-04T18:00:00.000Z"));
+    const prisma = prismaWith({ order: baseOrder({ deliveryDate: new Date("2026-09-05T00:00:00.000Z") }) });
+
+    await buildRecipientFollowupHandler(prisma)(record(1));
+
+    expect(publishAutomationTrigger).not.toHaveBeenCalled();
+    expect(enqueue).not.toHaveBeenCalled();
+  });
+
+  it("сегодня не день доставки — эскалация живёт только в день приезда курьера", async () => {
+    // Раньше это гарантировал сам триггер «Доставка сегодня». Теперь цепочку может завести любое
+    // правило с галочкой, поэтому день проверяется в обработчике.
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-03T18:00:00.000Z")); // 11:00 в LA, доставка завтра
+    const prisma = prismaWith({ order: baseOrder(), automation: undefined });
+
+    await buildRecipientFollowupHandler(prisma)(record(1, { deliveryDay: undefined }));
+
+    expect(publishAutomationTrigger).not.toHaveBeenCalled();
+  });
+
+  it("владелец снял галочку — уже запланированные волны не доигрывают", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-04T18:00:00.000Z"));
+    const prisma = prismaWith({ automation: { active: true, deletedAt: null, awaitRecipientReply: false } });
+
+    await buildRecipientFollowupHandler(prisma)(record(1));
+
+    expect(publishAutomationTrigger).not.toHaveBeenCalled();
+    expect(enqueue).not.toHaveBeenCalled();
+  });
+
+  it("правило выключено целиком — то же самое", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-04T18:00:00.000Z"));
+    const prisma = prismaWith({ automation: { active: false, deletedAt: null, awaitRecipientReply: true } });
+
+    await buildRecipientFollowupHandler(prisma)(record(1));
+
+    expect(publishAutomationTrigger).not.toHaveBeenCalled();
+  });
+
+  it("волна без automationId (запланирована до правки) доигрывает как раньше", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-04T18:00:00.000Z"));
+    const prisma = prismaWith();
+
+    await buildRecipientFollowupHandler(prisma)(record(1, { automationId: undefined }));
+
+    expect(publishAutomationTrigger).toHaveBeenCalledTimes(1);
+    expect((prisma.automation.findUnique as unknown as { mock: { calls: unknown[] } }).mock.calls).toHaveLength(0);
   });
 
   it("заказ исчез — обработчик молчит, а не падает", async () => {

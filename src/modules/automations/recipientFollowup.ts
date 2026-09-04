@@ -19,7 +19,8 @@ import type { PrismaClient } from "@/generated/prisma/client";
 import { PrismaOutboxRepository } from "@/outbox/prismaRepository";
 import { publishAutomationTrigger } from "./events";
 import { TERMINAL_ORDER_STATUSES } from "@/lib/statuses";
-import { localHourInTz } from "@/lib/tz";
+import { localHourInTz, todayStrInTz } from "@/lib/tz";
+import { deliveryLocalDay } from "./dailySchedule";
 
 export const RECIPIENT_FOLLOWUP_EVENT = "automation.recipient.followup";
 
@@ -47,26 +48,42 @@ export type RecipientFollowupPayload = {
   askedAt: string;
   /** Номер получателя на момент вопроса (E.164). Ответ ищем по нему. */
   phoneNormalized: string;
+  /**
+   * Локальный день доставки на момент вопроса (YYYY-MM-DD). Дату доставки переносят, а вопрос
+   * уходит заново на новый день — цепочка обязана считаться отдельной, иначе ключ старого дня
+   * молча съедает новую. Поле необязательное: волны, запланированные до этой правки, его не несут.
+   */
+  deliveryDay?: string;
+  /**
+   * Правило, задавшее вопрос. Снятая галочка «Ждём ответ получателя» обязана гасить и уже
+   * запущенную цепочку: иначе владелец выключил, а сообщения продолжают уходить людям.
+   */
+  automationId?: string;
 };
 
 /**
  * Ставит первую проверку после успешно отправленного вопроса.
  *
- * Ключ идемпотентности — заказ и волна, поэтому второе правило с тем же триггером (или повтор
- * обработчика) не заведёт вторую цепочку. Best-effort: сбой планирования не должен ронять уже
- * отправленное сообщение.
+ * Ключ идемпотентности — заказ, ДЕНЬ ДОСТАВКИ и волна: в пределах одного дня повтор обработчика
+ * (или второе правило с галочкой) второй цепочки не заведёт, а перенос доставки на другой день
+ * начинает цепочку заново. Без дня в ключе получалось наоборот: заказ переносят, вопрос уходит
+ * второй раз, а страховка молча не встаёт — именно на тех заказах, где получатель уже один раз
+ * не отозвался. Best-effort: сбой планирования не должен ронять уже отправленное сообщение.
  */
 export async function scheduleRecipientFollowup(
   prisma: PrismaClient,
-  args: { orderId: string; phoneNormalized: string | null; sentAt: Date }
+  args: { orderId: string; phoneNormalized: string | null; sentAt: Date; automationId?: string }
 ): Promise<void> {
   if (!args.phoneNormalized) return; // отвечать некому — эскалировать нечего
   try {
     const order = await prisma.order.findUnique({
       where: { id: args.orderId },
-      select: { site: { select: { recipientRetryAfterMin: true } } },
+      select: { deliveryDate: true, site: { select: { recipientRetryAfterMin: true } } },
     });
-    const waitMin = clampWait(order?.site.recipientRetryAfterMin, WAIT_AFTER_ASK_MIN);
+    // Цепочка живёт внутри дня доставки: без даты её не к чему привязать и незачем заводить.
+    if (!order?.deliveryDate) return;
+    const deliveryDay = deliveryLocalDay(order.deliveryDate);
+    const waitMin = clampWait(order.site.recipientRetryAfterMin, WAIT_AFTER_ASK_MIN);
     const repo = new PrismaOutboxRepository(prisma);
     await repo.enqueue({
       eventType: RECIPIENT_FOLLOWUP_EVENT,
@@ -77,8 +94,10 @@ export async function scheduleRecipientFollowup(
         wave: 1,
         askedAt: args.sentAt.toISOString(),
         phoneNormalized: args.phoneNormalized,
+        deliveryDay,
+        ...(args.automationId ? { automationId: args.automationId } : {}),
       } satisfies RecipientFollowupPayload,
-      idempotencyKey: `recipient-followup:${args.orderId}:1`,
+      idempotencyKey: `recipient-followup:${args.orderId}:${deliveryDay}:1`,
       availableAt: new Date(args.sentAt.getTime() + waitMin * 60_000),
     });
   } catch (err) {
@@ -118,8 +137,9 @@ function tooLateInStoreDay(timezone: string | null, now: Date): boolean {
  * Обработчик волны: молчит ли получатель — и если да, публикует триггер нужного шага.
  *
  * Гасим эскалацию, когда продолжать незачем: заказ закрыт (доставлен/отменён), получатель
- * ответил, наступил вечер. Волна 2 планируется ТОЛЬКО из волны 1 — если получатель ответил
- * между шагами, до заказчика сообщение уже не дойдёт.
+ * ответил, наступил вечер, доставка переехала на другой день, владелец снял галочку у правила.
+ * Волна 2 планируется ТОЛЬКО из волны 1 — если получатель ответил между шагами, до заказчика
+ * сообщение уже не дойдёт.
  */
 export function buildRecipientFollowupHandler(prisma: PrismaClient) {
   return async (record: { payload: unknown }): Promise<void> => {
@@ -129,7 +149,7 @@ export function buildRecipientFollowupHandler(prisma: PrismaClient) {
     const order = await prisma.order.findUnique({
       where: { id: p.orderId },
       select: {
-        id: true, siteId: true, orderStatus: true, deliveryStatus: true,
+        id: true, siteId: true, orderStatus: true, deliveryStatus: true, deliveryDate: true,
         site: { select: { timezone: true, recipientAlertAfterMin: true } },
       },
     });
@@ -139,7 +159,27 @@ export function buildRecipientFollowupHandler(prisma: PrismaClient) {
     if (TERMINAL_ORDER_STATUSES.includes(order.orderStatus) || order.deliveryStatus === "DELIVERED") return;
 
     const now = new Date();
+
+    // Эскалация имеет смысл ТОЛЬКО в день доставки: вся её суть — успеть до приезда курьера.
+    // Раньше это гарантировал сам триггер («Доставка сегодня»), теперь цепочку может завести
+    // любое правило с галочкой, поэтому день проверяется здесь — в одном месте, а не в настройке.
+    if (!order.deliveryDate) return;
+    const deliveryDay = deliveryLocalDay(order.deliveryDate);
+    // Дату перенесли после вопроса — эта волна относится к прошлому дню и адресату не нужна.
+    if (p.deliveryDay && p.deliveryDay !== deliveryDay) return;
+    if (deliveryDay !== todayStrInTz(order.site.timezone, now)) return;
+
     if (tooLateInStoreDay(order.site.timezone, now)) return;
+
+    // Снятая галочка гасит и уже запущенную цепочку: владелец выключил — значит выключено.
+    // Старые волны (запланированные до появления поля) правило не несут и доигрывают как раньше.
+    if (p.automationId) {
+      const rule = await prisma.automation.findUnique({
+        where: { id: p.automationId },
+        select: { active: true, deletedAt: true, awaitRecipientReply: true },
+      });
+      if (!rule || rule.deletedAt || !rule.active || !rule.awaitRecipientReply) return;
+    }
 
     if (await recipientAnswered(prisma, { phoneNormalized: p.phoneNormalized, since: new Date(p.askedAt) })) return;
 
@@ -148,8 +188,9 @@ export function buildRecipientFollowupHandler(prisma: PrismaClient) {
       orderId: order.id,
       siteId: order.siteId,
       triggerType: p.wave === 1 ? "RECIPIENT_NO_REPLY" : "RECIPIENT_UNREACHABLE",
-      // Одна цепочка на заказ: повторный заход обработчика не создаст второго сообщения.
-      occurrenceKey: `${order.id}:recipient-followup:${p.wave}`,
+      // Одна цепочка на заказ и день доставки: повторный заход обработчика не создаст второго
+      // сообщения, а перенесённая на другой день доставка получает свою.
+      occurrenceKey: `${order.id}:recipient-followup:${deliveryDay}:${p.wave}`,
     });
 
     if (p.wave === 1) {
@@ -157,8 +198,8 @@ export function buildRecipientFollowupHandler(prisma: PrismaClient) {
         eventType: RECIPIENT_FOLLOWUP_EVENT,
         aggregateType: "order",
         aggregateId: order.id,
-        payload: { ...p, wave: 2 } satisfies RecipientFollowupPayload,
-        idempotencyKey: `recipient-followup:${order.id}:2`,
+        payload: { ...p, wave: 2, deliveryDay } satisfies RecipientFollowupPayload,
+        idempotencyKey: `recipient-followup:${order.id}:${deliveryDay}:2`,
         availableAt: new Date(now.getTime() + clampWait(order.site.recipientAlertAfterMin, WAIT_AFTER_RETRY_MIN) * 60_000),
       });
     }

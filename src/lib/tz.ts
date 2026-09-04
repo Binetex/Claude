@@ -67,7 +67,10 @@ export function parseLocalDayToUtcMidnight(raw: string | null | undefined): Date
  * следующего дня.
  */
 export function localHourInTz(tz: string | null | undefined, now: Date = new Date()): number {
-  const zone = isValidTimeZone(tz) ? (tz as string) : "UTC";
+  // Фолбэк — тот же, что у всех остальных дневных помощников. UTC здесь означал бы «вечер
+  // наступил в 13:00 по Лос-Анджелесу»: у магазина без Site.timezone тихие часы включались бы
+  // среди рабочего дня и молча гасили эскалацию.
+  const zone = isValidTimeZone(tz) ? (tz as string) : DEFAULT_STORE_TZ;
   const hh = new Intl.DateTimeFormat("en-GB", { timeZone: zone, hour: "2-digit", hour12: false }).format(now);
   return Number(hh);
 }
