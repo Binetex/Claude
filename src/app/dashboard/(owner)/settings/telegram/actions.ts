@@ -2,8 +2,7 @@
 import { revalidatePath } from "next/cache";
 import { requireRole } from "@/lib/rbac";
 import { prisma } from "@/lib/db";
-import { resolveBotById } from "@/integrations/telegram/bots";
-import { getAppUrl } from "@/lib/appUrl";
+import { enableReplies, disableReplies } from "@/integrations/telegram/replies";
 import { upsertBot, deleteBotToken, setBotEnabled, type BotPurpose } from "@/integrations/telegram/bots";
 import { setTelegramGlobalEnabled } from "@/integrations/telegram/settings";
 import { verifyBot, type VerifyResult } from "@/integrations/telegram/verify";
@@ -62,12 +61,7 @@ export async function toggleBot(botId: string, enabled: boolean): Promise<Action
   // Выключенный бот не должен и принимать: иначе Telegram продолжит слать обновления на адрес,
   // где их некому разбирать, и через сутки бросит вебхук с ошибкой. Сбой снятия не блокирует
   // выключение — приём и так проверяет, включён ли бот.
-  if (!enabled) {
-    const lookup = await resolveBotById(prisma, botId);
-    if ("bot" in lookup) {
-      await fetch(`https://api.telegram.org/bot${lookup.bot.token}/deleteWebhook`, { method: "POST" }).catch(() => null);
-    }
-  }
+  if (!enabled) await disableReplies(prisma, botId).catch(() => null);
   const r = await setBotEnabled(prisma, botId, enabled);
   revalidatePath(PATH);
   if ("error" in r) return { error: r.error };
@@ -93,25 +87,16 @@ export async function enableBotRepliesAction(botId: string): Promise<ActionResul
   await requireRole("OWNER");
   const secret = process.env.TELEGRAM_WEBHOOK_SECRET?.trim();
   if (!secret) return { error: "Не задан TELEGRAM_WEBHOOK_SECRET — приём ответов включить нельзя." };
-
-  const lookup = await resolveBotById(prisma, botId);
-  if (!("bot" in lookup)) return { error: `Бот недоступен: ${lookup.skip}` };
-
-  const url = `${getAppUrl()}/api/webhooks/telegram/${botId}`;
-  const res = await fetch(`https://api.telegram.org/bot${lookup.bot.token}/setWebhook`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      url,
-      secret_token: secret,
-      // Нам нужны только ответы владельца и нажатия кнопок — остальное Telegram может не слать.
-      allowed_updates: ["message", "callback_query"],
-      drop_pending_updates: true,
-    }),
-  }).catch(() => null);
-
-  const json = (await res?.json().catch(() => null)) as { ok?: boolean; description?: string } | null;
-  if (!json?.ok) return { error: `Telegram отказал: ${json?.description ?? "нет ответа"}` };
-  revalidatePath("/dashboard/settings/telegram");
+  const r = await enableReplies(prisma, botId, secret);
+  revalidatePath(PATH);
+  if ("error" in r) return { error: r.error };
   return { ok: true, message: "Приём ответов включён" };
+}
+
+export async function disableBotRepliesAction(botId: string): Promise<ActionResult> {
+  await requireRole("OWNER");
+  const r = await disableReplies(prisma, botId);
+  revalidatePath(PATH);
+  if ("error" in r) return { error: r.error };
+  return { ok: true, message: "Приём ответов выключен" };
 }

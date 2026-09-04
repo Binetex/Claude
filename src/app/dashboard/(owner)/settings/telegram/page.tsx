@@ -3,6 +3,7 @@ import { requireRole } from "@/lib/rbac";
 import { listBots } from "@/integrations/telegram/bots";
 import { loadTelegramGlobalView } from "@/integrations/telegram/settings";
 import { listTelegramEvents } from "@/integrations/telegram/registry";
+import { getRepliesStatusMap } from "@/integrations/telegram/replies";
 import { Card, CardBody } from "@/components/ui/Card";
 import { TelegramBotsPanel } from "./TelegramBotsPanel";
 
@@ -26,6 +27,8 @@ export default async function TelegramSettingsPage() {
       orderBy: { createdAt: "asc" },
     }),
   ]);
+  // Состояние приёма спрашиваем у Telegram, а не у своей БД: см. integrations/telegram/replies.ts.
+  const replies = await getRepliesStatusMap(prisma, bots.filter((b) => b.tokenConfigured).map((b) => b.id));
   const events = listTelegramEvents().map((e) => ({ type: e.type, audience: e.audience, description: e.description }));
 
   return (
@@ -41,6 +44,7 @@ export default async function TelegramSettingsPage() {
       <TelegramBotsPanel
         global={global}
         bots={bots}
+        replies={replies}
         florists={florists.map((f) => ({ id: f.id, name: f.user.name }))}
       />
 

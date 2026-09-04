@@ -3,8 +3,9 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Card, CardBody } from "@/components/ui/Card";
 import { Button } from "@/components/ui/button";
-import { saveBot, removeBotToken, verifyBotAction, toggleBot, toggleGlobal, enableBotRepliesAction } from "./actions";
+import { saveBot, removeBotToken, verifyBotAction, toggleBot, toggleGlobal, enableBotRepliesAction, disableBotRepliesAction } from "./actions";
 import type { BotRow, BotPurpose } from "@/integrations/telegram/bots";
+import type { RepliesStatus } from "@/integrations/telegram/replies";
 import type { VerifyResult } from "@/integrations/telegram/verify";
 
 type Florist = { id: string; name: string };
@@ -16,6 +17,7 @@ function BotCard({
   purpose,
   floristId,
   bot,
+  replies,
   onDone,
 }: {
   title: string;
@@ -23,6 +25,7 @@ function BotCard({
   purpose: BotPurpose;
   floristId: string | null;
   bot: BotRow | null;
+  replies: RepliesStatus | null;
   onDone: () => void;
 }) {
   const [pending, start] = useTransition();
@@ -58,6 +61,13 @@ function BotCard({
           <span className="rounded border border-sky-200 bg-sky-50 px-1.5 py-px text-[11px] text-sky-700">
             Проверен{bot?.botUsername ? ` · @${bot.botUsername}` : ""}
           </span>
+        )}
+        {bot?.tokenConfigured && (
+          replies?.enabled ? (
+            <span className="rounded border border-emerald-200 bg-emerald-50 px-1.5 py-px text-[11px] text-emerald-700">Приём ответов включён</span>
+          ) : (
+            <span className="rounded border border-amber-200 bg-amber-50 px-1.5 py-px text-[11px] text-amber-800">Приём ответов выключен</span>
+          )
         )}
       </div>
 
@@ -104,25 +114,6 @@ function BotCard({
             Проверить
           </Button>
         )}
-        {bot?.tokenConfigured && (
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            disabled={pending}
-            title="Разрешить боту принимать ваши ответы: кнопку «Отправить» и ответ реплаем"
-            onClick={() => {
-              setMsg(null);
-              start(async () => {
-                const r = await enableBotRepliesAction(bot.id);
-                setMsg(r?.ok ? { ok: true, text: r.message ?? "Готово" } : { ok: false, text: r?.error ?? "Ошибка" });
-                onDone();
-              });
-            }}
-          >
-            Приём ответов
-          </Button>
-        )}
         {bot && (
           <label className="flex items-center gap-1.5 text-xs text-slate-600">
             <input
@@ -150,6 +141,33 @@ function BotCard({
         {msg && <span className={msg.ok ? "text-xs text-emerald-700" : "text-xs text-red-600"}>{msg.text}</span>}
       </div>
 
+      {/* Приём ответов — отдельной строкой с состоянием: кнопка без состояния читалась как
+          «нажал — и что?». Правда о вебхуке спрашивается у Telegram при каждой загрузке. */}
+      {bot?.tokenConfigured && (
+        <div className={`flex flex-wrap items-center gap-2 rounded-md border p-2 text-xs ${replies?.enabled ? "border-emerald-200 bg-emerald-50/60" : "border-amber-200 bg-amber-50/60"}`}>
+          <span className={replies?.enabled ? "font-medium text-emerald-800" : "font-medium text-amber-900"}>
+            {replies?.enabled ? "✓ Приём ответов включён" : "○ Приём ответов выключен"}
+          </span>
+          <span className="text-slate-600">
+            {replies?.enabled
+              ? "— бот принимает кнопку «Отправить» и ваши ответы реплаем по черновикам ассистента."
+              : `— черновики ассистента приходят, но кнопка «Отправить» и ответы реплаем не работают${replies?.detail ? ` (${replies.detail})` : ""}.`}
+          </span>
+          {replies?.lastError && <span className="text-red-600">Последняя ошибка Telegram: {replies.lastError}</span>}
+          <Button
+            type="button"
+            size="sm"
+            variant={replies?.enabled ? "ghost" : "default"}
+            className="ml-auto"
+            disabled={pending || (!replies?.enabled && !bot.enabled)}
+            title={!replies?.enabled && !bot.enabled ? "Сначала включите бота" : undefined}
+            onClick={() => run(() => (replies?.enabled ? disableBotRepliesAction(bot.id) : enableBotRepliesAction(bot.id)))}
+          >
+            {replies?.enabled ? "Выключить приём" : "Включить приём ответов"}
+          </Button>
+        </div>
+      )}
+
       {(verify || bot?.lastErrorSafe) && (
         <div className="space-y-0.5 rounded-md bg-slate-50 p-2">
           {verify?.steps.map((s) => (
@@ -168,10 +186,12 @@ function BotCard({
 export function TelegramBotsPanel({
   global,
   bots,
+  replies,
   florists,
 }: {
   global: { enabled: boolean; cryptoConfigured: boolean };
   bots: BotRow[];
+  replies: Record<string, RepliesStatus>;
   florists: Florist[];
 }) {
   const router = useRouter();
@@ -216,7 +236,7 @@ export function TelegramBotsPanel({
             <p className="text-xs text-slate-500">Новые заказы, проблемы с оплатой и доставкой.</p>
           </div>
           <div className="px-4 pb-2">
-            <BotCard title="Владелец" subtitle="" purpose="OWNER" floristId={null} bot={ownerBot} onDone={refresh} />
+            <BotCard title="Владелец" subtitle="" purpose="OWNER" floristId={null} bot={ownerBot} replies={ownerBot ? replies[ownerBot.id] ?? null : null} onDone={refresh} />
           </div>
         </CardBody>
       </Card>
@@ -231,7 +251,7 @@ export function TelegramBotsPanel({
             </p>
           </div>
           <div className="px-4 pb-2">
-            <BotCard title="Колл-центр" subtitle="" purpose="CUSTOMER_SERVICE" floristId={null} bot={serviceBot} onDone={refresh} />
+            <BotCard title="Колл-центр" subtitle="" purpose="CUSTOMER_SERVICE" floristId={null} bot={serviceBot} replies={serviceBot ? replies[serviceBot.id] ?? null : null} onDone={refresh} />
           </div>
         </CardBody>
       </Card>
@@ -255,6 +275,7 @@ export function TelegramBotsPanel({
                 purpose="FLORIST"
                 floristId={f.id}
                 bot={botByFlorist.get(f.id) ?? null}
+                replies={botByFlorist.get(f.id) ? replies[botByFlorist.get(f.id)!.id] ?? null : null}
                 onDone={refresh}
               />
             ))}
