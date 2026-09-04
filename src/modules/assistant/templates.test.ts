@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { readTemplates, writeTemplates, templateApplies } from "./templates";
+import { readTemplates, writeTemplates, templateApplies, renderAssistantTemplate } from "./templates";
 import { INTENTS, getIntent } from "./intents";
 
 /**
@@ -60,5 +60,18 @@ describe("применима ли заготовка", () => {
     expect(templateApplies(today, on, vars, { deliveryStatus: "DELIVERED", deliveryIsToday: true })).toBe(false);
     expect(templateApplies(delivered, { enabled: true, text: "done" }, {}, { deliveryStatus: "DELIVERED", deliveryIsToday: false })).toBe(true);
     expect(templateApplies(delivered, { enabled: true, text: "done" }, {}, { deliveryStatus: "PENDING", deliveryIsToday: true })).toBe(false);
+  });
+
+  it("предложение с пустой переменной выпадает, остальное остаётся", () => {
+    const text = "Here is your bouquet {{bouquet_photo_url}}. You can follow the delivery here {{tracking_url}}.";
+    expect(renderAssistantTemplate(text, { bouquet_photo_url: "https://p" })).toEqual({
+      text: "Here is your bouquet https://p.",
+      dropped: ["tracking_url"],
+    });
+    expect(renderAssistantTemplate(text, { bouquet_photo_url: "https://p", tracking_url: "https://t" }).text).toBe(
+      "Here is your bouquet https://p. You can follow the delivery here https://t."
+    );
+    expect(renderAssistantTemplate(text, {}).text).toBe("");
+    expect(renderAssistantTemplate("Line one {{tracking_url}}\nLine two", {}).text).toBe("Line two");
   });
 });

@@ -17,9 +17,8 @@ import { createDeepseekClient, type DeepseekClient } from "@/integrations/deepse
 import { DeepseekError } from "@/integrations/deepseek/errors";
 import { buildMessages, parseReply, type HistoryLine, type OrderSnapshot } from "./prompt";
 import { matchIntent } from "./intents";
-import { readTemplates, templateApplies } from "./templates";
+import { readTemplates, templateApplies, renderAssistantTemplate } from "./templates";
 import { loadCatalog, looksLikeShopping } from "./catalog";
-import { renderTemplate } from "@/modules/messaging/template";
 import { buildOrderVariables } from "@/modules/messaging/variables";
 import { orderToVariableSource, SMS_ORDER_INCLUDE } from "@/modules/messaging/orderSource";
 import { shouldConsider, decideDelivery, type AssistantMode } from "./policy";
@@ -123,10 +122,10 @@ export function buildAssistantHandler(prisma: PrismaClient, deps: AssistantDeps 
           deliveryIsToday: !!order.deliveryDate && order.deliveryDate.toISOString().slice(0, 10) === todayStrInTz(site.timezone, now()),
         };
         if (templateApplies(intent, setting, vars, state)) {
-          const rendered = renderTemplate(setting.text, vars);
-          // Незаполненная переменная рендерится пустотой и съедает часть фразы — такой ответ
-          // клиенту не уходит, вопрос честнее отдать модели.
-          if (rendered.missing.length === 0 && rendered.text.trim()) {
+          // Предложение с пустой переменной выпадает, остальное уходит. Не осталось ничего —
+          // вопрос честнее отдать модели.
+          const rendered = renderAssistantTemplate(setting.text, vars);
+          if (rendered.text) {
             const action = decideDelivery({
               mode: site.aiMode as AssistantMode,
               dryRun: site.aiDryRun,
@@ -281,9 +280,10 @@ export function buildAssistantHandler(prisma: PrismaClient, deps: AssistantDeps 
 /**
  * Что делать с готовым разбором: отправить самому или показать человеку.
  *
- * Сухой прогон не доходит сюда ни одним путём: `decideDelivery` в нём всегда возвращает
- * черновик, а черновик в сухом прогоне никуда не показывается — он живёт только в карточке
- * заказа. Так «включу и посмотрю» действительно ничего не отправляет и никого не будит.
+ * В сухом прогоне `decideDelivery` всегда возвращает черновик, и черновик приходит в Telegram с
+ * пометкой «сухой прогон»: владелец проверяет кнопки и реплаи по-настоящему, а SMS клиенту на
+ * последнем шаге не уходит (`sendAssistantReply` отвечает `dry_run`). Напоминание «one moment»
+ * в сухом прогоне не ставится — оно единственное шло бы клиенту мимо кнопки.
  *
  * Не смогли отправить сами (номер не в заказе, QUO отказал) — черновик идёт человеку: молча
  * оставить его в карточке значит, что клиент не получит ответа вовсе.
@@ -296,11 +296,10 @@ async function finishTurn(prisma: PrismaClient, turnId: string, action: "send" |
       if (res.ok) return;
       console.warn(`[assistant] автоответ ${turnId} не ушёл (${res.code}) — черновик человеку`);
     }
-    if (dryRun) return;
     const shown = await notifyDraft(prisma, turnId);
     // Напоминание ставим, только если черновик реально дошёл до человека: иначе «одну минуту»
     // уйдёт клиенту по разбору, которого никто не видел.
-    if (shown) await scheduleAssistantNudge(new PrismaOutboxRepository(prisma), turnId, new Date());
+    if (shown && !dryRun) await scheduleAssistantNudge(new PrismaOutboxRepository(prisma), turnId, new Date());
   } catch (err) {
     console.error(`[assistant] показ черновика ${turnId} не удался:`, err instanceof Error ? err.message : String(err));
   }

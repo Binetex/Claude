@@ -19,6 +19,9 @@ import { prisma } from "@/lib/db";
 import { extractVariables } from "@/modules/messaging/template";
 import { SMS_VARIABLES } from "@/modules/messaging/variables";
 import { writeTemplates } from "@/modules/assistant/templates";
+import { translateTemplate } from "@/modules/assistant/translate";
+import { getDeepseekConfig } from "@/integrations/deepseek/config";
+import { createDeepseekClient } from "@/integrations/deepseek/client";
 import { isValidTimeZone } from "@/lib/tz";
 import { rescheduleSiteFutureOrders } from "@/integrations/delivery/burq/scheduleService";
 
@@ -71,18 +74,27 @@ export async function ownerSetSiteAiSettings(
     unknownKnowledgeBase: string;
     templates?: Record<string, { enabled: boolean; text: string }>;
   }
-): Promise<FormState> {
+): Promise<FormState & { templates?: Record<string, { enabled: boolean; text: string }> }> {
   await requireRole("OWNER");
   if (!["OFF", "DRAFT", "AUTO_SIMPLE"].includes(input.mode)) return { error: "Неизвестный режим." };
 
   // Заготовку, которая ссылается на несуществующую переменную, рендер молча заменит пустотой и
   // съест часть фразы — отвергаем на сохранении, как и в остальных шаблонах проекта.
+  // Русский текст не отвергаем, а переводим: клиенту уходит только английский, а владельцу
+  // удобнее писать по-русски. Переведённое возвращается в форму — он видит, что именно уйдёт.
+  let translated = 0;
   if (input.templates) {
     const allowed = new Set(SMS_VARIABLES.map((v) => v.key));
     for (const [key, tpl] of Object.entries(input.templates)) {
       const unknown = extractVariables(tpl.text).filter((v) => !allowed.has(v));
       if (unknown.length) return { error: `В заготовке «${key}» неизвестная переменная: ${unknown.join(", ")}` };
-      if (/[Ѐ-ӿ]/.test(tpl.text)) return { error: `Заготовка «${key}» на русском — клиенту уходит только английский.` };
+      if (/[Ѐ-ӿ]/.test(tpl.text)) {
+        const cfg = getDeepseekConfig();
+        const english = cfg ? await translateTemplate(createDeepseekClient(cfg), tpl.text) : null;
+        if (!english) return { error: `Заготовка «${key}» на русском, а перевести не удалось — напишите её по-английски.` };
+        tpl.text = english;
+        translated++;
+      }
     }
   }
 
@@ -97,7 +109,12 @@ export async function ownerSetSiteAiSettings(
     },
   });
   revalidatePath("/dashboard/sites");
-  return { ok: true, message: input.mode === "OFF" ? "Ассистент выключен" : input.dryRun ? "Сохранено — сухой прогон, наружу ничего не уходит" : "Сохранено" };
+  const base = input.mode === "OFF" ? "Ассистент выключен" : input.dryRun ? "Сохранено — сухой прогон, наружу ничего не уходит" : "Сохранено";
+  return {
+    ok: true,
+    message: translated ? `${base}. Русский текст заготовок переведён на английский — проверьте.` : base,
+    ...(translated ? { templates: input.templates } : {}),
+  };
 }
 
 function guardCrypto(): string | null {

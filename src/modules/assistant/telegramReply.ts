@@ -108,8 +108,9 @@ export function buildTelegramUpdateHandler(prisma: PrismaClient, deps: Deps = {}
       const res = isSend ? await sendAssistantReply(prisma, turnId) : await discardAssistantReply(prisma, turnId);
       // Второе нажатие по уже решённому черновику — не ошибка: человек просто нажал дважды.
       const already = !res.ok && res.code === "already_decided";
+      const dry = !res.ok && res.code === "dry_run";
       const okText = isSend ? "✅ Отправлено клиенту." : "🚫 Не отвечаем.";
-      const failText = already ? "Уже решено раньше." : `⚠️ Не отправилось: ${res.ok ? "" : describe(res.code)}`;
+      const failText = already ? "Уже решено раньше." : dry ? "🧪 Сухой прогон: всё сработало, клиенту НЕ отправлено." : `⚠️ Не отправилось: ${res.ok ? "" : describe(res.code)}`;
       await sender.answerCallback(cb.id, res.ok ? okText : failText);
       if (cb.message?.message_id != null && !already) {
         // Кнопки убираем в любом случае: висящая «Отправить» после отправки — приглашение
@@ -167,7 +168,10 @@ export function buildTelegramUpdateHandler(prisma: PrismaClient, deps: Deps = {}
     // «+» или «ок» — отправляем то, что владелец уже прочитал.
     if (isConfirmation(text)) {
       const res = await sendAssistantReply(prisma, turn.id);
-      await sender.sendMessage(chatId, res.ok ? "✅ Отправлено клиенту." : `⚠️ Не отправилось: ${describe(res.code)}`);
+      await sender.sendMessage(
+        chatId,
+        res.ok ? "✅ Отправлено клиенту." : res.code === "dry_run" ? "🧪 Сухой прогон: всё сработало, клиенту НЕ отправлено." : `⚠️ Не отправилось: ${describe(res.code)}`
+      );
       return;
     }
     if (isDiscard(text)) {

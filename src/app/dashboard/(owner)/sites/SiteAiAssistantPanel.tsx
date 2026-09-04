@@ -60,6 +60,8 @@ export function SiteAiAssistantPanel({
   const save = () =>
     start(async () => {
       const r = await ownerSetSiteAiSettings(siteId, { mode, dryRun, knowledgeBase: kb, unknownKnowledgeBase: unknownKb, templates });
+      // Сервер перевёл русские заготовки — показываем то, что реально сохранилось.
+      if (r?.ok && r.templates) setTemplates((prev) => ({ ...prev, ...r.templates }));
       setMsg(r?.ok ? { ok: true, text: r.message ?? "Сохранено" } : { ok: false, text: r?.error ?? "Ошибка" });
     });
 
@@ -102,7 +104,7 @@ export function SiteAiAssistantPanel({
             <span>
               Сухой прогон
               <span className="block text-[11px] text-slate-400">
-                Ассистент работает и пишет черновики, но клиенту не уходит ничего. Снимать после недели наблюдения.
+                Ассистент работает, черновики приходят в Telegram с пометкой «сухой прогон», кнопки и реплаи можно проверять — но клиенту не уходит ничего. Снимать после недели наблюдения.
               </span>
             </span>
           </label>

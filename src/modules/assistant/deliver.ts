@@ -116,6 +116,7 @@ function clip(text: string, limit: number): string {
 
 /**
  * Показывает черновик тому, кто сейчас отвечает: до полудня владельцу, после — флористу заказа.
+ * В сухом прогоне — тоже, с пометкой: так весь путь до кнопки проверяется без риска для клиента.
  * У флориста нет бота — владельцу: черновик, который никто не увидел, это молчание магазина.
  * Возвращает false, если показать некому — тогда черновик остаётся только в карточке заказа.
  */
@@ -125,7 +126,7 @@ export async function notifyDraft(prisma: PrismaClient, turnId: string, now = ne
     where: { id: turnId },
     select: {
       id: true, replyText: true, important: true, needsHuman: true, intent: true,
-      site: { select: { name: true, timezone: true } },
+      site: { select: { name: true, timezone: true, aiDryRun: true } },
       order: { select: { orderNumber: true, currentFloristId: true, site: { select: { timezone: true } } } },
       communication: { select: { messageText: true, transcript: true, externalPhone: true, attachmentsJson: true } },
     },
@@ -150,7 +151,7 @@ export async function notifyDraft(prisma: PrismaClient, turnId: string, now = ne
 
   const incoming = escapeHtml(clip(turn.communication.messageText ?? turn.communication.transcript ?? "", 400));
   const draft = turn.replyText?.trim();
-  const head = turn.important ? "❗ Важное сообщение от клиента" : "Сообщение от клиента";
+  const head = `${turn.site.aiDryRun ? "🧪 Сухой прогон · " : ""}${turn.important ? "❗ Важное сообщение от клиента" : "Сообщение от клиента"}`;
   const where = turn.order
     ? `заказ ${escapeHtml(turn.order.orderNumber)}`
     : `незнакомый номер ${escapeHtml(turn.communication.externalPhone)} · ${escapeHtml(turn.site.name)}`;
@@ -162,9 +163,11 @@ export async function notifyDraft(prisma: PrismaClient, turnId: string, now = ne
     "",
     draft ? `Ответ ассистента:\n${escapeHtml(draft)}` : "Ассистент не смог ответить — нужен человек.",
     "",
-    draft
-      ? `Нажмите «Отправить» или ответьте на это сообщение своим текстом. Без решения через ${NUDGE_AFTER_MIN} мин клиенту уйдёт «one moment».`
-      : `Ответьте на это сообщение своим текстом. Без ответа через ${NUDGE_AFTER_MIN} мин клиенту уйдёт «one moment».`,
+    turn.site.aiDryRun
+      ? "Сухой прогон: кнопки и ответы работают, но клиенту ничего не уйдёт."
+      : draft
+        ? `Нажмите «Отправить» или ответьте на это сообщение своим текстом. Без решения через ${NUDGE_AFTER_MIN} мин клиенту уйдёт «one moment».`
+        : `Ответьте на это сообщение своим текстом. Без ответа через ${NUDGE_AFTER_MIN} мин клиенту уйдёт «one moment».`,
   ];
 
   const sender = new TelegramSender(lookup.bot.token);

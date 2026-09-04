@@ -4,6 +4,7 @@
  * Хранится JSON'ом на магазине, но наружу отдаётся уже разобранным: остальному коду не должно
  * быть дела до того, что где-то там `Json?`.
  */
+import { renderTemplate, extractVariables } from "@/modules/messaging/template";
 import { INTENTS, type IntentDef, type IntentKey, type IntentOrderState } from "./intents";
 
 export type TemplateSetting = { enabled: boolean; text: string };
@@ -53,4 +54,32 @@ export function templateApplies(
   if (!setting.enabled || !setting.text.trim()) return false;
   if (def.when && !def.when(state)) return false;
   return def.requires.every((key) => !!vars[key]?.trim());
+}
+
+export type AssistantRender = { text: string; dropped: string[] };
+
+/**
+ * Рендер заготовки ассистента: предложение с пустой переменной выбрасывается ЦЕЛИКОМ, остальные
+ * остаются. «Here is your bouquet {{bouquet_photo_url}}. Track here {{tracking_url}}» без трека
+ * уходит одним первым предложением — а не молчанием и не фразой с дырой. Границы: перенос
+ * строки и конец предложения (. ! ?). Обязательная переменная самой заготовки проверяется
+ * раньше, в `templateApplies`.
+ */
+export function renderAssistantTemplate(text: string, vars: Record<string, string>): AssistantRender {
+  const dropped: string[] = [];
+  const lines: string[] = [];
+  for (const line of text.split("\n")) {
+    const kept: string[] = [];
+    for (const sentence of line.split(/(?<=[.!?])\s+/)) {
+      const missing = extractVariables(sentence).filter((v) => !vars[v]?.trim());
+      if (missing.length) {
+        dropped.push(...missing);
+        continue;
+      }
+      const r = renderTemplate(sentence, vars).text.trim();
+      if (r) kept.push(r);
+    }
+    if (kept.length) lines.push(kept.join(" "));
+  }
+  return { text: lines.join("\n").trim(), dropped: [...new Set(dropped)] };
 }
