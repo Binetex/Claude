@@ -2,6 +2,8 @@
 import { revalidatePath } from "next/cache";
 import { requireRole } from "@/lib/rbac";
 import { prisma } from "@/lib/db";
+import { resolveBotById } from "@/integrations/telegram/bots";
+import { getAppUrl } from "@/lib/appUrl";
 import { upsertBot, deleteBotToken, setBotEnabled, type BotPurpose } from "@/integrations/telegram/bots";
 import { setTelegramGlobalEnabled } from "@/integrations/telegram/settings";
 import { verifyBot, type VerifyResult } from "@/integrations/telegram/verify";
@@ -69,4 +71,38 @@ export async function toggleGlobal(enabled: boolean): Promise<ActionResult> {
   await setTelegramGlobalEnabled(prisma, enabled);
   revalidatePath(PATH);
   return { ok: true, message: enabled ? "Уведомления включены." : "Уведомления выключены." };
+}
+
+/**
+ * Включает приём ответов от этого бота: регистрирует у Telegram адрес вебхука и секрет.
+ *
+ * Без этого шага бот умеет только писать: кнопка «Отправить» и ответ реплаем ничего не сделают,
+ * потому что Telegram просто некуда доставлять обновления. Секрет проверяется на приёме — адрес
+ * попадает в логи и историю, одного его мало.
+ */
+export async function enableBotRepliesAction(botId: string): Promise<ActionResult> {
+  await requireRole("OWNER");
+  const secret = process.env.TELEGRAM_WEBHOOK_SECRET?.trim();
+  if (!secret) return { error: "Не задан TELEGRAM_WEBHOOK_SECRET — приём ответов включить нельзя." };
+
+  const lookup = await resolveBotById(prisma, botId);
+  if (!("bot" in lookup)) return { error: `Бот недоступен: ${lookup.skip}` };
+
+  const url = `${getAppUrl()}/api/webhooks/telegram/${botId}`;
+  const res = await fetch(`https://api.telegram.org/bot${lookup.bot.token}/setWebhook`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      url,
+      secret_token: secret,
+      // Нам нужны только ответы владельца и нажатия кнопок — остальное Telegram может не слать.
+      allowed_updates: ["message", "callback_query"],
+      drop_pending_updates: true,
+    }),
+  }).catch(() => null);
+
+  const json = (await res?.json().catch(() => null)) as { ok?: boolean; description?: string } | null;
+  if (!json?.ok) return { error: `Telegram отказал: ${json?.description ?? "нет ответа"}` };
+  revalidatePath("/dashboard/settings/telegram");
+  return { ok: true, message: "Приём ответов включён" };
 }

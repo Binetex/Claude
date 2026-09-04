@@ -100,7 +100,8 @@ describe("сообщение флористу", () => {
 
 describe("кнопки под сообщением", () => {
   it("флорист: Open Order + Google Maps (адрес получателя)", () => {
-    const btns = buttonsFor("order.assigned", order);
+    // Кнопки уведомлений — всегда ссылки; кнопки-действия есть только у ассистента.
+    const btns = buttonsFor("order.assigned", order) as { text: string; url: string }[];
     expect(btns).toHaveLength(2);
     expect(btns[0].url).toMatch(/\/dashboard\/f\/o1$/);
     expect(btns[1].text).toContain("Google Maps");
@@ -111,12 +112,12 @@ describe("кнопки под сообщением", () => {
   });
 
   it("нет адреса → кнопки Google Maps нет", () => {
-    const btns = buttonsFor("order.assigned", { ...order, addressLine: null, apartment: null, city: null, zip: null });
+    const btns = buttonsFor("order.assigned", { ...order, addressLine: null, apartment: null, city: null, zip: null }) as { text: string; url: string }[];
     expect(btns).toHaveLength(1);
   });
 
   it("владелец: только Open Order на карточку заказа", () => {
-    const btns = buttonsFor("order.created", order);
+    const btns = buttonsFor("order.created", order) as { text: string; url: string }[];
     expect(btns).toHaveLength(1);
     expect(btns[0].url).toMatch(/\/dashboard\/orders\/o1$/);
   });
@@ -165,7 +166,7 @@ describe("проблемы доставки", () => {
   });
 
   it("кнопки флористских событий доставки — как у карточки флориста", () => {
-    const btns = buttonsFor("delivery.problem_florist", order);
+    const btns = buttonsFor("delivery.problem_florist", order) as { text: string; url: string }[];
     expect(btns[0].url).toMatch(/\/dashboard\/f\/o1$/);
   });
 });

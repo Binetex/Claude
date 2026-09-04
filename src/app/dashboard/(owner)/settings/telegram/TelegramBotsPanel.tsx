@@ -3,7 +3,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Card, CardBody } from "@/components/ui/Card";
 import { Button } from "@/components/ui/button";
-import { saveBot, removeBotToken, verifyBotAction, toggleBot, toggleGlobal } from "./actions";
+import { saveBot, removeBotToken, verifyBotAction, toggleBot, toggleGlobal, enableBotRepliesAction } from "./actions";
 import type { BotRow, BotPurpose } from "@/integrations/telegram/bots";
 import type { VerifyResult } from "@/integrations/telegram/verify";
 
@@ -102,6 +102,25 @@ function BotCard({
             }}
           >
             Проверить
+          </Button>
+        )}
+        {bot?.tokenConfigured && (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={pending}
+            title="Разрешить боту принимать ваши ответы: кнопку «Отправить» и ответ реплаем"
+            onClick={() => {
+              setMsg(null);
+              start(async () => {
+                const r = await enableBotRepliesAction(bot.id);
+                setMsg(r?.ok ? { ok: true, text: r.message ?? "Готово" } : { ok: false, text: r?.error ?? "Ошибка" });
+                onDone();
+              });
+            }}
+          >
+            Приём ответов
           </Button>
         )}
         {bot && (

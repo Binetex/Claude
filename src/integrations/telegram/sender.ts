@@ -20,7 +20,11 @@ const MAX_ATTEMPTS = 3;
 /** Лимит подписи фото в Telegram (у текста — 4096). */
 export const CAPTION_LIMIT = 1024;
 
-export type TelegramButton = { text: string; url: string };
+/**
+ * Кнопка под сообщением: либо ссылка, либо действие внутри бота (`callbackData`).
+ * Действие нужно там, где владелец подтверждает отправку одним нажатием, не печатая ответ.
+ */
+export type TelegramButton = { text: string; url: string } | { text: string; callbackData: string };
 
 export type SendResult =
   | { ok: true; messageId: string }
@@ -64,7 +68,13 @@ function firstMessageId(result: ApiResponse["result"]): string | null {
 /** Кнопки одним рядом. Пустой массив → без клавиатуры. */
 function keyboard(buttons?: TelegramButton[]): Record<string, unknown> {
   if (!buttons || buttons.length === 0) return {};
-  return { reply_markup: { inline_keyboard: [buttons.map((b) => ({ text: b.text, url: b.url }))] } };
+  return {
+    reply_markup: {
+      inline_keyboard: [
+        buttons.map((b) => ("url" in b ? { text: b.text, url: b.url } : { text: b.text, callback_data: b.callbackData })),
+      ],
+    },
+  };
 }
 
 export class TelegramSender {
@@ -119,6 +129,17 @@ export class TelegramSender {
     if (desc.includes(NOT_MODIFIED)) return { ok: true };
     if (UNEDITABLE.some((m) => desc.includes(m.toLowerCase()))) return { ok: false, needsResend: true };
     return { ok: false, retryable: !!networkError || status === 429 || status >= 500, code: safeCode(res, status, networkError) };
+  }
+
+  /**
+   * Ответ на нажатие кнопки. Без него Telegram держит на кнопке «часики», и владелец не понимает,
+   * сработало ли нажатие. Ошибку глотаем: это уведомление о приёме, а не само действие.
+   */
+  async answerCallback(callbackQueryId: string, text?: string): Promise<void> {
+    await this.callWithRetry("answerCallbackQuery", {
+      callback_query_id: callbackQueryId,
+      ...(text ? { text } : {}),
+    }).catch(() => null);
   }
 
   async sendMessage(chatId: string, text: string, buttons?: TelegramButton[]): Promise<SendResult> {

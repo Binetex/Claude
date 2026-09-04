@@ -23,7 +23,9 @@ import { renderTemplate } from "@/modules/messaging/template";
 import { buildOrderVariables } from "@/modules/messaging/variables";
 import { orderToVariableSource, SMS_ORDER_INCLUDE } from "@/modules/messaging/orderSource";
 import { shouldConsider, decideDelivery, type AssistantMode } from "./policy";
-import type { AssistantIncomingPayload } from "./events";
+import { scheduleAssistantNudge, type AssistantIncomingPayload } from "./events";
+import { PrismaOutboxRepository } from "@/outbox/prismaRepository";
+import { sendAssistantReply, notifyDraft } from "./deliver";
 
 /**
  * Сколько последних сообщений переписки показываем модели. Двадцать — вся живая переписка по
@@ -121,20 +123,23 @@ export function buildAssistantHandler(prisma: PrismaClient, deps: AssistantDeps 
           // Незаполненная переменная рендерится пустотой и съедает часть фразы — такой ответ
           // клиенту не уходит, вопрос честнее отдать модели.
           if (rendered.missing.length === 0 && rendered.text.trim()) {
-            await prisma.aiTurn.create({
+            const action = decideDelivery({
+              mode: site.aiMode as AssistantMode,
+              dryRun: site.aiDryRun,
+              hasReply: true,
+              needsHuman: false,
+              important: false,
+            });
+            const turn = await prisma.aiTurn.create({
               data: {
                 siteId: site.id, orderId: order.id, communicationId: incoming.id,
                 status: "DRAFT", source: "template", intent: intent.key,
                 replyText: rendered.text,
-                needsHuman: decideDelivery({
-                  mode: site.aiMode as AssistantMode,
-                  dryRun: site.aiDryRun,
-                  hasReply: true,
-                  needsHuman: false,
-                  important: false,
-                }) === "draft",
+                needsHuman: action === "draft",
               },
+              select: { id: true },
             });
+            await finishTurn(prisma, turn.id, action, site.aiDryRun);
             return;
           }
         }
@@ -190,12 +195,11 @@ export function buildAssistantHandler(prisma: PrismaClient, deps: AssistantDeps 
       important: parsed.important,
     });
 
-    await prisma.aiTurn.create({
+    const turn = await prisma.aiTurn.create({
       data: {
         siteId: site.id,
         orderId: order?.id ?? null,
         communicationId: incoming.id,
-        // Отправка живому человеку — отдельный шаг (этап 2); здесь ответ только готовится.
         status: "DRAFT",
         source: "model",
         intent: parsed.intent,
@@ -207,8 +211,35 @@ export function buildAssistantHandler(prisma: PrismaClient, deps: AssistantDeps 
         modelName,
         latencyMs,
       },
+      select: { id: true },
     });
+    await finishTurn(prisma, turn.id, action, site.aiDryRun);
   };
+}
+
+/**
+ * Что делать с готовым разбором: отправить самому или показать человеку.
+ *
+ * Сухой прогон не доходит сюда ни одним путём: `decideDelivery` в нём всегда возвращает
+ * черновик, а черновик в сухом прогоне никуда не показывается — он живёт только в карточке
+ * заказа. Так «включу и посмотрю» действительно ничего не отправляет и никого не будит.
+ *
+ * Сбой показа не должен ронять разбор: черновик уже записан и виден в карточке заказа.
+ */
+async function finishTurn(prisma: PrismaClient, turnId: string, action: "send" | "draft", dryRun: boolean): Promise<void> {
+  try {
+    if (action === "send") {
+      await sendAssistantReply(prisma, turnId);
+      return;
+    }
+    if (dryRun) return;
+    const shown = await notifyDraft(prisma, turnId);
+    // Напоминание ставим, только если черновик реально дошёл до человека: иначе «одну минуту»
+    // уйдёт клиенту по разбору, которого никто не видел.
+    if (shown) await scheduleAssistantNudge(new PrismaOutboxRepository(prisma), turnId, new Date());
+  } catch (err) {
+    console.error(`[assistant] показ черновика ${turnId} не удался:`, err instanceof Error ? err.message : String(err));
+  }
 }
 
 /** Текст входящего: у SMS — сам текст, у звонка — расшифровка или краткое содержание. */

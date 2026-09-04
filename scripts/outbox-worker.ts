@@ -35,6 +35,9 @@ import { buildAutomationTriggerHandler, buildAutomationSendHandler } from "@/mod
 import { AUTOMATION_TRIGGER_EVENT, AUTOMATION_SEND_EVENT } from "@/modules/automations/events";
 import { REPLY_WAIT_EVENT, buildReplyWaitHandler } from "@/modules/automations/replyWait";
 import { ASSISTANT_INCOMING_EVENT, buildAssistantHandler } from "@/modules/assistant/handler.registration";
+import { TELEGRAM_UPDATE_EVENT, buildTelegramUpdateHandler } from "@/modules/assistant/telegramReply";
+import { ASSISTANT_NUDGE_EVENT } from "@/modules/assistant/events";
+import { buildAssistantNudgeHandler } from "@/modules/assistant/deliver";
 import { buildFlowStepHandler } from "@/modules/automations/flows/handler";
 import { FLOW_STEP_EVENT } from "@/modules/automations/flows/events";
 import { ingestInboundEmails } from "@/integrations/emailFactory/ingest";
@@ -124,6 +127,10 @@ async function main() {
     // Ассистент клиентской переписки: разбирает входящее и готовит ответ. Наружу ничего не
     // уходит, пока владелец не включил режим и не снял сухой прогон.
     [ASSISTANT_INCOMING_EVENT]: buildAssistantHandler(prisma),
+    // Ответы владельца в Telegram: кнопка «Отправить» и свой текст реплаем.
+    [TELEGRAM_UPDATE_EVENT]: buildTelegramUpdateHandler(prisma),
+    // «Одну минуту» клиенту, если человек не успел подтвердить черновик за 20 минут.
+    [ASSISTANT_NUDGE_EVENT]: buildAssistantNudgeHandler(prisma),
     // Внутренние Telegram-уведомления сотрудникам: один обработчик на все типы событий.
     [TELEGRAM_NOTIFY_EVENT]: buildTelegramNotifyHandler(prisma),
     // Сверка платежа с Airwallex (режим наблюдения: business status заказа не меняется).

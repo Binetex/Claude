@@ -22,3 +22,26 @@ export async function publishAssistantIncoming(repo: OutboxRepository, communica
     idempotencyKey: `assistant.incoming:${communicationId}`,
   });
 }
+
+/** Проверка «владелец так и не ответил» — через 20 минут после показа черновика. */
+export const ASSISTANT_NUDGE_EVENT = "assistant.nudge";
+
+/** Сколько ждём решения человека, прежде чем сказать клиенту «одну минуту». */
+export const NUDGE_AFTER_MIN = 20;
+
+export type AssistantNudgePayload = { turnId: string };
+
+/**
+ * Клиент не должен сидеть в тишине, пока черновик ждёт подтверждения. Одно нейтральное
+ * сообщение — и всё: второго напоминания нет, иначе это уже назойливость.
+ */
+export async function scheduleAssistantNudge(repo: OutboxRepository, turnId: string, from: Date): Promise<void> {
+  await repo.enqueue({
+    eventType: ASSISTANT_NUDGE_EVENT,
+    aggregateType: "aiTurn",
+    aggregateId: turnId,
+    payload: { turnId } satisfies AssistantNudgePayload,
+    idempotencyKey: `assistant.nudge:${turnId}`,
+    availableAt: new Date(from.getTime() + NUDGE_AFTER_MIN * 60_000),
+  });
+}
