@@ -16,6 +16,11 @@ describe("узнавание вопроса", () => {
     expect(matchIntent("ETA please")?.key).toBe("delivery_time");
   });
 
+  it("вопрос про фото", () => {
+    expect(matchIntent("can you send a photo of the bouquet")?.key).toBe("photo");
+    expect(matchIntent("what does it look like?")?.key).toBe("photo");
+  });
+
   it("два вопроса сразу — шаблон не годится, отвечает модель", () => {
     // Заготовка ответит на половину, и клиенту придётся спрашивать заново.
     expect(matchIntent("where is my order and what time will it arrive?")).toBeNull();
@@ -38,5 +43,6 @@ describe("сами заготовки", () => {
     // «Вот ваш трек» без трека хуже молчания.
     expect(getIntent("tracking")?.requires).toContain("tracking_url");
     expect(getIntent("delivery_time")?.requires).toContain("delivery_time");
+    expect(getIntent("photo")?.requires).toContain("bouquet_photo_url");
   });
 });

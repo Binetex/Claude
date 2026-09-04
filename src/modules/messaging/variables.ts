@@ -24,6 +24,7 @@ export const SMS_VARIABLES: readonly SmsVariableDef[] = [
   { key: "card_message", label: "Текст открытки", example: "Happy Birthday!" },
   { key: "delivery_instructions", label: "Инструкции доставки", example: "Leave at door" },
   { key: "review_url", label: "Ссылка на отзыв", example: "https://review..." },
+  { key: "bouquet_photo_url", label: "Ссылка на фото букета", example: "https://floremart.com/bouquet/..." },
 ] as const;
 
 /** Тонкий срез данных, из которого собираются переменные (не тащим весь Prisma-объект в чистый модуль). */
@@ -45,6 +46,8 @@ export type OrderVariableSource = {
   storeName: string | null;
   storePhone: string | null;
   reviewUrl: string | null;
+  /** Публичная страница с фото собранного букета; пусто, пока фото не загружено. */
+  bouquetPhotoUrl: string | null;
   timezone: string | null;
   /** Адрес для ответов клиента (см. resolveSupportEmail). Отдаётся как {{support_email}}. */
   supportEmail: string | null;
@@ -105,6 +108,7 @@ export function buildOrderVariables(src: OrderVariableSource): Record<string, st
     card_message: s(src.cardMessage),
     delivery_instructions: s(src.deliveryInstructions),
     review_url: s(src.reviewUrl),
+    bouquet_photo_url: s(src.bouquetPhotoUrl),
 
     // Псевдонимы под именование Brevo-шаблонов. Указывают на те же данные, что и ключи выше;
     // существующие sender_name/store_name НЕ трогаем — на них уже завязаны SMS-шаблоны.

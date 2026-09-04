@@ -24,6 +24,7 @@ export function buildTestMessage(template: string, site: TestSendSite): string {
     city: "Portland",
     deliveryDate: new Date(),
     deliveryWindow: ex.delivery_time,
+    bouquetPhotoUrl: ex.bouquet_photo_url,
     trackingUrl: ex.tracking_url,
     cardMessage: ex.card_message,
     deliveryInstructions: ex.delivery_instructions,

@@ -6,12 +6,10 @@
  *
  * Ключевые слова живут в коде, а тексты — в настройках магазина: подбирать формулировки
  * владельцу удобно, а составлять списки синонимов — нет.
- *
- * Заготовки про фото букета здесь пока нет: ссылки на страницу с фотографией ещё не существует
- * (этап 5), а «вот фото» без фото хуже молчания. До тех пор на такие вопросы отвечает модель.
+
  */
 
-export type IntentKey = "tracking" | "delivery_time" | "delivered_check";
+export type IntentKey = "tracking" | "delivery_time" | "photo" | "delivered_check";
 
 export type IntentDef = {
   key: IntentKey;
@@ -46,6 +44,16 @@ export const INTENTS: readonly IntentDef[] = [
     phrases: ["what time", "when will it arrive", "when will you deliver", "when are you coming", "delivery time", "eta", "how soon"],
     requires: ["delivery_time"],
     defaultText: "Your delivery is scheduled for {{delivery_time}} today.",
+  },
+  {
+    key: "photo",
+    label: "Фото букета",
+    hint: "Клиент просит фотографию собранного букета.",
+    phrases: ["photo", "picture", "pic of", "send me a photo", "can i see", "what does it look like"],
+    // Ссылка появляется, когда флорист загрузил фото; до этого вопрос уходит модели, и та честно
+    // скажет, что фото пришлём, как только букет будет собран.
+    requires: ["bouquet_photo_url"],
+    defaultText: "Here is your bouquet: {{bouquet_photo_url}}",
   },
   {
     key: "delivered_check",

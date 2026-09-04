@@ -1,3 +1,4 @@
+import { bouquetPageUrl } from "@/lib/bouquetPage";
 import "server-only";
 /** Общий маппер Prisma-заказа (+Site) в срез переменных шаблона. Используют движки правил
  *  и цепочек, preview и reviews/sendLink.
@@ -38,6 +39,9 @@ export function orderToVariableSource(order: OrderWithSite): OrderVariableSource
     // если её нет — общая ссылка магазина. Второго способа получить {{review_url}} быть не
     // должно: рассылка и карточка запроса обязаны вести клиента в одно и то же место.
     reviewUrl: pickedReviewUrl(pickLocation(order.zip, order.site.googleLocations, order.site.reviewUrl)),
+    // Клиенту уходит страница, а не сырой файл: картинку в SMS не вложить, а ссылка на
+    // страницу открывается с подписью магазина и нормальным превью.
+    bouquetPhotoUrl: bouquetPageUrl(order.bouquetPhotoUrl),
     timezone: order.site.timezone,
     supportEmail: resolveSupportEmail(order.site.emailSettings),
   };

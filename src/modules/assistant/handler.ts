@@ -28,6 +28,7 @@ import { PrismaOutboxRepository } from "@/outbox/prismaRepository";
 import { sendAssistantReply, notifyDraft } from "./deliver";
 import { prependReadyTimeNote } from "./note";
 import { findOrderByHint, linkConversation } from "./link";
+import { bouquetPageUrl } from "@/lib/bouquetPage";
 import { publishTelegramNotification } from "@/integrations/telegram/events";
 
 /**
@@ -322,7 +323,7 @@ async function loadHistory(prisma: PrismaClient, orderId: string | null, exceptI
     });
 }
 
-type OrderWithSite = { orderNumber: string; orderStatus: string; deliveryStatus: string | null; deliveryDate: Date | null; deliveryWindow: string | null; recipientName: string | null; deliveryAddress: string | null; trackingUrl: string | null; total: unknown };
+type OrderWithSite = { orderNumber: string; orderStatus: string; deliveryStatus: string | null; deliveryDate: Date | null; deliveryWindow: string | null; recipientName: string | null; deliveryAddress: string | null; trackingUrl: string | null; bouquetPhotoUrl: string | null; total: unknown };
 
 function snapshot(order: Record<string, unknown>, storeName: string, partyRole: string): OrderSnapshot {
   const o = order as unknown as OrderWithSite;
@@ -336,8 +337,8 @@ function snapshot(order: Record<string, unknown>, storeName: string, partyRole: 
     recipientName: o.recipientName ?? null,
     deliveryAddress: o.deliveryAddress ?? null,
     trackingUrl: o.trackingUrl ?? null,
-    // Фото букета — этап 5: страницу по ссылке ещё не построили.
-    photoUrl: null,
+    // Клиенту уходит страница с фото, а не сырой файл (картинку в SMS не вложить).
+    photoUrl: bouquetPageUrl(o.bouquetPhotoUrl),
     totalFormatted: o.total != null ? `$${String(o.total)}` : null,
     party: partyRole === "CUSTOMER" ? "customer" : partyRole === "RECIPIENT" ? "recipient" : "unknown",
   };
