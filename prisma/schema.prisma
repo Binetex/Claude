@@ -458,6 +458,18 @@ model Site {
   /// работает старый код, которому эти колонки нужны. Снести следующим деплоем.
   recipientRetryAfterMin         Int     @default(60)
   recipientAlertAfterMin         Int     @default(20)
+  // ── ИИ-ассистент клиентской переписки ──
+  /// Режим на этом магазине. Настройка на магазин, а не глобальная: магазины разные и
+  /// обкатывается ассистент по одному.
+  aiMode                         AiAssistantMode @default(OFF)
+  /// Сухой прогон: ассистент работает и пишет черновики, но НАРУЖУ не уходит ничего — даже в
+  /// режиме AUTO_SIMPLE. Первая неделя любого магазина проходит так.
+  aiDryRun                       Boolean         @default(true)
+  /// База знаний для клиентов С ЗАКАЗОМ: свободный текст владельца, целиком уезжает в запрос.
+  aiKnowledgeBase                String?
+  /// База знаний для НЕЗНАКОМЫХ номеров — другой бот и другое поведение: заказа нет, данных нет.
+  aiUnknownKnowledgeBase         String?
+
   // Единый текст dropoff-инструкций магазина, автоматически добавляемый во все новые Burq draft.
   // Пусто/NULL → стандартная инструкция выключена (отдельный boolean не нужен).
   burqDefaultDropoffInstructions String?
@@ -505,6 +517,7 @@ model Site {
 
   // Запрет двух активных Site одного платформенного домена (двойное подключение).
   @@unique([platform, normalizedShopDomain])
+  aiTurns          AiTurn[]
 }
 
 // Прогресс фоновой синхронизации по сайту и типу (товары/заказы). Одна актуальная
@@ -1216,6 +1229,9 @@ model Order {
   /// ВНУТРЕННЯЯ заметка команды: владелец, колл-центр, флорист. На Woo сюда попадает и то,
   /// что заказчик написал при оформлении. НАРУЖУ НЕ УХОДИТ — курьеру предназначен courierNote.
   customerNote         String @default("")
+  /// Выключатель ассистента на КОНКРЕТНОМ заказе: сложный клиент, спорная ситуация, разбор
+  /// вручную. Сильнее режима магазина.
+  aiDisabled           Boolean @default(false)
   originalCustomerNote String @default("")
   /// Инструкция КУРЬЕРУ: единственное поле заказа, уезжающее в Burq (поверх стандартного
   /// текста магазина, Site.burqDefaultDropoffInstructions). Заполняется редко и вручную —
@@ -1331,6 +1347,7 @@ model Order {
   @@index([currentFloristId])
   @@index([orderStatus])
   @@index([isBackfilled])
+  aiTurns              AiTurn[]
 }
 
 model OrderItem {
@@ -1408,6 +1425,59 @@ model Message {
  * непривязанные события живут в разделе «Нераспознанные коммуникации»). Идемпотентность — по
  * (provider, providerEventId). Секреты/сырой webhook целиком НЕ храним (только нужные метаданные).
  */
+/// Разбор ОДНОГО входящего сообщения ассистентом: и журнал, и черновик ответа.
+///
+/// Одна строка на входящее (`communicationId` уникален) — повторный заход обработчика второго
+/// ответа не создаст. Здесь же лежит то, что уходило в модель и что она вернула: без этого на
+/// вопрос «почему он так ответил» нечем отвечать, кроме догадок. Видит только владелец.
+model AiTurn {
+  id     String @id @default(cuid())
+  siteId String
+  site   Site   @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  /// Заказ, если входящее удалось к нему привязать. Пусто — разговор с незнакомым номером.
+  orderId String?
+  order   Order?  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  /// Входящее сообщение, на которое отвечаем. Уникален: одно входящее — один разбор.
+  communicationId String             @unique
+  communication   OrderCommunication @relation("AiTurnIncoming", fields: [communicationId], references: [id], onDelete: Cascade)
+
+  status AiTurnStatus @default(DRAFT)
+  /// Откуда взялся ответ: "template" | "model" | "none".
+  source String
+  /// Тема обращения по мнению модели или шаблона (трек, время доставки, жалоба…).
+  intent     String?
+  /// true — тема из списка важных: сигнал уходит независимо от режима.
+  important  Boolean @default(false)
+  /// Модель не уверена — ответ обязан пройти через человека.
+  needsHuman Boolean @default(false)
+  /// Готовый текст клиенту. ВСЕГДА английский.
+  replyText  String?
+  /// Почему не ответили (потолок, тишина после автоматического, «спасибо»).
+  skipReason String?
+
+  /// Что ушло в модель и что она вернула — целиком, для разбора.
+  promptText   String?
+  responseText String?
+  modelName    String?
+  latencyMs    Int?
+
+  /// Сообщение в Telegram с черновиком — по нему находим разбор, когда владелец подтверждает.
+  telegramChatId    String?
+  telegramMessageId String?
+  /// Отправленное клиенту сообщение (появляется в момент отправки).
+  sentCommunicationId String?
+  /// Кто подтвердил отправку или отказ.
+  decidedByUserId String?
+  decidedAt       DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([siteId, status])
+  @@index([orderId])
+  @@index([telegramMessageId])
+}
+
 model OrderCommunication {
   id      String  @id @default(cuid())
   orderId String?
@@ -1457,6 +1527,7 @@ model OrderCommunication {
   @@index([externalPhoneNormalized, occurredAt])
   @@index([providerResourceId])
   @@index([orderId, readAt])
+  aiTurn               AiTurn?  @relation("AiTurnIncoming")
 }
 
 // Зарегистрированные Shopify webhook-подписки по Site — чтобы не создавать дубли и
@@ -2155,6 +2226,30 @@ model BrevoAccountStatus {
 // triggerType — String + централизованный app-registry (src/modules/sms/triggers.ts): новый
 // триггер добавляется без Prisma-миграции; неизвестное значение показывается как «Unsupported»
 // и не запускается. Все правила после deploy выключены (active=false), seed-правил нет.
+
+/// Режим ИИ-ассистента переписки на магазине.
+enum AiAssistantMode {
+  /// Выключен: входящие обрабатываются как раньше, ассистент не вызывается.
+  OFF
+  /// Всё готовит черновиком — отправляет человек.
+  DRAFT
+  /// Простое и уверенное отправляет сам, сложное и важное оставляет черновиком.
+  AUTO_SIMPLE
+}
+
+/// Чем закончился разбор одного входящего сообщения.
+enum AiTurnStatus {
+  /// Ответ готов, ждёт человека.
+  DRAFT
+  /// Ответ ушёл клиенту.
+  SENT
+  /// Человек отказался отправлять.
+  DISCARDED
+  /// Отвечать не стали (правило, потолок, тишина после автоматического сообщения).
+  SKIPPED
+  /// Не смогли получить ответ (модель недоступна, сломанный ответ).
+  FAILED
+}
 
 enum SmsAudience {
   CUSTOMER

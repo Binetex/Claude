@@ -53,6 +53,31 @@ export async function ownerSetSiteBurqDropoff(siteId: string, text: string): Pro
   return { ok: true, message: trimmed ? "Сохранено" : "Стандартная dropoff-инструкция выключена" };
 }
 
+/**
+ * Настройки ИИ-ассистента переписки на магазине: режим, сухой прогон и две базы знаний.
+ *
+ * Сухой прогон снимается ОТДЕЛЬНЫМ действием от режима — иначе «включу и посмотрю» одним кликом
+ * выпускает ответы живым клиентам. Пока он стоит, наружу не уходит ничего, что бы ни решила модель.
+ */
+export async function ownerSetSiteAiSettings(
+  siteId: string,
+  input: { mode: "OFF" | "DRAFT" | "AUTO_SIMPLE"; dryRun: boolean; knowledgeBase: string; unknownKnowledgeBase: string }
+): Promise<FormState> {
+  await requireRole("OWNER");
+  if (!["OFF", "DRAFT", "AUTO_SIMPLE"].includes(input.mode)) return { error: "Неизвестный режим." };
+  await prisma.site.update({
+    where: { id: siteId },
+    data: {
+      aiMode: input.mode,
+      aiDryRun: !!input.dryRun,
+      aiKnowledgeBase: input.knowledgeBase.trim() || null,
+      aiUnknownKnowledgeBase: input.unknownKnowledgeBase.trim() || null,
+    },
+  });
+  revalidatePath("/dashboard/sites");
+  return { ok: true, message: input.mode === "OFF" ? "Ассистент выключен" : input.dryRun ? "Сохранено — сухой прогон, наружу ничего не уходит" : "Сохранено" };
+}
+
 function guardCrypto(): string | null {
   return isCredentialCryptoConfigured()
     ? null

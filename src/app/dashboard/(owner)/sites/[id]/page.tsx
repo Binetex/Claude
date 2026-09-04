@@ -18,6 +18,7 @@ import { SiteQuoSetting } from "../SiteQuoSetting";
 import { SiteEmailPanel } from "../SiteEmailPanel";
 import { BrevoAccountPanel } from "../BrevoAccountPanel";
 import { SiteEmailFactoryPanel } from "../SiteEmailFactoryPanel";
+import { SiteAiAssistantPanel } from "../SiteAiAssistantPanel";
 import { SiteSettingsTabs, type SettingsSection } from "../SiteSettingsTabs";
 import { SitePriorityEditor } from "../../florists/SitePriorityEditor";
 import { connStatusMeta, syncSnapshot, dateTime } from "../siteMeta";
@@ -46,6 +47,10 @@ export default async function SiteSettingsPage({ params }: { params: Promise<{ i
       burqDraftAutoCreateEnabled: true,
       connectionStatus: true, shopifyShopDomain: true, timezone: true, burqDefaultDropoffInstructions: true,
       emailFactoryDomain: true,
+      aiMode: true,
+      aiDryRun: true,
+      aiKnowledgeBase: true,
+      aiUnknownKnowledgeBase: true,
       quoPhoneNumberId: true, quoPhoneNumber: true, quoEnabled: true, quoLastCheckAt: true, quoConnectionError: true,
       authMode: true, shopifyConnStatus: true, lastConnectionCheckAt: true, lastSyncAt: true,
       grantedScopes: true, connectionError: true,
@@ -314,6 +319,15 @@ export default async function SiteSettingsPage({ params }: { params: Promise<{ i
           </Card>
           {/* Второй почтовый канал магазина, независимый от Brevo: только ручная переписка. */}
           <SiteEmailFactoryPanel siteId={site.id} current={site.emailFactoryDomain} />
+          <SiteAiAssistantPanel
+            siteId={site.id}
+            initial={{
+              mode: site.aiMode,
+              dryRun: site.aiDryRun,
+              knowledgeBase: site.aiKnowledgeBase,
+              unknownKnowledgeBase: site.aiUnknownKnowledgeBase,
+            }}
+          />
         </>
       ),
     },

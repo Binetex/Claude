@@ -13,7 +13,7 @@ vi.mock("./events", () => ({
   publishAutomationTrigger: (...a: unknown[]) => publishAutomationTrigger(...a),
 }));
 
-import { scheduleReplyWait, buildReplyWaitHandler, WAIT_FIRST_MIN, WAIT_NEXT_MIN } from "./replyWait";
+import { scheduleReplyWait, buildReplyWaitHandler } from "./replyWait";
 import { MAX_CHAIN_MESSAGES, chainOccurrenceKey } from "./chain";
 
 /**

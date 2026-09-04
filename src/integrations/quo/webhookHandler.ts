@@ -8,6 +8,8 @@ import type { PrismaClient } from "@/generated/prisma/client";
 import type { OutboxHandler } from "@/outbox/worker";
 import type { OutboxRecord } from "@/outbox/types";
 import { ingestQuoEvent, type QuoIngestDeps } from "./ingest";
+import { publishAssistantIncoming } from "@/modules/assistant/events";
+import { PrismaOutboxRepository } from "@/outbox/prismaRepository";
 import { getQuoConfig } from "./config";
 import { createQuoClient } from "./client";
 import type { NormalizedQuoEvent } from "./types";
@@ -28,6 +30,11 @@ export function buildQuoWebhookHandler(prisma: PrismaClient): OutboxHandler {
       }
     : {};
   return async (record: OutboxRecord) => {
-    await ingestQuoEvent(prisma, record.payload as NormalizedQuoEvent, deps);
+    const res = await ingestQuoEvent(prisma, record.payload as NormalizedQuoEvent, deps);
+    // Новое входящее — повод посмотреть, должен ли ответить ассистент. Отдельным событием:
+    // разбор ходит в модель, а приём входящих обязан оставаться быстрым.
+    if (res.outcome === "created" && (record.payload as NormalizedQuoEvent).direction === "INBOUND") {
+      await publishAssistantIncoming(new PrismaOutboxRepository(prisma), res.communicationId);
+    }
   };
 }

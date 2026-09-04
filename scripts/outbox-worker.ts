@@ -34,6 +34,7 @@ import { buildQuoWebhookHandler, QUO_WEBHOOK_EVENT } from "@/integrations/quo/we
 import { buildAutomationTriggerHandler, buildAutomationSendHandler } from "@/modules/automations/handlers";
 import { AUTOMATION_TRIGGER_EVENT, AUTOMATION_SEND_EVENT } from "@/modules/automations/events";
 import { REPLY_WAIT_EVENT, buildReplyWaitHandler } from "@/modules/automations/replyWait";
+import { ASSISTANT_INCOMING_EVENT, buildAssistantHandler } from "@/modules/assistant/handler.registration";
 import { buildFlowStepHandler } from "@/modules/automations/flows/handler";
 import { FLOW_STEP_EVENT } from "@/modules/automations/flows/events";
 import { ingestInboundEmails } from "@/integrations/emailFactory/ingest";
@@ -120,6 +121,9 @@ async function main() {
     // (какое именно — указано в самом правиле; см. modules/automations/replyWait.ts).
     // Отправкой занимаются обычные правила, здесь только проверка тишины и публикация триггера.
     [REPLY_WAIT_EVENT]: buildReplyWaitHandler(prisma),
+    // Ассистент клиентской переписки: разбирает входящее и готовит ответ. Наружу ничего не
+    // уходит, пока владелец не включил режим и не снял сухой прогон.
+    [ASSISTANT_INCOMING_EVENT]: buildAssistantHandler(prisma),
     // Внутренние Telegram-уведомления сотрудникам: один обработчик на все типы событий.
     [TELEGRAM_NOTIFY_EVENT]: buildTelegramNotifyHandler(prisma),
     // Сверка платежа с Airwallex (режим наблюдения: business status заказа не меняется).
