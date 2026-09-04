@@ -55,6 +55,18 @@ export const SMS_TRIGGERS: readonly SmsTriggerDef[] = [
     domainEvent: "order.delivery.today",
   },
   {
+    type: "RECIPIENT_NO_REPLY",
+    label: "Получатель не ответил",
+    description: "Через час после вопроса о готовности принять букет получатель не ответил — переспрашиваем его.",
+    domainEvent: "order.recipient.no_reply",
+  },
+  {
+    type: "RECIPIENT_UNREACHABLE",
+    label: "С получателем не связались",
+    description: "Получатель молчит и после повтора — сообщаем заказчику, чтобы он связался сам.",
+    domainEvent: "order.recipient.unreachable",
+  },
+  {
     type: "PAYMENT_PENDING",
     label: "Оплата в ожидании (BNPL)",
     description: "Airwallex/Klarna приняли заказ, но подтверждение оплаты ещё не пришло. Только WooCommerce.",

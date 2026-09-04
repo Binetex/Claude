@@ -20,6 +20,10 @@ export type DomainEventMap = {
   "order.cancelled": { orderId: string; reason: string | null };
   "order.refunded": { orderId: string; amount: number | null };
   "order.delivery.today": { orderId: string; localDay: string };
+  /** Получатель не ответил на вопрос о готовности принять букет (волна 1 — переспросить). */
+  "order.recipient.no_reply": { orderId: string };
+  /** Получатель молчит и после повтора (волна 2 — сказать заказчику). */
+  "order.recipient.unreachable": { orderId: string };
   "order.payment.pending": { orderId: string };
   "order.payment.failed": { orderId: string };
   "product.synced": { siteId: string; created: number; updated: number };

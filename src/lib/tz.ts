@@ -61,6 +61,17 @@ export function parseLocalDayToUtcMidnight(raw: string | null | undefined): Date
 }
 
 /** true, если строка — валидная IANA-таймзона. */
+/**
+ * Час (0–23) по календарю магазина. Нужен там, где решают «не поздно ли сейчас писать
+ * клиенту»: сравнивать с часом сервера нельзя — он в UTC, и в Лос-Анджелесе это утро
+ * следующего дня.
+ */
+export function localHourInTz(tz: string | null | undefined, now: Date = new Date()): number {
+  const zone = isValidTimeZone(tz) ? (tz as string) : "UTC";
+  const hh = new Intl.DateTimeFormat("en-GB", { timeZone: zone, hour: "2-digit", hour12: false }).format(now);
+  return Number(hh);
+}
+
 export function isValidTimeZone(tz: string | null | undefined): boolean {
   if (!tz) return false;
   try {

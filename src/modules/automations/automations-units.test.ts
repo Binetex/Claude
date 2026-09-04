@@ -213,6 +213,9 @@ describe("triggers registry", () => {
       "ORDER_CANCELLED",
       "TRACKING_LINK_AVAILABLE",
       "DELIVERY_TODAY",
+      // Эскалация «получатель молчит»: переспросить его, затем сказать заказчику.
+      "RECIPIENT_NO_REPLY",
+      "RECIPIENT_UNREACHABLE",
       "PAYMENT_PENDING",
       "PAYMENT_FAILED",
       "ORDER_REFUNDED",

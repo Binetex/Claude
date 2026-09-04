@@ -23,7 +23,7 @@ export default async function AutomationsPage() {
     prisma.automationJob.groupBy({ by: ["automationId", "status"], _count: { _all: true } }),
     prisma.automationJob.groupBy({ by: ["channel", "status"], _count: { _all: true } }),
     prisma.automationJob.groupBy({ by: ["automationId"], _max: { sentAt: true } }),
-    prisma.site.findMany({ select: { id: true, name: true, quoEnabled: true, automationDailyLocalTime: true }, orderBy: { name: "asc" } }),
+    prisma.site.findMany({ select: { id: true, name: true, quoEnabled: true, automationDailyLocalTime: true, recipientRetryAfterMin: true, recipientAlertAfterMin: true }, orderBy: { name: "asc" } }),
     getAutomationSettings(prisma),
   ]);
 

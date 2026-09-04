@@ -448,6 +448,11 @@ model Site {
   burqDraftAutoCreateEnabled     Boolean @default(false)
   burqDraftCreationLocalTime     String  @default("04:00") // локальное время (HH:mm) утреннего создания черновиков
   automationDailyLocalTime       String  @default("08:00") // "HH:mm" локального времени ежедневных триггеров автоматизаций (напр. «Доставка сегодня»)
+  /// Эскалация «получатель молчит»: через сколько минут после вопроса переспросить его и
+  /// через сколько после повтора сказать заказчику. Значения ограничиваются при сохранении —
+  /// слишком короткое окно превращает нормальную паузу в тревогу.
+  recipientRetryAfterMin         Int     @default(60)
+  recipientAlertAfterMin         Int     @default(20)
   // Единый текст dropoff-инструкций магазина, автоматически добавляемый во все новые Burq draft.
   // Пусто/NULL → стандартная инструкция выключена (отдельный boolean не нужен).
   burqDefaultDropoffInstructions String?

@@ -1,6 +1,7 @@
 "use server";
 import { revalidatePath } from "next/cache";
 import { requireRole } from "@/lib/rbac";
+import { clampWait, WAIT_AFTER_ASK_MIN, WAIT_AFTER_RETRY_MIN } from "@/modules/automations/recipientFollowup";
 import { prisma } from "@/lib/db";
 import { featureFlags } from "@/lib/featureFlags";
 import { getQuoConfig } from "@/integrations/quo/config";
@@ -299,6 +300,30 @@ export async function saveSiteAutomationDailyTime(siteId: string, value: string)
   const site = await prisma.site.findUnique({ where: { id: siteId }, select: { id: true } });
   if (!site) return { error: "Магазин не найден." };
   await prisma.site.update({ where: { id: siteId }, data: { automationDailyLocalTime: v } });
+  revalidatePath("/dashboard/automations");
+  return { ok: true };
+}
+
+/**
+ * Тайминги эскалации «получатель молчит»: через сколько переспросить его и через сколько
+ * после этого сказать заказчику. Границы режутся на сервере (`clampWait`), а не только в форме:
+ * минута превращает нормальную паузу в тревогу, а сутки приходят уже после доставки.
+ */
+export async function saveSiteRecipientTimings(
+  siteId: string,
+  retryAfterMin: number,
+  alertAfterMin: number
+): Promise<ActionResult> {
+  await requireRole("OWNER");
+  const site = await prisma.site.findUnique({ where: { id: siteId }, select: { id: true } });
+  if (!site) return { error: "Магазин не найден." };
+  await prisma.site.update({
+    where: { id: siteId },
+    data: {
+      recipientRetryAfterMin: clampWait(retryAfterMin, WAIT_AFTER_ASK_MIN),
+      recipientAlertAfterMin: clampWait(alertAfterMin, WAIT_AFTER_RETRY_MIN),
+    },
+  });
   revalidatePath("/dashboard/automations");
   return { ok: true };
 }

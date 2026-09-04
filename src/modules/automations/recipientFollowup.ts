@@ -19,13 +19,22 @@ import type { PrismaClient } from "@/generated/prisma/client";
 import { PrismaOutboxRepository } from "@/outbox/prismaRepository";
 import { publishAutomationTrigger } from "./events";
 import { TERMINAL_ORDER_STATUSES } from "@/lib/statuses";
-import { localTimeInTz } from "@/lib/tz";
+import { localHourInTz } from "@/lib/tz";
 
 export const RECIPIENT_FOLLOWUP_EVENT = "automation.recipient.followup";
 
-/** Ждём ответа после вопроса; затем — после повтора. Значения выбраны владельцем. */
+/** Значения по умолчанию, если у магазина ничего не задано. Настраиваются в «Автоматизациях». */
 export const WAIT_AFTER_ASK_MIN = 60;
 export const WAIT_AFTER_RETRY_MIN = 20;
+
+/** Разумные границы: минута тревожит зря, а сутки — уже после доставки. */
+export const MIN_WAIT_MIN = 5;
+export const MAX_WAIT_MIN = 12 * 60;
+
+export function clampWait(value: number | null | undefined, fallback: number): number {
+  if (value == null || !Number.isFinite(value)) return fallback;
+  return Math.min(MAX_WAIT_MIN, Math.max(MIN_WAIT_MIN, Math.round(value)));
+}
 
 /** Позже этого часа (время магазина) переспрашивать бессмысленно — день доставки заканчивается. */
 export const QUIET_AFTER_HOUR = 20;
@@ -53,6 +62,11 @@ export async function scheduleRecipientFollowup(
 ): Promise<void> {
   if (!args.phoneNormalized) return; // отвечать некому — эскалировать нечего
   try {
+    const order = await prisma.order.findUnique({
+      where: { id: args.orderId },
+      select: { site: { select: { recipientRetryAfterMin: true } } },
+    });
+    const waitMin = clampWait(order?.site.recipientRetryAfterMin, WAIT_AFTER_ASK_MIN);
     const repo = new PrismaOutboxRepository(prisma);
     await repo.enqueue({
       eventType: RECIPIENT_FOLLOWUP_EVENT,
@@ -65,7 +79,7 @@ export async function scheduleRecipientFollowup(
         phoneNormalized: args.phoneNormalized,
       } satisfies RecipientFollowupPayload,
       idempotencyKey: `recipient-followup:${args.orderId}:1`,
-      availableAt: new Date(args.sentAt.getTime() + WAIT_AFTER_ASK_MIN * 60_000),
+      availableAt: new Date(args.sentAt.getTime() + waitMin * 60_000),
     });
   } catch (err) {
     console.error(`[sms] scheduleRecipientFollowup failed for order ${args.orderId}:`, err instanceof Error ? err.message : String(err));
@@ -95,11 +109,9 @@ export async function recipientAnswered(
   return !!found;
 }
 
-/** Час по времени магазина — чтобы не переспрашивать поздно вечером. */
+/** Поздно ли по времени магазина — переспрашивать вечером в день доставки бессмысленно. */
 function tooLateInStoreDay(timezone: string | null, now: Date): boolean {
-  const hhmm = localTimeInTz(timezone, now); // "HH:MM"
-  const hour = Number(hhmm.slice(0, 2));
-  return Number.isFinite(hour) && hour >= QUIET_AFTER_HOUR;
+  return localHourInTz(timezone, now) >= QUIET_AFTER_HOUR;
 }
 
 /**
@@ -116,7 +128,10 @@ export function buildRecipientFollowupHandler(prisma: PrismaClient) {
 
     const order = await prisma.order.findUnique({
       where: { id: p.orderId },
-      select: { id: true, siteId: true, orderStatus: true, deliveryStatus: true, site: { select: { timezone: true } } },
+      select: {
+        id: true, siteId: true, orderStatus: true, deliveryStatus: true,
+        site: { select: { timezone: true, recipientAlertAfterMin: true } },
+      },
     });
     if (!order) return; // заказ исчез — эскалировать нечего
 
@@ -144,7 +159,7 @@ export function buildRecipientFollowupHandler(prisma: PrismaClient) {
         aggregateId: order.id,
         payload: { ...p, wave: 2 } satisfies RecipientFollowupPayload,
         idempotencyKey: `recipient-followup:${order.id}:2`,
-        availableAt: new Date(now.getTime() + WAIT_AFTER_RETRY_MIN * 60_000),
+        availableAt: new Date(now.getTime() + clampWait(order.site.recipientAlertAfterMin, WAIT_AFTER_RETRY_MIN) * 60_000),
       });
     }
   };

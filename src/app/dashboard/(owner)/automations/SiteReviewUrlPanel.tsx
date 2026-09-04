@@ -1,15 +1,31 @@
 "use client";
 import { useState, useTransition } from "react";
 import { Card, CardBody } from "@/components/ui/Card";
-import { saveSiteAutomationDailyTime } from "./actions";
+import { saveSiteAutomationDailyTime, saveSiteRecipientTimings } from "./actions";
 import { DEFAULT_DAILY_LOCAL_TIME } from "@/modules/automations/dailySchedule";
 
-type SiteRow = { id: string; name: string; quoEnabled: boolean; automationDailyLocalTime: string };
+type SiteRow = {
+  id: string;
+  name: string;
+  quoEnabled: boolean;
+  automationDailyLocalTime: string;
+  recipientRetryAfterMin: number;
+  recipientAlertAfterMin: number;
+};
 
 function Row({ site }: { site: SiteRow }) {
   const [time, setTime] = useState(site.automationDailyLocalTime || DEFAULT_DAILY_LOCAL_TIME);
   const [timeMsg, setTimeMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [retry, setRetry] = useState(String(site.recipientRetryAfterMin));
+  const [alert, setAlert] = useState(String(site.recipientAlertAfterMin));
+  const [waitMsg, setWaitMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [, start] = useTransition();
+
+  const saveWaits = () =>
+    start(async () => {
+      const r = await saveSiteRecipientTimings(site.id, Number(retry), Number(alert));
+      setWaitMsg(r?.error ? { ok: false, text: r.error } : { ok: true, text: "✓" });
+    });
 
   return (
     <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 py-2 last:border-0">
@@ -28,6 +44,36 @@ function Row({ site }: { site: SiteRow }) {
         />
       </label>
       {timeMsg && <span className={timeMsg.ok ? "text-xs text-emerald-700" : "text-xs text-red-600"}>{timeMsg.text}</span>}
+
+      {/* Эскалация «получатель молчит». Живёт здесь же: вопрос задаётся ежедневным триггером
+          слева, а эти два числа решают, когда переспросить и когда звать заказчика. */}
+      <label className="flex items-center gap-1.5 text-xs text-slate-500">
+        Переспросить через
+        <input
+          type="number"
+          min={5}
+          max={720}
+          value={retry}
+          onChange={(e) => { setRetry(e.target.value); setWaitMsg(null); }}
+          onBlur={saveWaits}
+          className="w-16 rounded-md border border-slate-300 px-1.5 py-1 text-sm text-slate-800"
+        />
+        мин
+      </label>
+      <label className="flex items-center gap-1.5 text-xs text-slate-500">
+        заказчику через
+        <input
+          type="number"
+          min={5}
+          max={720}
+          value={alert}
+          onChange={(e) => { setAlert(e.target.value); setWaitMsg(null); }}
+          onBlur={saveWaits}
+          className="w-16 rounded-md border border-slate-300 px-1.5 py-1 text-sm text-slate-800"
+        />
+        мин
+      </label>
+      {waitMsg && <span className={waitMsg.ok ? "text-xs text-emerald-700" : "text-xs text-red-600"}>{waitMsg.text}</span>}
     </div>
   );
 }
@@ -39,7 +85,10 @@ export function SiteReviewUrlPanel({ sites }: { sites: SiteRow[] }) {
         <div className="mb-1">
           <h2 className="text-sm font-semibold text-slate-800">Настройки по магазинам</h2>
           <p className="text-xs text-slate-500">
-            Когда срабатывают ежедневные триггеры («Доставка сегодня») по местному времени магазина.
+            Когда срабатывают ежедневные триггеры («Доставка сегодня») по местному времени магазина
+            и через сколько идёт эскалация, если получатель не ответил: сначала переспрашиваем
+            его, затем пишем заказчику. Тексты — в правилах «Получатель не ответил» и
+            «С получателем не связались».
             Ссылка на отзыв живёт в разделе <b>Отзывы</b>: переменная{" "}
             <code className="rounded bg-slate-100 px-1">{"{{review_url}}"}</code> берёт ближайшую к адресу точку.
           </p>
