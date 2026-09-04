@@ -162,7 +162,7 @@ export function buildAssistantHandler(prisma: PrismaClient, deps: AssistantDeps 
     const messages = buildMessages({
       knowledgeBase: order ? site.aiKnowledgeBase : site.aiUnknownKnowledgeBase,
       order: order ? snapshot(order, site.name, incoming.partyRole) : null,
-      history: await loadHistory(prisma, order?.id ?? null, phone, incoming.storePhone, incoming.id),
+      history: await loadHistory(prisma, order?.id ?? null, phone, incoming.storePhone, incoming),
       incomingText: text,
       catalog: wantsCatalog ? await loadCatalog(prisma, site.id).catch(() => []) : undefined,
     });
@@ -223,7 +223,7 @@ export function buildAssistantHandler(prisma: PrismaClient, deps: AssistantDeps 
         const again = buildMessages({
           knowledgeBase: site.aiKnowledgeBase,
           order: snapshot(found, site.name, incoming.partyRole),
-          history: await loadHistory(prisma, found.id, phone, incoming.storePhone, incoming.id),
+          history: await loadHistory(prisma, found.id, phone, incoming.storePhone, incoming),
           incomingText: text,
         });
         try {
@@ -376,11 +376,14 @@ async function logSkip(prisma: PrismaClient, siteId: string, orderId: string | n
  * заказа; у незнакомого номера — его разговор с этим номером магазина. Неотправленные и
  * упавшие исходящие не показываем: клиент их не видел, и модель не должна считать их сказанными.
  */
-async function loadHistory(prisma: PrismaClient, orderId: string | null, phone: string, storePhone: string | null, exceptId: string): Promise<HistoryLine[]> {
+async function loadHistory(prisma: PrismaClient, orderId: string | null, phone: string, storePhone: string | null, incoming: { id: string; occurredAt: Date }): Promise<HistoryLine[]> {
   const rows = await prisma.orderCommunication.findMany({
     where: {
       ...(orderId ? { orderId } : { orderId: null, externalPhoneNormalized: phone, ...(storePhone ? { storePhone } : {}) }),
-      id: { not: exceptId },
+      id: { not: incoming.id },
+      // Только то, что было ДО разбираемого сообщения: при повторном разборе старого входящего
+      // модель не должна отвечать на него, зная, чем разговор кончился.
+      occurredAt: { lte: incoming.occurredAt },
       OR: [{ direction: "INBOUND" }, { direction: "OUTBOUND", status: { in: ["SENT", "DELIVERED"] } }],
       // Звонок — такая же часть разговора, как SMS: клиент часто ссылается на сказанное голосом.
       AND: [{ OR: [{ messageText: { not: null } }, { transcript: { not: null } }, { summary: { not: null } }, { attachmentsJson: { not: Prisma.DbNull } }] }],
