@@ -25,11 +25,15 @@ export type OrderSnapshot = {
 
 export type HistoryLine = { direction: "in" | "out"; text: string; at: string };
 
+export type CatalogLine = { name: string; price: string | null; url: string | null };
+
 export type PromptInput = {
   knowledgeBase: string | null;
   order: OrderSnapshot | null;
   history: HistoryLine[];
   incomingText: string;
+  /** Живые товары магазина — только когда разговор похож на покупку. */
+  catalog?: CatalogLine[];
 };
 
 export type DeepseekMessage = { role: "system" | "user" | "assistant"; content: string };
@@ -50,6 +54,9 @@ HARD RULES — never break them:
 - Never invent facts. If the answer is not in the order data or the knowledge base, set
   "needs_human": true.
 - Never apologize on behalf of the shop for something you cannot verify.
+- If a product list is given below, recommend ONLY items from it, and always include the item's
+  link. Never invent a bouquet, a price or a link. If nothing in the list fits what the customer
+  asks for, say so plainly and set "needs_human": true.
 
 Set "important": true when the customer talks about: cancelling, a refund, a complaint, flowers
 not delivered, a wrong or damaged bouquet, a wrong address, a funeral or a death, or threatens a
@@ -72,6 +79,8 @@ HARD RULES — never break them:
 - Answer general questions (hours, delivery areas, prices, how ordering works) from the knowledge
   base below. If the knowledge base does not cover it, set "needs_human": true.
 - Never promise refunds, discounts, dates, or anything about a specific order — you have no order data.
+- If a product list is given below, recommend ONLY items from it and always include the link.
+  Never invent a bouquet, a price or a link.
 
 Set "important": true for complaints, refunds, cancellations, undelivered flowers, or anything
 that sounds urgent.
@@ -103,6 +112,10 @@ export function buildMessages(input: PromptInput): DeepseekMessage[] {
 
   const parts = [knowledge];
   if (input.order) parts.push(`Order data:\n${orderBlock(input.order)}`);
+  if (input.catalog?.length) {
+    const lines = input.catalog.map((c) => [c.name, c.price, c.url].filter(Boolean).join(" — "));
+    parts.push(`Products available right now (recommend only from this list, always give the link):\n${lines.join("\n")}`);
+  }
   if (input.history.length) {
     const lines = input.history.map((h) => `${h.at} ${h.direction === "in" ? "customer" : "shop"}: ${h.text}`);
     parts.push(`Recent conversation (oldest first):\n${lines.join("\n")}`);

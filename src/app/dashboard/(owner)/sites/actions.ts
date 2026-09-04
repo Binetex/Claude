@@ -16,6 +16,9 @@ import {
 } from "@/modules/sites/deletion";
 import { isCredentialCryptoConfigured } from "@/lib/crypto/secretBox";
 import { prisma } from "@/lib/db";
+import { extractVariables } from "@/modules/messaging/template";
+import { SMS_VARIABLES } from "@/modules/messaging/variables";
+import { writeTemplates } from "@/modules/assistant/templates";
 import { isValidTimeZone } from "@/lib/tz";
 import { rescheduleSiteFutureOrders } from "@/integrations/delivery/burq/scheduleService";
 
@@ -61,10 +64,28 @@ export async function ownerSetSiteBurqDropoff(siteId: string, text: string): Pro
  */
 export async function ownerSetSiteAiSettings(
   siteId: string,
-  input: { mode: "OFF" | "DRAFT" | "AUTO_SIMPLE"; dryRun: boolean; knowledgeBase: string; unknownKnowledgeBase: string }
+  input: {
+    mode: "OFF" | "DRAFT" | "AUTO_SIMPLE";
+    dryRun: boolean;
+    knowledgeBase: string;
+    unknownKnowledgeBase: string;
+    templates?: Record<string, { enabled: boolean; text: string }>;
+  }
 ): Promise<FormState> {
   await requireRole("OWNER");
   if (!["OFF", "DRAFT", "AUTO_SIMPLE"].includes(input.mode)) return { error: "Неизвестный режим." };
+
+  // Заготовку, которая ссылается на несуществующую переменную, рендер молча заменит пустотой и
+  // съест часть фразы — отвергаем на сохранении, как и в остальных шаблонах проекта.
+  if (input.templates) {
+    const allowed = new Set(SMS_VARIABLES.map((v) => v.key));
+    for (const [key, tpl] of Object.entries(input.templates)) {
+      const unknown = extractVariables(tpl.text).filter((v) => !allowed.has(v));
+      if (unknown.length) return { error: `В заготовке «${key}» неизвестная переменная: ${unknown.join(", ")}` };
+      if (/[Ѐ-ӿ]/.test(tpl.text)) return { error: `Заготовка «${key}» на русском — клиенту уходит только английский.` };
+    }
+  }
+
   await prisma.site.update({
     where: { id: siteId },
     data: {
@@ -72,6 +93,7 @@ export async function ownerSetSiteAiSettings(
       aiDryRun: !!input.dryRun,
       aiKnowledgeBase: input.knowledgeBase.trim() || null,
       aiUnknownKnowledgeBase: input.unknownKnowledgeBase.trim() || null,
+      ...(input.templates ? { aiTemplatesJson: writeTemplates(input.templates) } : {}),
     },
   });
   revalidatePath("/dashboard/sites");

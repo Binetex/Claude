@@ -16,11 +16,21 @@ import { getDeepseekConfig } from "@/integrations/deepseek/config";
 import { createDeepseekClient, type DeepseekClient } from "@/integrations/deepseek/client";
 import { DeepseekError } from "@/integrations/deepseek/errors";
 import { buildMessages, parseReply, type HistoryLine, type OrderSnapshot } from "./prompt";
+import { matchIntent } from "./intents";
+import { readTemplates, templateApplies } from "./templates";
+import { loadCatalog, looksLikeShopping } from "./catalog";
+import { renderTemplate } from "@/modules/messaging/template";
+import { buildOrderVariables } from "@/modules/messaging/variables";
+import { orderToVariableSource, SMS_ORDER_INCLUDE } from "@/modules/messaging/orderSource";
 import { shouldConsider, decideDelivery, type AssistantMode } from "./policy";
 import type { AssistantIncomingPayload } from "./events";
 
-/** Сколько последних сообщений переписки показываем модели. */
-const HISTORY_LIMIT = 10;
+/**
+ * Сколько последних сообщений переписки показываем модели. Двадцать — вся живая переписка по
+ * заказу: клиент часто ссылается на сказанное раньше («как договаривались»), и без этого
+ * ассистент отвечает в вакууме.
+ */
+const HISTORY_LIMIT = 20;
 
 export type AssistantDeps = {
   /** Инъекция клиента модели — в тестах реального обращения быть не должно. */
@@ -48,11 +58,10 @@ export function buildAssistantHandler(prisma: PrismaClient, deps: AssistantDeps 
     const existing = await prisma.aiTurn.findUnique({ where: { communicationId: incoming.id }, select: { id: true } });
     if (existing) return;
 
+    // Тот же срез заказа, что у автоматизаций: переменные шаблонов обязаны считаться одинаково,
+    // иначе «во сколько привезут» в заготовке и в правиле разойдутся.
     const order = incoming.orderId
-      ? await prisma.order.findUnique({
-          where: { id: incoming.orderId },
-          include: { site: true },
-        })
+      ? await prisma.order.findUnique({ where: { id: incoming.orderId }, include: SMS_ORDER_INCLUDE })
       : null;
 
     // Магазин: у привязанного входящего — от заказа, у незнакомого номера — по номеру магазина,
@@ -100,6 +109,38 @@ export function buildAssistantHandler(prisma: PrismaClient, deps: AssistantDeps 
       return;
     }
 
+    // Заготовка сильнее модели: на «где мой заказ» ответ один и тот же, и тратить на него запрос,
+    // рискуя выдумкой, незачем. Только для заказов: у незнакомого номера подставлять нечего.
+    if (order) {
+      const intent = matchIntent(text);
+      if (intent) {
+        const setting = readTemplates(site.aiTemplatesJson)[intent.key];
+        const vars = buildOrderVariables(orderToVariableSource(order));
+        if (templateApplies(intent, setting, vars)) {
+          const rendered = renderTemplate(setting.text, vars);
+          // Незаполненная переменная рендерится пустотой и съедает часть фразы — такой ответ
+          // клиенту не уходит, вопрос честнее отдать модели.
+          if (rendered.missing.length === 0 && rendered.text.trim()) {
+            await prisma.aiTurn.create({
+              data: {
+                siteId: site.id, orderId: order.id, communicationId: incoming.id,
+                status: "DRAFT", source: "template", intent: intent.key,
+                replyText: rendered.text,
+                needsHuman: decideDelivery({
+                  mode: site.aiMode as AssistantMode,
+                  dryRun: site.aiDryRun,
+                  hasReply: true,
+                  needsHuman: false,
+                  important: false,
+                }) === "draft",
+              },
+            });
+            return;
+          }
+        }
+      }
+    }
+
     const cfg = getDeepseekConfig();
     const client = deps.client ?? (cfg ? createDeepseekClient(cfg) : null);
     if (!client) {
@@ -107,11 +148,15 @@ export function buildAssistantHandler(prisma: PrismaClient, deps: AssistantDeps 
       return;
     }
 
+    // Каталог нужен не всегда: на «во сколько привезут» он только раздувает запрос. Но у
+    // незнакомого номера разговор почти всегда про покупку, поэтому там он идёт сразу.
+    const wantsCatalog = !order || looksLikeShopping(text);
     const messages = buildMessages({
       knowledgeBase: order ? site.aiKnowledgeBase : site.aiUnknownKnowledgeBase,
       order: order ? snapshot(order, site.name, incoming.partyRole) : null,
       history: await loadHistory(prisma, order?.id ?? null, incoming.id),
       incomingText: text,
+      catalog: wantsCatalog ? await loadCatalog(prisma, site.id).catch(() => []) : undefined,
     });
 
     let raw: string;
@@ -181,18 +226,27 @@ async function logSkip(prisma: PrismaClient, siteId: string, orderId: string | n
 async function loadHistory(prisma: PrismaClient, orderId: string | null, exceptId: string): Promise<HistoryLine[]> {
   if (!orderId) return [];
   const rows = await prisma.orderCommunication.findMany({
-    where: { orderId, id: { not: exceptId }, messageText: { not: null } },
+    where: {
+      orderId,
+      id: { not: exceptId },
+      // Звонок — такая же часть разговора, как SMS: клиент часто ссылается на сказанное голосом.
+      OR: [{ messageText: { not: null } }, { transcript: { not: null } }, { summary: { not: null } }],
+    },
     orderBy: { occurredAt: "desc" },
     take: HISTORY_LIMIT,
-    select: { direction: true, messageText: true, occurredAt: true },
+    select: { direction: true, messageText: true, transcript: true, summary: true, type: true, occurredAt: true },
   });
   return rows
     .reverse()
-    .map((r) => ({
-      direction: r.direction === "INBOUND" ? ("in" as const) : ("out" as const),
-      text: (r.messageText ?? "").slice(0, 300),
-      at: r.occurredAt.toISOString().slice(11, 16),
-    }));
+    .map((r) => {
+      const body = r.messageText ?? r.transcript ?? r.summary ?? "";
+      const prefix = r.messageText ? "" : "(call) ";
+      return {
+        direction: r.direction === "INBOUND" ? ("in" as const) : ("out" as const),
+        text: `${prefix}${body}`.slice(0, 400),
+        at: r.occurredAt.toISOString().slice(11, 16),
+      };
+    });
 }
 
 type OrderWithSite = { orderNumber: string; orderStatus: string; deliveryStatus: string | null; deliveryDate: Date | null; deliveryWindow: string | null; recipientName: string | null; deliveryAddress: string | null; trackingUrl: string | null; total: unknown };

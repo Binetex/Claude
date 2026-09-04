@@ -2,6 +2,8 @@
 import { useState, useTransition } from "react";
 import { Button } from "@/components/ui/button";
 import { ownerSetSiteAiSettings } from "./actions";
+import { INTENTS } from "@/modules/assistant/intents";
+import { readTemplates, type TemplateSetting } from "@/modules/assistant/templates";
 
 type Mode = "OFF" | "DRAFT" | "AUTO_SIMPLE";
 
@@ -23,24 +25,41 @@ export function SiteAiAssistantPanel({
   initial,
 }: {
   siteId: string;
-  initial: { mode: Mode; dryRun: boolean; knowledgeBase: string | null; unknownKnowledgeBase: string | null };
+  initial: {
+    mode: Mode;
+    dryRun: boolean;
+    knowledgeBase: string | null;
+    unknownKnowledgeBase: string | null;
+    templates: unknown;
+  };
 }) {
   const [mode, setMode] = useState<Mode>(initial.mode);
   const [dryRun, setDryRun] = useState(initial.dryRun);
   const [kb, setKb] = useState(initial.knowledgeBase ?? "");
   const [unknownKb, setUnknownKb] = useState(initial.unknownKnowledgeBase ?? "");
+  const [templates, setTemplates] = useState<Record<string, TemplateSetting>>(() => readTemplates(initial.templates));
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [pending, start] = useTransition();
+
+  const initialTemplates = readTemplates(initial.templates);
+  const templatesDirty = INTENTS.some(
+    (i) => templates[i.key].enabled !== initialTemplates[i.key].enabled || templates[i.key].text.trim() !== initialTemplates[i.key].text.trim()
+  );
+  const setTemplate = (key: string, patch: Partial<TemplateSetting>) => {
+    setTemplates((prev) => ({ ...prev, [key]: { ...prev[key], ...patch } }));
+    setMsg(null);
+  };
 
   const dirty =
     mode !== initial.mode ||
     dryRun !== initial.dryRun ||
     kb.trim() !== (initial.knowledgeBase ?? "").trim() ||
-    unknownKb.trim() !== (initial.unknownKnowledgeBase ?? "").trim();
+    unknownKb.trim() !== (initial.unknownKnowledgeBase ?? "").trim() ||
+    templatesDirty;
 
   const save = () =>
     start(async () => {
-      const r = await ownerSetSiteAiSettings(siteId, { mode, dryRun, knowledgeBase: kb, unknownKnowledgeBase: unknownKb });
+      const r = await ownerSetSiteAiSettings(siteId, { mode, dryRun, knowledgeBase: kb, unknownKnowledgeBase: unknownKb, templates });
       setMsg(r?.ok ? { ok: true, text: r.message ?? "Сохранено" } : { ok: false, text: r?.error ?? "Ошибка" });
     });
 
@@ -115,6 +134,47 @@ export function SiteAiAssistantPanel({
             />
           </div>
         </>
+      )}
+
+      {mode !== "OFF" && (
+        <div className="space-y-2">
+          <div>
+            <div className="text-xs text-slate-400">Готовые ответы на частые вопросы</div>
+            <p className="text-[11px] text-slate-400">
+              Совпал вопрос — уходит этот текст, модель не вызывается вообще. Если нужного значения в
+              заказе нет (например, трека), заготовка пропускается и отвечает модель.
+            </p>
+          </div>
+          {INTENTS.map((i) => (
+            <div key={i.key} className="rounded-md border border-slate-200 px-2.5 py-2">
+              <label className="flex items-start gap-2 text-sm text-slate-700">
+                <input
+                  type="checkbox"
+                  className="mt-1"
+                  checked={templates[i.key].enabled}
+                  onChange={(e) => setTemplate(i.key, { enabled: e.target.checked })}
+                />
+                <span>
+                  {i.label}
+                  <span className="block text-[11px] text-slate-400">{i.hint}</span>
+                </span>
+              </label>
+              {templates[i.key].enabled && (
+                <textarea
+                  value={templates[i.key].text}
+                  onChange={(e) => setTemplate(i.key, { text: e.target.value })}
+                  rows={2}
+                  className="mt-1.5 w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm"
+                  aria-label={`Текст ответа: ${i.label}`}
+                />
+              )}
+            </div>
+          ))}
+          <p className="text-[11px] text-slate-400">
+            Переменные: {"{{tracking_url}}"}, {"{{delivery_time}}"}, {"{{delivery_date}}"}, {"{{order_number}}"},
+            {" "}{"{{recipient_name}}"}, {"{{store_name}}"}. Текст — только по-английски.
+          </p>
+        </div>
       )}
 
       <div className="flex flex-wrap items-center gap-2">

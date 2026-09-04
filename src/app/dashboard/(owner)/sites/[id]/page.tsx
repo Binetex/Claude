@@ -51,6 +51,7 @@ export default async function SiteSettingsPage({ params }: { params: Promise<{ i
       aiDryRun: true,
       aiKnowledgeBase: true,
       aiUnknownKnowledgeBase: true,
+      aiTemplatesJson: true,
       quoPhoneNumberId: true, quoPhoneNumber: true, quoEnabled: true, quoLastCheckAt: true, quoConnectionError: true,
       authMode: true, shopifyConnStatus: true, lastConnectionCheckAt: true, lastSyncAt: true,
       grantedScopes: true, connectionError: true,
@@ -348,6 +349,7 @@ export default async function SiteSettingsPage({ params }: { params: Promise<{ i
                 dryRun: site.aiDryRun,
                 knowledgeBase: site.aiKnowledgeBase,
                 unknownKnowledgeBase: site.aiUnknownKnowledgeBase,
+                templates: site.aiTemplatesJson,
               }}
             />
           </CardBody>
