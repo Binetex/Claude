@@ -24,7 +24,7 @@ export default async function AutomationsPage() {
     prisma.automationJob.groupBy({ by: ["automationId", "status"], _count: { _all: true } }),
     prisma.automationJob.groupBy({ by: ["channel", "status"], _count: { _all: true } }),
     prisma.automationJob.groupBy({ by: ["automationId"], _max: { sentAt: true } }),
-    prisma.site.findMany({ select: { id: true, name: true, quoEnabled: true, automationDailyLocalTime: true, awaitReplyFirstMin: true, awaitReplyNextMin: true }, orderBy: { name: "asc" } }),
+    prisma.site.findMany({ select: { id: true, name: true, quoEnabled: true, automationDailyLocalTime: true }, orderBy: { name: "asc" } }),
     getAutomationSettings(prisma),
   ]);
 
@@ -143,11 +143,30 @@ export default async function AutomationsPage() {
                         {depth > 0 && <span className="text-slate-300" aria-hidden>└</span>}
                         <Link href={`/dashboard/automations/${a.id}`} className="font-medium text-slate-800 hover:underline">{a.name}</Link>
                       </div>
-                      {a.noReplyNextAutomationId && (
-                        <span className="mt-0.5 block text-[11px] text-slate-500" style={{ paddingLeft: depth * 14 + 12 }}>
-                          ждёт ответ {a.noReplyAfterMin != null ? formatWait(a.noReplyAfterMin) : "по сроку магазина"}
-                        </span>
-                      )}
+                      {a.noReplyNextAutomationId && (() => {
+                        const nextRule = ruleById.get(a.noReplyNextAutomationId);
+                        // Цепочка рвётся тремя способами, и все три молчат в рантайме: правило
+                        // удалили, выключили или у пары не осталось общего магазина.
+                        const problem = !nextRule
+                          ? "следующее правило удалено"
+                          : !nextRule.active
+                            ? "следующее правило выключено"
+                            : !a.sites.some((x) => nextRule.sites.some((y) => y.siteId === x.siteId))
+                              ? "со следующим нет общего магазина"
+                              : null;
+                        // Срок пишем, только если он задан у самого правила: «по сроку магазина»
+                        // это не сведение, а шум — оно и так написано внизу страницы.
+                        const note = problem ?? (a.noReplyAfterMin != null ? `ждёт ответ ${formatWait(a.noReplyAfterMin)}` : null);
+                        if (!note) return null;
+                        return (
+                          <span
+                            className={`mt-0.5 block text-[11px] ${problem ? "text-red-600" : "text-slate-500"}`}
+                            style={{ paddingLeft: depth * 14 + 12 }}
+                          >
+                            {note}
+                          </span>
+                        );
+                      })()}
                     </td>
                     <td className="px-3 py-2 text-slate-600">
                       {/* Одна карточка на правило: сводка + раскрытие полного списка магазинов. */}
@@ -180,46 +199,17 @@ export default async function AutomationsPage() {
                       ) : (
                         <span className="rounded border border-amber-200 bg-amber-50 px-1.5 py-px text-[11px] text-amber-700">Unsupported: {a.triggerType}</span>
                       )}
-                      {/* Шаг цепочки сам не срабатывает — без этой строки он выглядит сломанным.
-                          Показываем «← из» и у обычного правила: если на него ссылаются, оно
-                          уходит ЕЩЁ И по цепочке, и это должно быть видно снаружи карточки. */}
-                      {(a.triggerType === CHAINED_TRIGGER || calledBy.get(a.id)?.length) && (
-                        <span className="mt-0.5 block text-[11px] text-slate-500">
-                          {calledBy.get(a.id)?.length
-                            ? `← из: ${calledBy.get(a.id)!.join(", ")}`
-                            : "⚠ никто не запускает — правило не сработает"}
-                        </span>
+                      {/* Кто запускает — обычно видно по лесенке: правило стоит строкой выше.
+                          Пишем словами только там, где лесенка не объясняет: на правило
+                          ссылаются несколько, или шаг остался вовсе без предшественника. */}
+                      {a.triggerType === CHAINED_TRIGGER && !calledBy.get(a.id)?.length && (
+                        <span className="mt-0.5 block text-[11px] text-amber-700">⚠ никто не запускает</span>
+                      )}
+                      {(calledBy.get(a.id)?.length ?? 0) > 1 && (
+                        <span className="mt-0.5 block text-[11px] text-slate-500">← из: {calledBy.get(a.id)!.join(", ")}</span>
                       )}
                     </td>
-                    <td className="px-3 py-2 text-slate-600">
-                      {audienceLabel(a.audience)}
-                      {/* Цепочка иначе видна только внутри карточки: снаружи должно читаться,
-                          что правило ждёт ответа и кого позовёт, если ответа не будет. */}
-                      {a.noReplyNextAutomationId && (() => {
-                        const nextRule = ruleById.get(a.noReplyNextAutomationId);
-                        // Третий способ сломать цепочку — потерять общий магазин: шаг запускается
-                        // в магазине заказа, и без пересечения он молча не дойдёт ни разу.
-                        const shared = nextRule
-                          ? a.sites.some((x) => nextRule.sites.some((y) => y.siteId === x.siteId))
-                          : false;
-                        const problem = !nextRule
-                          ? "правило удалено"
-                          : !nextRule.active
-                            ? "выключено"
-                            : !shared
-                              ? "нет общего магазина"
-                              : null;
-                        return (
-                          <span
-                            className={`ml-1 whitespace-nowrap rounded border px-1.5 py-px text-[11px] ${problem ? "border-red-200 bg-red-50 text-red-700" : "border-amber-200 bg-amber-50 text-amber-700"}`}
-                            title="Если не ответят — запустится это правило"
-                          >
-                            → {nextRule ? nextRule.name : "правило удалено"}
-                            {problem && nextRule ? ` (${problem})` : ""}
-                          </span>
-                        );
-                      })()}
-                    </td>
+                    <td className="px-3 py-2 text-slate-600">{audienceLabel(a.audience)}</td>
                     <td className="px-3 py-2 text-slate-600">{delayLabel(a.delayAmount, a.delayUnit)}</td>
                     <td className="px-3 py-2">
                       {a.active ? (

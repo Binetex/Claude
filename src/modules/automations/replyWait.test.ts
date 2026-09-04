@@ -29,7 +29,6 @@ const baseOrder = (over: Record<string, unknown> = {}) => ({
   siteId: "s1",
   orderStatus: "CONFIRMED",
   deliveryStatus: "PENDING",
-  site: { awaitReplyFirstMin: 60, awaitReplyNextMin: 20 },
   ...over,
 });
 
@@ -90,7 +89,7 @@ beforeEach(() => {
 });
 
 describe("постановка ожидания", () => {
-  it("первое сообщение ждёт «первым» сроком магазина", async () => {
+  it("без срока на правиле работает значение по умолчанию для первого сообщения", async () => {
     await scheduleReplyWait(prismaWith(), {
       orderId: "o1", automationId: "a1", jobId: "job1", phoneNormalized: "+13105550100", senderCase: "occ1", sentAt: SENT_AT, isChainStep: false,
     });
@@ -100,21 +99,12 @@ describe("постановка ожидания", () => {
     expect(arg.availableAt.getTime()).toBe(SENT_AT.getTime() + 60 * 60_000);
   });
 
-  it("сообщение, само пришедшее по цепочке, ждёт «следующим» сроком", async () => {
+  it("сообщение, само пришедшее по цепочке, ждёт «следующим» сроком по умолчанию", async () => {
     await scheduleReplyWait(prismaWith(), {
       orderId: "o1", automationId: "a2", jobId: "job2", phoneNormalized: "+13105550100", senderCase: "occ1", sentAt: SENT_AT, isChainStep: true,
     });
 
     expect(enqueue.mock.calls[0][0].availableAt.getTime()).toBe(SENT_AT.getTime() + 20 * 60_000);
-  });
-
-  it("сроки магазина не заданы — работают значения по умолчанию", async () => {
-    const noSettings = prismaWith({ order: baseOrder({ site: { awaitReplyFirstMin: null, awaitReplyNextMin: null } }) });
-    await scheduleReplyWait(noSettings, {
-      orderId: "o1", automationId: "a1", jobId: "job1", phoneNormalized: "+13105550100", senderCase: "occ1", sentAt: SENT_AT, isChainStep: false,
-    });
-    expect(enqueue.mock.calls[0][0].availableAt.getTime()).toBe(SENT_AT.getTime() + WAIT_FIRST_MIN * 60_000);
-    expect(WAIT_NEXT_MIN).toBeGreaterThan(0);
   });
 
   it("ключ привязан к ОТПРАВЛЕННОМУ сообщению — новое сообщение получает своё ожидание", async () => {
@@ -299,7 +289,7 @@ describe("срок ожидания берётся у правила, а не у
     expect(enqueue.mock.calls[0][0].availableAt.getTime()).toBe(SENT_AT.getTime() + 2 * 24 * 60 * 60_000);
   });
 
-  it("на правиле не задан — работает срок магазина, как раньше", async () => {
+  it("на правиле не задан — работает значение по умолчанию для шага цепочки", async () => {
     await scheduleReplyWait(prismaWith(), {
       orderId: "o1", automationId: "a1", jobId: "job1", phoneNormalized: "+13105550100",
       senderCase: "occ1", sentAt: SENT_AT, isChainStep: true, ruleWaitMin: null,

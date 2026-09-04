@@ -359,30 +359,6 @@ export async function saveSiteAutomationDailyTime(siteId: string, value: string)
   return { ok: true };
 }
 
-/**
- * Сроки ожидания ответа: сколько ждать на первое сообщение и сколько на каждое следующее в
- * цепочке. Границы режутся на сервере (`clampWait`), а не только в форме: минута превращает
- * нормальную паузу в тревогу, а сутки приходят уже после доставки.
- */
-export async function saveSiteRecipientTimings(
-  siteId: string,
-  retryAfterMin: number,
-  alertAfterMin: number
-): Promise<ActionResult> {
-  await requireRole("OWNER");
-  const site = await prisma.site.findUnique({ where: { id: siteId }, select: { id: true } });
-  if (!site) return { error: "Магазин не найден." };
-  await prisma.site.update({
-    where: { id: siteId },
-    data: {
-      awaitReplyFirstMin: clampWait(retryAfterMin, WAIT_FIRST_MIN),
-      awaitReplyNextMin: clampWait(alertAfterMin, WAIT_NEXT_MIN),
-    },
-  });
-  revalidatePath("/dashboard/automations");
-  return { ok: true };
-}
-
 /** Глобальный «рубильник»: при disableAll=true движок не создаёт и не отправляет job'ы. */
 export async function setKillSwitch(disableAll: boolean): Promise<ActionResult> {
   const user = await requireRole("OWNER");

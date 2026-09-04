@@ -79,24 +79,15 @@ export async function scheduleReplyWait(
     senderCase: string | null;
     /** Само это сообщение пришло по цепочке — значит ждём «следующим» сроком, а не первым. */
     isChainStep: boolean;
-    /** Срок ЭТОГО правила, если владелец задал его на шаге. Пусто — берём срок магазина. */
+    /** Срок ЭТОГО правила. Пусто — значение по умолчанию, отдельной настройки магазина нет. */
     ruleWaitMin?: number | null;
   }
 ): Promise<void> {
   if (!args.phoneNormalized) return; // отвечать некому — ждать нечего
   try {
-    const order = await prisma.order.findUnique({
-      where: { id: args.orderId },
-      select: { site: { select: { awaitReplyFirstMin: true, awaitReplyNextMin: true } } },
-    });
-    // Срок правила важнее срока магазина: в лесенке из четырёх шагов у каждого своя пауза.
-    // Магазин остаётся общим запасным вариантом для правил, где срок не задан.
-    const waitMin =
-      args.ruleWaitMin != null
-        ? clampWait(args.ruleWaitMin, WAIT_FIRST_MIN)
-        : args.isChainStep
-          ? clampWait(order?.site.awaitReplyNextMin, WAIT_NEXT_MIN)
-          : clampWait(order?.site.awaitReplyFirstMin, WAIT_FIRST_MIN);
+    // Срок задаётся на самом правиле: в лесенке из четырёх шагов у каждого своя пауза, и второго
+    // места для той же настройки быть не должно. Пусто — значение по умолчанию.
+    const waitMin = clampWait(args.ruleWaitMin, args.isChainStep ? WAIT_NEXT_MIN : WAIT_FIRST_MIN);
 
     const dueAt = new Date(args.sentAt.getTime() + waitMin * 60_000);
     const repo = new PrismaOutboxRepository(prisma);
