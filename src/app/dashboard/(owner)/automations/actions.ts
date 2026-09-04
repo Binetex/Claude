@@ -37,6 +37,8 @@ export type AutomationInput = {
   conditions: SmsConditions;
   /** «Если не ответят — запустить это правило». null = цепочка на этом правиле заканчивается. */
   noReplyNextAutomationId?: string | null;
+  /** Сколько ждать ответа на сообщение ЭТОГО правила, минут. null = срок магазина. */
+  noReplyAfterMin?: number | null;
 };
 
 export type ActionResult = { ok?: true; id?: string; error?: string; warning?: string };
@@ -158,6 +160,8 @@ export async function createAutomation(input: AutomationInput): Promise<ActionRe
       template: input.template,
       conditionsJson: normalizeConditions(input.conditions),
       noReplyNextAutomationId: input.noReplyNextAutomationId ?? null,
+      // Срок режем на сервере: форму можно обойти, а сломанная пауза видна уже по факту.
+      noReplyAfterMin: input.noReplyNextAutomationId && input.noReplyAfterMin != null ? clampWait(input.noReplyAfterMin, WAIT_FIRST_MIN) : null,
     },
     select: { id: true },
   });
@@ -206,6 +210,8 @@ export async function updateAutomation(id: string, input: AutomationInput): Prom
       template: input.template,
       conditionsJson: normalizeConditions(input.conditions),
       noReplyNextAutomationId: input.noReplyNextAutomationId ?? null,
+      // Срок режем на сервере: форму можно обойти, а сломанная пауза видна уже по факту.
+      noReplyAfterMin: input.noReplyNextAutomationId && input.noReplyAfterMin != null ? clampWait(input.noReplyAfterMin, WAIT_FIRST_MIN) : null,
     },
   });
   revalidatePath("/dashboard/automations");
@@ -242,6 +248,7 @@ export async function duplicateAutomation(id: string): Promise<ActionResult> {
       template: src.template,
       conditionsJson: src.conditionsJson ?? undefined,
       noReplyNextAutomationId: src.noReplyNextAutomationId,
+      noReplyAfterMin: src.noReplyAfterMin,
     },
     select: { id: true },
   });

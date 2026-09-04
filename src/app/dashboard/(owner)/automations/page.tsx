@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { Card, CardBody } from "@/components/ui/Card";
 import { Button } from "@/components/ui/button";
 import { getSmsTrigger, CHAINED_TRIGGER } from "@/modules/automations/triggers";
+import { orderByChain, formatWait } from "@/modules/automations/chain";
 import { audienceLabel, delayLabel } from "@/modules/automations/display";
 import { getAutomationSettings } from "@/modules/automations/settings";
 import { AutomationsTabs } from "./AutomationsTabs";
@@ -129,14 +130,24 @@ export default async function AutomationsPage() {
               {automations.length === 0 && (
                 <tr><td colSpan={13} className="px-3 py-10 text-center text-slate-400">Автоматизаций пока нет</td></tr>
               )}
-              {automations.map((a) => {
+              {orderByChain(automations).map(({ rule: a, depth }) => {
                 const trigger = getSmsTrigger(a.triggerType);
                 const lastRun = lastRunByAuto.get(a.id) ?? null;
                 const s = stats.get(a.id);
                 return (
                   <tr key={a.id} className="border-b border-slate-100 last:border-0">
                     <td className="px-3 py-2">
-                      <Link href={`/dashboard/automations/${a.id}`} className="font-medium text-slate-800 hover:underline">{a.name}</Link>
+                      {/* Шаг цепочки стоит прямо под своим правилом и со сдвигом: иначе лесенку
+                          не увидеть — карточки лежат в списке далеко друг от друга. */}
+                      <div style={depth ? { paddingLeft: depth * 14 } : undefined} className="flex items-baseline gap-1">
+                        {depth > 0 && <span className="text-slate-300" aria-hidden>└</span>}
+                        <Link href={`/dashboard/automations/${a.id}`} className="font-medium text-slate-800 hover:underline">{a.name}</Link>
+                      </div>
+                      {a.noReplyNextAutomationId && (
+                        <span className="mt-0.5 block text-[11px] text-slate-500" style={{ paddingLeft: depth * 14 + 12 }}>
+                          ждёт ответ {a.noReplyAfterMin != null ? formatWait(a.noReplyAfterMin) : "по сроку магазина"}
+                        </span>
+                      )}
                     </td>
                     <td className="px-3 py-2 text-slate-600">
                       {/* Одна карточка на правило: сводка + раскрытие полного списка магазинов. */}

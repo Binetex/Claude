@@ -14,6 +14,7 @@ import {
   type SiteEmailTemplateStatus,
 } from "./actions";
 import { SiteMultiSelect, type SiteOption } from "./SiteMultiSelect";
+import { WAIT_UNITS, splitWait, joinWait, type WaitUnit } from "@/modules/automations/chain";
 
 type TriggerOpt = { type: string; label: string; description: string };
 type VarDef = { key: string; label: string; example: string };
@@ -38,6 +39,7 @@ export type AutomationFormInitial = {
   template: string;
   conditions: Conditions;
   noReplyNextAutomationId?: string | null;
+  noReplyAfterMin?: number | null;
 };
 
 const DELAY_UNITS: { value: AutomationInput["delayUnit"]; label: string }[] = [
@@ -87,6 +89,11 @@ export function AutomationForm({
   const [template, setTemplate] = useState(initial?.template ?? "");
   const [cond, setCond] = useState<Conditions>(initial?.conditions ?? { excludeCancelledRefunded: true });
   const [noReplyNextId, setNoReplyNextId] = useState<string>(initial?.noReplyNextAutomationId ?? "");
+  // Срок ожидания у ЭТОГО правила: пусто — берётся из настроек магазина. Храним минутами,
+  // показываем парой «сколько + единица», чтобы «через 2 дня» не приходилось считать в уме.
+  const initialWait = initial?.noReplyAfterMin != null ? splitWait(initial.noReplyAfterMin) : null;
+  const [waitAmount, setWaitAmount] = useState<string>(initialWait ? String(initialWait.amount) : "");
+  const [waitUnit, setWaitUnit] = useState<WaitUnit>(initialWait?.unit ?? "MINUTE");
   // Ответ узнаём по входящим на номер, поэтому ждать его можно только у SMS. То же условие
   // режет сервер при сохранении — форму можно обойти.
   const awaitReplyAvailable = smsEnabled;
@@ -165,6 +172,7 @@ export function AutomationForm({
       conditions: cond,
       // Ждать ответа имеет смысл только там, где сообщение реально уходит по SMS.
       noReplyNextAutomationId: awaitReplyAvailable && noReplyNextId ? noReplyNextId : null,
+      noReplyAfterMin: waitAmount.trim() && Number(waitAmount) > 0 ? joinWait(Number(waitAmount), waitUnit) : null,
     };
   }
 
@@ -349,13 +357,38 @@ export function AutomationForm({
                 </option>
               ))}
             </select>
+            {/* Срок ожидания у каждого шага свой: вопросу хватает часа, напоминанию нужен день. */}
+            {noReplyNextId && awaitReplyAvailable && (
+              <label className="flex flex-wrap items-center gap-1.5 text-xs text-slate-600">
+                Ждать ответ
+                <input
+                  type="number"
+                  min={1}
+                  value={waitAmount}
+                  onChange={(e) => setWaitAmount(e.target.value)}
+                  placeholder="по умолчанию"
+                  className="w-24 rounded-md border border-slate-300 px-1.5 py-1 text-sm text-slate-800"
+                />
+                <select
+                  value={waitUnit}
+                  onChange={(e) => setWaitUnit(e.target.value as WaitUnit)}
+                  className="rounded-md border border-slate-300 px-1.5 py-1 text-sm text-slate-800"
+                >
+                  {WAIT_UNITS.map((u) => (
+                    <option key={u.value} value={u.value}>
+                      {u.label}
+                    </option>
+                  ))}
+                </select>
+                <span className="text-slate-400">пусто — срок из настроек магазина</span>
+              </label>
+            )}
             <p className="text-xs text-slate-500">
               {awaitReplyAvailable ? (
                 <>
                   Ответом считается входящее сообщение или звонок с того же номера. Молчит — уйдёт
                   выбранное правило; у него может быть своё продолжение, так собирается лесенка
-                  любой длины. Сроки ожидания — в списке правил внизу, блок «Настройки по
-                  магазинам».
+                  любой длины, и у каждого шага свой срок ожидания.
                 </>
               ) : (
                 <>Доступно при включённом SMS: ответ мы узнаём по входящим на номер.</>

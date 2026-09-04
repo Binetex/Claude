@@ -22,7 +22,7 @@ import { PrismaOutboxRepository } from "@/outbox/prismaRepository";
 import { publishAutomationTrigger } from "./events";
 import { TERMINAL_ORDER_STATUSES } from "@/lib/statuses";
 import { CHAINED_TRIGGER } from "./triggers";
-import { CHAIN_OCCURRENCE_PREFIX, MAX_CHAIN_MESSAGES, MAX_WAIT_MIN, chainOccurrenceKey, clampWait, isTooLate } from "./chain";
+import { CHAIN_OCCURRENCE_PREFIX, MAX_CHAIN_MESSAGES, LEGACY_WAIT_FALLBACK_MIN, chainOccurrenceKey, clampWait, isTooLate } from "./chain";
 
 /**
  * Значение eventType сохранено историческим: в очереди на момент перехода могли лежать уже
@@ -79,6 +79,8 @@ export async function scheduleReplyWait(
     senderCase: string | null;
     /** Само это сообщение пришло по цепочке — значит ждём «следующим» сроком, а не первым. */
     isChainStep: boolean;
+    /** Срок ЭТОГО правила, если владелец задал его на шаге. Пусто — берём срок магазина. */
+    ruleWaitMin?: number | null;
   }
 ): Promise<void> {
   if (!args.phoneNormalized) return; // отвечать некому — ждать нечего
@@ -87,9 +89,14 @@ export async function scheduleReplyWait(
       where: { id: args.orderId },
       select: { site: { select: { awaitReplyFirstMin: true, awaitReplyNextMin: true } } },
     });
-    const waitMin = args.isChainStep
-      ? clampWait(order?.site.awaitReplyNextMin, WAIT_NEXT_MIN)
-      : clampWait(order?.site.awaitReplyFirstMin, WAIT_FIRST_MIN);
+    // Срок правила важнее срока магазина: в лесенке из четырёх шагов у каждого своя пауза.
+    // Магазин остаётся общим запасным вариантом для правил, где срок не задан.
+    const waitMin =
+      args.ruleWaitMin != null
+        ? clampWait(args.ruleWaitMin, WAIT_FIRST_MIN)
+        : args.isChainStep
+          ? clampWait(order?.site.awaitReplyNextMin, WAIT_NEXT_MIN)
+          : clampWait(order?.site.awaitReplyFirstMin, WAIT_FIRST_MIN);
 
     const dueAt = new Date(args.sentAt.getTime() + waitMin * 60_000);
     const repo = new PrismaOutboxRepository(prisma);
@@ -174,9 +181,9 @@ export function buildReplyWaitHandler(prisma: PrismaClient) {
 
     // Опоздавшая проверка ничего не отправляет: воркер мог лежать часами, и накопленные
     // проверки срабатывают пачкой. «Вы не ответили» через сутки после вопроса — это уже не
-    // страховка. Записи без dueAt (поставленные до появления поля) считаем по максимальной
-    // паузе от момента вопроса.
-    const dueAt = p.dueAt ? new Date(p.dueAt) : new Date(new Date(p.askedAt).getTime() + MAX_WAIT_MIN * 60_000);
+    // страховка. Записи без dueAt (поставленные до появления поля) считаем по прежней
+    // максимальной паузе от момента вопроса.
+    const dueAt = p.dueAt ? new Date(p.dueAt) : new Date(new Date(p.askedAt).getTime() + LEGACY_WAIT_FALLBACK_MIN * 60_000);
     if (isTooLate(dueAt, new Date())) return stop(p, "проверка опоздала — отправлять уже поздно");
 
     const order = await prisma.order.findUnique({

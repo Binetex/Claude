@@ -287,3 +287,33 @@ describe("опоздавшая проверка", () => {
     vi.useRealTimers();
   });
 });
+
+describe("срок ожидания берётся у правила, а не у магазина", () => {
+  it("задан на правиле — ждём столько, сколько сказал владелец", async () => {
+    // В лесенке из четырёх шагов у каждого своя пауза: вопросу хватает часа, напоминанию нужен день.
+    await scheduleReplyWait(prismaWith(), {
+      orderId: "o1", automationId: "a1", jobId: "job1", phoneNormalized: "+13105550100",
+      senderCase: "occ1", sentAt: SENT_AT, isChainStep: true, ruleWaitMin: 2 * 24 * 60,
+    });
+
+    expect(enqueue.mock.calls[0][0].availableAt.getTime()).toBe(SENT_AT.getTime() + 2 * 24 * 60 * 60_000);
+  });
+
+  it("на правиле не задан — работает срок магазина, как раньше", async () => {
+    await scheduleReplyWait(prismaWith(), {
+      orderId: "o1", automationId: "a1", jobId: "job1", phoneNormalized: "+13105550100",
+      senderCase: "occ1", sentAt: SENT_AT, isChainStep: true, ruleWaitMin: null,
+    });
+
+    expect(enqueue.mock.calls[0][0].availableAt.getTime()).toBe(SENT_AT.getTime() + 20 * 60_000);
+  });
+
+  it("срок правила тоже режется границами", async () => {
+    await scheduleReplyWait(prismaWith(), {
+      orderId: "o1", automationId: "a1", jobId: "job1", phoneNormalized: "+13105550100",
+      senderCase: "occ1", sentAt: SENT_AT, isChainStep: false, ruleWaitMin: 1,
+    });
+
+    expect(enqueue.mock.calls[0][0].availableAt.getTime()).toBe(SENT_AT.getTime() + 5 * 60_000);
+  });
+});

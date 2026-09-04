@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { findChainCycle, chainOccurrenceKey, isChainOccurrence, shouldWaitForReply, MAX_CHAIN_MESSAGES } from "./chain";
+import { orderByChain, findChainCycle, chainOccurrenceKey, isChainOccurrence, shouldWaitForReply, splitWait, joinWait, formatWait, clampWait, MIN_WAIT_MIN, MAX_WAIT_MIN, MAX_CHAIN_MESSAGES } from "./chain";
 
 /**
  * Цепочка «не ответили — следующее правило». Здесь закреплены её предохранители: кольцо в
@@ -92,5 +92,70 @@ describe("ждать ли ответа на отправленное сообщ�
 
   it("SMS без номера — не ждём: ответ искать не по чему", () => {
     expect(shouldWaitForReply({ channel: "SMS", phoneNormalized: null }, link)).toBe(false);
+  });
+});
+
+describe("срок ожидания в понятных единицах", () => {
+  it("минуты раскладываются в самую крупную единицу без остатка", () => {
+    expect(splitWait(45)).toEqual({ amount: 45, unit: "MINUTE" });
+    expect(splitWait(120)).toEqual({ amount: 2, unit: "HOUR" });
+    expect(splitWait(2880)).toEqual({ amount: 2, unit: "DAY" });
+    expect(splitWait(90)).toEqual({ amount: 90, unit: "MINUTE" }); // 1.5 часа не врём про «часы»
+  });
+
+  it("собирается обратно ровно тем же числом минут", () => {
+    for (const m of [5, 45, 60, 90, 120, 1440, 2880, 10080]) {
+      const { amount, unit } = splitWait(m);
+      expect(joinWait(amount, unit)).toBe(m);
+    }
+  });
+
+  it("ждать можно до двух недель — «напомнить через неделю» это нормальный шаг", () => {
+    expect(clampWait(joinWait(7, "DAY"), 60)).toBe(7 * 24 * 60);
+    expect(MAX_WAIT_MIN).toBe(14 * 24 * 60);
+  });
+
+  it("границы режутся: минута тревожит зря, месяц уже не про этот заказ", () => {
+    expect(clampWait(1, 60)).toBe(MIN_WAIT_MIN);
+    expect(clampWait(60 * 24 * 30, 60)).toBe(MAX_WAIT_MIN);
+  });
+});
+
+describe("порядок списка: цепочка читается сверху вниз", () => {
+  const r = (id: string, next: string | null = null) => ({ id, noReplyNextAutomationId: next });
+
+  it("шаги встают под своим родителем со сдвигом", () => {
+    // В базе они лежат в обратном порядке — список обязан показать лесенку правильно.
+    const res = orderByChain([r("c"), r("a", "b"), r("b", "c")]);
+    expect(res.map((x) => [x.rule.id, x.depth])).toEqual([
+      ["a", 0],
+      ["b", 1],
+      ["c", 2],
+    ]);
+  });
+
+  it("одиночные правила остаются на своём месте", () => {
+    const res = orderByChain([r("solo1"), r("a", "b"), r("b"), r("solo2")]);
+    expect(res.map((x) => x.rule.id)).toEqual(["solo1", "a", "b", "solo2"]);
+  });
+
+  it("ни одно правило не теряется и не показывается дважды", () => {
+    // Даже если ссылки образуют кольцо (сохранить его нельзя, но данные бывают всякие).
+    const res = orderByChain([r("a", "b"), r("b", "a"), r("c")]);
+    expect(res.map((x) => x.rule.id).sort()).toEqual(["a", "b", "c"]);
+    expect(res).toHaveLength(3);
+  });
+});
+
+describe("подпись срока по-русски", () => {
+  it("число и слово согласованы", () => {
+    // «ждёт ответ 1 часов» в списке правил читается как небрежность.
+    expect(formatWait(60)).toBe("1 час");
+    expect(formatWait(120)).toBe("2 часа");
+    expect(formatWait(300)).toBe("5 часов");
+    expect(formatWait(1440)).toBe("1 день");
+    expect(formatWait(2880)).toBe("2 дня");
+    expect(formatWait(45)).toBe("45 минут");
+    expect(formatWait(21 * 60)).toBe("21 час");
   });
 });

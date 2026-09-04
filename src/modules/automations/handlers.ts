@@ -545,6 +545,7 @@ export function buildAutomationSendHandler(prisma: PrismaClient, deps: Automatio
           sentAt: new Date(),
           senderCase: job.occurrenceKey,
           isChainStep: isChainOccurrence(job.occurrenceKey),
+          ruleWaitMin: automation.noReplyAfterMin,
         });
       }
       return;

@@ -2222,6 +2222,11 @@ model Automation {
   noReplyNextAutomationId String?
   noReplyNext             Automation?  @relation("AutomationNoReply", fields: [noReplyNextAutomationId], references: [id], onDelete: SetNull)
   noReplyPrev             Automation[] @relation("AutomationNoReply")
+  /// Сколько ждать ответа НА СООБЩЕНИЕ ЭТОГО ПРАВИЛА, в минутах. Пусто — берётся срок магазина
+  /// («Настройки по магазинам»). Срок на правиле, а не только на магазине, потому что в лесенке
+  /// из четырёх шагов у каждого шага своя разумная пауза: у первого вопроса час, у напоминания
+  /// день, у последнего — до завтра.
+  noReplyAfterMin         Int?
   /// УСТАРЕЛО, не читать и не писать: роль флага играет ссылка выше. Колонка жива до отдельной
   /// миграции зачистки — см. пояснение у Site.recipientRetryAfterMin. Снести следующим деплоем.
   awaitRecipientReply     Boolean      @default(false)

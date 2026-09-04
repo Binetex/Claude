@@ -93,6 +93,7 @@ async function SettingsTab({ automation }: { automation: AutomationWithSites }) 
     template: automation.template,
     conditions: (automation.conditionsJson as SmsConditions | null) ?? { excludeCancelledRefunded: true },
     noReplyNextAutomationId: automation.noReplyNextAutomationId,
+    noReplyAfterMin: automation.noReplyAfterMin,
   };
 
   return (
