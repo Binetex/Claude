@@ -41,11 +41,16 @@ export type ConsiderResult = { ok: true } | { ok: false; reason: string };
  * которая уже закончилась, и выглядит навязчиво.
  */
 const SMALL_TALK = new Set([
-  "thanks", "thank you", "thank u", "thankyou", "thx", "ty", "tnx",
+  "thanks", "thank", "thank you", "thank u", "thankyou", "thx", "ty", "tnx",
   "ok", "okay", "okey", "k", "kk", "got it", "gotit", "great", "perfect",
   "cool", "nice", "yes", "yep", "yeah", "no", "nope", "sure", "fine",
+  "confirmed", "noted", "received", "done", "awesome", "alright", "understood", "good",
+  "bye", "goodbye", "np", "sounds good", "will do", "all good", "no problem", "you too",
+  "same to you", "have a good day", "have a nice day", "have a great day", "many thanks",
   "спасибо", "спс", "ок", "хорошо", "понял", "поняла",
 ]);
+/** Слова-связки, которые сами по себе ничего не значат: «thanks so much», «thanks a lot». */
+const FILLER = new Set(["you", "very", "much", "so", "a", "lot", "the", "and", "that", "it", "too", "again"]);
 
 /** Похоже ли входящее на вежливую точку, а не на вопрос. */
 export function isSmallTalk(raw: string): boolean {
@@ -58,9 +63,9 @@ export function isSmallTalk(raw: string): boolean {
     .trim();
   if (!text) return true; // одни эмодзи
   if (SMALL_TALK.has(text)) return true;
-  // «ok thanks», «thank you very much» — те же слова с хвостом вежливости.
+  // «ok thanks», «thank you very much», «confirmed thank you» — те же слова с хвостом вежливости.
   const words = text.split(" ");
-  return words.length <= 4 && words.every((w) => SMALL_TALK.has(w) || w === "you" || w === "very" || w === "much" || w === "so");
+  return words.length <= 5 && words.some((w) => SMALL_TALK.has(w)) && words.every((w) => SMALL_TALK.has(w) || FILLER.has(w));
 }
 
 /** Стоит ли вообще разбирать это входящее. Первая же непройденная проверка — выходим. */

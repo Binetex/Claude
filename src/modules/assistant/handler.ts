@@ -69,7 +69,7 @@ export function buildAssistantHandler(prisma: PrismaClient, deps: AssistantDeps 
       },
     });
     if (!incoming || incoming.direction !== "INBOUND") return;
-    const text = pickText(incoming);
+    const { body, text, photos } = pickText(incoming);
 
     // Разбор уже был: одно входящее — один разбор, повтор обработчика ничего не создаёт.
     // Исключение — звонок: его запись создаётся до расшифровки, и первый разбор честно
@@ -112,8 +112,10 @@ export function buildAssistantHandler(prisma: PrismaClient, deps: AssistantDeps 
 
     // Заготовка сильнее модели: на «где мой заказ» ответ один и тот же, и тратить на него запрос,
     // рискуя выдумкой, незачем. Только для заказов: у незнакомого номера подставлять нечего.
-    if (order) {
-      const intent = matchIntent(text);
+    // Сопоставляем СЛОВА клиента, а не служебную пометку о фото: «клиент прислал фото» — это не
+    // просьба прислать фото. Пришло фото — заготовки вообще мимо, там решает человек.
+    if (order && !photos) {
+      const intent = matchIntent(body);
       if (intent) {
         const setting = readTemplates(site.aiTemplatesJson)[intent.key];
         const vars = buildOrderVariables(orderToVariableSource(order));
@@ -310,12 +312,12 @@ async function finishTurn(prisma: PrismaClient, turnId: string, action: "send" |
  * подписи — тоже сообщение: клиент прислал чек или букет и ждёт реакции, а не тишины. Модель
  * картинку не видит, поэтому ей говорится ровно это.
  */
-function pickText(c: { messageText: string | null; transcript: string | null; summary: string | null; attachmentsJson?: Prisma.JsonValue | null }): string {
+function pickText(c: { messageText: string | null; transcript: string | null; summary: string | null; attachmentsJson?: Prisma.JsonValue | null }): { body: string; text: string; photos: number } {
   const body = (c.messageText || c.transcript || c.summary || "").trim();
   const photos = parseAttachments(c.attachmentsJson).length;
-  if (!photos) return body;
+  if (!photos) return { body, text: body, photos };
   const note = `[The customer sent ${photos === 1 ? "a photo" : `${photos} photos`}${body ? " with this text" : " without text"}. You cannot see images.]`;
-  return body ? `${note}\n${body}` : note;
+  return { body, text: body ? `${note}\n${body}` : note, photos };
 }
 
 /**

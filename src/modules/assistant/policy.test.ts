@@ -64,13 +64,13 @@ describe("когда ассистент вообще вступает", () => {
 
 describe("вежливая точка в разговоре", () => {
   it("на благодарности и «ок» не отвечаем", () => {
-    for (const t of ["thanks", "Thank you!", "ok", "OK 👍", "👍", "❤️", "got it", "спасибо", "thanks so much"]) {
+    for (const t of ["thanks", "Thank you!", "ok", "OK 👍", "👍", "❤️", "got it", "спасибо", "thanks so much", "Confirmed. Thank you", "Sounds good!", "Will do", "Have a nice day", "thanks a lot", "Ok, noted"]) {
       expect(isSmallTalk(t)).toBe(true);
     }
   });
 
   it("вопрос благодарностью не считается", () => {
-    for (const t of ["thanks, but where is it?", "ok what time?", "thank you, can I change the address"]) {
+    for (const t of ["thanks, but where is it?", "ok what time?", "thank you, can I change the address", "confirmed, but can you come at 2?", "good morning", "so very much"]) {
       expect(isSmallTalk(t)).toBe(false);
     }
   });
