@@ -14,6 +14,8 @@ import {
   type OrderSnapshot,
   renderOwnerDeliveryProblem,
   renderOwnerNoCouriers,
+  renderCustomerCallRequest,
+  callCenterOrderUrl,
 } from "./templates";
 
 const order: OrderSnapshot = {
@@ -168,5 +170,18 @@ describe("проблемы доставки", () => {
   it("кнопки флористских событий доставки — как у карточки флориста", () => {
     const btns = buttonsFor("delivery.problem_florist", order) as { text: string; url: string }[];
     expect(btns[0].url).toMatch(/\/dashboard\/f\/o1$/);
+  });
+});
+
+describe("клиент просит позвонить", () => {
+  it("телефон и слова клиента в тексте, HTML экранирован, кнопка оператора ведёт в его кабинет", () => {
+    const text = renderCustomerCallRequest(order, "Can you <call> me?", "+1 (310) 555-0100", null);
+    expect(text).toContain("Клиент просит позвонить");
+    expect(text).toContain("+1 (310) 555-0100");
+    expect(text).toContain("Can you &lt;call&gt; me?");
+    expect(text).toContain("Позвоните клиенту.");
+    expect(renderCustomerCallRequest(order, null, null, "🧪 Сухой прогон")).toContain("🧪 Сухой прогон · Клиент просит позвонить");
+    expect(buttonsFor("customer.call_request_cc", order)).toEqual([{ text: "Open Order", url: callCenterOrderUrl(order.id) }]);
+    expect(buttonsFor("customer.call_request", order)).toEqual([{ text: "Open Order", url: ownerOrderUrl(order.id) }]);
   });
 });

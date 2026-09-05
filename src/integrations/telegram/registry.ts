@@ -27,11 +27,18 @@ export const TELEGRAM_EVENTS = [
   "order.ask_review",
   "customer.ready_time",
   "customer.ready_time_florist",
+  "customer.call_request",
+  "customer.call_request_cc",
 ] as const;
 
 export type TelegramEventType = (typeof TELEGRAM_EVENTS)[number];
 
-export type DedupeContext = { orderId: string; floristId?: string | null };
+export type DedupeContext = {
+  orderId: string;
+  floristId?: string | null;
+  /** Конкретный случай (id входящего сообщения): события «клиент написал» не редактируют прошлое, а идут новым сообщением. */
+  occurrence?: string | null;
+};
 
 export type TelegramEventDef = {
   type: TelegramEventType;
@@ -139,15 +146,31 @@ const REGISTRY: Record<TelegramEventType, TelegramEventDef> = {
     type: "customer.ready_time",
     audience: "OWNER",
     perFlorist: false,
-    dedupeKey: ({ orderId }) => `order:${orderId}:owner.ready_time`,
+    dedupeKey: ({ orderId, occurrence }) => `order:${orderId}:owner.ready_time:${occurrence ?? "-"}`,
     description: "Клиент написал, когда готов принять доставку — владельцу.",
   },
   "customer.ready_time_florist": {
     type: "customer.ready_time_florist",
     audience: "FLORIST",
     perFlorist: true,
-    dedupeKey: ({ orderId, floristId }) => `order:${orderId}:florist:${floristId}:ready_time`,
+    dedupeKey: ({ orderId, floristId, occurrence }) => `order:${orderId}:florist:${floristId}:ready_time:${occurrence ?? "-"}`,
     description: "Клиент написал, когда готов принять доставку — флористу, который везёт.",
+  },
+  // Клиент просит позвонить. Сразу двоим: владельцу и оператору колл-центра — кто первый
+  // свободен, тот и звонит. Каждая просьба — новое сообщение, а не правка прошлого.
+  "customer.call_request": {
+    type: "customer.call_request",
+    audience: "OWNER",
+    perFlorist: false,
+    dedupeKey: ({ orderId, occurrence }) => `order:${orderId}:owner.call_request:${occurrence ?? "-"}`,
+    description: "Клиент просит позвонить ему — владельцу.",
+  },
+  "customer.call_request_cc": {
+    type: "customer.call_request_cc",
+    audience: "CUSTOMER_SERVICE",
+    perFlorist: false,
+    dedupeKey: ({ orderId, occurrence }) => `order:${orderId}:cs.call_request:${occurrence ?? "-"}`,
+    description: "Клиент просит позвонить ему — задача оператору колл-центра.",
   },
 };
 

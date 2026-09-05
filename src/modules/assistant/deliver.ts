@@ -10,7 +10,7 @@ import type { PrismaClient } from "@/generated/prisma/client";
 import { getQuoConfig } from "@/integrations/quo/config";
 import { createQuoClient, type QuoClient } from "@/integrations/quo/client";
 import { sendOrderSms, sendUnlinkedSms } from "@/integrations/quo/send";
-import { resolveOwnerBot, resolveFloristBot, type BotLookup } from "@/integrations/telegram/bots";
+import { resolveOwnerBot, resolveFloristBot, resolveCustomerServiceBot, type BotLookup } from "@/integrations/telegram/bots";
 import { isTelegramGloballyEnabled } from "@/integrations/telegram/config";
 import { TelegramSender } from "@/integrations/telegram/sender";
 import { pickRecipient, storeHour } from "./routing";
@@ -203,10 +203,15 @@ export async function notifyDraft(prisma: PrismaClient, turnId: string, now = ne
  * модели» — про систему. Один раз: повторы гасит вызывающий.
  */
 export async function notifyOwnerText(prisma: PrismaClient, text: string): Promise<boolean> {
+  return notifyBotText(prisma, "OWNER", text);
+}
+
+/** Тот же прямой сигнал, но в выбранный служебный бот: владельцу или колл-центру. */
+export async function notifyBotText(prisma: PrismaClient, who: "OWNER" | "CUSTOMER_SERVICE", text: string): Promise<boolean> {
   if (!(await isTelegramGloballyEnabled(prisma))) return false;
-  const owner = await resolveOwnerBot(prisma);
-  if (!("bot" in owner)) return false;
-  const res = await new TelegramSender(owner.bot.token).sendMessage(owner.bot.chatId, text).catch(() => null);
+  const lookup = who === "OWNER" ? await resolveOwnerBot(prisma) : await resolveCustomerServiceBot(prisma);
+  if (!("bot" in lookup)) return false;
+  const res = await new TelegramSender(lookup.bot.token).sendMessage(lookup.bot.chatId, text).catch(() => null);
   return !!res?.ok;
 }
 

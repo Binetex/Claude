@@ -13,6 +13,7 @@ import {
   renderOwnerCreated,
   renderOwnerDeliveryProblem,
   renderCustomerReadyTime,
+  renderCustomerCallRequest,
   renderOwnerNoCouriers,
   renderAskReview,
   renderOwnerPaymentProblem,
@@ -67,7 +68,7 @@ export function buildTelegramNotifyHandler(prisma: PrismaClient): OutboxHandler 
     if (!order) return; // заказ исчез — уведомлять не о чем
 
     const ctx = p.context ?? {};
-    const dedupeKey = def.dedupeKey({ orderId: order.id, floristId: p.floristId });
+    const dedupeKey = def.dedupeKey({ orderId: order.id, floristId: p.floristId, occurrence: ctx.occurrence ?? null });
     const existing = await prisma.telegramMessage.findUnique({ where: { dedupeKey } });
 
     // Редактировать может только отправивший бот, поэтому для существующего сообщения
@@ -261,6 +262,9 @@ function renderFor(type: TelegramNotifyPayload["type"], order: OrderSnapshot, ct
     case "customer.ready_time":
     case "customer.ready_time_florist":
       return renderCustomerReadyTime(order, ctx.readyTime ?? "—", ctx.quote ?? null);
+    case "customer.call_request":
+    case "customer.call_request_cc":
+      return renderCustomerCallRequest(order, ctx.quote ?? null, ctx.phone ?? null, ctx.note ?? null);
   }
 }
 

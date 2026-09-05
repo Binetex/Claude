@@ -21,10 +21,10 @@ import { readTemplates, templateApplies, renderAssistantTemplate } from "./templ
 import { loadCatalog, looksLikeShopping } from "./catalog";
 import { buildOrderVariables } from "@/modules/messaging/variables";
 import { orderToVariableSource, SMS_ORDER_INCLUDE } from "@/modules/messaging/orderSource";
-import { shouldConsider, decideDelivery, type AssistantMode } from "./policy";
+import { shouldConsider, decideDelivery, isCallRequest, type AssistantMode } from "./policy";
 import { scheduleAssistantNudge, type AssistantIncomingPayload } from "./events";
 import { PrismaOutboxRepository } from "@/outbox/prismaRepository";
-import { sendAssistantReply, notifyDraft, notifyOwnerText } from "./deliver";
+import { sendAssistantReply, notifyDraft, notifyOwnerText, notifyBotText, escapeHtml } from "./deliver";
 import { prependReadyTimeNote } from "./note";
 import { findOrderByHint, linkConversation } from "./link";
 import { bouquetPageUrl } from "@/lib/bouquetPage";
@@ -64,12 +64,14 @@ export function buildAssistantHandler(prisma: PrismaClient, deps: AssistantDeps 
       where: { id: p.communicationId },
       select: {
         id: true, orderId: true, direction: true, messageText: true, transcript: true, summary: true,
-        type: true, partyRole: true, externalPhoneNormalized: true, storePhone: true, providerPhoneNumberId: true, occurredAt: true,
+        type: true, partyRole: true, externalPhone: true, externalPhoneNormalized: true, storePhone: true, providerPhoneNumberId: true, occurredAt: true,
         attachmentsJson: true,
       },
     });
     if (!incoming || incoming.direction !== "INBOUND") return;
     const { body, text, photos } = pickText(incoming);
+    // Просьба позвонить распознаётся и без модели: сигнал людям не должен зависеть от её сбоя.
+    const callRequested = isCallRequest(body);
 
     // Разбор уже был: одно входящее — один разбор, повтор обработчика ничего не создаёт.
     // Исключение — звонок: его запись создаётся до расшифровки, и первый разбор честно
@@ -144,6 +146,7 @@ export function buildAssistantHandler(prisma: PrismaClient, deps: AssistantDeps 
               },
               select: { id: true },
             });
+            if (callRequested) await notifyCallRequest(prisma, order, site, incoming, body).catch(logCallRequestError);
             await finishTurn(prisma, turn.id, action, site.aiDryRun);
             return;
           }
@@ -275,8 +278,44 @@ export function buildAssistantHandler(prisma: PrismaClient, deps: AssistantDeps 
       },
       select: { id: true },
     });
+    if (callRequested || parsed.intent === "call_request") {
+      await notifyCallRequest(prisma, linkedOrder, site, incoming, body).catch(logCallRequestError);
+    }
     await finishTurn(prisma, turn.id, action, site.aiDryRun);
   };
+}
+
+function logCallRequestError(err: unknown) {
+  console.error("[assistant] сигнал «клиент просит позвонить» не ушёл:", err instanceof Error ? err.message : String(err));
+}
+
+/**
+ * Клиент просит позвонить — владельцу и оператору колл-центра сразу, ещё до того, как решится
+ * судьба ответа: живой звонок важнее любого текста. По заказу — через общий реестр событий
+ * Telegram (durable, с карточкой заказа); незнакомому номеру карточки нет, поэтому прямой
+ * текст в те же два бота. В сухом прогоне оператора не трогаем: проверяет владелец.
+ */
+async function notifyCallRequest(
+  prisma: PrismaClient,
+  order: { id: string } | null,
+  site: { name: string; aiDryRun: boolean },
+  incoming: { id: string; externalPhone: string },
+  quote: string
+): Promise<void> {
+  const note = site.aiDryRun ? "🧪 Сухой прогон" : null;
+  if (order) {
+    const context = { quote: quote.slice(0, 200), phone: incoming.externalPhone, occurrence: incoming.id, note };
+    await publishTelegramNotification(prisma, { type: "customer.call_request", orderId: order.id, occurrenceKey: incoming.id, context });
+    if (!site.aiDryRun) {
+      await publishTelegramNotification(prisma, { type: "customer.call_request_cc", orderId: order.id, occurrenceKey: incoming.id, context });
+    }
+    return;
+  }
+  const text =
+    `📞 <b>${note ? `${note} · ` : ""}Клиент просит позвонить</b> · незнакомый номер ${escapeHtml(incoming.externalPhone)} · ${escapeHtml(site.name)}\n\n` +
+    `Сообщение: ${escapeHtml(quote.slice(0, 300))}\n\nПозвоните клиенту.`;
+  await notifyBotText(prisma, "OWNER", text);
+  if (!site.aiDryRun) await notifyBotText(prisma, "CUSTOMER_SERVICE", text);
 }
 
 /**
@@ -455,7 +494,7 @@ async function recordReadyTime(
     where: { id: order.id },
     data: { customerNote: prependReadyTimeNote(fresh?.customerNote ?? "", readyTime, new Date(), order.site.timezone) },
   });
-  const context = { readyTime, quote: quote.slice(0, 200) };
+  const context = { readyTime, quote: quote.slice(0, 200), occurrence: communicationId };
   await publishTelegramNotification(prisma, { type: "customer.ready_time", orderId: order.id, occurrenceKey: communicationId, context });
   if (order.currentFloristId) {
     await publishTelegramNotification(prisma, {

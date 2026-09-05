@@ -68,6 +68,24 @@ export function isSmallTalk(raw: string): boolean {
   return words.length <= 5 && words.some((w) => SMALL_TALK.has(w)) && words.every((w) => SMALL_TALK.has(w) || FILLER.has(w));
 }
 
+const CALL_PATTERNS = [
+  /\bcall me\b/, /\bgive me a (quick )?call\b/, /\bcall (me )?back\b/, /\bring me\b/, /\bphone call\b/,
+  // «will call» само по себе не просьба: «the recipient will call the doorman» — про их звонок.
+  /\b(can|could|would|will)\s+(you|u|someone|somebody|anyone)\b[^.?!]{0,20}\bcall\b/, /\b(pls|please)\b[^.?!]{0,20}\bcall\b/, /\bcall (me )?(at|on) \+?\d/,
+  /\b(talk|speak|discuss|chat)\b[^.?!]{0,30}\b(on|over|by|via) (the )?phone\b/, /\bby phone\b/, /\bover the phone\b/,
+];
+const NO_CALL = /\b(don'?t|do not|no need to|never|please don'?t|stop)\b[^.?!]{0,15}\b(call|phone|ring)/;
+
+/**
+ * Клиент просит позвонить. Владелец и колл-центр должны узнать сразу, не дожидаясь модели:
+ * это самая быстрая дорога к живому разговору, и терять её из-за сбоя модели нельзя.
+ */
+export function isCallRequest(raw: string): boolean {
+  const text = raw.toLowerCase().replace(/\s+/g, " ");
+  if (NO_CALL.test(text)) return false;
+  return CALL_PATTERNS.some((re) => re.test(text));
+}
+
 /** Стоит ли вообще разбирать это входящее. Первая же непройденная проверка — выходим. */
 export function shouldConsider(input: ConsiderInput): ConsiderResult {
   if (input.mode === "OFF") return { ok: false, reason: "assistant_off" };

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { shouldConsider, decideDelivery, isSmallTalk, DAILY_CAP, ORDER_CAP, AUTOMATED_SILENCE_MIN } from "./policy";
+import { shouldConsider, decideDelivery, isSmallTalk, isCallRequest, DAILY_CAP, ORDER_CAP, AUTOMATED_SILENCE_MIN } from "./policy";
 
 /**
  * Правила ассистента. Каждая проверка здесь — про живого человека с телефоном: лишний ответ
@@ -102,5 +102,19 @@ describe("кто нажимает «отправить»", () => {
 
   it("текста нет — отправлять нечего", () => {
     expect(decideDelivery({ ...d, hasReply: false })).toBe("draft");
+  });
+});
+
+describe("просьба позвонить", () => {
+  it("распознаётся в разных формулировках", () => {
+    for (const t of [
+      "Can you call me?", "Please call me", "call me back", "Could someone call me at 310-555-0100?",
+      "I'd like to discuss this over the phone", "Can we talk by phone?", "Give me a call when you can", "pls call",
+    ]) expect(isCallRequest(t)).toBe(true);
+  });
+  it("не срабатывает на «не звоните» и на обычные сообщения", () => {
+    for (const t of ["Please don't call me, text only", "No need to call, all good", "I'll be there around 2PM", "Where is my order?", "The recipient will call the doorman"]) {
+      expect(isCallRequest(t)).toBe(false);
+    }
   });
 });

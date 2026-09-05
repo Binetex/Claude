@@ -228,6 +228,24 @@ export function renderCustomerReadyTime(o: OrderSnapshot, readyTime: string, quo
   ).trimEnd();
 }
 
+/**
+ * Клиент просит позвонить. Текст один владельцу и оператору: телефон того, кто написал, и его
+ * слова — чтобы звонящий знал, о чём разговор, не открывая карточку.
+ */
+export function renderCustomerCallRequest(o: OrderSnapshot, quote: string | null, phone: string | null, note: string | null): string {
+  return (
+    `📞 <b>${note ? `${esc(note)} · ` : ""}Клиент просит позвонить</b>\n` +
+    `<b>${esc(o.orderNumber)}</b> · ${esc(o.siteName)}\n\n` +
+    line("Телефон", phone) +
+    line("Сообщение", quote) +
+    `\n` +
+    line("Заказчик", o.senderName ?? null) +
+    line("Получатель", o.recipientName) +
+    line("Доставка", [fmtDate(o.deliveryDate), fmtTimeWindow(o.deliveryWindow)].filter(Boolean).join(", ")) +
+    `\nПозвоните клиенту.`
+  ).trimEnd();
+}
+
 export function renderOwnerDeliveryProblem(o: OrderSnapshot, status: string, safeReason: string | null): string {
   return (
     `🚨 <b>Проблема с доставкой</b>\n` +
@@ -291,7 +309,7 @@ export function renderAskReview(o: OrderSnapshot): string {
  */
 export function buttonsFor(type: TelegramEventType, o: OrderSnapshot): TelegramButton[] {
   // Оператор открывает СВОЮ карточку заказа: в кабинет владельца у него нет доступа.
-  if (type === "order.ask_review") return [{ text: "Open Order", url: callCenterOrderUrl(o.id) }];
+  if (type === "order.ask_review" || type === "customer.call_request_cc") return [{ text: "Open Order", url: callCenterOrderUrl(o.id) }];
   const forFlorist =
     type === "order.assigned" ||
     type === "order.handed_over" ||
