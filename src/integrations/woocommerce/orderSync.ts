@@ -9,6 +9,8 @@ import "server-only";
  *  - watermark есть → только изменённое после него (`modified_after` — ловит и новые, и обновления);
  *  - watermark пуст (первая синхронизация) → начальное окно INITIAL_WINDOW_DAYS (14 дней).
  * После успешного прохода watermark продвигается на время старта прохода.
+ * Инкрементальный проход публикует триггеры жизненного цикла как живой вебхук (см.
+ * shouldEmitLifecycleOnSync); полная история и первый проход — молчат.
  *
  * Дедуп/externalUpdatedAt/anti-rollback живут в ingestWooOrder и здесь НЕ меняются.
  * Запускается фоново (worker/outbox), НЕ внутри HTTP-запроса страницы.
@@ -29,6 +31,21 @@ export const INITIAL_WINDOW_DAYS = 14; // окно первой синхрони
  *  - watermark → modified_after (инкрементально);
  *  - иначе → after = now − windowDays (начальное окно).
  */
+/**
+ * Публиковать ли триггеры жизненного цикла (ORDER_CREATED / ORDER_PAID / ORDER_DELIVERED …) из
+ * синхронизации. Инкрементальный проход по watermark — это ЗАМЕНА опоздавшего вебхука: заказ
+ * 20678 (05.09.2026) стал оплаченным через такой проход молча, и когда вебхук пришёл через
+ * полчаса, перехода «не оплачен → оплачен» он уже не увидел — клиент остался без «Спасибо за
+ * заказ». Ключи триггеров идемпотентны (`<заказ>:ORDER_PAID`), поэтому вебхук, пришедший следом,
+ * дубля не создаёт.
+ *
+ * Молчат по-прежнему: полная история (перенос уже случившегося) и первый проход без watermark
+ * (окно в две недели старых заказов — им SMS не нужны).
+ */
+export function shouldEmitLifecycleOnSync(lastOrderSyncAt: Date | null, fullHistory: boolean): boolean {
+  return !fullHistory && lastOrderSyncAt != null;
+}
+
 export function computeOrderSyncBound(
   lastOrderSyncAt: Date | null,
   fullHistory: boolean,
@@ -68,13 +85,14 @@ export async function syncWooOrders(siteId: string, opts: { fullHistory?: boolea
     // Watermark: время последней успешной синхронизации заказов этого магазина.
     const conn = await prisma.wooCommerceConnection.findUnique({ where: { siteId }, select: { lastOrderSyncAt: true } });
     const bound = computeOrderSyncBound(conn?.lastOrderSyncAt ?? null, opts.fullHistory ?? false, now);
+    const emitLifecycle = shouldEmitLifecycleOnSync(conn?.lastOrderSyncAt ?? null, opts.fullHistory ?? false);
 
     total = await countWooOrders(creds, bound);
     if (total != null) await prisma.siteSync.update({ where: { siteId_kind: { siteId, kind: "ORDERS" } }, data: { total } });
 
     for await (const order of fetchWooOrders(creds, bound)) {
       try {
-        const res = await ingestWooOrder(site, order as never, config);
+        const res = await ingestWooOrder(site, order as never, config, { emitLifecycle });
         if (res.status === "created") created++;
         else if (res.status === "updated") updated++;
         else skipped++;

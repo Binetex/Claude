@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { computeOrderSyncBound, INITIAL_WINDOW_DAYS } from "./orderSync";
+import { computeOrderSyncBound, shouldEmitLifecycleOnSync, INITIAL_WINDOW_DAYS } from "./orderSync";
 
 const NOW = new Date("2026-07-18T12:00:00.000Z");
 
@@ -28,5 +28,15 @@ describe("computeOrderSyncBound — инкрементальная синхро�
   it("кастомное окно уважается", () => {
     const b = computeOrderSyncBound(null, false, NOW, 3);
     expect(b.after).toBe(new Date(NOW.getTime() - 3 * 24 * 60 * 60 * 1000).toISOString());
+  });
+});
+
+describe("shouldEmitLifecycleOnSync — триггеры из синхронизации", () => {
+  it("инкрементальный проход по watermark публикует триггеры: это замена опоздавшего вебхука", () => {
+    expect(shouldEmitLifecycleOnSync(new Date("2026-09-05T18:30:00Z"), false)).toBe(true);
+  });
+  it("полная история и первый проход без watermark молчат", () => {
+    expect(shouldEmitLifecycleOnSync(new Date("2026-09-05T18:30:00Z"), true)).toBe(false);
+    expect(shouldEmitLifecycleOnSync(null, false)).toBe(false);
   });
 });
