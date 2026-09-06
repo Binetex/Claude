@@ -125,7 +125,7 @@ export async function notifyDraft(prisma: PrismaClient, turnId: string, now = ne
   const turn = await prisma.aiTurn.findUnique({
     where: { id: turnId },
     select: {
-      id: true, replyText: true, important: true, needsHuman: true, intent: true,
+      id: true, replyText: true, important: true, needsHuman: true, intent: true, orderId: true,
       site: { select: { name: true, timezone: true, aiDryRun: true } },
       order: { select: { orderNumber: true, currentFloristId: true, site: { select: { timezone: true } } } },
       communication: { select: { messageText: true, transcript: true, externalPhone: true, attachmentsJson: true } },
@@ -186,8 +186,9 @@ export async function notifyDraft(prisma: PrismaClient, turnId: string, now = ne
 
   // Важное владелец узнаёт всегда, даже когда черновик ушёл флористу: отмена, возврат, жалоба —
   // это его решения. Копия без кнопки: подтверждает тот, у кого черновик, а владелец при желании
-  // открывает заказ. Сбой копии черновик не отменяет.
-  if (turn.important && who === "FLORIST" && turn.order) {
+  // открывает заказ. Сбой копии черновик не отменяет. Один сигнал на разговор: о возврате пишут
+  // тремя сообщениями подряд, и три одинаковые копии — шум, а не забота.
+  if (turn.important && who === "FLORIST" && turn.order && !(await ownerAlreadyWarned(prisma, turn.id, turn.orderId, now))) {
     const owner = await resolveOwnerBot(prisma);
     if ("bot" in owner) {
       await new TelegramSender(owner.bot.token)
@@ -196,6 +197,19 @@ export async function notifyDraft(prisma: PrismaClient, turnId: string, now = ne
     }
   }
   return true;
+}
+
+/** Окно, в котором «важное» по одному заказу считается тем же разговором. */
+const IMPORTANT_WINDOW_MIN = 120;
+
+async function ownerAlreadyWarned(prisma: PrismaClient, turnId: string, orderId: string | null, now: Date): Promise<boolean> {
+  if (!orderId) return false;
+  const since = new Date(now.getTime() - IMPORTANT_WINDOW_MIN * 60_000);
+  const prev = await prisma.aiTurn.findFirst({
+    where: { orderId, important: true, id: { not: turnId }, createdAt: { gte: since } },
+    select: { id: true },
+  });
+  return !!prev;
 }
 
 /**

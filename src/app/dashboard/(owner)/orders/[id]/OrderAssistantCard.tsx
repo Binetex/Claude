@@ -39,6 +39,7 @@ const SKIP_LABELS: Record<string, string> = {
   order_cap: "исчерпан потолок ответов на заказ",
   model_not_configured: "модель не подключена",
   spam: "спам или реклама",
+  superseded: "клиент дописал следующее сообщение — отвечаем на него",
 };
 
 function skipLabel(reason: string | null): string {

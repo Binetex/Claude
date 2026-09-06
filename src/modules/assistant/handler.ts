@@ -21,7 +21,7 @@ import { readTemplates, templateApplies, renderAssistantTemplate } from "./templ
 import { loadCatalog, looksLikeShopping } from "./catalog";
 import { buildOrderVariables } from "@/modules/messaging/variables";
 import { orderToVariableSource, SMS_ORDER_INCLUDE } from "@/modules/messaging/orderSource";
-import { shouldConsider, decideDelivery, isCallRequest, type AssistantMode } from "./policy";
+import { shouldConsider, decideDelivery, isCallRequest, isSmallTalk, type AssistantMode } from "./policy";
 import { scheduleAssistantNudge, type AssistantIncomingPayload } from "./events";
 import { PrismaOutboxRepository } from "@/outbox/prismaRepository";
 import { sendAssistantReply, notifyDraft, notifyOwnerText, notifyBotText, escapeHtml } from "./deliver";
@@ -112,6 +112,14 @@ export function buildAssistantHandler(prisma: PrismaClient, deps: AssistantDeps 
       return;
     }
 
+    // Человек дописал следующее сообщение, пока это ждало разбора: отвечаем на ПОСЛЕДНЕЕ, а не
+    // на каждое по отдельности. Старое никуда не делось — оно в истории, и ответ на новое
+    // учитывает оба. Иначе три реплики подряд давали клиенту три SMS, а людям три черновика.
+    if (await hasNewerIncoming(prisma, incoming, order?.id ?? null, phone)) {
+      await logSkip(prisma, site.id, order?.id ?? null, incoming.id, "superseded");
+      return;
+    }
+
     // Заготовка сильнее модели: на «где мой заказ» ответ один и тот же, и тратить на него запрос,
     // рискуя выдумкой, незачем. Только для заказов: у незнакомого номера подставлять нечего.
     // Сопоставляем СЛОВА клиента, а не служебную пометку о фото: «клиент прислал фото» — это не
@@ -147,7 +155,8 @@ export function buildAssistantHandler(prisma: PrismaClient, deps: AssistantDeps 
               },
               select: { id: true },
             });
-            if (callRequested) await notifyCallRequest(prisma, order, site, incoming, body).catch(logCallRequestError);
+            if (callRequested && !(await alreadyAskedToCall(prisma, order.id, phone, incoming.id, now())))
+              await notifyCallRequest(prisma, order, site, incoming, body).catch(logCallRequestError);
             await finishTurn(prisma, turn.id, action, site.aiDryRun);
             return;
           }
@@ -298,7 +307,12 @@ export function buildAssistantHandler(prisma: PrismaClient, deps: AssistantDeps 
       },
       select: { id: true },
     });
-    if (callRequested || parsed.intent === "call_request") {
+    // Просьбу позвонить модель тоже вытаскивает из истории («call me» в прошлом сообщении), а
+    // сигнал уходит сразу двоим. Второй круг по тому же разговору гасим.
+    if (
+      (callRequested || parsed.intent === "call_request") &&
+      !(await alreadyAskedToCall(prisma, linkedOrder?.id ?? null, phone, incoming.id, now()))
+    ) {
       await notifyCallRequest(prisma, linkedOrder, site, incoming, body).catch(logCallRequestError);
     }
     await finishTurn(prisma, turn.id, action, site.aiDryRun);
@@ -364,6 +378,58 @@ async function finishTurn(prisma: PrismaClient, turnId: string, action: "send" |
   } catch (err) {
     console.error(`[assistant] показ черновика ${turnId} не удался:`, err instanceof Error ? err.message : String(err));
   }
+}
+
+/**
+ * Есть ли в этом разговоре сообщение клиента ПОЗЖЕ разбираемого, на которое стоит отвечать.
+ * Пустые и вежливые точки не считаются: иначе «спасибо» после вопроса отменило бы ответ на сам
+ * вопрос, и клиент не получил бы ничего.
+ */
+async function hasNewerIncoming(
+  prisma: PrismaClient,
+  incoming: { id: string; occurredAt: Date; storePhone: string | null },
+  orderId: string | null,
+  phone: string
+): Promise<boolean> {
+  const rows = await prisma.orderCommunication.findMany({
+    where: {
+      direction: "INBOUND",
+      id: { not: incoming.id },
+      occurredAt: { gt: incoming.occurredAt },
+      externalPhoneNormalized: phone,
+      ...(orderId ? { orderId } : { orderId: null, ...(incoming.storePhone ? { storePhone: incoming.storePhone } : {}) }),
+    },
+    select: { messageText: true, transcript: true, summary: true, attachmentsJson: true },
+    take: 5,
+  });
+  return rows.some((r) => {
+    const { text } = pickText(r);
+    return !!text.trim() && !isSmallTalk(text);
+  });
+}
+
+/** Окно, в котором повторная просьба позвонить считается тем же разговором. */
+const CALL_REQUEST_WINDOW_MIN = 120;
+
+/** По этому разговору недавно уже просили позвонить: людям хватит одного сигнала. */
+async function alreadyAskedToCall(
+  prisma: PrismaClient,
+  orderId: string | null,
+  phone: string,
+  exceptCommunicationId: string,
+  now: Date
+): Promise<boolean> {
+  const since = new Date(now.getTime() - CALL_REQUEST_WINDOW_MIN * 60_000);
+  const rows = await prisma.aiTurn.findMany({
+    where: {
+      createdAt: { gte: since },
+      communicationId: { not: exceptCommunicationId },
+      ...(orderId ? { orderId } : { communication: { externalPhoneNormalized: phone } }),
+    },
+    select: { intent: true, communication: { select: { messageText: true, transcript: true, summary: true } } },
+    take: 20,
+  });
+  return rows.some((r) => r.intent === "call_request" || isCallRequest(pickText({ ...r.communication, attachmentsJson: null }).body));
 }
 
 /**
