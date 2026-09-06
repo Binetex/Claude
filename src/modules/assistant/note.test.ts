@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { prependReadyTimeNote, NOTE_SEPARATOR } from "./note";
+import { prependReadyTimeNote, NOTE_SEPARATOR, hasReadyTime, mentionsTime } from "./note";
 
 /** Формат заметки — договорённость с владельцем: сверху, с датой, через разделитель. */
 describe("заметка о времени готовности", () => {
@@ -21,5 +21,19 @@ describe("заметка о времени готовности", () => {
     const once = prependReadyTimeNote("", "after 5pm", at, null);
     const twice = prependReadyTimeNote(once, "tomorrow morning", at, null);
     expect(twice.indexOf("tomorrow morning")).toBeLessThan(twice.indexOf("after 5pm"));
+  });
+});
+
+describe("повтор времени и время в самом сообщении", () => {
+  it("то же время в заметке уже есть — второй раз не пишем", () => {
+    const note = prependReadyTimeNote("", "around 11am", new Date("2026-09-06T17:13:00Z"), "America/Los_Angeles");
+    expect(hasReadyTime(note, "around 11am")).toBe(true);
+    expect(hasReadyTime(note, "Around  11AM")).toBe(true);
+    expect(hasReadyTime(note, "after 5pm")).toBe(false);
+    expect(hasReadyTime("", "after 5pm")).toBe(false);
+  });
+  it("время берётся только из сообщения, где оно есть", () => {
+    for (const t of ["Please deliver it around 11am", "after 5", "tomorrow morning", "I'll be home by noon", "anytime today"]) expect(mentionsTime(t)).toBe(true);
+    for (const t of ["Just buzz the door to get inside", "Thanks!", "Leave it with the doorman"]) expect(mentionsTime(t)).toBe(false);
   });
 });

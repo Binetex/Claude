@@ -95,8 +95,12 @@ export function buildTelegramNotifyHandler(prisma: PrismaClient): OutboxHandler 
     const buttons = buttonsFor(p.type, order);
     // Фото — только у сообщений флористу. Одно фото прикрепляется к самой карточке,
     // несколько уходят альбомом отдельным сообщением ПЕРЕД ней (см. sendAlbumOnce).
-    const wantPhoto = def.audience === "FLORIST" && !!order.imageUrl;
-    const wantAlbum = def.audience === "FLORIST" && order.albumUrls.length > 0;
+    // Фото букета флористу — только там, где он его собирает: назначение и передача заказа.
+    // «Клиент назвал время» или «проблема доставки» с альбомом на пять фото — это два-три
+    // сообщения вместо одного, и по одному заказу за минуту приходило по десять.
+    const withPhotos = def.audience === "FLORIST" && (p.type === "order.assigned" || p.type === "order.handed_over");
+    const wantPhoto = withPhotos && !!order.imageUrl;
+    const wantAlbum = withPhotos && order.albumUrls.length > 0;
     const sender = new TelegramSender(bot.token);
 
     /**

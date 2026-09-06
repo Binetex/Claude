@@ -25,7 +25,7 @@ import { shouldConsider, decideDelivery, isCallRequest, type AssistantMode } fro
 import { scheduleAssistantNudge, type AssistantIncomingPayload } from "./events";
 import { PrismaOutboxRepository } from "@/outbox/prismaRepository";
 import { sendAssistantReply, notifyDraft, notifyOwnerText, notifyBotText, escapeHtml } from "./deliver";
-import { prependReadyTimeNote } from "./note";
+import { prependReadyTimeNote, hasReadyTime, mentionsTime } from "./note";
 import { findOrderByHint, linkConversation } from "./link";
 import { bouquetPageUrl } from "@/lib/bouquetPage";
 import { publishTelegramNotification } from "@/integrations/telegram/events";
@@ -270,6 +270,9 @@ export function buildAssistantHandler(prisma: PrismaClient, deps: AssistantDeps 
 
     // Клиент назвал время — это данные заказа, а не только реплика: строка в заметку сверху и
     // уведомление владельцу и флористу. В сухом прогоне не пишем и не уведомляем: он пассивный.
+    // Время берётся только когда оно есть в САМОМ сообщении: модель тянет его из истории, и на
+    // «Just buzz the door» второй раз уходило «around 11am» — в заметку, владельцу и флористу.
+    if (parsed.readyTime && !mentionsTime(body)) parsed = { ...parsed, readyTime: null };
     if (parsed.readyTime && linkedOrder && !site.aiDryRun) {
       const forNote = linkedOrder;
       await recordReadyTime(prisma, forNote, incoming.id, parsed.readyTime, text).catch((err) =>
@@ -513,6 +516,8 @@ async function recordReadyTime(
   quote: string
 ): Promise<void> {
   const fresh = await prisma.order.findUnique({ where: { id: order.id }, select: { customerNote: true } });
+  // То же время уже записано — второй раз не пишем и никого не дёргаем.
+  if (hasReadyTime(fresh?.customerNote ?? "", readyTime)) return;
   await prisma.order.update({
     where: { id: order.id },
     data: { customerNote: prependReadyTimeNote(fresh?.customerNote ?? "", readyTime, new Date(), order.site.timezone) },
