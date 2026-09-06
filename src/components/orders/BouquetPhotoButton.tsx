@@ -1,11 +1,11 @@
 "use client";
 import { useRef, useState, useTransition } from "react";
-import { Camera } from "lucide-react";
+import { Camera, Send } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { ZoomableImage } from "@/components/ImageLightbox";
 import { compressImage } from "@/lib/imageCompress";
-import { uploadBouquetPhotoAction } from "@/modules/orders/bouquetPhotoActions";
+import { uploadBouquetPhotoAction, sendBouquetPhotoLinkAction } from "@/modules/orders/bouquetPhotoActions";
 
 /**
  * Фото готового букета внутри блока доставки. Одна кнопка на три кабинета: флорист, колл-центр
@@ -25,6 +25,10 @@ export function looksLikeImage(file: File): boolean {
 export function BouquetPhotoButton({ orderId, photoUrl }: { orderId: string; photoUrl: string | null }) {
   const fileRef = useRef<HTMLInputElement>(null);
   const [preview, setPreview] = useState(photoUrl);
+  // Сохранённое фото — не то же, что превью: превью показывается сразу, ещё до записи на сервер,
+  // а отправлять клиенту нечего, пока файла на сервере нет.
+  const [saved, setSaved] = useState(!!photoUrl);
+  const [armed, setArmed] = useState(false);
   const [pending, start] = useTransition();
 
   async function onPick(e: React.ChangeEvent<HTMLInputElement>) {
@@ -51,8 +55,11 @@ export function BouquetPhotoButton({ orderId, photoUrl }: { orderId: string; pho
     setPreview(dataUrl); // показываем сразу, не дожидаясь загрузки
     start(async () => {
       const res = await uploadBouquetPhotoAction(orderId, dataUrl);
-      if (res.ok) toast.success("Фото букета сохранено");
-      else {
+      if (res.ok) {
+        setSaved(true);
+        setArmed(false); // новое фото — новое решение, отправлять или нет
+        toast.success("Фото букета сохранено");
+      } else {
         setPreview(photoUrl);
         toast.error(res.error ?? "Не удалось сохранить фото");
       }
@@ -78,6 +85,36 @@ export function BouquetPhotoButton({ orderId, photoUrl }: { orderId: string; pho
         <Camera className="size-4" />
         {pending ? "Сохранение…" : preview ? "Заменить фото букета" : "Фото букета"}
       </Button>
+
+      {/* Картинку в SMS не вложить — у QUO по API только текст, — поэтому клиенту уходит ссылка
+          на публичную страницу с фото. Два нажатия: SMS живому человеку, случайный клик тут дорог. */}
+      {saved &&
+        (armed ? (
+          <>
+            <Button
+              size="sm"
+              disabled={pending}
+              onClick={() =>
+                start(async () => {
+                  const res = await sendBouquetPhotoLinkAction(orderId);
+                  setArmed(false);
+                  if (res.error) toast.error(res.error);
+                  else toast.success(res.message ?? "Отправлено");
+                })
+              }
+            >
+              Отправить заказчику?
+            </Button>
+            <Button size="sm" variant="ghost" disabled={pending} onClick={() => setArmed(false)}>
+              Отмена
+            </Button>
+          </>
+        ) : (
+          <Button variant="ghost" size="sm" disabled={pending} onClick={() => setArmed(true)}>
+            <Send className="size-4" />
+            Отправить фото клиенту
+          </Button>
+        ))}
     </div>
   );
 }

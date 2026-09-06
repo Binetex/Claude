@@ -48,3 +48,12 @@ describe("кнопка фото букета", () => {
     expect(withPhoto).toContain("Заменить фото букета");
   });
 });
+
+describe("отправка фото клиенту", () => {
+  it("кнопка есть только когда фото уже сохранено", () => {
+    const withPhoto = renderToStaticMarkup(<BouquetPhotoButton orderId="o1" photoUrl="https://img/x.jpg" />);
+    expect(withPhoto).toContain("Отправить фото клиенту");
+    const without = renderToStaticMarkup(<BouquetPhotoButton orderId="o1" photoUrl={null} />);
+    expect(without).not.toContain("Отправить фото клиенту");
+  });
+});
