@@ -247,6 +247,19 @@ export function buildAssistantHandler(prisma: PrismaClient, deps: AssistantDeps 
       }
     }
 
+    // Спам и реклама: молчим и никого не будим. Строка в журнале остаётся, чтобы было видно, что
+    // сообщение разобрано и отброшено осознанно, а не потеряно.
+    if (parsed.intent === "spam" && !parsed.replyEn) {
+      await prisma.aiTurn.create({
+        data: {
+          siteId: site.id, orderId: linkedOrder?.id ?? null, communicationId: incoming.id,
+          status: "SKIPPED", source: "model", intent: "spam", skipReason: "spam",
+          promptText: renderPrompt(messages), responseText: raw, modelName, latencyMs,
+        },
+      });
+      return;
+    }
+
     const action = decideDelivery({
       mode: site.aiMode as AssistantMode,
       dryRun: site.aiDryRun,

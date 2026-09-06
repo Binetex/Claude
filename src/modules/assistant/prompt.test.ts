@@ -36,7 +36,7 @@ describe("запрос к модели", () => {
     const [system, user] = buildMessages({ knowledgeBase: "Hours 9-6", order: null, history: [], incomingText: "hi" });
 
     expect(system.content).toContain("NOT linked to any order");
-    expect(system.content).toContain("find out which order");
+    expect(system.content).toContain("ask for the name on the order or the delivery address");
     expect(user.content).not.toContain("Order data");
   });
 
@@ -162,5 +162,20 @@ describe("подсказка о заказе от незнакомого ном�
     expect(describeDeliveryDay("2026-09-05", "2026-09-06")).toBe("yesterday");
     expect(describeDeliveryDay("2026-09-01", "2026-09-06")).toBe("5 days ago");
     expect(describeDeliveryDay(null, "2026-09-06")).toBeNull();
+  });
+
+  it("спам — без ответа и без человека", () => {
+    const r = parseReply(JSON.stringify({ reply_en: "", intent: "spam", important: false, needs_human: false }));
+    expect(r.intent).toBe("spam");
+    expect(r.replyEn).toBe("");
+    expect(r.needsHuman).toBe(false);
+  });
+
+  it("незнакомому без заказа не устраивают допрос, 5 PM не считается ранним", () => {
+    const m = buildMessages({ knowledgeBase: "", order: null, history: [], incomingText: "no order yet" });
+    expect(m[0].content).toContain("do NOT ask for an order name");
+    expect(m[0].content).toContain("1 PM or 5 PM are not");
+    const k = buildMessages({ knowledgeBase: "", order, history: [], incomingText: "hi" });
+    expect(k[0].content).toContain('"as close to 5 pm as possible" are NOT early');
   });
 });
