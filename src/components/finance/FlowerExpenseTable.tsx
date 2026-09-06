@@ -11,7 +11,9 @@ import Link from "next/link";
 import { Badge } from "@/components/ui/Badge";
 import { formatCents } from "@/lib/cents";
 import { ExpenseDialog, DeleteExpenseDialog, type ExpenseActions } from "./FlowerExpenseForms";
+import { NoPurchaseButton } from "./NoPurchaseButton";
 import type { DayStatus, FlowerExpenseRow } from "@/modules/finance/flowerExpenses";
+import { todayStrInTz, DEFAULT_STORE_TZ } from "@/lib/tz";
 
 const statusMeta: Record<DayStatus, { label: string; className: string }> = {
   COUNTED: { label: "Посчитан", className: "border-emerald-200 bg-emerald-50 text-emerald-700" },
@@ -33,6 +35,10 @@ export function FlowerExpenseTable({
   hrefBase: string;
   compact?: boolean;
 }) {
+  // «Закупки не было» — только за ПРОШЕДШИЙ день по календарю магазина: сегодня закупка ещё
+  // может случиться, и ноль по нему был бы преждевременным.
+  const today = todayStrInTz(DEFAULT_STORE_TZ);
+  const canZero = (r: FlowerExpenseRow) => !r.expense && r.day < today;
   return (
     <>
       {/* Телефон: карточка на день вместо строки таблицы. В восьми колонках кнопка «Внести»
@@ -60,7 +66,7 @@ export function FlowerExpenseTable({
 
             {r.expense?.comment && <p className="mt-1 truncate text-xs text-slate-500">{r.expense.comment}</p>}
 
-            <div className="mt-2 flex items-center gap-2">
+            <div className="mt-2 flex flex-wrap items-center gap-2">
               <ExpenseDialog
                 actions={actions}
                 trigger={r.expense ? "Изменить" : "Внести"}
@@ -70,6 +76,7 @@ export function FlowerExpenseTable({
                 variant={r.expense ? "outline" : "default"}
                 className="flex-1"
               />
+              {canZero(r) && <NoPurchaseButton actions={actions} day={r.day} />}
               {r.expense && <DeleteExpenseDialog actions={actions} day={r.day} />}
             </div>
           </li>
@@ -145,6 +152,7 @@ export function FlowerExpenseTable({
                     amountCents={r.expense?.amountCents ?? null}
                     comment={r.expense?.comment ?? null}
                   />
+                  {canZero(r) && <NoPurchaseButton actions={actions} day={r.day} />}
                   {r.expense && <DeleteExpenseDialog actions={actions} day={r.day} />}
                 </div>
               </td>
