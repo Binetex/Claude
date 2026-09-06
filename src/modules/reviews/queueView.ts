@@ -9,6 +9,7 @@ import { prisma } from "@/lib/db";
 import { listToday, listWaiting, listToCheck, listClosed, queueCounts, type QueueCard } from "./queue";
 import { resolveReviewSettings } from "./requests";
 import { REVIEW_STATUS_LABELS, REVIEW_EVENT_LABELS } from "@/lib/reviewStatus";
+import { toE164 } from "@/lib/phone";
 import type { CardVM } from "@/components/reviews/ReviewQueue";
 
 export type QueueTab = "today" | "waiting" | "check" | "closed";
@@ -67,13 +68,82 @@ export async function loadQueueScreen(tab: QueueTab, orderHref: (orderId: string
     journalByRequest.set(e.requestId, list);
   }
 
+  const lastContactByPhone = await loadLastContacts(cards.map((c) => c.order.senderPhone));
+
   const now = new Date();
   return {
     counts,
     locationsBySite,
     cards: cards.map((c) =>
-      toVM(c, now, settingsBySite.get(c.order.site.id)?.maxCallAttempts ?? 2, orderHref, journalByRequest.get(c.id) ?? [])
+      toVM(
+        c,
+        now,
+        settingsBySite.get(c.order.site.id)?.maxCallAttempts ?? 2,
+        orderHref,
+        journalByRequest.get(c.id) ?? [],
+        lastContactByPhone.get(toE164(c.order.senderPhone) ?? "") ?? null
+      )
     ),
+  };
+}
+
+/**
+ * Последнее общение с каждым номером — одним запросом на весь список.
+ *
+ * Оператор звонит по очереди и первым делом хочет знать, что с этим человеком уже было: он
+ * звонил сам, ему писали, он ответил. Раньше для этого надо было открыть заказ, а из очереди
+ * карточка выглядела одинаково и у того, кто вчера всё сказал, и у того, с кем не общались ни разу.
+ *
+ * Ищем ПО НОМЕРУ, а не по заказу: разговор может идти и по прошлому заказу того же человека,
+ * а звонок вообще приходит без привязки. `distinct` по номеру + сортировка по времени даёт
+ * ровно одну свежую строку на номер (SELECT DISTINCT ON), а не выборку «сколько-нибудь».
+ */
+async function loadLastContacts(rawPhones: (string | null)[]): Promise<Map<string, LastContact>> {
+  const phones = [...new Set(rawPhones.map((p) => toE164(p)).filter((p): p is string => !!p))];
+  if (phones.length === 0) return new Map();
+
+  const rows = await prisma.orderCommunication.findMany({
+    where: {
+      externalPhoneNormalized: { in: phones },
+      // Неотправленное и упавшее исходящее человек не видел — показывать его как «последнее
+      // общение» значит врать оператору, что клиенту что-то ушло.
+      OR: [{ direction: "INBOUND" }, { direction: "OUTBOUND", status: { in: ["SENT", "DELIVERED"] } }],
+    },
+    distinct: ["externalPhoneNormalized"],
+    orderBy: [{ externalPhoneNormalized: "asc" }, { occurredAt: "desc" }],
+    select: {
+      externalPhoneNormalized: true, direction: true, type: true, status: true,
+      messageText: true, transcript: true, summary: true, occurredAt: true,
+    },
+  });
+
+  return new Map(rows.map((r) => [r.externalPhoneNormalized, describeContact(r)]));
+}
+
+type LastContact = CardVM["lastContact"];
+
+/** Одна строка о последнем общении: когда, кто и что. Пустой звонок — тоже событие. */
+export function describeContact(r: {
+  direction: string; type: string; status: string;
+  messageText: string | null; transcript: string | null; summary: string | null; occurredAt: Date;
+}): LastContact {
+  const inbound = r.direction === "INBOUND";
+  const body = (r.messageText || r.transcript || r.summary || "").trim();
+  const isCall = r.type === "CALL" || r.type === "VOICEMAIL";
+  const who = isCall
+    ? inbound
+      ? r.status === "MISSED"
+        ? "пропущенный звонок от клиента"
+        : "звонок от клиента"
+      : "наш звонок клиенту"
+    : inbound
+      ? "клиент написал"
+      : "мы написали";
+  return {
+    at: format(r.occurredAt, "dd.MM HH:mm"),
+    who,
+    // У звонка текста может не быть вовсе: расшифровка приходит позже, а иногда не приходит.
+    text: body ? body.slice(0, 240) : null,
   };
 }
 
@@ -108,7 +178,8 @@ function toVM(
   now: Date,
   maxAttempts: number,
   orderHref: (orderId: string) => string,
-  journal: CardVM["journal"]
+  journal: CardVM["journal"],
+  lastContact: CardVM["lastContact"]
 ): CardVM {
   const items = c.order.items.map((i) => `${i.name}${i.quantity > 1 ? ` ×${i.quantity}` : ""}`).join(", ");
   const next = c.nextActionAt;
@@ -136,6 +207,7 @@ function toVM(
     items: items || "без позиций",
     deliveryLabel: format(c.order.deliveryDate, "dd.MM"),
     journal,
+    lastContact,
     guidance: guidanceFor(
       c.status,
       c.callAttempts,

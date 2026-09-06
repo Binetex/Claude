@@ -10,6 +10,9 @@ import { listQuoSigningSecretsMasked } from "@/integrations/quo/signingSecrets";
 import { getQuoSigningKeys } from "@/integrations/quo/config";
 import { isCredentialCryptoConfigured } from "@/lib/crypto/secretBox";
 import { EmailFactoryTokenPanel } from "./EmailFactoryTokenPanel";
+import { AiGlobalNotePanel } from "./AiGlobalNotePanel";
+import { loadGlobalNote, isGlobalNoteActive } from "@/modules/assistant/globalNote";
+import { todayStrInTz, DEFAULT_STORE_TZ } from "@/lib/tz";
 import { loadEmailFactoryView } from "@/integrations/emailFactory/token";
 
 export const dynamic = "force-dynamic";
@@ -40,11 +43,24 @@ export default async function SitesPage() {
   });
 
   const emailViews = await loadSiteEmailSettingsViews(prisma, sites.map((s) => s.id));
+  // Общее правило ассистента — над списком: оно про все магазины сразу.
+  const note = await loadGlobalNote(prisma).catch(() => ({ text: null, activeUntil: null, updatedAt: null }));
+  const today = todayStrInTz(DEFAULT_STORE_TZ);
   const quoSecrets = await listQuoSigningSecretsMasked(prisma).catch(() => []);
 
   return (
     <div className="space-y-4">
       <h1 className="text-lg font-semibold text-slate-900">Сайты</h1>
+
+      <AiGlobalNotePanel
+        today={today}
+        initial={{
+          text: note.text,
+          activeUntil: note.activeUntil ? note.activeUntil.toISOString().slice(0, 10) : null,
+          updatedAt: note.updatedAt ? note.updatedAt.toISOString() : null,
+          active: isGlobalNoteActive(note, today),
+        }}
+      />
 
       <AddSitePanel />
 

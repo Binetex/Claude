@@ -19,10 +19,12 @@ import { prisma } from "@/lib/db";
 import { extractVariables } from "@/modules/messaging/template";
 import { SMS_VARIABLES } from "@/modules/messaging/variables";
 import { writeTemplates } from "@/modules/assistant/templates";
+import { saveGlobalNote, GLOBAL_NOTE_MAX } from "@/modules/assistant/globalNote";
+import { parseLocalDayToUtcMidnight, todayStrInTz, isValidTimeZone, DEFAULT_STORE_TZ } from "@/lib/tz";
 import { translateTemplate } from "@/modules/assistant/translate";
 import { getDeepseekConfig } from "@/integrations/deepseek/config";
 import { createDeepseekClient } from "@/integrations/deepseek/client";
-import { isValidTimeZone } from "@/lib/tz";
+
 import { rescheduleSiteFutureOrders } from "@/integrations/delivery/burq/scheduleService";
 
 type FormState = { error?: string; ok?: boolean; message?: string } | null;
@@ -256,4 +258,36 @@ export async function ownerDeleteSite(siteId: string): Promise<FormState> {
     if (e instanceof SiteDeletionError) return { error: e.message };
     throw e;
   }
+}
+
+/**
+ * Общее правило ассистента на ВСЕ магазины. Отдельное действие, а не поле магазина: правило
+ * одно на систему, и дублировать его по магазинам значит забыть снять в одном из них.
+ *
+ * Срок в прошлом отвергаем: правило, которое уже не действует, — это снятое правило, и
+ * сохранять его как «действующее до вчера» значит оставить владельца в уверенности, что
+ * ассистент что-то учитывает.
+ */
+export async function ownerSetAiGlobalNote(input: { text: string; activeUntil: string | null }): Promise<FormState> {
+  const user = await requireRole("OWNER");
+  const text = input.text.trim();
+  if (text.length > GLOBAL_NOTE_MAX) return { error: `Правило длиннее ${GLOBAL_NOTE_MAX} символов — сократите.` };
+
+  let activeUntil: Date | null = null;
+  if (text && input.activeUntil) {
+    activeUntil = parseLocalDayToUtcMidnight(input.activeUntil);
+    if (!activeUntil) return { error: "Не разобрал дату окончания." };
+    if (input.activeUntil < todayStrInTz(DEFAULT_STORE_TZ)) return { error: "Дата окончания уже прошла." };
+  }
+
+  await saveGlobalNote(prisma, { text: text || null, activeUntil, userId: user.id });
+  revalidatePath("/dashboard/sites");
+  return {
+    ok: true,
+    message: text
+      ? activeUntil
+        ? `Правило действует до ${input.activeUntil} на всех магазинах.`
+        : "Правило действует на всех магазинах, пока его не снять."
+      : "Правило снято.",
+  };
 }

@@ -23,6 +23,7 @@ const MODES: { value: Mode; label: string; hint: string }[] = [
 export function SiteAiAssistantPanel({
   siteId,
   initial,
+  globalNote = null,
 }: {
   siteId: string;
   initial: {
@@ -32,6 +33,8 @@ export function SiteAiAssistantPanel({
     unknownKnowledgeBase: string | null;
     templates: unknown;
   };
+  /** Действующее общее правило на все магазины — оно сильнее базы знаний этого магазина. */
+  globalNote?: string | null;
 }) {
   const [mode, setMode] = useState<Mode>(initial.mode);
   const [dryRun, setDryRun] = useState(initial.dryRun);
@@ -72,6 +75,12 @@ export function SiteAiAssistantPanel({
         <p className="text-[11px] text-slate-400">
           Отвечает на входящие SMS и расшифровки звонков. Клиенту пишет только по-английски.
         </p>
+        {globalNote && (
+          // Иначе непонятно, почему ассистент отвечает не то, что написано в базе знаний ниже.
+          <p className="mt-1 rounded border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] text-amber-800">
+            Сейчас действует общее правило для всех магазинов, оно сильнее этой базы знаний: «{globalNote}». Снять — на странице «Сайты».
+          </p>
+        )}
       </div>
 
       <div className="space-y-1.5">

@@ -12,6 +12,7 @@ import { SiteSyncControls } from "../SiteSyncControls";
 import { WooSiteControls } from "../WooSiteControls";
 import { WooSettings } from "../WooSettings";
 import { AirwallexMonitoringPanel } from "../AirwallexMonitoringPanel";
+import { loadGlobalNote, activeGlobalNoteText } from "@/modules/assistant/globalNote";
 import { SiteTimezoneSetting } from "../SiteTimezoneSetting";
 import { SiteBurqDropoffSetting } from "../SiteBurqDropoffSetting";
 import { SiteQuoSetting } from "../SiteQuoSetting";
@@ -84,6 +85,9 @@ export default async function SiteSettingsPage({ params }: { params: Promise<{ i
   });
 
   if (!site) notFound();
+  // Общее правило на все магазины: показываем здесь, чтобы не гадать, почему ассистент отвечает
+  // не то, что написано в базе знаний этого магазина.
+  const globalNote = await loadGlobalNote(prisma).catch(() => null);
 
   const [emailViews, brevoViews, allFlorists, unassignedCount] = await Promise.all([
     loadSiteEmailSettingsViews(prisma, [site.id]),
@@ -343,6 +347,7 @@ export default async function SiteSettingsPage({ params }: { params: Promise<{ i
         <Card>
           <CardBody className="text-sm">
             <SiteAiAssistantPanel
+              globalNote={activeGlobalNoteText(globalNote, new Date(), site.timezone)}
               siteId={site.id}
               initial={{
                 mode: site.aiMode,

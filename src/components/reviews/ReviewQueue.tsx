@@ -42,6 +42,8 @@ export type CardVM = {
   deliveryLabel: string;
   /** Журнал запроса, старые сверху: когда кто связывался и что было сделано. */
   journal: { at: string; label: string; by: string | null; detail: string | null }[];
+  /** Последнее общение с этим номером: звонок, расшифровка или сообщение. */
+  lastContact: { at: string; who: string; text: string | null } | null;
   /** Что сейчас делать и что нажать — по состоянию запроса. */
   guidance: string;
 };
@@ -166,6 +168,16 @@ function RequestCard({
         {card.nextActionLabel && <span>· {card.nextActionLabel}</span>}
         {card.linkChannelLabel && <span>· ссылка ушла {card.linkChannelLabel}</span>}
       </div>
+
+      {/* Что с этим человеком уже было. Без этой строки карточка выглядела одинаково и у того,
+          кто вчера всё сказал по телефону, и у того, с кем не общались ни разу. */}
+      {card.lastContact && (
+        <p className="mt-1.5 rounded-md bg-slate-50 px-2 py-1.5 text-xs text-slate-600">
+          <span className="text-slate-400">{card.lastContact.at} · </span>
+          <span className="font-medium">{card.lastContact.who}</span>
+          {card.lastContact.text ? <>: {card.lastContact.text}</> : <span className="text-slate-400"> · без текста</span>}
+        </p>
+      )}
 
       {/* Ответ на «что нужно помечать и как»: карточка сама говорит, чей ход и что нажать. */}
       {card.guidance && <p className="mt-2 text-xs text-slate-600">{card.guidance}</p>}

@@ -27,6 +27,7 @@ import { PrismaOutboxRepository } from "@/outbox/prismaRepository";
 import { sendAssistantReply, notifyDraft, notifyOwnerText, notifyBotText, escapeHtml } from "./deliver";
 import { prependReadyTimeNote, hasReadyTime, mentionsTime } from "./note";
 import { findOrderByHint, linkConversation } from "./link";
+import { loadGlobalNote, activeGlobalNoteText } from "./globalNote";
 import { bouquetPageUrl } from "@/lib/bouquetPage";
 import { publishTelegramNotification } from "@/integrations/telegram/events";
 import { todayStrInTz, zonedLocalTimeToUtc, localClock } from "@/lib/tz";
@@ -121,11 +122,16 @@ export function buildAssistantHandler(prisma: PrismaClient, deps: AssistantDeps 
       return;
     }
 
+    // Общее правило владельца на все магазины: «сегодня выходной», «заказы со вторника». Пока
+    // оно действует, заготовки на частые вопросы молчат — «привезём сегодня в 11» прямо спорило
+    // бы с «сегодня не работаем», а правило свежее любого заготовленного текста.
+    const globalNote = activeGlobalNoteText(await loadGlobalNote(prisma).catch(() => null), now(), site.timezone);
+
     // Заготовка сильнее модели: на «где мой заказ» ответ один и тот же, и тратить на него запрос,
     // рискуя выдумкой, незачем. Только для заказов: у незнакомого номера подставлять нечего.
     // Сопоставляем СЛОВА клиента, а не служебную пометку о фото: «клиент прислал фото» — это не
     // просьба прислать фото. Пришло фото — заготовки вообще мимо, там решает человек.
-    if (order && !photos) {
+    if (order && !photos && !globalNote) {
       const intent = matchIntent(body);
       if (intent) {
         const setting = readTemplates(site.aiTemplatesJson)[intent.key];
@@ -181,6 +187,7 @@ export function buildAssistantHandler(prisma: PrismaClient, deps: AssistantDeps 
       order: order ? snapshot(order, site.name, incoming.partyRole, clock.dateStr) : null,
       history: await loadHistory(prisma, order?.id ?? null, phone, incoming.storePhone, incoming, site.timezone),
       now: clock,
+      globalNote,
       incomingText: text,
       catalog: wantsCatalog ? await loadCatalog(prisma, site.id).catch(() => []) : undefined,
     });
@@ -243,6 +250,7 @@ export function buildAssistantHandler(prisma: PrismaClient, deps: AssistantDeps 
           order: snapshot(found, site.name, incoming.partyRole, clock.dateStr),
           history: await loadHistory(prisma, found.id, phone, incoming.storePhone, incoming, site.timezone),
           now: clock,
+          globalNote,
           incomingText: text,
         });
         try {

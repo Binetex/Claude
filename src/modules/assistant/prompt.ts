@@ -40,6 +40,8 @@ export type PromptInput = {
   incomingText: string;
   /** Текущие дата и время по часам магазина: без них модель считает любую доставку сегодняшней. */
   now?: ShopClock;
+  /** Общее правило владельца на все магазины («сегодня выходной») — сильнее баз знаний. */
+  globalNote?: string | null;
   /** Живые товары магазина — только когда разговор похож на покупку. */
   catalog?: CatalogLine[];
 };
@@ -65,6 +67,11 @@ HARD RULES (never break them):
   when a rule below tells you to, or when you cannot act without the answer.
 - No greetings like "Dear customer", no signatures.
 - Never use dashes (— or –) in the reply. Use a comma or a period instead.
+- SHOP NOTICE: if a "Shop notice from the owner" block is present below, it is the freshest word
+  from the shop and OVERRIDES the knowledge base and anything you would otherwise say. It may be
+  written in Russian or another language: use its MEANING, never quote or translate it word for
+  word, and always answer in English. If it says the shop is closed or not taking orders, say so
+  plainly and never promise a delivery.
 - DATES: "Now at the shop" below is the current date and time. The order's delivery date says
   whether it is today, tomorrow or later. Never say "today" about a delivery that is not today:
   say "tomorrow" or name the day. Every time-of-day promise or question is about the DELIVERY day.
@@ -132,6 +139,11 @@ HARD RULES (never break them):
 - Reply ONLY in English.
 - EXACTLY ONE sentence. Never two. No closers like "Anything else?", "Let me know if you need
   anything", "Happy to help". No greetings, no signatures.
+- SHOP NOTICE: if a "Shop notice from the owner" block is present below, it is the freshest word
+  from the shop and OVERRIDES the knowledge base and anything you would otherwise say. It may be
+  written in Russian or another language: use its MEANING, never quote or translate it word for
+  word, and always answer in English. If it says the shop is closed or not taking orders, say so
+  plainly and never promise a delivery.
 - "Now at the shop" below is the current date and time; never assume a delivery is today.
 - If they ask for a morning or early delivery (a time AT OR BEFORE 12 noon; 1 PM or 5 PM are not
   early), never promise it: say we have a lot of bouquets going out that day so you can't make it
@@ -204,7 +216,12 @@ export function buildMessages(input: PromptInput): DeepseekMessage[] {
     ? `Shop knowledge base (authoritative, use it before anything else):\n${input.knowledgeBase.trim()}`
     : "Shop knowledge base: empty.";
 
-  const parts = [knowledge];
+  // Правило владельца — ПЕРВЫМ блоком, ДО базы знаний: оно свежее её и сильнее.
+  const parts: string[] = [];
+  if (input.globalNote?.trim()) {
+    parts.push(`Shop notice from the owner (overrides everything else):\n${input.globalNote.trim()}`);
+  }
+  parts.push(knowledge);
   if (input.now) parts.push(`Now at the shop: ${input.now.weekday} ${input.now.dateStr}, ${input.now.timeStr} (local time).`);
   if (input.order) parts.push(`Order data:\n${orderBlock(input.order)}`);
   if (input.catalog?.length) {

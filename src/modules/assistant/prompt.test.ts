@@ -178,4 +178,25 @@ describe("подсказка о заказе от незнакомого ном�
     const k = buildMessages({ knowledgeBase: "", order, history: [], incomingText: "hi" });
     expect(k[0].content).toContain('"as close to 5 pm as possible" are NOT early');
   });
+
+  it("общее правило владельца стоит выше базы знаний и объявлено сильнее её", () => {
+    const m = buildMessages({
+      knowledgeBase: "We deliver daily 9-6",
+      order,
+      history: [],
+      incomingText: "can you deliver today?",
+      globalNote: "Сегодня выходной, доставок нет",
+    });
+    const user = m[m.length - 1].content;
+    expect(user).toContain("Shop notice from the owner (overrides everything else):\nСегодня выходной, доставок нет");
+    // Именно выше базы знаний: то, что ниже, модель считает менее свежим.
+    expect(user.indexOf("Shop notice from the owner")).toBeLessThan(user.indexOf("We deliver daily 9-6"));
+    expect(m[0].content).toContain("OVERRIDES the knowledge base");
+    expect(m[0].content).toContain("use its MEANING");
+  });
+
+  it("без правила блока в запросе нет", () => {
+    const m = buildMessages({ knowledgeBase: "x", order, history: [], incomingText: "hi" });
+    expect(m[m.length - 1].content).not.toContain("Shop notice from the owner");
+  });
 });
