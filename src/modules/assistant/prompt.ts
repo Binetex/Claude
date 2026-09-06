@@ -6,6 +6,8 @@
  * поэтому разбор устроен так, что при любом сомнении ответ уходит человеку, а не клиенту.
  */
 
+import { dayDiff } from "@/lib/tz";
+
 export type OrderSnapshot = {
   orderNumber: string;
   storeName: string;
@@ -13,6 +15,8 @@ export type OrderSnapshot = {
   orderStatus: string;
   deliveryStatus: string | null;
   deliveryDate: string | null;
+  /** «today» / «tomorrow» / «in 3 days» / «yesterday» — относительно часов магазина. */
+  deliveryDayLabel: string | null;
   deliveryWindow: string | null;
   recipientName: string | null;
   deliveryAddress: string | null;
@@ -27,11 +31,15 @@ export type HistoryLine = { direction: "in" | "out"; text: string; at: string };
 
 export type CatalogLine = { name: string; price: string | null; url: string | null };
 
+export type ShopClock = { dateStr: string; timeStr: string; weekday: string };
+
 export type PromptInput = {
   knowledgeBase: string | null;
   order: OrderSnapshot | null;
   history: HistoryLine[];
   incomingText: string;
+  /** Текущие дата и время по часам магазина: без них модель считает любую доставку сегодняшней. */
+  now?: ShopClock;
   /** Живые товары магазина — только когда разговор похож на покупку. */
   catalog?: CatalogLine[];
 };
@@ -57,15 +65,22 @@ HARD RULES (never break them):
   when a rule below tells you to, or when you cannot act without the answer.
 - No greetings like "Dear customer", no signatures.
 - Never use dashes (— or –) in the reply. Use a comma or a period instead.
+- DATES: "Now at the shop" below is the current date and time. The order's delivery date says
+  whether it is today, tomorrow or later. Never say "today" about a delivery that is not today:
+  say "tomorrow" or name the day. Every time-of-day promise or question is about the DELIVERY day.
 - EARLY TIMES: the shop often asks the customer until what time they can receive the bouquet.
   If the customer names an early time, whether as a request ("by 9", "can you get there by 12",
   "in the morning") or as an ANSWER to our question ("9", "9 am", "around 10", "I'll be home at
   8", "8 to 11"), NEVER agree and never promise it: anything at or before 12 noon is early. Say we
-  have a lot of bouquets going out today so you can't make it that early, and in the same
-  sentence ask until what time they could receive it if it comes later. Example: "We have a lot
-  of bouquets going out today, so I can't make it that early, but until what time could you
-  receive it if it comes later?" Still put the early time they named in "ready_time". For times
-  after 12, confirm from the delivery window in the order data and never promise an exact minute.
+  have a lot of bouquets going out that day so you can't make it that early, and in the same
+  sentence ask until what time they could receive it if it comes later. Name the delivery day
+  correctly: "today" only if the delivery is today, otherwise "tomorrow" or the date. Examples:
+  delivery today: "We have a lot of bouquets going out today, so I can't make it that early, but
+  until what time could you receive it if it comes later?"; delivery tomorrow: "We have a lot of
+  bouquets going out tomorrow, so I can't promise that early, but until what time could you
+  receive it tomorrow if it comes later?" Still put the early time they named in "ready_time".
+  For times after 12, confirm from the delivery window in the order data and never promise an
+  exact minute.
 - NEVER reveal: the florist's name, internal team notes, or what flowers are in the bouquet.
 - You MAY state the order total if asked.
 - Refunds, discounts, delivery date changes, address changes, compensation: you never decide
@@ -112,9 +127,10 @@ HARD RULES (never break them):
 - Reply ONLY in English.
 - EXACTLY ONE sentence. Never two. No closers like "Anything else?", "Let me know if you need
   anything", "Happy to help". No greetings, no signatures.
+- "Now at the shop" below is the current date and time; never assume a delivery is today.
 - If they ask for a morning or early delivery (any time at or before 12 noon), never promise it:
-  say we have a lot of bouquets going out today so you can't make it that early, and in the same
-  sentence ask until what time they could receive it if it comes later.
+  say we have a lot of bouquets going out that day so you can't make it that early, and in the
+  same sentence ask until what time they could receive it if it comes later.
 - Never use dashes (— or –) in the reply. Use a comma or a period instead.
 - Your first goal is to find out which order they mean: ask for the name on the order or the
   delivery address. Ask for ONE thing at a time.
@@ -142,12 +158,25 @@ order number), put exactly what they said in "order_hint" (for example "Maria Lo
 Answer with JSON only:
 {"reply_en": string, "intent": string, "important": boolean, "needs_human": boolean, "ready_time": null, "order_hint": string|null}`;
 
+/** «today» / «tomorrow» / «in 3 days» / «yesterday» / «5 days ago» — по календарным дням магазина. */
+export function describeDeliveryDay(deliveryDate: string | null, todayStr: string): string | null {
+  if (!deliveryDate) return null;
+  const diff = dayDiff(todayStr, deliveryDate);
+  if (diff === 0) return "today";
+  if (diff === 1) return "tomorrow";
+  if (diff === -1) return "yesterday";
+  if (diff > 1) return `in ${diff} days`;
+  return `${-diff} days ago`;
+}
+
 /** Срез заказа для модели. Отдаём всё, что знаем: решение владельца. */
 function orderBlock(o: OrderSnapshot): string {
   const lines = [
     `Order: ${o.orderNumber} (${o.storeName})`,
     `Status: ${o.orderStatus}${o.deliveryStatus ? `, delivery ${o.deliveryStatus}` : ""}`,
-    o.deliveryDate ? `Delivery date: ${o.deliveryDate}${o.deliveryWindow ? `, ${o.deliveryWindow}` : ""}` : "Delivery date: not set",
+    o.deliveryDate
+      ? `Delivery date: ${o.deliveryDate}${o.deliveryDayLabel ? ` (${o.deliveryDayLabel})` : ""}${o.deliveryWindow ? `, ${o.deliveryWindow}` : ""}`
+      : "Delivery date: not set",
     o.recipientName ? `Recipient: ${o.recipientName}` : null,
     o.deliveryAddress ? `Address: ${o.deliveryAddress}` : null,
     o.trackingUrl ? `Tracking link: ${o.trackingUrl}` : "Tracking link: not available yet",
@@ -165,6 +194,7 @@ export function buildMessages(input: PromptInput): DeepseekMessage[] {
     : "Shop knowledge base: empty.";
 
   const parts = [knowledge];
+  if (input.now) parts.push(`Now at the shop: ${input.now.weekday} ${input.now.dateStr}, ${input.now.timeStr} (local time).`);
   if (input.order) parts.push(`Order data:\n${orderBlock(input.order)}`);
   if (input.catalog?.length) {
     const lines = input.catalog.map((c) => [c.name, c.price, c.url].filter(Boolean).join(" | "));

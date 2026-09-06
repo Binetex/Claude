@@ -139,3 +139,20 @@ export function deliveryDayBucket(
   if (deliveryDate >= today.lt && deliveryDate < tomorrowLt) return "tomorrow";
   return "other";
 }
+
+/**
+ * Дата, время и день недели «сейчас» по часам магазина — для текста, который читает человек или
+ * модель. Возвращает строки, а не Date: Date без зоны в промпте только путает.
+ */
+export function localClock(tz: string | null | undefined, at: Date = new Date()): { dateStr: string; timeStr: string; weekday: string } {
+  const zone = tz || DEFAULT_STORE_TZ;
+  const dateStr = localDateStr(at, zone);
+  const timeStr = new Intl.DateTimeFormat("en-GB", { timeZone: zone, hour: "2-digit", minute: "2-digit", hour12: false }).format(at);
+  const weekday = new Intl.DateTimeFormat("en-US", { timeZone: zone, weekday: "long" }).format(at);
+  return { dateStr, timeStr, weekday };
+}
+
+/** Разница в календарных днях между двумя `YYYY-MM-DD`: b − a. */
+export function dayDiff(a: string, b: string): number {
+  return Math.round((Date.parse(`${b}T00:00:00Z`) - Date.parse(`${a}T00:00:00Z`)) / 86_400_000);
+}

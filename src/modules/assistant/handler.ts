@@ -15,7 +15,7 @@ import { parseAttachments } from "@/integrations/quo/communicationsService";
 import { getDeepseekConfig } from "@/integrations/deepseek/config";
 import { createDeepseekClient, type DeepseekClient } from "@/integrations/deepseek/client";
 import { DeepseekError } from "@/integrations/deepseek/errors";
-import { buildMessages, parseReply, type HistoryLine, type OrderSnapshot } from "./prompt";
+import { buildMessages, parseReply, describeDeliveryDay, type HistoryLine, type OrderSnapshot } from "./prompt";
 import { matchIntent } from "./intents";
 import { readTemplates, templateApplies, renderAssistantTemplate } from "./templates";
 import { loadCatalog, looksLikeShopping } from "./catalog";
@@ -29,7 +29,7 @@ import { prependReadyTimeNote } from "./note";
 import { findOrderByHint, linkConversation } from "./link";
 import { bouquetPageUrl } from "@/lib/bouquetPage";
 import { publishTelegramNotification } from "@/integrations/telegram/events";
-import { todayStrInTz, zonedLocalTimeToUtc } from "@/lib/tz";
+import { todayStrInTz, zonedLocalTimeToUtc, localClock } from "@/lib/tz";
 
 /**
  * Сколько последних сообщений переписки показываем модели. Двадцать — вся живая переписка по
@@ -165,10 +165,12 @@ export function buildAssistantHandler(prisma: PrismaClient, deps: AssistantDeps 
     // Каталог нужен не всегда: на «во сколько привезут» он только раздувает запрос. Но у
     // незнакомого номера разговор почти всегда про покупку, поэтому там он идёт сразу.
     const wantsCatalog = !order || looksLikeShopping(text);
+    const clock = localClock(site.timezone, now());
     const messages = buildMessages({
       knowledgeBase: order ? site.aiKnowledgeBase : site.aiUnknownKnowledgeBase,
-      order: order ? snapshot(order, site.name, incoming.partyRole) : null,
-      history: await loadHistory(prisma, order?.id ?? null, phone, incoming.storePhone, incoming),
+      order: order ? snapshot(order, site.name, incoming.partyRole, clock.dateStr) : null,
+      history: await loadHistory(prisma, order?.id ?? null, phone, incoming.storePhone, incoming, site.timezone),
+      now: clock,
       incomingText: text,
       catalog: wantsCatalog ? await loadCatalog(prisma, site.id).catch(() => []) : undefined,
     });
@@ -228,8 +230,9 @@ export function buildAssistantHandler(prisma: PrismaClient, deps: AssistantDeps 
         linkedOrder = found;
         const again = buildMessages({
           knowledgeBase: site.aiKnowledgeBase,
-          order: snapshot(found, site.name, incoming.partyRole),
-          history: await loadHistory(prisma, found.id, phone, incoming.storePhone, incoming),
+          order: snapshot(found, site.name, incoming.partyRole, clock.dateStr),
+          history: await loadHistory(prisma, found.id, phone, incoming.storePhone, incoming, site.timezone),
+          now: clock,
           incomingText: text,
         });
         try {
@@ -424,7 +427,7 @@ async function logSkip(prisma: PrismaClient, siteId: string, orderId: string | n
  * заказа; у незнакомого номера — его разговор с этим номером магазина. Неотправленные и
  * упавшие исходящие не показываем: клиент их не видел, и модель не должна считать их сказанными.
  */
-async function loadHistory(prisma: PrismaClient, orderId: string | null, phone: string, storePhone: string | null, incoming: { id: string; occurredAt: Date }): Promise<HistoryLine[]> {
+async function loadHistory(prisma: PrismaClient, orderId: string | null, phone: string, storePhone: string | null, incoming: { id: string; occurredAt: Date }, tz: string | null): Promise<HistoryLine[]> {
   const rows = await prisma.orderCommunication.findMany({
     where: {
       ...(orderId ? { orderId } : { orderId: null, externalPhoneNormalized: phone, ...(storePhone ? { storePhone } : {}) }),
@@ -448,15 +451,17 @@ async function loadHistory(prisma: PrismaClient, orderId: string | null, phone: 
       return {
         direction: r.direction === "INBOUND" ? ("in" as const) : ("out" as const),
         text: `${prefix}${body}`.slice(0, 400),
-        at: r.occurredAt.toISOString().slice(11, 16),
+        // Время по часам магазина и с датой: «вчера в 18:40» и «сегодня в 09:10» модель обязана различать.
+        at: `${localClock(tz, r.occurredAt).dateStr.slice(5)} ${localClock(tz, r.occurredAt).timeStr}`,
       };
     });
 }
 
 type OrderWithSite = { orderNumber: string; orderStatus: string; deliveryStatus: string | null; deliveryDate: Date | null; deliveryWindow: string | null; recipientName: string | null; deliveryAddress: string | null; trackingUrl: string | null; bouquetPhotoUrl: string | null; total: unknown };
 
-function snapshot(order: Record<string, unknown>, storeName: string, partyRole: string): OrderSnapshot {
+function snapshot(order: Record<string, unknown>, storeName: string, partyRole: string, todayStr: string): OrderSnapshot {
   const o = order as unknown as OrderWithSite;
+  const deliveryDate = o.deliveryDate ? o.deliveryDate.toISOString().slice(0, 10) : null;
   return {
     orderNumber: o.orderNumber,
     storeName,
@@ -464,7 +469,8 @@ function snapshot(order: Record<string, unknown>, storeName: string, partyRole: 
     // Модели нельзя говорить «delivery pending» по доставленному заказу: правда о доставке — в
     // статусе заказа, а Order.deliveryStatus всегда PENDING (его никто не пишет).
     deliveryStatus: o.orderStatus === "DELIVERED" ? "delivered" : o.orderStatus === "CANCELLED" ? null : o.deliveryStatus ? String(o.deliveryStatus).toLowerCase() : null,
-    deliveryDate: o.deliveryDate ? o.deliveryDate.toISOString().slice(0, 10) : null,
+    deliveryDate,
+    deliveryDayLabel: describeDeliveryDay(deliveryDate, todayStr),
     deliveryWindow: o.deliveryWindow ?? null,
     recipientName: o.recipientName ?? null,
     deliveryAddress: o.deliveryAddress ?? null,

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildMessages, parseReply, looksEnglish, stripDashes, type OrderSnapshot } from "./prompt";
+import { buildMessages, parseReply, looksEnglish, stripDashes, describeDeliveryDay, type OrderSnapshot } from "./prompt";
 
 /**
  * Что уходит в модель и как читается её ответ. Главное здесь — запреты: разбор устроен так,
@@ -11,6 +11,7 @@ const order: OrderSnapshot = {
   orderStatus: "confirmed",
   deliveryStatus: "assigned",
   deliveryDate: "2026-09-05",
+  deliveryDayLabel: "today",
   deliveryWindow: "10:00-14:00",
   recipientName: "Jane",
   deliveryAddress: "123 Main St, Apt 4B",
@@ -138,5 +139,28 @@ describe("подсказка о заказе от незнакомого ном�
   it("сама инструкция без длинных тире: модель копирует стиль, который видит", () => {
     const m = buildMessages({ knowledgeBase: "", order: null, history: [], incomingText: "hi" });
     expect(m[0].content.replace(/\(— or –\)/g, "")).not.toMatch(/[—–]/);
+  });
+
+  it("модель знает, какое сейчас число, и видит, что доставка завтра", () => {
+    const m = buildMessages({
+      knowledgeBase: "",
+      order: { ...order, deliveryDate: "2026-09-07", deliveryDayLabel: describeDeliveryDay("2026-09-07", "2026-09-06") },
+      history: [],
+      incomingText: "can you come at 9?",
+      now: { dateStr: "2026-09-06", timeStr: "14:32", weekday: "Sunday" },
+    });
+    const user = m[m.length - 1].content;
+    expect(user).toContain("Now at the shop: Sunday 2026-09-06, 14:32");
+    expect(user).toContain("Delivery date: 2026-09-07 (tomorrow)");
+    expect(m[0].content).toContain('Never say "today" about a delivery that is not today');
+  });
+
+  it("подпись дня доставки считается по календарю", () => {
+    expect(describeDeliveryDay("2026-09-06", "2026-09-06")).toBe("today");
+    expect(describeDeliveryDay("2026-09-07", "2026-09-06")).toBe("tomorrow");
+    expect(describeDeliveryDay("2026-09-09", "2026-09-06")).toBe("in 3 days");
+    expect(describeDeliveryDay("2026-09-05", "2026-09-06")).toBe("yesterday");
+    expect(describeDeliveryDay("2026-09-01", "2026-09-06")).toBe("5 days ago");
+    expect(describeDeliveryDay(null, "2026-09-06")).toBeNull();
   });
 });

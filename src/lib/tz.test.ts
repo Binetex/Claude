@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { localDateStr, todayStrInTz, isValidTimeZone, utcDayRangeForLocalToday, deliveryDayBucket, DEFAULT_STORE_TZ } from "@/lib/tz";
+import { localDateStr, todayStrInTz, isValidTimeZone, utcDayRangeForLocalToday, deliveryDayBucket, DEFAULT_STORE_TZ, localClock, dayDiff } from "@/lib/tz";
 
 describe("localDateStr — «сегодня» по таймзоне магазина", () => {
   it("возвращает дату в указанной таймзоне, не в UTC", () => {
@@ -70,5 +70,18 @@ describe("deliveryDayBucket — примитив будущего per-site ра�
     expect(deliveryDayBucket(d19, "America/Los_Angeles", now)).toBe("tomorrow");
     expect(deliveryDayBucket(d19, "UTC", now)).toBe("today");
     // → глобальный единый tz на границе суток даёт разный результат: будущие метрики считать по Site.timezone.
+  });
+});
+
+describe("localClock / dayDiff", () => {
+  it("часы магазина: дата, время и день недели в его зоне", () => {
+    // 2026-09-06T21:32Z = воскресенье 14:32 в Лос-Анджелесе (PDT, −7)
+    expect(localClock("America/Los_Angeles", new Date("2026-09-06T21:32:00Z"))).toEqual({ dateStr: "2026-09-06", timeStr: "14:32", weekday: "Sunday" });
+    // 2026-09-07T05:30Z — в LA ещё воскресенье, 22:30
+    expect(localClock("America/Los_Angeles", new Date("2026-09-07T05:30:00Z")).dateStr).toBe("2026-09-06");
+  });
+  it("разница в календарных днях", () => {
+    expect(dayDiff("2026-09-06", "2026-09-07")).toBe(1);
+    expect(dayDiff("2026-09-06", "2026-09-01")).toBe(-5);
   });
 });
