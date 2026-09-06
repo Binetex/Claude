@@ -26,8 +26,11 @@ export function BouquetPhotoButton({ orderId, photoUrl }: { orderId: string; pho
   const fileRef = useRef<HTMLInputElement>(null);
   const [preview, setPreview] = useState(photoUrl);
   // Сохранённое фото — не то же, что превью: превью показывается сразу, ещё до записи на сервер,
-  // а отправлять клиенту нечего, пока файла на сервере нет.
-  const [saved, setSaved] = useState(!!photoUrl);
+  // а отправлять клиенту нечего, пока файла на сервере нет. Проп важнее собственного состояния:
+  // фото мог загрузить флорист из своей карточки, страница перерисовалась, и кнопка «Отправить»
+  // обязана появиться без перезагрузки.
+  const [uploaded, setUploaded] = useState(false);
+  const saved = !!photoUrl || uploaded;
   const [armed, setArmed] = useState(false);
   const [pending, start] = useTransition();
 
@@ -56,7 +59,7 @@ export function BouquetPhotoButton({ orderId, photoUrl }: { orderId: string; pho
     start(async () => {
       const res = await uploadBouquetPhotoAction(orderId, dataUrl);
       if (res.ok) {
-        setSaved(true);
+        setUploaded(true);
         setArmed(false); // новое фото — новое решение, отправлять или нет
         toast.success("Фото букета сохранено");
       } else {

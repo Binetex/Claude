@@ -14,6 +14,7 @@ import { resolveOwnerBot, resolveFloristBot, resolveCustomerServiceBot, type Bot
 import { isTelegramGloballyEnabled } from "@/integrations/telegram/config";
 import { TelegramSender } from "@/integrations/telegram/sender";
 import { pickRecipient, storeHour } from "./routing";
+import { toE164 } from "@/lib/phone";
 import { parseAttachments } from "@/integrations/quo/communicationsService";
 import { NUDGE_AFTER_MIN } from "./events";
 
@@ -49,9 +50,15 @@ export function pickOrderTarget(
   partyRole: string,
   order: { senderPhone: string | null; recipientPhone: string | null }
 ): "CUSTOMER" | "RECIPIENT" | null {
-  if (incomingPhone && order.recipientPhone && incomingPhone === order.recipientPhone) return "RECIPIENT";
-  if (incomingPhone && order.senderPhone && incomingPhone === order.senderPhone) return "CUSTOMER";
-  if (incomingPhone) return null;
+  // Номер входящего строго в E.164, а в заказе он лежит как прислал магазин: Woo сохраняет
+  // «(310) 555-0100» дословно. Без приведения свой же заказчик выглядел «третьим номером»,
+  // и ответ уходил мимо заказа — сравниваем одинаково нормализованные значения.
+  const incoming = toE164(incomingPhone);
+  const recipient = toE164(order.recipientPhone);
+  const sender = toE164(order.senderPhone);
+  if (incoming && recipient && incoming === recipient) return "RECIPIENT";
+  if (incoming && sender && incoming === sender) return "CUSTOMER";
+  if (incoming) return null;
   return partyRole === "RECIPIENT" ? "RECIPIENT" : "CUSTOMER";
 }
 
@@ -189,11 +196,15 @@ export async function notifyDraft(prisma: PrismaClient, turnId: string, now = ne
     data: { telegramChatId: lookup.bot.chatId, telegramMessageId: res.messageId },
   });
 
-  // Важное владелец узнаёт всегда, даже когда черновик ушёл флористу: отмена, возврат, жалоба —
+  // Важное владелец узнаёт ВСЕГДА, даже когда черновик ушёл флористу: отмена, возврат, жалоба —
   // это его решения. Копия без кнопки: подтверждает тот, у кого черновик, а владелец при желании
-  // открывает заказ. Сбой копии черновик не отменяет. Один сигнал на разговор: о возврате пишут
-  // тремя сообщениями подряд, и три одинаковые копии — шум, а не забота.
-  if (turn.important && who === "FLORIST" && turn.order && !(await ownerAlreadyWarned(prisma, turn.id, turn.orderId, turn.communication.externalPhoneNormalized, now))) {
+  // открывает заказ. Сбой копии черновик не отменяет.
+  //
+  // Окна «одна копия на разговор» здесь НЕТ намеренно: копия отправляется best-effort и её сбой
+  // проглатывается, поэтому «мы уже писали» по журналу означало «строка есть», а не «владелец
+  // прочитал». Одна проглоченная ошибка Telegram гасила бы и «хочу отменить», и «верните деньги»
+  // на два часа. Лишняя копия по важной теме — меньшее зло, чем пропущенная.
+  if (turn.important && who === "FLORIST" && turn.order) {
     const owner = await resolveOwnerBot(prisma);
     if ("bot" in owner) {
       await new TelegramSender(owner.bot.token)
@@ -204,19 +215,6 @@ export async function notifyDraft(prisma: PrismaClient, turnId: string, now = ne
   return true;
 }
 
-/** Окно, в котором «важное» по одному заказу считается тем же разговором. */
-const IMPORTANT_WINDOW_MIN = 120;
-
-async function ownerAlreadyWarned(prisma: PrismaClient, turnId: string, orderId: string | null, phone: string, now: Date): Promise<boolean> {
-  if (!orderId) return false;
-  const since = new Date(now.getTime() - IMPORTANT_WINDOW_MIN * 60_000);
-  const prev = await prisma.aiTurn.findFirst({
-    // Разговор = заказ + номер: жалоба получателя и вопрос заказчика — разные поводы.
-    where: { orderId, important: true, id: { not: turnId }, createdAt: { gte: since }, communication: { externalPhoneNormalized: phone } },
-    select: { id: true },
-  });
-  return !!prev;
-}
 
 /**
  * Служебный сигнал владельцу мимо реестра событий: тот привязан к заказу, а «кончился баланс
@@ -264,7 +262,7 @@ export function buildAssistantNudgeHandler(prisma: PrismaClient, deps: { now?: (
       select: {
         id: true, status: true, orderId: true, siteId: true, createdAt: true,
         site: { select: { aiDryRun: true, aiMode: true } },
-        communication: { select: { partyRole: true, externalPhoneNormalized: true, storePhone: true } },
+        communication: { select: { partyRole: true, externalPhoneNormalized: true, storePhone: true, occurredAt: true } },
         order: { select: { senderPhone: true, recipientPhone: true, orderStatus: true, deliveryStatus: true, aiDisabled: true } },
       },
     });
@@ -273,13 +271,16 @@ export function buildAssistantNudgeHandler(prisma: PrismaClient, deps: { now?: (
     // Доставлен или отменён — по статусу заказа (Order.deliveryStatus никто не пишет).
     if (turn.order?.orderStatus === "DELIVERED" || turn.order?.orderStatus === "CANCELLED") return;
 
-    // Человек уже написал этому номеру после входящего — руками, из карточки или из QUO.
+    // Человек уже написал этому номеру после ВХОДЯЩЕГО — руками, из карточки или из QUO.
+    // Именно после входящего, а не после разбора: между ними минута паузы, и ответ, данный
+    // живым человеком в эту минуту, иначе не считался бы ответом — клиент получал «одну минуту»
+    // через двадцать минут после того, как с ним уже поговорили.
     const phone = turn.communication.externalPhoneNormalized;
     const manual = await prisma.orderCommunication.findFirst({
       where: {
         direction: "OUTBOUND",
         externalPhoneNormalized: phone,
-        occurredAt: { gt: turn.createdAt },
+        occurredAt: { gt: turn.communication.occurredAt },
         status: { notIn: ["FAILED"] },
         ...(turn.orderId ? { orderId: turn.orderId } : { storePhone: turn.communication.storePhone }),
       },

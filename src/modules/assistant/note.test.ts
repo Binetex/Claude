@@ -33,7 +33,13 @@ describe("повтор времени и время в самом сообщен
     expect(hasReadyTime("", "after 5pm")).toBe(false);
   });
   it("время берётся только из сообщения, где оно есть", () => {
-    for (const t of ["Please deliver it around 11am", "after 5", "tomorrow morning", "I'll be home by noon", "anytime today"]) expect(mentionsTime(t)).toBe(true);
-    for (const t of ["Just buzz the door to get inside", "Thanks!", "Leave it with the doorman"]) expect(mentionsTime(t)).toBe(false);
+    for (const t of ["Please deliver it around 11am", "after 5", "tomorrow morning", "I'll be home by noon", "anytime today", "eleven works", "2:30 please", "asap"]) {
+      expect(mentionsTime(t)).toBe(true);
+    }
+    // Цифра в адресе и слово «am» в «I am home» временем не являются: на них прежняя проверка
+    // пропускала выдуманное моделью время в заметку и в Telegram.
+    for (const t of ["Just buzz the door to get inside", "Thanks!", "Leave it with the doorman", "Apt 4B, gate code 1408", "I am home", "Leave it by the door"]) {
+      expect(mentionsTime(t)).toBe(false);
+    }
   });
 });

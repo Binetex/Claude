@@ -145,8 +145,8 @@ HARD RULES (never break them):
   word, and always answer in English. If it says the shop is closed or not taking orders, say so
   plainly and never promise a delivery.
 - "Now at the shop" below is the current date and time; never assume a delivery is today.
-- If they ask for a morning or early delivery (a time AT OR BEFORE 12 noon; 1 PM or 5 PM are not
-  early), never promise it: say we have a lot of bouquets going out that day so you can't make it
+- If they ask for a morning or early delivery (a time AT OR BEFORE 12 noon; 1 PM, 3 PM, 5 PM and
+  "as close to 5 pm as possible" are NOT early), never promise it: say we have a lot of bouquets going out that day so you can't make it
   that early, and in the same sentence ask until what time they could receive it if it comes later.
 - Never use dashes (— or –) in the reply. Use a comma or a period instead.
 - If they refer to an EXISTING order ("my order", "my delivery", "where are my flowers"), find out
@@ -301,8 +301,12 @@ export function parseReply(raw: string): ParsedReply {
     return { replyEn: "", intent: "unparsed", important: false, needsHuman: true, readyTime: null, orderHint: null };
   }
 
-  const replyEn = typeof data.reply_en === "string" ? stripDashes(data.reply_en.trim()) : "";
   const intent = typeof data.intent === "string" && data.intent.trim() ? data.intent.trim().slice(0, 40) : "other";
+  const rawReply = typeof data.reply_en === "string" ? stripDashes(data.reply_en.trim()) : "";
+  // Спам — это «не отвечаем», а не «ответь вот так»: текст при этом намерении не уходит никогда,
+  // иначе в автоматическом режиме модель отправила бы «перестаньте писать» живому человеку.
+  const replyEn = intent === "spam" ? "" : rawReply;
+
   const important = data.important === true;
   // Спам не нуждается ни в ответе, ни в человеке: пустой текст здесь — решение, а не неуверенность.
   const needsHuman = intent === "spam" ? false : data.needs_human === true || !replyEn;

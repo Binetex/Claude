@@ -117,4 +117,12 @@ describe("просьба позвонить", () => {
       expect(isCallRequest(t)).toBe(false);
     }
   });
+
+  it("запрет действует в своей фразе, а не на всё сообщение", () => {
+    // Самая частая инструкция курьеру: не звонить в домофон, но позвонить по телефону.
+    expect(isCallRequest("Don't ring the bell, call me at 3105550100")).toBe(true);
+    expect(isCallRequest("Please dont email, just call me")).toBe(true);
+    // Телефоны подставляют типографский апостроф — это то же слово.
+    expect(isCallRequest("Please don\u2019t call me, text only")).toBe(false);
+  });
 });

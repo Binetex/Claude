@@ -53,6 +53,10 @@ export default async function SitesPage() {
       <h1 className="text-lg font-semibold text-slate-900">Сайты</h1>
 
       <AiGlobalNotePanel
+        // Правило одно на систему и меняется из другой вкладки или другим человеком. Ключ по
+        // времени правки перерисовывает форму с нуля: иначе открытая вкладка сохранила бы поверх
+        // чужого правила своё старое (пустое) значение и молча сняла бы его со всех магазинов.
+        key={note.updatedAt ? note.updatedAt.toISOString() : "none"}
         today={today}
         initial={{
           text: note.text,

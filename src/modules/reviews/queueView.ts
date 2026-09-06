@@ -98,13 +98,19 @@ export async function loadQueueScreen(tab: QueueTab, orderHref: (orderId: string
  * а звонок вообще приходит без привязки. `distinct` по номеру + сортировка по времени даёт
  * ровно одну свежую строку на номер (SELECT DISTINCT ON), а не выборку «сколько-нибудь».
  */
+const LAST_CONTACT_WINDOW_DAYS = 120;
+
 async function loadLastContacts(rawPhones: (string | null)[]): Promise<Map<string, LastContact>> {
   const phones = [...new Set(rawPhones.map((p) => toE164(p)).filter((p): p is string => !!p))];
   if (phones.length === 0) return new Map();
 
+  // Полгода назад «последнее общение» уже ничего не объясняет, а без границы выборка растёт
+  // вместе со всей историей переписки магазина.
+  const since = new Date(Date.now() - LAST_CONTACT_WINDOW_DAYS * 86_400_000);
   const rows = await prisma.orderCommunication.findMany({
     where: {
       externalPhoneNormalized: { in: phones },
+      occurredAt: { gte: since },
       // Неотправленное и упавшее исходящее человек не видел — показывать его как «последнее
       // общение» значит врать оператору, что клиенту что-то ушло.
       OR: [{ direction: "INBOUND" }, { direction: "OUTBOUND", status: { in: ["SENT", "DELIVERED"] } }],

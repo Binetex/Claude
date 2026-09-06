@@ -174,7 +174,7 @@ describe("подсказка о заказе от незнакомого ном�
   it("незнакомому без заказа не устраивают допрос, 5 PM не считается ранним", () => {
     const m = buildMessages({ knowledgeBase: "", order: null, history: [], incomingText: "no order yet" });
     expect(m[0].content).toContain("do NOT ask for an order name");
-    expect(m[0].content).toContain("1 PM or 5 PM are not");
+    expect(m[0].content).toContain("are NOT early");
     const k = buildMessages({ knowledgeBase: "", order, history: [], incomingText: "hi" });
     expect(k[0].content).toContain('"as close to 5 pm as possible" are NOT early');
   });
@@ -198,5 +198,11 @@ describe("подсказка о заказе от незнакомого ном�
   it("без правила блока в запросе нет", () => {
     const m = buildMessages({ knowledgeBase: "x", order, history: [], incomingText: "hi" });
     expect(m[m.length - 1].content).not.toContain("Shop notice from the owner");
+  });
+
+  it("спам не может дать отправляемый текст, даже если модель его написала", () => {
+    const r = parseReply(JSON.stringify({ reply_en: "Please stop texting this number.", intent: "spam", needs_human: true }));
+    expect(r.replyEn).toBe("");
+    expect(r.intent).toBe("spam");
   });
 });

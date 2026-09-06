@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { computeOrderSyncBound, shouldEmitLifecycleOnSync, INITIAL_WINDOW_DAYS } from "./orderSync";
+import { computeOrderSyncBound, shouldEmitLifecycleOnSync, orderIsFreshEnoughForTriggers, LIFECYCLE_MAX_LAG_HOURS, INITIAL_WINDOW_DAYS } from "./orderSync";
 
 const NOW = new Date("2026-07-18T12:00:00.000Z");
 
@@ -38,5 +38,21 @@ describe("shouldEmitLifecycleOnSync — триггеры из синхрониз
   it("полная история и первый проход без watermark молчат", () => {
     expect(shouldEmitLifecycleOnSync(new Date("2026-09-05T18:30:00Z"), true)).toBe(false);
     expect(shouldEmitLifecycleOnSync(null, false)).toBe(false);
+  });
+});
+
+describe("возраст заказа ограничивает триггеры из синхронизации", () => {
+  const now = new Date("2026-09-07T12:00:00Z");
+  it("свежий заказ — живой путь", () => {
+    expect(orderIsFreshEnoughForTriggers("2026-09-07T11:30:00", now)).toBe(true);
+    expect(orderIsFreshEnoughForTriggers("2026-09-07T06:30:00", now)).toBe(true);
+  });
+  it("вчерашний — перенос истории, молчим: иначе после простоя синка уйдёт пачка SMS", () => {
+    expect(orderIsFreshEnoughForTriggers("2026-09-06T12:00:00", now)).toBe(false);
+    expect(orderIsFreshEnoughForTriggers(`2026-09-07T0${12 - LIFECYCLE_MAX_LAG_HOURS - 1}:00:00`, now)).toBe(false);
+  });
+  it("без времени изменения возраст неизвестен — молчим", () => {
+    expect(orderIsFreshEnoughForTriggers(null, now)).toBe(false);
+    expect(orderIsFreshEnoughForTriggers("не дата", now)).toBe(false);
   });
 });

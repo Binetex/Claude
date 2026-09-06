@@ -46,6 +46,23 @@ export function shouldEmitLifecycleOnSync(lastOrderSyncAt: Date | null, fullHist
   return !fullHistory && lastOrderSyncAt != null;
 }
 
+/**
+ * Насколько свежим должен быть заказ, чтобы проход считался «живым» для него лично.
+ *
+ * Watermark не двигается на упавшем проходе: если синк лежал двое суток, первый удачный проход
+ * увидит все переходы за эти сутки разом. Без ограничения по возрасту клиенты получили бы пачку
+ * «спасибо за заказ» и «ваш букет доставлен» по заказам, закрытым позавчера. Опоздание в
+ * несколько часов — это ещё замена вебхука, а вчерашнее — уже перенос истории, и он молчит.
+ */
+export const LIFECYCLE_MAX_LAG_HOURS = 6;
+
+export function orderIsFreshEnoughForTriggers(modifiedGmt: string | null | undefined, now: Date): boolean {
+  if (!modifiedGmt) return false; // без времени изменения возраст неизвестен — молчим
+  const at = Date.parse(modifiedGmt.endsWith("Z") ? modifiedGmt : `${modifiedGmt}Z`);
+  if (!Number.isFinite(at)) return false;
+  return now.getTime() - at <= LIFECYCLE_MAX_LAG_HOURS * 3_600_000;
+}
+
 export function computeOrderSyncBound(
   lastOrderSyncAt: Date | null,
   fullHistory: boolean,
@@ -92,7 +109,9 @@ export async function syncWooOrders(siteId: string, opts: { fullHistory?: boolea
 
     for await (const order of fetchWooOrders(creds, bound)) {
       try {
-        const res = await ingestWooOrder(site, order as never, config, { emitLifecycle });
+        const wooOrder = order as { date_modified_gmt?: string | null; date_created_gmt?: string | null };
+        const fresh = orderIsFreshEnoughForTriggers(wooOrder.date_modified_gmt ?? wooOrder.date_created_gmt, new Date());
+        const res = await ingestWooOrder(site, order as never, config, { emitLifecycle: emitLifecycle && fresh });
         if (res.status === "created") created++;
         else if (res.status === "updated") updated++;
         else skipped++;

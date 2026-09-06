@@ -32,14 +32,18 @@ export function hasReadyTime(existing: string, readyTime: string): boolean {
 }
 
 /**
- * Есть ли в словах клиента хоть что-то похожее на время или день: цифры с am/pm, «morning»,
- * «noon», «after 5», «tomorrow»… Модель обязана брать время только из НОВОГО сообщения, но
- * инструкцию она нарушает, а эта проверка — нет: «Just buzz the door» времени не содержит.
+ * Есть ли в словах клиента время. Проверка нужна потому, что модель тянет время из истории:
+ * на «Just buzz the door» она повторяла вчерашнее «around 11am», и оно уходило в заметку и людям.
+ *
+ * Считается временем: часы с am/pm или двоеточием («11am», «2:30»), голое число рядом со
+ * словом-предлогом времени («after 5», «by 11»), слова вроде morning/noon/asap и числительные
+ * словами. Просто цифра в адресе («Apt 4B», «code 1408») временем НЕ считается — на этом
+ * прежняя проверка пропускала всё подряд.
  */
 export function mentionsTime(text: string): boolean {
   const t = text.toLowerCase();
-  return (
-    /\d/.test(t) ||
-    /\b(am|pm|a\.m\.|p\.m\.|noon|midday|morning|afternoon|evening|tonight|today|tomorrow|o'?clock|anytime|any time|whenever|all day|after|before|until|till|by)\b/.test(t)
-  );
+  if (/\b\d{1,2}(:\d{2})?\s*(am|pm|a\.m\.|p\.m\.|o'?clock)/.test(t)) return true;
+  if (/\b\d{1,2}:\d{2}\b/.test(t)) return true;
+  if (/\b(by|after|before|until|till|around|at|from|past)\s+\d{1,2}\b/.test(t)) return true;
+  return /\b(morning|afternoon|evening|tonight|noon|midday|midnight|asap|lunch|lunchtime|dinner|breakfast|anytime|any time|whenever|all day|today|tomorrow|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\b/.test(t);
 }

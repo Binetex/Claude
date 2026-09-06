@@ -97,6 +97,15 @@ export function buildAssistantHandler(prisma: PrismaClient, deps: AssistantDeps 
     if (!site) return;
 
     const phone = incoming.externalPhoneNormalized;
+
+    // Просьба позвонить уходит людям ПЕРВЫМ делом — до потолков, тишины после автоматики и
+    // прочих правил молчания. Эти правила про «не писать клиенту лишнего», а тут мы никому не
+    // пишем: мы говорим своим, что человек ждёт звонка. Выключенный ассистент и галочка «без ИИ»
+    // на заказе всё же уважаются: это прямой запрет владельца на всю работу по этому заказу.
+    if (callRequested && site.aiMode !== "OFF" && !order?.aiDisabled) {
+      await notifyCallRequest(prisma, order, site, incoming, body, now()).catch(logCallRequestError);
+    }
+
     const gate = shouldConsider({
       mode: site.aiMode as AssistantMode,
       orderDisabled: !!order?.aiDisabled,
@@ -125,7 +134,9 @@ export function buildAssistantHandler(prisma: PrismaClient, deps: AssistantDeps 
     // Общее правило владельца на все магазины: «сегодня выходной», «заказы со вторника». Пока
     // оно действует, заготовки на частые вопросы молчат — «привезём сегодня в 11» прямо спорило
     // бы с «сегодня не работаем», а правило свежее любого заготовленного текста.
-    const globalNote = activeGlobalNoteText(await loadGlobalNote(prisma).catch(() => null), now(), site.timezone);
+    // Правило объявлено сильнее всего остального, поэтому его недоступность — это неизвестность,
+    // а не «правила нет»: молча пообещать доставку в выходной хуже, чем промолчать и повторить.
+    const globalNote = activeGlobalNoteText(await loadGlobalNote(prisma), now(), site.timezone);
 
     // Заготовка сильнее модели: на «где мой заказ» ответ один и тот же, и тратить на него запрос,
     // рискуя выдумкой, незачем. Только для заказов: у незнакомого номера подставлять нечего.
@@ -162,8 +173,6 @@ export function buildAssistantHandler(prisma: PrismaClient, deps: AssistantDeps 
               },
               select: { id: true },
             });
-            if (callRequested && !(await alreadyAskedToCall(prisma, order.id, phone, incoming.id, now())))
-              await notifyCallRequest(prisma, order, site, incoming, body).catch(logCallRequestError);
             await finishTurn(prisma, turn.id, action, site.aiDryRun);
             return;
           }
@@ -266,8 +275,10 @@ export function buildAssistantHandler(prisma: PrismaClient, deps: AssistantDeps 
     }
 
     // Спам и реклама: молчим и никого не будим. Строка в журнале остаётся, чтобы было видно, что
-    // сообщение разобрано и отброшено осознанно, а не потеряно.
-    if (parsed.intent === "spam" && !parsed.replyEn) {
+    // сообщение разобрано и отброшено осознанно, а не потеряно. Но «важное» спамом не бывает:
+    // одна ошибка классификации не должна проглотить отмену заказа или жалобу — такое идёт
+    // человеку обычным путём.
+    if (parsed.intent === "spam" && !parsed.important) {
       await prisma.aiTurn.create({
         data: {
           siteId: site.id, orderId: linkedOrder?.id ?? null, communicationId: incoming.id,
@@ -316,13 +327,10 @@ export function buildAssistantHandler(prisma: PrismaClient, deps: AssistantDeps 
       },
       select: { id: true },
     });
-    // Просьбу позвонить модель тоже вытаскивает из истории («call me» в прошлом сообщении), а
-    // сигнал уходит сразу двоим. Второй круг по тому же разговору гасим.
-    if (
-      (callRequested || parsed.intent === "call_request") &&
-      !(await alreadyAskedToCall(prisma, linkedOrder?.id ?? null, phone, incoming.id, now()))
-    ) {
-      await notifyCallRequest(prisma, linkedOrder, site, incoming, body).catch(logCallRequestError);
+    // Модель разглядела просьбу позвонить там, где слова её не выдали («I would rather hear a
+    // voice»). Своими словами распознанное уже ушло выше; здесь — только добавка модели.
+    if (!callRequested && parsed.intent === "call_request") {
+      await notifyCallRequest(prisma, linkedOrder, site, incoming, body, now()).catch(logCallRequestError);
     }
     await finishTurn(prisma, turn.id, action, site.aiDryRun);
   };
@@ -342,15 +350,19 @@ async function notifyCallRequest(
   prisma: PrismaClient,
   order: { id: string } | null,
   site: { name: string; aiDryRun: boolean },
-  incoming: { id: string; externalPhone: string },
-  quote: string
+  incoming: { id: string; externalPhone: string; externalPhoneNormalized: string },
+  quote: string,
+  now: Date = new Date()
 ): Promise<void> {
   const note = site.aiDryRun ? "🧪 Сухой прогон" : null;
   if (order) {
-    const context = { quote: quote.slice(0, 200), phone: incoming.externalPhone, occurrence: incoming.id, note };
-    await publishTelegramNotification(prisma, { type: "customer.call_request", orderId: order.id, occurrenceKey: incoming.id, context });
+    // Случай — разговор плюс двухчасовое окно: очередь сама не пропустит второй такой же ключ,
+    // и людям уходит один сигнал, даже если клиент попросил позвонить трижды подряд.
+    const occurrence = `${order.id}:${incoming.externalPhoneNormalized}:${callRequestBucket(now)}`;
+    const context = { quote: quote.slice(0, 200), phone: incoming.externalPhone, occurrence, note };
+    await publishTelegramNotification(prisma, { type: "customer.call_request", orderId: order.id, occurrenceKey: occurrence, context });
     if (!site.aiDryRun) {
-      await publishTelegramNotification(prisma, { type: "customer.call_request_cc", orderId: order.id, occurrenceKey: incoming.id, context });
+      await publishTelegramNotification(prisma, { type: "customer.call_request_cc", orderId: order.id, occurrenceKey: occurrence, context });
     }
     return;
   }
@@ -409,6 +421,8 @@ async function hasNewerIncoming(
       ...(orderId ? { orderId } : { orderId: null, ...(incoming.storePhone ? { storePhone: incoming.storePhone } : {}) }),
     },
     select: { messageText: true, transcript: true, summary: true, attachmentsJson: true },
+    // Ближайшие следующие сообщения, а не пять случайных: иначе «есть ли новое» отвечало наугад.
+    orderBy: { occurredAt: "asc" },
     take: 5,
   });
   return rows.some((r) => {
@@ -420,28 +434,16 @@ async function hasNewerIncoming(
 /** Окно, в котором повторная просьба позвонить считается тем же разговором. */
 const CALL_REQUEST_WINDOW_MIN = 120;
 
-/** По этому разговору недавно уже просили позвонить: людям хватит одного сигнала. */
-async function alreadyAskedToCall(
-  prisma: PrismaClient,
-  orderId: string | null,
-  phone: string,
-  exceptCommunicationId: string,
-  now: Date
-): Promise<boolean> {
-  const since = new Date(now.getTime() - CALL_REQUEST_WINDOW_MIN * 60_000);
-  const rows = await prisma.aiTurn.findMany({
-    where: {
-      createdAt: { gte: since },
-      communicationId: { not: exceptCommunicationId },
-      // Разговор = заказ + номер: заказчик и получатель просят позвонить каждый о своём.
-      communication: { externalPhoneNormalized: phone },
-      ...(orderId ? { orderId } : {}),
-    },
-    select: { intent: true, communication: { select: { messageText: true, transcript: true, summary: true } } },
-    take: 20,
-  });
-  return rows.some((r) => r.intent === "call_request" || isCallRequest(pickText({ ...r.communication, attachmentsJson: null }).body));
+/**
+ * Номер двухчасового окна. Ключ идемпотентности с ним гасит повтор В САМОЙ ОЧЕРЕДИ: «уже
+ * публиковали» — это факт, а не догадка по журналу. Прошлая проверка искала строку разбора и
+ * потому считала уведомлением даже отказ («superseded», «потолок»), после которого никому
+ * ничего не ушло, — и настоящая просьба пропадала на два часа.
+ */
+function callRequestBucket(now: Date): string {
+  return String(Math.floor(now.getTime() / (CALL_REQUEST_WINDOW_MIN * 60_000)));
 }
+
 
 /**
  * Текст входящего: у SMS — сам текст, у звонка — расшифровка или краткое содержание. Фото без
@@ -546,11 +548,12 @@ async function loadHistory(prisma: PrismaClient, orderId: string | null, phone: 
     .map((r) => {
       const body = r.messageText ?? r.transcript ?? r.summary ?? "";
       const prefix = parseAttachments(r.attachmentsJson).length ? "(photo) " : r.messageText ? "" : "(call) ";
+      const clock = localClock(tz, r.occurredAt);
       return {
         direction: r.direction === "INBOUND" ? ("in" as const) : ("out" as const),
         text: `${prefix}${body}`.slice(0, 400),
         // Время по часам магазина и с датой: «вчера в 18:40» и «сегодня в 09:10» модель обязана различать.
-        at: `${localClock(tz, r.occurredAt).dateStr.slice(5)} ${localClock(tz, r.occurredAt).timeStr}`,
+        at: `${clock.dateStr.slice(5)} ${clock.timeStr}`,
       };
     });
 }
