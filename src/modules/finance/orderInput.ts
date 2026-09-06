@@ -15,6 +15,7 @@ import { toNumber } from "@/lib/money";
 import type { DayOrderInput } from "./dayCalc";
 import { estimateFeeCents, type ResolvedConsumables, type ResolvedFeeModel } from "./settings";
 import type { ItemFinance } from "./itemFinance";
+import { deliveryCostKnown } from "@/lib/financeMissing";
 
 const toCents = (v: unknown) => Math.round(toNumber(v as never) * 100);
 
@@ -85,10 +86,10 @@ export function toDayOrderInputs(
   }
 ): DayOrderInput[] {
   return orders.map((order) => {
-    // Подтверждённый ноль — валидная стоимость, неподтверждённый — неизвестность.
+    // Подтверждённый ноль — валидная стоимость, неподтверждённый — неизвестность. Правило общее
+    // с карточкой заказа (`deliveryCostKnown`): экран и расчёт не должны спорить.
     const deliveryCents = toCents(order.deliveryActualCost);
-    const deliveryActualCents =
-      order.deliveryActualCostConfirmedAt != null || deliveryCents > 0 ? deliveryCents : null;
+    const deliveryActualCents = deliveryCostKnown(deliveryCents, order.deliveryActualCostConfirmedAt) ? deliveryCents : null;
 
     // Фактическая комиссия приоритетнее модели магазина.
     const feeModel = order.acquiringFee ? null : (deps.settings.feeModels.get(order.siteId) ?? null);

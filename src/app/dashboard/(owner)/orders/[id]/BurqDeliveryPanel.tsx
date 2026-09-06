@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { ZoomableImage } from "@/components/ImageLightbox";
 import { resolveDeliveryAction, createNewDeliveryAttemptAction, refetchPodAction, confirmDeliveryActualCostAction } from "./deliveryActions";
 import { BurqLinkForm } from "./BurqLinkForm";
+import { deliveryCostKnown } from "@/lib/financeMissing";
 
 export type DeliveryPanelData = {
   id: string;
@@ -294,7 +295,9 @@ function ActualCostBlock({
   const [editing, setEditing] = useState(false);
   const [state, action, pending] = useActionState(confirmDeliveryActualCostAction, null);
 
-  const confirmed = actualCost.confirmedAt !== null;
+  // «Известна» по тому же правилу, что у расчёта дня: подтверждена рукой ИЛИ Burq прислал сумму.
+  // Иначе на каждом заказе с честной цифрой курьера висело «не подтверждена», а день при этом считался.
+  const confirmed = deliveryCostKnown(actualCost.amount, actualCost.confirmedAt);
   // Флористу и колл-центру блок показывается ТОЛЬКО когда стоимость подтверждена. «Не
   // подтверждена» и объяснение про расчёт дня — язык владельца: правку они всё равно сделать не
   // могут, а вопросы про финансы у них появятся.

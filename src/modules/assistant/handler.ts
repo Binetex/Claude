@@ -122,7 +122,8 @@ export function buildAssistantHandler(prisma: PrismaClient, deps: AssistantDeps 
         const setting = readTemplates(site.aiTemplatesJson)[intent.key];
         const vars = buildOrderVariables(orderToVariableSource(order));
         const state = {
-          deliveryStatus: order.deliveryStatus,
+          // «Доставлен» — это статус ЗАКАЗА: поле Order.deliveryStatus никто не пишет, оно всегда PENDING.
+          deliveryStatus: order.orderStatus === "DELIVERED" ? "DELIVERED" : order.deliveryStatus,
           deliveryIsToday: !!order.deliveryDate && order.deliveryDate.toISOString().slice(0, 10) === todayStrInTz(site.timezone, now()),
         };
         if (templateApplies(intent, setting, vars, state)) {
@@ -360,11 +361,12 @@ function pickText(c: { messageText: string | null; transcript: string | null; su
 }
 
 /**
- * Момент доставки. Своего поля у заказа нет; день доставки — ближайшая правда: «доставлен три
- * дня назад» — это про календарь, а не про секунду, когда курьер нажал кнопку.
+ * Момент доставки. Доставлен ли заказ, говорит `orderStatus` (Burq и магазин переводят в
+ * DELIVERED именно его; `Order.deliveryStatus` никто не пишет). Своего поля-момента у заказа нет;
+ * день доставки — ближайшая правда: «доставлен три дня назад» — это про календарь.
  */
-function deliveredMoment(order: { deliveryStatus: string; deliveryDate: Date | null; updatedAt: Date } | null): Date | null {
-  if (!order || order.deliveryStatus !== "DELIVERED") return null;
+function deliveredMoment(order: { orderStatus: string; deliveryDate: Date | null; updatedAt: Date } | null): Date | null {
+  if (!order || order.orderStatus !== "DELIVERED") return null;
   return order.deliveryDate ?? order.updatedAt;
 }
 
@@ -459,7 +461,9 @@ function snapshot(order: Record<string, unknown>, storeName: string, partyRole: 
     orderNumber: o.orderNumber,
     storeName,
     orderStatus: String(o.orderStatus).toLowerCase(),
-    deliveryStatus: o.deliveryStatus ? String(o.deliveryStatus).toLowerCase() : null,
+    // Модели нельзя говорить «delivery pending» по доставленному заказу: правда о доставке — в
+    // статусе заказа, а Order.deliveryStatus всегда PENDING (его никто не пишет).
+    deliveryStatus: o.orderStatus === "DELIVERED" ? "delivered" : o.orderStatus === "CANCELLED" ? null : o.deliveryStatus ? String(o.deliveryStatus).toLowerCase() : null,
     deliveryDate: o.deliveryDate ? o.deliveryDate.toISOString().slice(0, 10) : null,
     deliveryWindow: o.deliveryWindow ?? null,
     recipientName: o.recipientName ?? null,

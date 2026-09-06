@@ -37,3 +37,14 @@ export function incompleteSummary(o: { missing: string[]; noFloristPrice: boolea
 export function incompleteOrderHref(o: { id: string; missing: string[]; noFloristPrice: boolean }): string {
   return o.missing.length > 0 ? `/dashboard/finance/orders/${o.id}` : `/dashboard/orders/${o.id}`;
 }
+
+/**
+ * Известна ли фактическая стоимость доставки. ОДНО правило на расчёт дня и на карточку заказа:
+ * подтверждена человеком ИЛИ курьер (Burq) сообщил ненулевую сумму. Неподтверждённый ноль —
+ * неизвестность: ноль означал бы «доставка ничего не стоила» и завысил бы прибыль.
+ * Карточка раньше требовала ручного подтверждения даже при цифре от Burq, хотя расчёт её уже
+ * принимал, — и на каждом заказе висело «не подтверждена».
+ */
+export function deliveryCostKnown(amount: number, confirmedAt: Date | string | null | undefined): boolean {
+  return confirmedAt != null || amount > 0;
+}

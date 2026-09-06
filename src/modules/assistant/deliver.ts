@@ -250,7 +250,8 @@ export function buildAssistantNudgeHandler(prisma: PrismaClient, deps: { now?: (
     });
     // Ответили, отказались, выключили или сухой прогон — говорить «одну минуту» уже незачем.
     if (!turn || turn.status !== "DRAFT" || turn.site.aiDryRun || turn.site.aiMode === "OFF" || turn.order?.aiDisabled) return;
-    if (turn.order?.deliveryStatus === "DELIVERED" || turn.order?.orderStatus === "CANCELLED") return;
+    // Доставлен или отменён — по статусу заказа (Order.deliveryStatus никто не пишет).
+    if (turn.order?.orderStatus === "DELIVERED" || turn.order?.orderStatus === "CANCELLED") return;
 
     // Человек уже написал этому номеру после входящего — руками, из карточки или из QUO.
     const phone = turn.communication.externalPhoneNormalized;
