@@ -49,6 +49,18 @@ export function isBurqOrderId(id: string): boolean {
   return /^(o_[a-z0-9]+|mock_[a-z0-9-]+)$/i.test(id);
 }
 
+/**
+ * Достаёт id заказа Burq из того, что вставил человек: чистый «o_…», ссылка из кабинета Burq
+ * («…/orders/o_01m1…»), строка с пробелами или с «#». Флорист копирует то, что под рукой, и
+ * отказ «некорректный id» на правильной ссылке выглядел как «привязка не работает».
+ * Id доставки «del_…» — другая сущность, его не принимаем: Burq order по нему не найти.
+ */
+export function extractBurqOrderId(raw: string): string {
+  const text = raw.trim();
+  const m = text.match(/\b(o_[a-z0-9]+|mock_[a-z0-9-]+)\b/i);
+  return m ? m[1] : text.replace(/^#/, "");
+}
+
 /** Статусы, из которых текущую попытку можно заменить БЕЗ подтверждения (терминально-провальные). */
 const AUTO_REPLACEABLE = new Set<string>(RETRYABLE_DELIVERY_STATUSES);
 

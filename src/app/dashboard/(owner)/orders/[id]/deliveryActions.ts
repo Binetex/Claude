@@ -5,7 +5,7 @@ import { prisma } from "@/lib/db";
 import { resolveDeliveryManually, type ManualDecision } from "@/integrations/delivery/burq/manualResolution";
 import { createRetryDeliveryAttempt } from "@/integrations/delivery/burq/retryService";
 import { refetchPodForDelivery } from "@/integrations/delivery/burq/podService";
-import { linkBurqOrder } from "@/integrations/delivery/burq/linkService";
+import { linkBurqOrder, extractBurqOrderId } from "@/integrations/delivery/burq/linkService";
 import { makeCompletedPublisher } from "@/integrations/delivery/burq/webhookHandler";
 import { onOrderDeliveryChange } from "@/integrations/delivery/burq/scheduleService";
 import { fixDeliveryActualCost, FinanceFixError } from "@/modules/finance/fix";
@@ -179,7 +179,8 @@ const STATUS_LABEL: Record<string, string> = {
 export async function linkBurqOrderAction(_prev: LinkFormState, formData: FormData): Promise<LinkFormState> {
   await requireUser();
   const orderId = String(formData.get("orderId") ?? "");
-  const burqOrderId = String(formData.get("burqOrderId") ?? "").trim();
+  const rawId = String(formData.get("burqOrderId") ?? "").trim();
+  const burqOrderId = extractBurqOrderId(rawId);
   const confirm = String(formData.get("confirm") ?? "") === "1";
   if (!orderId) return { error: "Не указан заказ." };
   if (!burqOrderId) return { error: "Введите Burq Order ID." };
@@ -204,7 +205,11 @@ export async function linkBurqOrderAction(_prev: LinkFormState, formData: FormDa
     case "burq_not_found":
       return { error: "Burq Order с таким ID не найден." };
     case "invalid_id":
-      return { error: "Некорректный Burq Order ID (ожидается вид o_…)." };
+      return {
+        error: /^del_/i.test(burqOrderId)
+          ? "Это id доставки (del_…), а нужен id заказа Burq вида o_… — он в адресе страницы заказа в кабинете Burq."
+          : "Некорректный Burq Order ID: нужен id вида o_… из адреса страницы заказа в кабинете Burq.",
+      };
     case "order_not_found":
       return { error: "Заказ не найден." };
     default:
