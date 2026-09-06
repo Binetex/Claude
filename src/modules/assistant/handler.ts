@@ -425,7 +425,9 @@ async function alreadyAskedToCall(
     where: {
       createdAt: { gte: since },
       communicationId: { not: exceptCommunicationId },
-      ...(orderId ? { orderId } : { communication: { externalPhoneNormalized: phone } }),
+      // Разговор = заказ + номер: заказчик и получатель просят позвонить каждый о своём.
+      communication: { externalPhoneNormalized: phone },
+      ...(orderId ? { orderId } : {}),
     },
     select: { intent: true, communication: { select: { messageText: true, transcript: true, summary: true } } },
     take: 20,
@@ -513,7 +515,12 @@ async function logSkip(prisma: PrismaClient, siteId: string, orderId: string | n
 async function loadHistory(prisma: PrismaClient, orderId: string | null, phone: string, storePhone: string | null, incoming: { id: string; occurredAt: Date }, tz: string | null): Promise<HistoryLine[]> {
   const rows = await prisma.orderCommunication.findMany({
     where: {
-      ...(orderId ? { orderId } : { orderId: null, externalPhoneNormalized: phone, ...(storePhone ? { storePhone } : {}) }),
+      // ТОЛЬКО переписка с этим номером. У заказа две стороны — заказчик и получатель, и у
+      // каждой свой разговор. Склеенные в одну ленту, они путают модель («мне сказали в 11» —
+      // сказал другой человек) и показывают одному то, что другой писал лично. Так же устроены
+      // и вкладки общения в карточке заказа: сторону определяет номер сообщения.
+      externalPhoneNormalized: phone,
+      ...(orderId ? { orderId } : { orderId: null, ...(storePhone ? { storePhone } : {}) }),
       id: { not: incoming.id },
       // Только то, что было ДО разбираемого сообщения: при повторном разборе старого входящего
       // модель не должна отвечать на него, зная, чем разговор кончился.

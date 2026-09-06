@@ -127,8 +127,8 @@ export async function notifyDraft(prisma: PrismaClient, turnId: string, now = ne
     select: {
       id: true, replyText: true, important: true, needsHuman: true, intent: true, orderId: true,
       site: { select: { name: true, timezone: true, aiDryRun: true } },
-      order: { select: { orderNumber: true, currentFloristId: true, site: { select: { timezone: true } } } },
-      communication: { select: { messageText: true, transcript: true, externalPhone: true, attachmentsJson: true } },
+      order: { select: { orderNumber: true, currentFloristId: true, senderPhone: true, recipientPhone: true, site: { select: { timezone: true } } } },
+      communication: { select: { messageText: true, transcript: true, externalPhone: true, externalPhoneNormalized: true, partyRole: true, attachmentsJson: true } },
     },
   });
   if (!turn) return false;
@@ -154,8 +154,13 @@ export async function notifyDraft(prisma: PrismaClient, turnId: string, now = ne
   const incoming = escapeHtml(clip(turn.communication.messageText ?? turn.communication.transcript ?? "", 400));
   const draft = turn.replyText?.trim();
   const head = `${turn.site.aiDryRun ? "🧪 Сухой прогон · " : ""}${turn.important ? "❗ Важное сообщение от клиента" : "Сообщение от клиента"}`;
+  // Кто именно написал: у заказа два разговора, и человек должен видеть, кому он отвечает.
+  const side = turn.order
+    ? pickOrderTarget(turn.communication.externalPhoneNormalized, turn.communication.partyRole, turn.order)
+    : null;
+  const sideLabel = side === "RECIPIENT" ? "получатель" : side === "CUSTOMER" ? "заказчик" : "другой номер";
   const where = turn.order
-    ? `заказ ${escapeHtml(turn.order.orderNumber)}`
+    ? `заказ ${escapeHtml(turn.order.orderNumber)} · ${sideLabel} ${escapeHtml(turn.communication.externalPhone)}`
     : `незнакомый номер ${escapeHtml(turn.communication.externalPhone)} · ${escapeHtml(turn.site.name)}`;
   const lines = [
     `<b>${head}</b> · ${where}`,
@@ -188,7 +193,7 @@ export async function notifyDraft(prisma: PrismaClient, turnId: string, now = ne
   // это его решения. Копия без кнопки: подтверждает тот, у кого черновик, а владелец при желании
   // открывает заказ. Сбой копии черновик не отменяет. Один сигнал на разговор: о возврате пишут
   // тремя сообщениями подряд, и три одинаковые копии — шум, а не забота.
-  if (turn.important && who === "FLORIST" && turn.order && !(await ownerAlreadyWarned(prisma, turn.id, turn.orderId, now))) {
+  if (turn.important && who === "FLORIST" && turn.order && !(await ownerAlreadyWarned(prisma, turn.id, turn.orderId, turn.communication.externalPhoneNormalized, now))) {
     const owner = await resolveOwnerBot(prisma);
     if ("bot" in owner) {
       await new TelegramSender(owner.bot.token)
@@ -202,11 +207,12 @@ export async function notifyDraft(prisma: PrismaClient, turnId: string, now = ne
 /** Окно, в котором «важное» по одному заказу считается тем же разговором. */
 const IMPORTANT_WINDOW_MIN = 120;
 
-async function ownerAlreadyWarned(prisma: PrismaClient, turnId: string, orderId: string | null, now: Date): Promise<boolean> {
+async function ownerAlreadyWarned(prisma: PrismaClient, turnId: string, orderId: string | null, phone: string, now: Date): Promise<boolean> {
   if (!orderId) return false;
   const since = new Date(now.getTime() - IMPORTANT_WINDOW_MIN * 60_000);
   const prev = await prisma.aiTurn.findFirst({
-    where: { orderId, important: true, id: { not: turnId }, createdAt: { gte: since } },
+    // Разговор = заказ + номер: жалоба получателя и вопрос заказчика — разные поводы.
+    where: { orderId, important: true, id: { not: turnId }, createdAt: { gte: since }, communication: { externalPhoneNormalized: phone } },
     select: { id: true },
   });
   return !!prev;
