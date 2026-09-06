@@ -12,14 +12,28 @@ export const ASSISTANT_INCOMING_EVENT = "assistant.incoming";
 
 export type AssistantIncomingPayload = { communicationId: string };
 
+/**
+ * Пауза перед разбором. Люди пишут очередями: «привезите к 11», через двадцать секунд «звоните
+ * в домофон». Минута ожидания превращает такую очередь в ОДИН ответ: пока пауза идёт, приходят
+ * остальные сообщения, и разбор берёт последнее, видя все в истории (см. handler: `superseded`).
+ * Ответ через минуту человек читает как обычную скорость переписки, а не как задержку.
+ */
+export const ASSISTANT_DELAY_SEC = 60;
+
 /** Идемпотентно по входящему сообщению: одно входящее — один разбор. */
-export async function publishAssistantIncoming(repo: OutboxRepository, communicationId: string, keySuffix?: string): Promise<void> {
+export async function publishAssistantIncoming(
+  repo: OutboxRepository,
+  communicationId: string,
+  keySuffix?: string,
+  from: Date = new Date()
+): Promise<void> {
   await repo.enqueue({
     eventType: ASSISTANT_INCOMING_EVENT,
     aggregateType: "communication",
     aggregateId: communicationId,
     payload: { communicationId } satisfies AssistantIncomingPayload,
     idempotencyKey: `assistant.incoming:${communicationId}${keySuffix ? `:${keySuffix}` : ""}`,
+    availableAt: new Date(from.getTime() + ASSISTANT_DELAY_SEC * 1000),
   });
 }
 
