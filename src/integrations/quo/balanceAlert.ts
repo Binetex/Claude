@@ -64,27 +64,31 @@ function providerCodeOf(raw: unknown): string | null {
 }
 
 /**
+ * Когда владельцу в последний раз говорили про пустой баланс. В памяти процесса, как у сигнала
+ * о мёртвых событиях: журнал отправок для этого не годится — прошлые 402 в нём означают «отказ
+ * был», а не «мы об этом сказали», и первый же запуск считал бы себя опоздавшим.
+ */
+let lastAlertAt: number | null = null;
+
+/** Только для тестов: забыть, что уже говорили. */
+export function __resetQuoBalanceAlert(): void {
+  lastAlertAt = null;
+}
+
+/**
  * Сообщение владельцу «деньги кончились». Best-effort: сбой Telegram не должен ломать отправку,
- * внутри которой мы находимся. Повтор гасится по журналу: если такой же отказ уже был за
- * последние сутки, владельцу об этом уже говорили.
+ * внутри которой мы находимся. Не чаще раза в сутки — пустой баланс сам не чинится.
  */
 export async function alertQuoOutOfMoney(prisma: PrismaClient, now: Date = new Date()): Promise<void> {
   try {
-    const since = new Date(now.getTime() - ALERT_EVERY_HOURS * 3_600_000);
-    const recent = await prisma.orderCommunication.findMany({
-      where: { provider: "QUO", direction: "OUTBOUND", status: "FAILED", occurredAt: { gte: since } },
-      orderBy: { occurredAt: "desc" },
-      take: 50,
-      select: { rawMetadata: true },
-    });
-    // Текущая неудача уже записана, поэтому «уже говорили» — это ВТОРАЯ и далее запись с 402.
-    if (recent.filter((r) => isQuoOutOfMoney(providerCodeOf(r.rawMetadata))).length > 1) return;
+    if (lastAlertAt != null && now.getTime() - lastAlertAt < ALERT_EVERY_HOURS * 3_600_000) return;
 
     if (!(await isTelegramGloballyEnabled(prisma))) return;
     if (!(await isTelegramAudienceOn(prisma, "OWNER"))) return;
     const lookup = await resolveOwnerBot(prisma);
     if (!("bot" in lookup)) return;
 
+    lastAlertAt = now.getTime();
     const text = [
       "🛑 <b>QUO: закончились деньги</b>",
       "",
