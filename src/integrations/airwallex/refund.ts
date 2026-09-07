@@ -13,6 +13,7 @@ import "server-only";
 import { prisma } from "@/lib/db";
 import { AirwallexClient, type AirwallexRefund } from "./client";
 import { resolveAirwallexCreds } from "./settings";
+import { publishWooRefundPush } from "@/integrations/woocommerce/refundPushEvents";
 
 /** Что показать владельцу до нажатия кнопки. */
 export type RefundState =
@@ -151,6 +152,28 @@ export type CreateRefundOutcome =
   | { ok: false; kind: "unknown"; message: string };
 
 /**
+ * Один возврат по его id.
+ *
+ * Отдельно от `getRefundState`: та отвечает на вопрос «сколько ещё можно вернуть» и потому
+ * требует успешного платежа и положительной списанной суммы. Здесь вопрос другой — «состоялся
+ * ли ВОТ ЭТОТ возврат», и он остаётся осмысленным, даже когда возвращать больше нечего.
+ */
+export async function findRefundById(
+  orderId: string,
+  refundId: string
+): Promise<{ ok: true; refund: AirwallexRefund | null } | { ok: false; code: string }> {
+  const pay = await loadPayment(orderId);
+  if (!pay?.paymentIntentId) return { ok: false, code: "no_payment" };
+
+  const creds = await resolveAirwallexCreds(prisma, pay.siteId);
+  if (!creds) return { ok: false, code: "no_credentials" };
+
+  const list = await new AirwallexClient(creds).listRefunds(pay.paymentIntentId);
+  if (!list.ok) return { ok: false, code: list.code };
+  return { ok: true, refund: list.refunds.find((r) => r.id === refundId) ?? null };
+}
+
+/**
  * Создать возврат. Вызывается только из действия владельца после подтверждения.
  *
  * `requestId` приходит СНАРУЖИ и не генерируется здесь: он должен быть один и тот же у всех
@@ -193,7 +216,19 @@ export async function createOrderRefund(input: {
     requestId: input.requestId,
   });
 
-  if (res.ok) return { ok: true, refund: res.refund };
+  if (res.ok) {
+    // Магазин обязан узнать о возврате: иначе заказ в Woo остаётся оплаченным, в отчётах денег
+    // нет, а клиенту не уходит письмо о возврате — его шлёт сам WooCommerce, когда возврат
+    // оформлен в нём. Ставим задачу отсюда, из единственного места создания возврата: у любого
+    // будущего вызывающего это должно работать само. Денег задача не двигает (api_refund=false).
+    await publishWooRefundPush(prisma, {
+      orderId: input.orderId,
+      refundId: res.refund.id,
+      amount: res.refund.amount,
+      reason: input.reason,
+    });
+    return { ok: true, refund: res.refund };
+  }
 
   // Сеть/пустой ответ — исход неизвестен. Не говорим «не получилось»: деньги могли уйти.
   if (res.code === "network_unknown" || res.code === "empty_response") {
