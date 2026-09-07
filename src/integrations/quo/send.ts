@@ -21,7 +21,8 @@ export type SendTarget = "CUSTOMER" | "RECIPIENT";
 export type SendSmsInput = { orderId: string; target: SendTarget; text: string; idempotencyKey: string; sentByUserId?: string | null };
 export type SendSmsResult =
   | { ok: true; communicationId: string; status: "PENDING" | "SENT"; duplicate: boolean }
-  | { ok: false; code: string; communicationId?: string };
+  /** `detail` — ответ провайдера «402» или «402:0201402»: по нему видно, что именно чинить. */
+  | { ok: false; code: string; communicationId?: string; detail?: string };
 
 
 export async function sendOrderSms(prisma: PrismaClient, client: QuoClient | null, input: SendSmsInput): Promise<SendSmsResult> {
@@ -88,10 +89,19 @@ export async function sendOrderSms(prisma: PrismaClient, client: QuoClient | nul
   } catch (err) {
     const kind = err instanceof QuoApiError ? err.kind : "network";
     const safeCode = err instanceof QuoApiError ? `${err.kind}:${err.status}` : "network:0";
-    await prisma.orderCommunication.update({ where: { id: pendingId }, data: { status: "FAILED", rawMetadata: { error: safeCode } } });
-    quoLog("sms.failed", { communicationId: pendingId, target: input.target, phone: maskPhone(e164), errorCode: safeCode });
-    return { ok: false, code: `quo_${kind}`, communicationId: pendingId };
+    // Код из тела ответа («0201402» — истёкшая подписка) — единственное, с чем можно идти в
+    // поддержку Quo. Без него в журнале оставалось только «client:402».
+    const detail = providerDetail(err);
+    await prisma.orderCommunication.update({ where: { id: pendingId }, data: { status: "FAILED", rawMetadata: { error: safeCode, providerCode: detail ?? null } } });
+    quoLog("sms.failed", { communicationId: pendingId, target: input.target, phone: maskPhone(e164), errorCode: safeCode, providerCode: detail });
+    return { ok: false, code: `quo_${kind}`, communicationId: pendingId, detail };
   }
+}
+
+/** «402» или «402:0201402» — статус ответа провайдера и его собственный код ошибки. */
+function providerDetail(err: unknown): string | undefined {
+  if (!(err instanceof QuoApiError) || !err.status) return undefined;
+  return err.safeCode ? `${err.status}:${err.safeCode}` : String(err.status);
 }
 
 export type SendUnlinkedSmsInput = {
@@ -163,8 +173,9 @@ export async function sendUnlinkedSms(prisma: PrismaClient, client: QuoClient | 
   } catch (err) {
     const kind = err instanceof QuoApiError ? err.kind : "network";
     const safeCode = err instanceof QuoApiError ? `${err.kind}:${err.status}` : "network:0";
-    await prisma.orderCommunication.update({ where: { id: pendingId }, data: { status: "FAILED", rawMetadata: { error: safeCode } } });
-    quoLog("sms.failed", { communicationId: pendingId, target: "UNKNOWN", phone: maskPhone(e164), errorCode: safeCode });
-    return { ok: false, code: `quo_${kind}`, communicationId: pendingId };
+    const detail = providerDetail(err);
+    await prisma.orderCommunication.update({ where: { id: pendingId }, data: { status: "FAILED", rawMetadata: { error: safeCode, providerCode: detail ?? null } } });
+    quoLog("sms.failed", { communicationId: pendingId, target: "UNKNOWN", phone: maskPhone(e164), errorCode: safeCode, providerCode: detail });
+    return { ok: false, code: `quo_${kind}`, communicationId: pendingId, detail };
   }
 }

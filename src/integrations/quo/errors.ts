@@ -10,7 +10,12 @@ export class QuoApiError extends Error {
     readonly kind: QuoErrorKind,
     readonly status: number,
     /** Значение Retry-After в секундах (если пришло от 429), иначе null. */
-    readonly retryAfterSeconds: number | null = null
+    readonly retryAfterSeconds: number | null = null,
+    /**
+     * Код ошибки из тела ответа QUO («0201402» — истёкшая подписка, «0206400» — номер не прошёл
+     * A2P). Без него в журнале остаётся только «4xx», и человеку нечего делать с этой строкой.
+     */
+    readonly safeCode: string | null = null
   ) {
     super(message);
     this.name = "QuoApiError";
@@ -25,12 +30,12 @@ export class QuoApiError extends Error {
 /** Классифицирует HTTP-статус QUO в типизированную ошибку (без тела/секретов в сообщении). */
 export function quoErrorFromStatus(status: number, retryAfterSeconds: number | null = null, safeCode: string | null = null): QuoApiError {
   const suffix = safeCode ? ` (${safeCode})` : "";
-  if (status === 401) return new QuoApiError(`QUO unauthorized${suffix}`, "auth", status);
-  if (status === 403) return new QuoApiError(`QUO forbidden${suffix}`, "forbidden", status);
-  if (status === 404) return new QuoApiError(`QUO not found${suffix}`, "not_found", status);
-  if (status === 429) return new QuoApiError(`QUO rate limited${suffix}`, "rate_limit", status, retryAfterSeconds);
-  if (status >= 500) return new QuoApiError(`QUO server error ${status}${suffix}`, "server", status);
-  return new QuoApiError(`QUO request failed ${status}${suffix}`, "client", status);
+  if (status === 401) return new QuoApiError(`QUO unauthorized${suffix}`, "auth", status, null, safeCode);
+  if (status === 403) return new QuoApiError(`QUO forbidden${suffix}`, "forbidden", status, null, safeCode);
+  if (status === 404) return new QuoApiError(`QUO not found${suffix}`, "not_found", status, null, safeCode);
+  if (status === 429) return new QuoApiError(`QUO rate limited${suffix}`, "rate_limit", status, retryAfterSeconds, safeCode);
+  if (status >= 500) return new QuoApiError(`QUO server error ${status}${suffix}`, "server", status, null, safeCode);
+  return new QuoApiError(`QUO request failed ${status}${suffix}`, "client", status, null, safeCode);
 }
 
 /** Сетевой сбой (fetch throw / таймаут) — ретраибелен. */

@@ -17,6 +17,7 @@ import { createDeepseekClient, type DeepseekClient } from "@/integrations/deepse
 import { sendAssistantReply, discardAssistantReply, escapeHtml, SEND_ACTION_PREFIX, DISCARD_ACTION_PREFIX } from "./deliver";
 import { looksEnglish, stripDashes } from "./prompt";
 import { getSpeechConfig, createTranscriber, type Transcriber } from "@/integrations/speech/transcribe";
+import { describeSendFailure } from "@/lib/smsFailure";
 
 export const TELEGRAM_UPDATE_EVENT = "assistant.telegram.update";
 
@@ -110,7 +111,7 @@ export function buildTelegramUpdateHandler(prisma: PrismaClient, deps: Deps = {}
       const already = !res.ok && res.code === "already_decided";
       const dry = !res.ok && res.code === "dry_run";
       const okText = isSend ? "✅ Отправлено клиенту." : "🚫 Не отвечаем.";
-      const failText = already ? "Уже решено раньше." : dry ? "🧪 Сухой прогон: всё сработало, клиенту НЕ отправлено." : `⚠️ Не отправилось: ${res.ok ? "" : describe(res.code)}`;
+      const failText = already ? "Уже решено раньше." : dry ? "🧪 Сухой прогон: всё сработало, клиенту НЕ отправлено." : `⚠️ Не отправилось: ${res.ok ? "" : describe(res.code, res.detail)}`;
       await sender.answerCallback(cb.id, res.ok ? okText : failText);
       if (cb.message?.message_id != null && !already) {
         // Кнопки убираем в любом случае: висящая «Отправить» после отправки — приглашение
@@ -170,7 +171,7 @@ export function buildTelegramUpdateHandler(prisma: PrismaClient, deps: Deps = {}
       const res = await sendAssistantReply(prisma, turn.id);
       await sender.sendMessage(
         chatId,
-        res.ok ? "✅ Отправлено клиенту." : res.code === "dry_run" ? "🧪 Сухой прогон: всё сработало, клиенту НЕ отправлено." : `⚠️ Не отправилось: ${describe(res.code)}`
+        res.ok ? "✅ Отправлено клиенту." : res.code === "dry_run" ? "🧪 Сухой прогон: всё сработало, клиенту НЕ отправлено." : `⚠️ Не отправилось: ${describe(res.code, res.detail)}`
       );
       return;
     }
@@ -200,15 +201,21 @@ export function buildTelegramUpdateHandler(prisma: PrismaClient, deps: Deps = {}
   };
 }
 
-/** Коды отказа — человеку в чат, а не в лог: он должен понять, что делать дальше. */
-function describe(code: string): string {
+/**
+ * Коды отказа — человеку в чат, а не в лог: он должен понять, что делать дальше.
+ *
+ * Всё, что про саму отправку, объясняет общий `describeSendFailure`: владелец увидел здесь голое
+ * `quo_client` вместо «подписка Quo истекла» и не мог понять, что чинить.
+ */
+function describe(code: string, detail?: string): string {
   switch (code) {
     case "dry_run": return "у магазина включён сухой прогон";
     case "assistant_off": return "ассистент выключен";
     case "order_disabled": return "ассистент выключен на этом заказе";
     case "no_text": return "нет текста ответа";
     case "turn_not_found": return "черновик не найден";
-    default: return code;
+    case "already_sent": return "этот ответ клиенту уже ушёл";
+    default: return describeSendFailure(code, detail);
   }
 }
 

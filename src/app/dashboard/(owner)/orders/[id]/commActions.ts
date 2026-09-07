@@ -6,27 +6,9 @@ import { featureFlags } from "@/lib/featureFlags";
 import { getQuoConfig } from "@/integrations/quo/config";
 import { createQuoClient } from "@/integrations/quo/client";
 import { sendOrderSms, type SendTarget } from "@/integrations/quo/send";
+import { describeSendFailure } from "@/lib/smsFailure";
 
 type FormState = { ok?: boolean; error?: string; status?: string } | null;
-
-const ERR_RU: Record<string, string> = {
-  empty_text: "Введите текст сообщения.",
-  too_long: "Слишком длинное сообщение (макс. 1600 символов).",
-  invalid_target_phone: "У этого адресата некорректный номер телефона.",
-  store_no_quo_number: "У магазина не настроен номер QUO для отправки SMS.",
-  store_quo_disabled: "QUO отключён для этого магазина — включите его в настройках сайта.",
-  quo_not_configured: "Интеграция QUO не настроена.",
-  order_not_found: "Заказ не найден.",
-  missing_idempotency_key: "Повторите отправку.",
-  previous_attempt_failed: "Прошлая попытка не удалась и сообщение не ушло. Нажмите «Отправить» ещё раз.",
-  quo_auth: "QUO отклонил запрос (авторизация).",
-  quo_forbidden: "QUO: недостаточно прав.",
-  quo_not_found: "QUO: ресурс не найден.",
-  quo_rate_limit: "QUO: превышен лимит запросов, попробуйте позже.",
-  quo_server: "QUO временно недоступен, попробуйте позже.",
-  quo_network: "Сетевая ошибка при обращении к QUO.",
-  quo_client: "QUO отклонил запрос.",
-};
 
 /**
  * Отправка SMS из карточки заказа. Доступна ЛЮБОМУ аутентифицированному сотруднику
@@ -47,5 +29,7 @@ export async function sendOrderSmsAction(_prev: FormState, formData: FormData): 
   const res = await sendOrderSms(prisma, client, { orderId, target, text, idempotencyKey, sentByUserId: user.id });
   revalidatePath(`/dashboard/orders/${orderId}`);
   if (res.ok) return { ok: true, status: res.status };
-  return { error: ERR_RU[res.code] ?? "Не удалось отправить SMS." };
+  // Подписи общие с Telegram-ботом (`lib/smsFailure`): один и тот же отказ обязан читаться
+  // одинаково, где бы человек его ни увидел.
+  return { error: describeSendFailure(res.code, res.detail) };
 }

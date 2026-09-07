@@ -18,7 +18,8 @@ import { toE164 } from "@/lib/phone";
 import { parseAttachments } from "@/integrations/quo/communicationsService";
 import { NUDGE_AFTER_MIN, ASSISTANT_NUDGE_ENABLED } from "./events";
 
-export type DeliverResult = { ok: true } | { ok: false; code: string };
+/** `detail` — ответ провайдера («402:0201402»), чтобы человеку было что чинить. */
+export type DeliverResult = { ok: true } | { ok: false; code: string; detail?: string };
 
 /** Кнопка подтверждения: одно нажатие вместо печати ответа. */
 export const SEND_ACTION_PREFIX = "ai:send:";
@@ -90,20 +91,45 @@ export async function sendAssistantReply(prisma: PrismaClient, turnId: string, d
   const incomingPhone = turn.communication.externalPhoneNormalized;
   const target = turn.order ? pickOrderTarget(incomingPhone, turn.communication.partyRole, turn.order) : null;
 
+  // Прошлые попытки отправки этого же ответа: по ним решается, можно ли слать сейчас.
+  const prior = await prisma.orderCommunication.findMany({
+    where: { sendKey: { startsWith: `ai-turn:${turn.id}` } },
+    select: { status: true },
+  });
+  const attempt = nextSendKey(turn.id, prior);
+  if ("alreadySent" in attempt) return { ok: false, code: "already_sent" };
+  const idempotencyKey = attempt.key;
+
   // Без заказа, или пишет номер, которого в заказе нет: отвечаем в тот же номер от номера
   // магазина. Запись при этом относится к заказу, если он есть — разговор-то его.
   const res = target
-    ? await sendOrderSms(prisma, quoClient(), { orderId: turn.orderId!, target, text, idempotencyKey: `ai-turn:${turn.id}` })
+    ? await sendOrderSms(prisma, quoClient(), { orderId: turn.orderId!, target, text, idempotencyKey })
     : await sendUnlinkedSms(prisma, quoClient(), {
-        siteId: turn.siteId, toPhone: incomingPhone, text, idempotencyKey: `ai-turn:${turn.id}`, orderId: turn.orderId,
+        siteId: turn.siteId, toPhone: incomingPhone, text, idempotencyKey, orderId: turn.orderId,
       });
-  if (!res.ok) return { ok: false, code: res.code };
+  if (!res.ok) return { ok: false, code: res.code, detail: res.detail };
 
   await prisma.aiTurn.update({
     where: { id: turn.id },
     data: { status: "SENT", sentCommunicationId: res.communicationId ?? null, decidedAt: new Date(), decidedByUserId: decidedByUserId ?? null },
   });
   return { ok: true };
+}
+
+/**
+ * Ключ отправки для очередной попытки — или отказ, если ответ уже ушёл.
+ *
+ * Неудачная попытка НЕ должна запирать черновик навсегда: у Quo истекла подписка, владелец её
+ * продлил, нажал «Отправить» ещё раз — и с прежним ключом упирался бы в «прошлая попытка не
+ * удалась» до конца жизни заказа. Поэтому каждая новая попытка получает свой ключ.
+ *
+ * Защита от второго сообщения клиенту остаётся: НЕ-упавшая запись (PENDING или SENT) означает,
+ * что сообщение уже в пути или доставлено, и повторять его нельзя, даже если статус разбора
+ * почему-то не обновился.
+ */
+export function nextSendKey(turnId: string, prior: { status: string }[]): { key: string } | { alreadySent: true } {
+  if (prior.some((r) => r.status !== "FAILED")) return { alreadySent: true };
+  return { key: prior.length ? `ai-turn:${turnId}:${prior.length + 1}` : `ai-turn:${turnId}` };
 }
 
 /** Человек решил не отвечать: черновик закрывается, напоминание «one moment» больше не уйдёт. */
