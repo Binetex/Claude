@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { OutboxRepository } from "@/outbox/types";
-import { publishAssistantIncoming, scheduleAssistantNudge, ASSISTANT_DELAY_SEC, NUDGE_AFTER_MIN } from "./events";
+import { publishAssistantIncoming, scheduleAssistantNudge, ASSISTANT_DELAY_SEC, ASSISTANT_NUDGE_ENABLED } from "./events";
 
 /** Репозиторий-заглушка: проверяем ровно то, что кладётся в очередь. */
 function fakeRepo() {
@@ -26,9 +26,11 @@ describe("пауза перед разбором", () => {
     expect(calls[0].availableAt).toEqual(new Date(at.getTime() + ASSISTANT_DELAY_SEC * 1000));
   });
 
-  it("напоминание «одну минуту» — через 20 минут после черновика", async () => {
+  it("напоминание «одну минуту» выключено владельцем — в очередь ничего не ставится", async () => {
     const { repo, calls } = fakeRepo();
     await scheduleAssistantNudge(repo, "t1", at);
-    expect(calls[0].availableAt).toEqual(new Date(at.getTime() + NUDGE_AFTER_MIN * 60_000));
+    // Включат обратно (ASSISTANT_NUDGE_ENABLED) — проверка встаёт через NUDGE_AFTER_MIN минут.
+    expect(ASSISTANT_NUDGE_ENABLED).toBe(false);
+    expect(calls).toEqual([]);
   });
 });

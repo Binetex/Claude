@@ -100,7 +100,7 @@ export function EditUserDialog({
               type="password"
               autoComplete="new-password"
               minLength={8}
-              placeholder="Оставьте пустым, чтобы не менять"
+              placeholder="Новый пароль"
             />
             <p className="text-[11px] text-slate-400">Минимум 8 символов. Текущий пароль не показывается.</p>
           </div>

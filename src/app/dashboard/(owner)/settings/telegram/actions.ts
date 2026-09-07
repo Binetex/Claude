@@ -4,7 +4,7 @@ import { requireRole } from "@/lib/rbac";
 import { prisma } from "@/lib/db";
 import { enableReplies, disableReplies } from "@/integrations/telegram/replies";
 import { upsertBot, deleteBotToken, setBotEnabled, type BotPurpose } from "@/integrations/telegram/bots";
-import { setTelegramGlobalEnabled } from "@/integrations/telegram/settings";
+import { setTelegramGlobalEnabled, setTelegramAudiences, type TelegramAudiences } from "@/integrations/telegram/settings";
 import { verifyBot, type VerifyResult } from "@/integrations/telegram/verify";
 
 export type ActionResult = { ok?: true; message?: string; error?: string };
@@ -74,6 +74,19 @@ export async function toggleGlobal(enabled: boolean): Promise<ActionResult> {
   await setTelegramGlobalEnabled(prisma, enabled);
   revalidatePath(PATH);
   return { ok: true, message: enabled ? "Уведомления включены." : "Уведомления выключены." };
+}
+
+/**
+ * Кому писать. Отдельная настройка от общего рубильника: «выключить всё» и «пока не трогать
+ * флористов» — разные решения. Боты выключенной аудитории остаются настроенными и проверенными,
+ * поэтому вернуть поток — один клик.
+ */
+export async function setAudiences(a: TelegramAudiences): Promise<ActionResult> {
+  await requireRole("OWNER");
+  await setTelegramAudiences(prisma, a);
+  revalidatePath(PATH);
+  const on = [a.owner && "вам", a.florists && "флористам", a.customerService && "колл-центру"].filter(Boolean);
+  return { ok: true, message: on.length ? `Уведомления идут: ${on.join(", ")}.` : "Уведомления не идут никому." };
 }
 
 /**

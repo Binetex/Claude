@@ -6,6 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { saveBurqSettingsAction, checkBurqConnectionAction, toggleBurqDraftCreationAction } from "./burqActions";
 import type { BurqSettingsView } from "@/integrations/delivery/burq/settings";
+import { secretPlaceholder } from "@/lib/secretHint";
 
 const CONNECTION_LABEL: Record<string, string> = {
   ok: "Подключение подтверждено",
@@ -72,7 +73,7 @@ export function BurqSettingsForm({ settings, webhookUrl }: { settings: BurqSetti
             {/* API Key */}
             <div className="space-y-1">
               <Label className="text-xs">API Key {settings.hasApiKey && <span className="text-slate-400">(сохранён: {settings.apiKeyMask})</span>}</Label>
-              <Input name="apiKey" type="password" autoComplete="off" placeholder={settings.hasApiKey ? "Оставьте пустым, чтобы не менять" : "Вставьте API Key"} />
+              <Input name="apiKey" type="password" autoComplete="off" placeholder={secretPlaceholder(settings.apiKeyMask, "API Key")} />
             </div>
 
             {/* Webhook Signing Secret */}
@@ -80,7 +81,7 @@ export function BurqSettingsForm({ settings, webhookUrl }: { settings: BurqSetti
               <Label className="text-xs">
                 Webhook Signing Secret {settings.hasWebhookSecret && <span className="text-slate-400">(сохранён: {settings.webhookSecretMask})</span>}
               </Label>
-              <Input name="webhookSecret" type="password" autoComplete="off" placeholder={settings.hasWebhookSecret ? "Оставьте пустым, чтобы не менять" : "Вставьте Signing Secret"} />
+              <Input name="webhookSecret" type="password" autoComplete="off" placeholder={secretPlaceholder(settings.webhookSecretMask, "Signing Secret")} />
             </div>
 
             {/* Advanced: base URL (read-only default) */}

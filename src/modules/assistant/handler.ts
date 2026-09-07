@@ -121,6 +121,15 @@ export function buildAssistantHandler(prisma: PrismaClient, deps: AssistantDeps 
       await notifyCallRequest(prisma, order, site, incoming, body, now()).catch(logCallRequestError);
     }
 
+    // Фото ассистент не комментирует ВООБЩЕ (решение владельца 07.09.2026). Картинку модель не
+    // видит, и «спасибо, сейчас посмотрю» — это обещание за человека по содержимому, которого
+    // никто не читал. Само фото никуда не делось: оно видно во вкладке общения в карточке заказа,
+    // а в журнале остаётся строка с причиной. Просьбу позвонить мы к этому моменту уже передали.
+    if (photos) {
+      await logSkip(prisma, site.id, order?.id ?? null, incoming.id, "photo");
+      return;
+    }
+
     const gate = shouldConsider({
       mode: site.aiMode as AssistantMode,
       orderDisabled: !!order?.aiDisabled,
@@ -517,8 +526,10 @@ async function hasNewerIncoming(
     take: 5,
   });
   return rows.some((r) => {
-    const { text } = pickText(r);
-    return !!text.trim() && !isSmallTalk(text);
+    const { body, photos } = pickText(r);
+    // На фото мы не отвечаем, поэтому «дальше пришло фото» не отменяет ответ на вопрос до него.
+    // Смотрим на слова клиента, а не на служебную пометку о фото из pickText.
+    return !photos && !!body.trim() && !isSmallTalk(body);
   });
 }
 

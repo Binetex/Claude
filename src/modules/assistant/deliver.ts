@@ -11,12 +11,12 @@ import { getQuoConfig } from "@/integrations/quo/config";
 import { createQuoClient, type QuoClient } from "@/integrations/quo/client";
 import { sendOrderSms, sendUnlinkedSms } from "@/integrations/quo/send";
 import { resolveOwnerBot, resolveFloristBot, resolveCustomerServiceBot, type BotLookup } from "@/integrations/telegram/bots";
-import { isTelegramGloballyEnabled } from "@/integrations/telegram/config";
+import { isTelegramGloballyEnabled, isTelegramAudienceOn, loadTelegramAudienceFlags } from "@/integrations/telegram/config";
 import { TelegramSender } from "@/integrations/telegram/sender";
 import { pickRecipient, storeHour } from "./routing";
 import { toE164 } from "@/lib/phone";
 import { parseAttachments } from "@/integrations/quo/communicationsService";
-import { NUDGE_AFTER_MIN } from "./events";
+import { NUDGE_AFTER_MIN, ASSISTANT_NUDGE_ENABLED } from "./events";
 
 export type DeliverResult = { ok: true } | { ok: false; code: string };
 
@@ -155,8 +155,11 @@ export async function notifyDraft(
   // Незнакомый номер идёт только владельцу: флориста у разговора без заказа нет. Сухой прогон —
   // тоже только владельцу: проверяет ассистента он, а флористу пробные черновики с пометкой
   // «клиенту не уйдёт» только мешают.
+  // Флористы выключены владельцем — черновик идёт ему самому, как при отсутствии бота: у
+  // разговора всё равно должен быть живой адресат, иначе клиент останется без ответа.
+  const audiences = await loadTelegramAudienceFlags(prisma);
   let who = turn.order && !turn.site.aiDryRun
-    ? pickRecipient({ storeHour: storeHour(turn.order.site?.timezone, now), hasFlorist: !!turn.order.currentFloristId })
+    ? pickRecipient({ storeHour: storeHour(turn.order.site?.timezone, now), hasFlorist: audiences.FLORIST && !!turn.order.currentFloristId })
     : "OWNER";
   let lookup: BotLookup =
     who === "FLORIST" && turn.order?.currentFloristId
@@ -167,7 +170,12 @@ export async function notifyDraft(
     lookup = await resolveOwnerBot(prisma);
   }
   if (!("bot" in lookup)) return false;
+  // Владелец выключил уведомления и себе: наружу ничего, черновик остаётся в карточке заказа.
+  if (!audiences[who]) return false;
 
+  // Обещаем «one moment» только пока напоминание включено: строчка в черновике — это то, чему
+  // человек верит, решая не отвечать прямо сейчас.
+  const nudgeNote = ASSISTANT_NUDGE_ENABLED ? ` Без решения через ${NUDGE_AFTER_MIN} мин клиенту уйдёт «one moment».` : "";
   const incoming = escapeHtml(clip(burst?.text ?? turn.communication.messageText ?? turn.communication.transcript ?? "", 400));
   const draft = turn.replyText?.trim();
   const head = `${turn.site.aiDryRun ? "🧪 Сухой прогон · " : ""}${turn.important ? "❗ Важное сообщение от клиента" : "Сообщение от клиента"}`;
@@ -190,8 +198,8 @@ export async function notifyDraft(
     turn.site.aiDryRun
       ? "Сухой прогон: кнопки и ответы работают, но клиенту ничего не уйдёт."
       : draft
-        ? `Нажмите «Отправить» или ответьте на это сообщение своим текстом. Без решения через ${NUDGE_AFTER_MIN} мин клиенту уйдёт «one moment».`
-        : `Ответьте на это сообщение своим текстом. Без ответа через ${NUDGE_AFTER_MIN} мин клиенту уйдёт «one moment».`,
+        ? `Нажмите «Отправить» или ответьте на это сообщение своим текстом.${nudgeNote}`
+        : `Ответьте на это сообщение своим текстом.${nudgeNote}`,
   ];
 
   const sender = new TelegramSender(lookup.bot.token);
@@ -214,7 +222,7 @@ export async function notifyDraft(
   // проглатывается, поэтому «мы уже писали» по журналу означало «строка есть», а не «владелец
   // прочитал». Одна проглоченная ошибка Telegram гасила бы и «хочу отменить», и «верните деньги»
   // на два часа. Лишняя копия по важной теме — меньшее зло, чем пропущенная.
-  if (turn.important && who === "FLORIST" && turn.order) {
+  if (turn.important && who === "FLORIST" && turn.order && audiences.OWNER) {
     const owner = await resolveOwnerBot(prisma);
     if ("bot" in owner) {
       await new TelegramSender(owner.bot.token)
@@ -237,6 +245,7 @@ export async function notifyOwnerText(prisma: PrismaClient, text: string): Promi
 /** Тот же прямой сигнал, но в выбранный служебный бот: владельцу или колл-центру. */
 export async function notifyBotText(prisma: PrismaClient, who: "OWNER" | "CUSTOMER_SERVICE", text: string): Promise<boolean> {
   if (!(await isTelegramGloballyEnabled(prisma))) return false;
+  if (!(await isTelegramAudienceOn(prisma, who))) return false;
   const lookup = who === "OWNER" ? await resolveOwnerBot(prisma) : await resolveCustomerServiceBot(prisma);
   if (!("bot" in lookup)) return false;
   const res = await new TelegramSender(lookup.bot.token).sendMessage(lookup.bot.chatId, text).catch(() => null);
@@ -260,6 +269,8 @@ export const NUDGE_LATE_TOLERANCE_MIN = 60;
 export function buildAssistantNudgeHandler(prisma: PrismaClient, deps: { now?: () => Date } = {}) {
   const now = deps.now ?? (() => new Date());
   return async (record: { payload: unknown }): Promise<void> => {
+    // Выключено владельцем: гасим и то, что уже стояло в очереди на момент правки.
+    if (!ASSISTANT_NUDGE_ENABLED) return;
     const p = record.payload as { turnId?: string; dueAt?: string };
     if (!p?.turnId) return;
     if (p.dueAt) {

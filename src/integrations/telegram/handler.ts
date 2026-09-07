@@ -4,7 +4,7 @@ import type { OutboxHandler } from "@/outbox/worker";
 import type { OutboxRecord } from "@/outbox/types";
 import { getTelegramEvent } from "./registry";
 import { resolveOwnerBot, resolveFloristBot, resolveCustomerServiceBot, resolveBotById, type BotLookup, type ResolvedBot } from "./bots";
-import { isTelegramGloballyEnabled } from "./config";
+import { isTelegramGloballyEnabled, isTelegramAudienceOn } from "./config";
 import { TelegramSender } from "./sender";
 import {
   buttonsFor,
@@ -56,6 +56,14 @@ export function buildTelegramNotifyHandler(prisma: PrismaClient): OutboxHandler 
 
     if (!(await isTelegramGloballyEnabled(prisma))) {
       console.info(`[telegram] ${p.type} пропущено: уведомления выключены`);
+      return;
+    }
+
+    // Аудитория выключена владельцем («пока не пишем флористам»): молчим целиком, включая
+    // правку уже отправленного сообщения — иначе выключенный адресат всё равно получал бы
+    // обновления по своим старым карточкам.
+    if (!(await isTelegramAudienceOn(prisma, def.audience))) {
+      console.info(`[telegram] ${p.type} пропущено: уведомления для ${def.audience} выключены`);
       return;
     }
 

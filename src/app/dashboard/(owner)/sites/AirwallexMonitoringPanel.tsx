@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { ownerSaveAirwallex, ownerVerifyAirwallex, ownerToggleAirwallexMonitoring, ownerTogglePushPaidStatus } from "./wooActions";
 import type { AirwallexSettingsView } from "@/integrations/airwallex/settings";
+import { secretTail, secretPlaceholder } from "@/lib/secretHint";
 
 /**
  * Пер-сайтовая настройка Airwallex Payment Monitoring. Credentials обратно не показываются;
@@ -35,7 +36,9 @@ export function AirwallexMonitoringPanel({ siteId, initial }: { siteId: string; 
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-xs font-semibold text-slate-600">Airwallex Payment Monitoring</span>
         {initial.clientIdConfigured && initial.apiKeyConfigured ? (
-          <span className="rounded border border-emerald-200 bg-emerald-50 px-1.5 py-px text-[11px] text-emerald-700">Ключи заданы</span>
+          <span className="rounded border border-emerald-200 bg-emerald-50 px-1.5 py-px text-[11px] text-emerald-700">
+            Ключи заданы{secretTail(initial.apiKeyMask) ? ` · API Key ${secretTail(initial.apiKeyMask)}` : ""}
+          </span>
         ) : (
           <span className="rounded border border-slate-200 bg-slate-50 px-1.5 py-px text-[11px] text-slate-500">Не настроено</span>
         )}
@@ -51,12 +54,12 @@ export function AirwallexMonitoringPanel({ siteId, initial }: { siteId: string; 
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
         <input
           type="password" autoComplete="new-password" value={clientId} onChange={(e) => setClientId(e.target.value)}
-          placeholder={initial.clientIdConfigured ? "Client ID настроен — пусто = не менять" : "Airwallex Client ID"}
+          placeholder={secretPlaceholder(initial.clientIdMask, "Airwallex Client ID")}
           className="rounded-md border border-slate-300 px-2 py-1.5 text-sm"
         />
         <input
           type="password" autoComplete="new-password" value={apiKey} onChange={(e) => setApiKey(e.target.value)}
-          placeholder={initial.apiKeyConfigured ? `API Key ${initial.apiKeyMask ?? "настроен"} — пусто = не менять` : "Airwallex API Key"}
+          placeholder={secretPlaceholder(initial.apiKeyMask, "Airwallex API Key")}
           className="rounded-md border border-slate-300 px-2 py-1.5 text-sm"
         />
       </div>
@@ -116,7 +119,7 @@ export function AirwallexMonitoringPanel({ siteId, initial }: { siteId: string; 
       <p className="text-[11px] text-slate-400">
         {verified
           ? `Проверено ${new Date(initial.verifiedAt!).toLocaleString("ru-RU")}. Без галочки «Проставлять оплату в магазине» мониторинг только читает статус платежа и заказы в работу не переводит.`
-          : "Включить мониторинг можно после успешного Verify. Credentials обратно не показываются; пустое поле не стирает существующее."}
+          : "Включить мониторинг можно после успешного Verify."}
       </p>
       {initial.errorSafe && !msg && <p className="text-[11px] text-red-600">{initial.errorSafe}</p>}
     </div>

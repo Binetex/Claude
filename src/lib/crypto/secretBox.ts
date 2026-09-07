@@ -97,6 +97,21 @@ export function maskSecret(plaintext: string, visible = 4): string {
   return "*".repeat(8) + plaintext.slice(-visible);
 }
 
+/**
+ * Маска по ЗАШИФРОВАННОМУ значению — для полей, у которых своей колонки маски нет
+ * (токен бота Telegram, Client ID Airwallex). Расшифровка здесь оправдана только на экранах
+ * настройки: списки и карточки читают готовую маску из своей колонки и в шифр не лезут.
+ * Ключ сменился или шифр повреждён — молча null: экран настройки не должен падать из-за этого.
+ */
+export function maskEncrypted(ciphertext: string | null | undefined, visible = 4): string | null {
+  if (!ciphertext) return null;
+  try {
+    return maskSecret(decryptSecret(ciphertext), visible);
+  } catch {
+    return null;
+  }
+}
+
 /** true, если сервис сконфигурирован (есть валидный ключ). Для health/диагностики. */
 export function isCredentialCryptoConfigured(): boolean {
   try {

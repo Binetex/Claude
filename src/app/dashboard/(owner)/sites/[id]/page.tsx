@@ -28,6 +28,8 @@ import { getBrevoAccountViews } from "@/integrations/email/accountKey";
 import { isCredentialCryptoConfigured } from "@/lib/crypto/secretBox";
 import { diffScopes } from "@/integrations/shopify/customApp/scopes";
 import { TERMINAL_ORDER_STATUSES } from "@/lib/statuses";
+import { secretTail } from "@/lib/secretHint";
+import { maskEncrypted } from "@/lib/crypto/secretBox";
 
 export const dynamic = "force-dynamic";
 
@@ -55,6 +57,7 @@ export default async function SiteSettingsPage({ params }: { params: Promise<{ i
       aiTemplatesJson: true,
       quoPhoneNumberId: true, quoPhoneNumber: true, quoEnabled: true, quoLastCheckAt: true, quoConnectionError: true,
       authMode: true, shopifyConnStatus: true, lastConnectionCheckAt: true, lastSyncAt: true,
+      clientSecretMask: true, accessTokenMask: true,
       grantedScopes: true, connectionError: true,
       webhooks: { select: { topic: true, status: true } },
       floristPriorities: {
@@ -197,7 +200,7 @@ export default async function SiteSettingsPage({ params }: { params: Promise<{ i
                   <div><span className="text-slate-400">WooCommerce:</span> {site.wooConnection.wooVersion ?? "—"}</div>
                   <div><span className="text-slate-400">Webhooks:</span> {site._count.wooWebhooks}</div>
                   <div><span className="text-slate-400">Проверка:</span> {dateTime(site.wooConnection.lastConnectionCheckAt)}</div>
-                  <div><span className="text-slate-400">Секрет:</span> {site.wooConnection.consumerSecretMask || "—"}</div>
+                  <div><span className="text-slate-400">Consumer Secret:</span> {secretTail(site.wooConnection.consumerSecretMask) ?? "—"}</div>
                 </div>
                 {site.wooConnection.connectionError && <div className="text-xs text-orange-700">{site.wooConnection.connectionError}</div>}
                 <WooSiteControls
@@ -239,6 +242,9 @@ export default async function SiteSettingsPage({ params }: { params: Promise<{ i
                 <div className="grid grid-cols-2 gap-2 text-xs text-slate-500">
                   <div><span className="text-slate-400">Последняя проверка:</span> {dateTime(site.lastConnectionCheckAt)}</div>
                   <div><span className="text-slate-400">Последняя синхр.:</span> {dateTime(site.lastSyncAt)}</div>
+                  {/* Ключи перевыпускают, и «подключено» не отвечает, какой ключ сейчас работает. */}
+                  <div><span className="text-slate-400">Client Secret:</span> {secretTail(site.clientSecretMask) ?? "—"}</div>
+                  <div><span className="text-slate-400">Access token:</span> {secretTail(site.accessTokenMask) ?? "—"}</div>
                 </div>
                 {(() => {
                   const missing = diffScopes(site.grantedScopes).missing;
@@ -390,8 +396,10 @@ export default async function SiteSettingsPage({ params }: { params: Promise<{ i
             monitoringEnabled: site.wooConnection.airwallexMonitoringEnabled,
             pushPaidStatusToWoo: site.wooConnection.pushPaidStatusToWoo,
             clientIdConfigured: !!site.wooConnection.airwallexApiClientIdEncrypted,
+            // Хвост ключей: владелец перевыпускает их и должен видеть, тот ли лежит сейчас.
+            clientIdMask: maskEncrypted(site.wooConnection.airwallexApiClientIdEncrypted),
             apiKeyConfigured: !!site.wooConnection.airwallexApiKeyEncrypted,
-            apiKeyMask: site.wooConnection.airwallexApiKeyMask,
+            apiKeyMask: site.wooConnection.airwallexApiKeyMask ?? maskEncrypted(site.wooConnection.airwallexApiKeyEncrypted),
             env: site.wooConnection.airwallexApiEnv === "demo" ? "demo" : "prod",
             pendingThresholdMin: site.wooConnection.airwallexPendingThresholdMin,
             verifiedAt: site.wooConnection.airwallexApiVerifiedAt ? site.wooConnection.airwallexApiVerifiedAt.toISOString() : null,

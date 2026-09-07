@@ -45,8 +45,8 @@ export function FloristEditForm({ florist }: { florist: FloristForEdit }) {
             <div className="space-y-1"><Label htmlFor={`ef-name-${florist.id}`}>Name</Label><Input id={`ef-name-${florist.id}`} name="name" defaultValue={florist.name} required /></div>
             <div className="space-y-1"><Label htmlFor={`ef-email-${florist.id}`}>Email / Login</Label><Input id={`ef-email-${florist.id}`} name="email" type="email" defaultValue={florist.email} required /></div>
             <div className="space-y-1"><Label htmlFor={`ef-phone-${florist.id}`}>Phone</Label><Input id={`ef-phone-${florist.id}`} name="phone" defaultValue={florist.phone ?? ""} /></div>
-            <div className="space-y-1"><Label htmlFor={`ef-pw-${florist.id}`}>New password (пусто = без изменений)</Label><Input id={`ef-pw-${florist.id}`} name="password" type="text" autoComplete="new-password" /></div>
-            <AvatarUpload name="avatarDataUrl" currentUrl={florist.avatarUrl} label="Аватарка (пусто = без изменений)" />
+            <div className="space-y-1"><Label htmlFor={`ef-pw-${florist.id}`}>Новый пароль</Label><Input id={`ef-pw-${florist.id}`} name="password" type="text" autoComplete="new-password" /></div>
+            <AvatarUpload name="avatarDataUrl" currentUrl={florist.avatarUrl} label="Аватарка" />
           </div>
           <label className="flex items-center gap-2 text-sm text-slate-700">
             <input type="checkbox" name="active" defaultChecked={florist.active} className="h-4 w-4" /> Active

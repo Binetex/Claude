@@ -2039,6 +2039,11 @@ model TelegramSettings {
   ownerChatId       String?
   floristsChatId    String?
   enabled           Boolean   @default(false)
+  /// Кому уходят уведомления. Выключенная аудитория молчит целиком — быстрый способ увести
+  /// весь поток в свой чат, не выключая ботов по одному и не теряя их настройки.
+  notifyOwner           Boolean @default(true)
+  notifyFlorists        Boolean @default(true)
+  notifyCustomerService Boolean @default(true)
   verifiedAt        DateTime?
   botUsername       String? // из getMe — показываем владельцу, что подключён нужный бот
   lastErrorSafe     String? // безопасная причина последней неудачи, без секретов

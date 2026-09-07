@@ -1,6 +1,6 @@
 import "server-only";
 import type { PrismaClient } from "@/generated/prisma/client";
-import { encryptSecret, decryptSecret } from "@/lib/crypto/secretBox";
+import { encryptSecret, decryptSecret, maskEncrypted } from "@/lib/crypto/secretBox";
 
 /**
  * Боты Telegram: один у владельца, по одному у каждого флориста.
@@ -76,6 +76,8 @@ export type BotRow = {
   floristId: string | null;
   floristName: string | null;
   tokenConfigured: boolean;
+  /** Хвост сохранённого токена («********abcd») — по нему владелец узнаёт, какой бот тут стоит. */
+  tokenMask: string | null;
   chatId: string;
   enabled: boolean;
   verifiedAt: string | null;
@@ -96,6 +98,9 @@ export async function listBots(prisma: PrismaClient): Promise<BotRow[]> {
     floristId: b.floristId,
     floristName: b.florist?.user.name ?? null,
     tokenConfigured: !!b.tokenEncrypted,
+    // У TelegramBot нет колонки маски: считаем её здесь. Экран один, ботов единицы, а колонка
+    // осталась бы пустой у всех уже сохранённых токенов — до тех пор, пока их не введут заново.
+    tokenMask: maskEncrypted(b.tokenEncrypted),
     chatId: b.chatId ?? "",
     enabled: b.enabled,
     verifiedAt: b.verifiedAt ? b.verifiedAt.toISOString() : null,

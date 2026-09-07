@@ -1,6 +1,6 @@
 import "server-only";
 import type { PrismaClient } from "@/generated/prisma/client";
-import { encryptSecret, decryptSecret, maskSecret, isCredentialCryptoConfigured } from "@/lib/crypto/secretBox";
+import { encryptSecret, decryptSecret, maskSecret, maskEncrypted, isCredentialCryptoConfigured } from "@/lib/crypto/secretBox";
 import { AirwallexClient, type AirwallexCreds, type AirwallexEnv } from "./client";
 
 /**
@@ -17,6 +17,8 @@ export type AirwallexSettingsView = {
   /** Подтверждённая оплата переводит заказ в магазине в `processing`. */
   pushPaidStatusToWoo: boolean;
   clientIdConfigured: boolean;
+  /** Хвост Client ID — своей колонки маски у него нет, считаем при показе экрана настроек. */
+  clientIdMask: string | null;
   apiKeyConfigured: boolean;
   apiKeyMask: string | null;
   env: AirwallexEnv;
@@ -42,8 +44,10 @@ export async function loadAirwallexSettings(prisma: PrismaClient, siteId: string
     monitoringEnabled: c.airwallexMonitoringEnabled,
     pushPaidStatusToWoo: c.pushPaidStatusToWoo,
     clientIdConfigured: !!c.airwallexApiClientIdEncrypted,
+    clientIdMask: maskEncrypted(c.airwallexApiClientIdEncrypted),
     apiKeyConfigured: !!c.airwallexApiKeyEncrypted,
-    apiKeyMask: c.airwallexApiKeyMask,
+    // Колонка появилась позже самих ключей: у сохранённого до неё маски нет, достаём из шифра.
+    apiKeyMask: c.airwallexApiKeyMask ?? maskEncrypted(c.airwallexApiKeyEncrypted),
     env: c.airwallexApiEnv === "demo" ? "demo" : "prod",
     pendingThresholdMin: c.airwallexPendingThresholdMin,
     verifiedAt: c.airwallexApiVerifiedAt ? c.airwallexApiVerifiedAt.toISOString() : null,

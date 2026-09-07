@@ -17,6 +17,10 @@ vi.mock("@/lib/crypto/secretBox", () => ({
     return m[1];
   },
   isCredentialCryptoConfigured: () => true,
+  maskEncrypted: (c: string | null) => {
+    const m = c && /^enc\((.*)\)$/.exec(c);
+    return m ? `********${m[1].slice(-4)}` : null;
+  },
 }));
 
 import { upsertBot, setBotEnabled, resolveFloristBot, resolveOwnerBot, listBots } from "./bots";
@@ -131,6 +135,8 @@ describe("список для UI", () => {
     many = [{ ...bot({ tokenEncrypted: "enc(секретный-токен)" }), florist: { user: { name: "Наташа" } } }];
     const rows = await listBots(prisma);
     expect(rows[0].tokenConfigured).toBe(true);
+    // Наружу уходит только хвост: по нему владелец узнаёт, какой токен лежит, но не сам токен.
+    expect(rows[0].tokenMask).toBe("********окен");
     expect(JSON.stringify(rows)).not.toContain("секретный-токен");
     expect(JSON.stringify(rows)).not.toContain("enc(");
   });

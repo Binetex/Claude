@@ -3,12 +3,20 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Card, CardBody } from "@/components/ui/Card";
 import { Button } from "@/components/ui/button";
-import { saveBot, removeBotToken, verifyBotAction, toggleBot, toggleGlobal, enableBotRepliesAction, disableBotRepliesAction } from "./actions";
+import { saveBot, removeBotToken, verifyBotAction, toggleBot, toggleGlobal, setAudiences, enableBotRepliesAction, disableBotRepliesAction } from "./actions";
 import type { BotRow, BotPurpose } from "@/integrations/telegram/bots";
 import type { RepliesStatus } from "@/integrations/telegram/replies";
 import type { VerifyResult } from "@/integrations/telegram/verify";
+import { secretTail, secretPlaceholder } from "@/lib/secretHint";
 
 type Florist = { id: string; name: string };
+
+/** Адресаты уведомлений. Порядок как на странице: свой чат первым. */
+const AUDIENCES = [
+  { key: "owner", label: "Мне (владельцу)" },
+  { key: "florists", label: "Флористам" },
+  { key: "customerService", label: "Колл-центру" },
+] as const;
 
 /** Одна карточка бота: владельца или флориста. Флорист может ещё не иметь бота — тогда bot=null. */
 function BotCard({
@@ -53,7 +61,9 @@ function BotCard({
         <span className="text-sm font-medium text-slate-800">{title}</span>
         <span className="text-xs text-slate-400">{subtitle}</span>
         {bot?.tokenConfigured ? (
-          <span className="rounded border border-emerald-200 bg-emerald-50 px-1.5 py-px text-[11px] text-emerald-700">Configured</span>
+          <span className="rounded border border-emerald-200 bg-emerald-50 px-1.5 py-px text-[11px] text-emerald-700">
+            Токен {secretTail(bot.tokenMask) ?? "сохранён"}
+          </span>
         ) : (
           <span className="rounded border border-slate-200 bg-slate-50 px-1.5 py-px text-[11px] text-slate-500">Не настроен</span>
         )}
@@ -77,7 +87,7 @@ function BotCard({
           autoComplete="new-password"
           value={token}
           onChange={(e) => setToken(e.target.value)}
-          placeholder={bot?.tokenConfigured ? "Настроен — пусто = не менять" : "Bot Token"}
+          placeholder={secretPlaceholder(bot?.tokenMask, "Bot Token")}
           className="rounded-md border border-slate-300 px-2 py-1.5 text-sm"
         />
         <input
@@ -189,7 +199,7 @@ export function TelegramBotsPanel({
   replies,
   florists,
 }: {
-  global: { enabled: boolean; cryptoConfigured: boolean };
+  global: { enabled: boolean; cryptoConfigured: boolean; audiences: { owner: boolean; florists: boolean; customerService: boolean } };
   bots: BotRow[];
   replies: Record<string, RepliesStatus>;
   florists: Florist[];
@@ -226,6 +236,43 @@ export function TelegramBotsPanel({
             />
             {global.enabled ? "Уведомления включены" : "Уведомления выключены"}
           </label>
+        </CardBody>
+      </Card>
+
+      <Card>
+        <CardBody className="space-y-2">
+          <div>
+            <h2 className="text-sm font-semibold text-slate-800">Кому приходят уведомления</h2>
+            <p className="text-xs text-slate-500">
+              Снятая галочка — этот адресат не получает ничего, пока вы её не вернёте. Бот остаётся
+              настроенным и проверенным, перенастраивать его не придётся. Черновики ассистента при
+              выключенных флористах приходят вам в любое время суток.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-x-5 gap-y-2">
+            {AUDIENCES.map((a) => (
+              <label key={a.key} className="flex items-center gap-2 text-sm text-slate-700">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4"
+                  checked={global.audiences[a.key]}
+                  disabled={pending}
+                  onChange={(e) =>
+                    start(async () => {
+                      await setAudiences({ ...global.audiences, [a.key]: e.target.checked });
+                      refresh();
+                    })
+                  }
+                />
+                {a.label}
+              </label>
+            ))}
+          </div>
+          {!global.audiences.owner && !global.audiences.florists && !global.audiences.customerService && (
+            <p className="text-xs text-amber-700">
+              Сейчас уведомления не идут никому — включая ваш чат.
+            </p>
+          )}
         </CardBody>
       </Card>
 

@@ -216,6 +216,25 @@ describe("персональные боты флористов", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("аудитория выключена владельцем → флористу не уходит ничего, бот не трогается", async () => {
+    const site = await makeSite();
+    const f = await makeFlorist("Молчим", { chatId: "402" });
+    await makeOwnerBot();
+    const order = await makeOrder(site.id);
+    await prisma.telegramSettings.update({ where: { id: "singleton" }, data: { notifyFlorists: false } });
+
+    try {
+      await expect(handler(rec({ type: "order.assigned", orderId: order.id, floristId: f.id }))).resolves.toBeUndefined();
+      expect(fetchMock).not.toHaveBeenCalled();
+      // Именно ЭТА аудитория: владельцу события в тот же момент по-прежнему уходят.
+      fetchMock.mockResolvedValueOnce(okSend(555));
+      await handler(rec({ type: "order.created", orderId: order.id }));
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    } finally {
+      await prisma.telegramSettings.update({ where: { id: "singleton" }, data: { notifyFlorists: true } });
+    }
+  });
+
   it("повторное событие с тем же текстом → в Telegram не ходим", async () => {
     const site = await makeSite();
     const f = await makeFlorist("Повтор", { chatId: "401" });

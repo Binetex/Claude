@@ -18,3 +18,27 @@ export async function isTelegramGloballyEnabled(prisma: PrismaClient): Promise<b
   if (s) return s.enabled;
   return process.env.TELEGRAM_ENABLED === "true";
 }
+
+/**
+ * Кому сейчас разрешено писать. Выключенная аудитория молчит целиком: событие не уходит, бот
+ * остаётся настроенным и включённым, и вернуть поток — один клик, а не перенастройка ботов.
+ *
+ * Проверка стоит на КАЖДОМ пути отправки, а не внутри резолва бота: тем же резолвом бот
+ * достаётся для проверки токена и включения приёма ответов, и администрирование не должно
+ * упираться в то, что уведомления этой аудитории временно выключены.
+ *
+ * Строки настроек нет — считаем, что можно всем: это состояние «ещё ничего не настраивали», и
+ * молчать в нём значит потерять уведомления там, где владелец их не выключал.
+ */
+export async function loadTelegramAudienceFlags(prisma: PrismaClient): Promise<Record<TelegramAudience, boolean>> {
+  const s = await prisma.telegramSettings.findUnique({ where: { id: "singleton" } }).catch(() => null);
+  return {
+    OWNER: s ? s.notifyOwner : true,
+    FLORIST: s ? s.notifyFlorists : true,
+    CUSTOMER_SERVICE: s ? s.notifyCustomerService : true,
+  };
+}
+
+export async function isTelegramAudienceOn(prisma: PrismaClient, audience: TelegramAudience): Promise<boolean> {
+  return (await loadTelegramAudienceFlags(prisma))[audience];
+}
