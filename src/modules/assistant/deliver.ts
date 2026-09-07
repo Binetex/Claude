@@ -127,7 +127,17 @@ function clip(text: string, limit: number): string {
  * У флориста нет бота — владельцу: черновик, который никто не увидел, это молчание магазина.
  * Возвращает false, если показать некому — тогда черновик остаётся только в карточке заказа.
  */
-export async function notifyDraft(prisma: PrismaClient, turnId: string, now = new Date()): Promise<boolean> {
+export async function notifyDraft(
+  prisma: PrismaClient,
+  turnId: string,
+  now = new Date(),
+  /**
+   * Очередь сообщений, на которую отвечает разбор: человек подтверждает ответ и обязан видеть
+   * ВСЁ, что клиент написал, а не только последнюю реплику. Пусто — обычный случай, одно
+   * сообщение, и берём его из самого разбора.
+   */
+  burst: { text: string; photoUrls: string[] } | null = null
+): Promise<boolean> {
   if (!(await isTelegramGloballyEnabled(prisma))) return false;
   const turn = await prisma.aiTurn.findUnique({
     where: { id: turnId },
@@ -140,7 +150,7 @@ export async function notifyDraft(prisma: PrismaClient, turnId: string, now = ne
   });
   if (!turn) return false;
   // Фото клиента человек обязан увидеть: модель его не видит, и решение — по картинке.
-  const photos = parseAttachments(turn.communication.attachmentsJson).map((a) => a.url);
+  const photos = burst?.photoUrls ?? parseAttachments(turn.communication.attachmentsJson).map((a) => a.url);
 
   // Незнакомый номер идёт только владельцу: флориста у разговора без заказа нет. Сухой прогон —
   // тоже только владельцу: проверяет ассистента он, а флористу пробные черновики с пометкой
@@ -158,7 +168,7 @@ export async function notifyDraft(prisma: PrismaClient, turnId: string, now = ne
   }
   if (!("bot" in lookup)) return false;
 
-  const incoming = escapeHtml(clip(turn.communication.messageText ?? turn.communication.transcript ?? "", 400));
+  const incoming = escapeHtml(clip(burst?.text ?? turn.communication.messageText ?? turn.communication.transcript ?? "", 400));
   const draft = turn.replyText?.trim();
   const head = `${turn.site.aiDryRun ? "🧪 Сухой прогон · " : ""}${turn.important ? "❗ Важное сообщение от клиента" : "Сообщение от клиента"}`;
   // Кто именно написал: у заказа два разговора, и человек должен видеть, кому он отвечает.

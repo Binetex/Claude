@@ -70,16 +70,14 @@ export function buildAssistantHandler(prisma: PrismaClient, deps: AssistantDeps 
       },
     });
     if (!incoming || incoming.direction !== "INBOUND") return;
-    const { body, text, photos } = pickText(incoming);
-    // Просьба позвонить распознаётся и без модели: сигнал людям не должен зависеть от её сбоя.
-    const callRequested = isCallRequest(body);
+    const own = pickText(incoming);
 
     // Разбор уже был: одно входящее — один разбор, повтор обработчика ничего не создаёт.
     // Исключение — звонок: его запись создаётся до расшифровки, и первый разбор честно
     // пропустил пустой текст. Пришла расшифровка — тот разбор снимается, идёт настоящий.
     const existing = await prisma.aiTurn.findUnique({ where: { communicationId: incoming.id }, select: { id: true, status: true, skipReason: true } });
     if (existing) {
-      if (!(existing.status === "SKIPPED" && existing.skipReason === "empty_text" && text)) return;
+      if (!(existing.status === "SKIPPED" && existing.skipReason === "empty_text" && own.text)) return;
       await prisma.aiTurn.delete({ where: { id: existing.id } });
     }
 
@@ -97,6 +95,23 @@ export function buildAssistantHandler(prisma: PrismaClient, deps: AssistantDeps 
     if (!site) return;
 
     const phone = incoming.externalPhoneNormalized;
+
+    // Человек написал очередью: «привезите к 11», через двадцать секунд «звоните в домофон».
+    // Пока шла минутная пауза, те сообщения отложились в пользу этого — забираем их и отвечаем
+    // на ВСЁ разом, одним ответом. Готовить по ответу на каждое предложение незачем: человек
+    // писал одну мысль в три приёма.
+    const deferred = await loadDeferred(prisma, incoming, order?.id ?? null, phone);
+    const body = [...deferred.map((d) => d.body), own.body].filter((t) => t.trim()).join("\n");
+    const text = [...deferred.map((d) => d.text), own.text].filter((t) => t.trim()).join("\n");
+    const photoUrls = [...deferred.flatMap((d) => d.photoUrls), ...parseAttachments(incoming.attachmentsJson).map((a) => a.url)];
+    const photos = photoUrls.length;
+    const answeredIds = [...deferred.map((d) => d.id), incoming.id];
+    // Человек в Telegram подтверждает ответ, поэтому видеть он обязан ВСЮ очередь, а не одну
+    // последнюю реплику: иначе ответ про «11 утра» стоял бы под словами «just buzz the door».
+    const burst = deferred.length ? { text: body, photoUrls } : null;
+
+    // Просьба позвонить распознаётся и без модели: сигнал людям не должен зависеть от её сбоя.
+    const callRequested = isCallRequest(body);
 
     // Просьба позвонить уходит людям ПЕРВЫМ делом — до потолков, тишины после автоматики и
     // прочих правил молчания. Эти правила про «не писать клиенту лишнего», а тут мы никому не
@@ -123,8 +138,8 @@ export function buildAssistantHandler(prisma: PrismaClient, deps: AssistantDeps 
     }
 
     // Человек дописал следующее сообщение, пока шла минутная пауза (`ASSISTANT_DELAY_SEC`):
-    // отвечаем на ПОСЛЕДНЕЕ, а не на каждое по отдельности. Старое никуда не делось — оно в
-    // истории, и ответ на новое учитывает оба. Иначе три реплики подряд давали клиенту три SMS,
+    // это сообщение откладывается, а разбирать очередь будет ПОСЛЕДНЕЕ — оно заберёт отложенные
+    // и ответит на всё разом (см. loadDeferred). Иначе три реплики подряд давали клиенту три SMS,
     // а людям три черновика.
     if (await hasNewerIncoming(prisma, incoming, order?.id ?? null, phone)) {
       await logSkip(prisma, site.id, order?.id ?? null, incoming.id, "superseded");
@@ -173,7 +188,7 @@ export function buildAssistantHandler(prisma: PrismaClient, deps: AssistantDeps 
               },
               select: { id: true },
             });
-            await finishTurn(prisma, turn.id, action, site.aiDryRun);
+            await finishTurn(prisma, turn.id, action, site.aiDryRun, burst);
             return;
           }
         }
@@ -194,7 +209,7 @@ export function buildAssistantHandler(prisma: PrismaClient, deps: AssistantDeps 
     const messages = buildMessages({
       knowledgeBase: order ? site.aiKnowledgeBase : site.aiUnknownKnowledgeBase,
       order: order ? snapshot(order, site.name, incoming.partyRole, clock.dateStr) : null,
-      history: await loadHistory(prisma, order?.id ?? null, phone, incoming.storePhone, incoming, site.timezone),
+      history: await loadHistory(prisma, order?.id ?? null, phone, incoming.storePhone, incoming, site.timezone, answeredIds),
       now: clock,
       globalNote,
       incomingText: text,
@@ -257,7 +272,7 @@ export function buildAssistantHandler(prisma: PrismaClient, deps: AssistantDeps 
         const again = buildMessages({
           knowledgeBase: site.aiKnowledgeBase,
           order: snapshot(found, site.name, incoming.partyRole, clock.dateStr),
-          history: await loadHistory(prisma, found.id, phone, incoming.storePhone, incoming, site.timezone),
+          history: await loadHistory(prisma, found.id, phone, incoming.storePhone, incoming, site.timezone, answeredIds),
           now: clock,
           globalNote,
           incomingText: text,
@@ -332,7 +347,7 @@ export function buildAssistantHandler(prisma: PrismaClient, deps: AssistantDeps 
     if (!callRequested && parsed.intent === "call_request") {
       await notifyCallRequest(prisma, linkedOrder, site, incoming, body, now()).catch(logCallRequestError);
     }
-    await finishTurn(prisma, turn.id, action, site.aiDryRun);
+    await finishTurn(prisma, turn.id, action, site.aiDryRun, burst);
   };
 }
 
@@ -385,20 +400,96 @@ async function notifyCallRequest(
  * оставить его в карточке значит, что клиент не получит ответа вовсе.
  * Сбой показа не должен ронять разбор: черновик уже записан и виден в карточке заказа.
  */
-async function finishTurn(prisma: PrismaClient, turnId: string, action: "send" | "draft", dryRun: boolean): Promise<void> {
+async function finishTurn(
+  prisma: PrismaClient,
+  turnId: string,
+  action: "send" | "draft",
+  dryRun: boolean,
+  /** Очередь сообщений, на которую отвечаем, — её показываем человеку вместо одной реплики. */
+  burst: { text: string; photoUrls: string[] } | null = null
+): Promise<void> {
   try {
     if (action === "send") {
       const res = await sendAssistantReply(prisma, turnId);
       if (res.ok) return;
       console.warn(`[assistant] автоответ ${turnId} не ушёл (${res.code}) — черновик человеку`);
     }
-    const shown = await notifyDraft(prisma, turnId);
+    const shown = await notifyDraft(prisma, turnId, new Date(), burst);
     // Напоминание ставим, только если черновик реально дошёл до человека: иначе «одну минуту»
     // уйдёт клиенту по разбору, которого никто не видел.
     if (shown && !dryRun) await scheduleAssistantNudge(new PrismaOutboxRepository(prisma), turnId, new Date());
   } catch (err) {
     console.error(`[assistant] показ черновика ${turnId} не удался:`, err instanceof Error ? err.message : String(err));
   }
+}
+
+/** Насколько назад собираем очередь сообщений: дальше это уже отдельный разговор. */
+const BURST_WINDOW_MIN = 15;
+
+/**
+ * Сколько сообщений очереди забираем максимум. Что не влезло — не потеряно: модель всё равно
+ * видит эти сообщения в истории переписки, просто отвечаем мы не на них.
+ */
+const BURST_MAX = 10;
+
+/**
+ * Очередь сообщений, отложенных В ПОЛЬЗУ разбираемого: идём от свежих к старым, пока сообщения
+ * откладывались, и останавливаемся на первом УЖЕ РАЗОБРАННОМ. Ниже него очередь закрыта ответом,
+ * и отвечать на те же слова второй раз нельзя: строка `superseded` остаётся в журнале навсегда,
+ * поэтому «всё отложенное за 15 минут» через пять минут притащило бы разобранное заново.
+ *
+ * Вход — от свежих к старым, выход — в том порядке, в котором человек писал.
+ */
+export function takeDeferredQueue<T extends { status: string; skipReason: string | null }>(newestFirst: T[]): T[] {
+  const queue: T[] = [];
+  for (const r of newestFirst) {
+    if (!(r.status === "SKIPPED" && r.skipReason === "superseded")) break;
+    queue.push(r);
+  }
+  return queue.reverse();
+}
+
+/**
+ * Сообщения, которые в этом разговоре отложились В ПОЛЬЗУ разбираемого: каждое из них честно
+ * записало причину `superseded`, и отвечать на них по отдельности мы не собирались.
+ *
+ * Берём именно их, а не «всё, что пришло за N минут»: так граница очереди определяется решением,
+ * которое уже принято и записано, а не догадкой про исходящие. Если ни одного нет — очередь из
+ * одного сообщения, и всё работает как раньше.
+ */
+async function loadDeferred(
+  prisma: PrismaClient,
+  incoming: { id: string; occurredAt: Date; storePhone: string | null },
+  orderId: string | null,
+  phone: string
+): Promise<{ id: string; body: string; text: string; photoUrls: string[] }[]> {
+  const since = new Date(incoming.occurredAt.getTime() - BURST_WINDOW_MIN * 60_000);
+  const rows = await prisma.aiTurn.findMany({
+    where: {
+      // Тот же разговор, что у истории и у проверки «есть ли новее»: заказ И номер, а у
+      // незнакомого номера — его переписка с этим номером магазина. Иначе в очередь попало бы
+      // сообщение того же человека по ДРУГОМУ заказу, и ответ ушёл бы не про тот букет.
+      communication: {
+        externalPhoneNormalized: phone,
+        occurredAt: { gte: since, lt: incoming.occurredAt },
+        ...(orderId ? { orderId } : { orderId: null, ...(incoming.storePhone ? { storePhone: incoming.storePhone } : {}) }),
+      },
+    },
+    orderBy: { communication: { occurredAt: "desc" } },
+    take: BURST_MAX,
+    select: {
+      status: true,
+      skipReason: true,
+      communication: {
+        select: { id: true, messageText: true, transcript: true, summary: true, attachmentsJson: true },
+      },
+    },
+  });
+  return takeDeferredQueue(rows).map((r) => ({
+    id: r.communication.id,
+    ...pickText(r.communication),
+    photoUrls: parseAttachments(r.communication.attachmentsJson).map((a) => a.url),
+  }));
 }
 
 /**
@@ -522,7 +613,7 @@ async function logSkip(prisma: PrismaClient, siteId: string, orderId: string | n
  * заказа; у незнакомого номера — его разговор с этим номером магазина. Неотправленные и
  * упавшие исходящие не показываем: клиент их не видел, и модель не должна считать их сказанными.
  */
-async function loadHistory(prisma: PrismaClient, orderId: string | null, phone: string, storePhone: string | null, incoming: { id: string; occurredAt: Date }, tz: string | null): Promise<HistoryLine[]> {
+async function loadHistory(prisma: PrismaClient, orderId: string | null, phone: string, storePhone: string | null, incoming: { id: string; occurredAt: Date }, tz: string | null, exceptIds: string[] = []): Promise<HistoryLine[]> {
   const rows = await prisma.orderCommunication.findMany({
     where: {
       // ТОЛЬКО переписка с этим номером. У заказа две стороны — заказчик и получатель, и у
@@ -531,7 +622,8 @@ async function loadHistory(prisma: PrismaClient, orderId: string | null, phone: 
       // и вкладки общения в карточке заказа: сторону определяет номер сообщения.
       externalPhoneNormalized: phone,
       ...(orderId ? { orderId } : { orderId: null, ...(storePhone ? { storePhone } : {}) }),
-      id: { not: incoming.id },
+      // Сообщения, на которые отвечаем сейчас, в историю не идут: они и есть новое сообщение.
+      id: { notIn: exceptIds.length ? exceptIds : [incoming.id] },
       // Только то, что было ДО разбираемого сообщения: при повторном разборе старого входящего
       // модель не должна отвечать на него, зная, чем разговор кончился.
       occurredAt: { lte: incoming.occurredAt },
