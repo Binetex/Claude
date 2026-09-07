@@ -235,6 +235,28 @@ describe("персональные боты флористов", () => {
     }
   });
 
+  it("у ассистента свой набор адресатов: заказы идут, ИИ молчит", async () => {
+    const site = await makeSite();
+    const f = await makeFlorist("ИИ-молчим", { chatId: "403" });
+    const order = await makeOrder(site.id);
+    await prisma.telegramSettings.update({ where: { id: "singleton" }, data: { aiNotifyFlorists: false } });
+
+    try {
+      // Уведомление ассистента флористу — выключено отдельной галочкой.
+      await expect(
+        handler(rec({ type: "customer.ready_time_florist", orderId: order.id, floristId: f.id, context: { quote: "around 5pm" } }))
+      ).resolves.toBeUndefined();
+      expect(fetchMock).not.toHaveBeenCalled();
+
+      // А обычное уведомление о заказе тому же флористу тем же ботом уходит.
+      fetchMock.mockResolvedValueOnce(okSend(556));
+      await handler(rec({ type: "order.assigned", orderId: order.id, floristId: f.id }));
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    } finally {
+      await prisma.telegramSettings.update({ where: { id: "singleton" }, data: { aiNotifyFlorists: true } });
+    }
+  });
+
   it("повторное событие с тем же текстом → в Telegram не ходим", async () => {
     const site = await makeSite();
     const f = await makeFlorist("Повтор", { chatId: "401" });

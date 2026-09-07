@@ -14,8 +14,10 @@ const SINGLETON = "singleton";
 export type TelegramGlobalView = {
   enabled: boolean;
   cryptoConfigured: boolean;
-  /** Кому сейчас разрешено писать. Выключенная аудитория молчит целиком. */
+  /** Кому сейчас разрешено писать про заказы, оплаты и доставку. */
   audiences: TelegramAudiences;
+  /** То же для уведомлений ассистента (ИИ) — отдельный набор, выключается отдельно. */
+  aiAudiences: TelegramAudiences;
 };
 
 /** Три адресата уведомлений. Четвёртого в реестре событий нет. */
@@ -32,6 +34,11 @@ export async function loadTelegramGlobalView(prisma: PrismaClient): Promise<Tele
       florists: s ? s.notifyFlorists : true,
       customerService: s ? s.notifyCustomerService : true,
     },
+    aiAudiences: {
+      owner: s ? s.aiNotifyOwner : true,
+      florists: s ? s.aiNotifyFlorists : true,
+      customerService: s ? s.aiNotifyCustomerService : true,
+    },
   };
 }
 
@@ -41,6 +48,19 @@ export async function loadTelegramGlobalView(prisma: PrismaClient): Promise<Tele
  */
 export async function setTelegramAudiences(prisma: PrismaClient, a: TelegramAudiences): Promise<void> {
   const data = { notifyOwner: a.owner, notifyFlorists: a.florists, notifyCustomerService: a.customerService };
+  await prisma.telegramSettings.upsert({
+    where: { id: SINGLETON },
+    create: { id: SINGLETON, enabled: false, ...data },
+    update: data,
+  });
+}
+
+/**
+ * Кому писать про ассистента: черновики ответов клиенту, «клиент назвал время», «клиент просит
+ * позвонить». Отдельно от уведомлений о заказах — их выключают по разным поводам.
+ */
+export async function setTelegramAiAudiences(prisma: PrismaClient, a: TelegramAudiences): Promise<void> {
+  const data = { aiNotifyOwner: a.owner, aiNotifyFlorists: a.florists, aiNotifyCustomerService: a.customerService };
   await prisma.telegramSettings.upsert({
     where: { id: SINGLETON },
     create: { id: SINGLETON, enabled: false, ...data },

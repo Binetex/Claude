@@ -3,7 +3,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Card, CardBody } from "@/components/ui/Card";
 import { Button } from "@/components/ui/button";
-import { saveBot, removeBotToken, verifyBotAction, toggleBot, toggleGlobal, setAudiences, enableBotRepliesAction, disableBotRepliesAction } from "./actions";
+import { saveBot, removeBotToken, verifyBotAction, toggleBot, toggleGlobal, setAudiences, setAiAudiences, enableBotRepliesAction, disableBotRepliesAction } from "./actions";
 import type { BotRow, BotPurpose } from "@/integrations/telegram/bots";
 import type { RepliesStatus } from "@/integrations/telegram/replies";
 import type { VerifyResult } from "@/integrations/telegram/verify";
@@ -17,6 +17,53 @@ const AUDIENCES = [
   { key: "florists", label: "Флористам" },
   { key: "customerService", label: "Колл-центру" },
 ] as const;
+
+type Audiences = { owner: boolean; florists: boolean; customerService: boolean };
+
+/**
+ * Выбор адресатов. Один компонент на оба набора (заказы и ассистент): два набора галочек,
+ * ведущих себя по-разному, читались бы как разные механизмы, хотя это один и тот же выбор.
+ */
+function AudiencePicker({
+  title,
+  hint,
+  value,
+  pending,
+  onChange,
+}: {
+  title: string;
+  hint: string;
+  value: Audiences;
+  pending: boolean;
+  onChange: (next: Audiences) => void;
+}) {
+  const silent = !value.owner && !value.florists && !value.customerService;
+  return (
+    <Card>
+      <CardBody className="space-y-2">
+        <div>
+          <h2 className="text-sm font-semibold text-slate-800">{title}</h2>
+          <p className="text-xs text-slate-500">{hint}</p>
+        </div>
+        <div className="flex flex-wrap gap-x-5 gap-y-2">
+          {AUDIENCES.map((a) => (
+            <label key={a.key} className="flex items-center gap-2 text-sm text-slate-700">
+              <input
+                type="checkbox"
+                className="h-4 w-4"
+                checked={value[a.key]}
+                disabled={pending}
+                onChange={(e) => onChange({ ...value, [a.key]: e.target.checked })}
+              />
+              {a.label}
+            </label>
+          ))}
+        </div>
+        {silent && <p className="text-xs text-amber-700">Сейчас эти уведомления не идут никому — включая ваш чат.</p>}
+      </CardBody>
+    </Card>
+  );
+}
 
 /** Одна карточка бота: владельца или флориста. Флорист может ещё не иметь бота — тогда bot=null. */
 function BotCard({
@@ -199,7 +246,12 @@ export function TelegramBotsPanel({
   replies,
   florists,
 }: {
-  global: { enabled: boolean; cryptoConfigured: boolean; audiences: { owner: boolean; florists: boolean; customerService: boolean } };
+  global: {
+    enabled: boolean;
+    cryptoConfigured: boolean;
+    audiences: { owner: boolean; florists: boolean; customerService: boolean };
+    aiAudiences: { owner: boolean; florists: boolean; customerService: boolean };
+  };
   bots: BotRow[];
   replies: Record<string, RepliesStatus>;
   florists: Florist[];
@@ -239,42 +291,21 @@ export function TelegramBotsPanel({
         </CardBody>
       </Card>
 
-      <Card>
-        <CardBody className="space-y-2">
-          <div>
-            <h2 className="text-sm font-semibold text-slate-800">Кому приходят уведомления</h2>
-            <p className="text-xs text-slate-500">
-              Снятая галочка — этот адресат не получает ничего, пока вы её не вернёте. Бот остаётся
-              настроенным и проверенным, перенастраивать его не придётся. Черновики ассистента при
-              выключенных флористах приходят вам в любое время суток.
-            </p>
-          </div>
-          <div className="flex flex-wrap gap-x-5 gap-y-2">
-            {AUDIENCES.map((a) => (
-              <label key={a.key} className="flex items-center gap-2 text-sm text-slate-700">
-                <input
-                  type="checkbox"
-                  className="h-4 w-4"
-                  checked={global.audiences[a.key]}
-                  disabled={pending}
-                  onChange={(e) =>
-                    start(async () => {
-                      await setAudiences({ ...global.audiences, [a.key]: e.target.checked });
-                      refresh();
-                    })
-                  }
-                />
-                {a.label}
-              </label>
-            ))}
-          </div>
-          {!global.audiences.owner && !global.audiences.florists && !global.audiences.customerService && (
-            <p className="text-xs text-amber-700">
-              Сейчас уведомления не идут никому — включая ваш чат.
-            </p>
-          )}
-        </CardBody>
-      </Card>
+      <AudiencePicker
+        title="Кому приходят уведомления о заказах"
+        hint="Новые заказы, назначения флористам, оплаты, доставка, задачи колл-центру. Снятая галочка — этот адресат не получает ничего, пока вы её не вернёте: бот остаётся настроенным и проверенным, перенастраивать его не придётся."
+        value={global.audiences}
+        pending={pending}
+        onChange={(next) => start(async () => { await setAudiences(next); refresh(); })}
+      />
+
+      <AudiencePicker
+        title="Кому приходят уведомления ассистента (ИИ)"
+        hint="Всё, что делает ассистент: черновики ответов клиенту с кнопкой «Отправить», «клиент назвал время», «клиент просит позвонить». Выключается отдельно от уведомлений о заказах — ИИ можно погасить, не теряя остальное. При выключенных флористах черновики приходят вам в любое время суток."
+        value={global.aiAudiences}
+        pending={pending}
+        onChange={(next) => start(async () => { await setAiAudiences(next); refresh(); })}
+      />
 
       <Card>
         <CardBody className="p-0">

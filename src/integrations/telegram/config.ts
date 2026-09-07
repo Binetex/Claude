@@ -30,15 +30,28 @@ export async function isTelegramGloballyEnabled(prisma: PrismaClient): Promise<b
  * Строки настроек нет — считаем, что можно всем: это состояние «ещё ничего не настраивали», и
  * молчать в нём значит потерять уведомления там, где владелец их не выключал.
  */
-export async function loadTelegramAudienceFlags(prisma: PrismaClient): Promise<Record<TelegramAudience, boolean>> {
+/**
+ * Какой поток уведомлений настраиваем. Наборов адресатов два, потому что и выключают их по
+ * разным причинам: «пока не пишем флористам про заказы» и «пока не показываем ответы ассистента»
+ * — разные решения, и одно не должно гасить другое.
+ */
+export type TelegramAudienceScope = "SYSTEM" | "ASSISTANT";
+
+export async function loadTelegramAudienceFlags(
+  prisma: PrismaClient,
+  scope: TelegramAudienceScope = "SYSTEM"
+): Promise<Record<TelegramAudience, boolean>> {
   const s = await prisma.telegramSettings.findUnique({ where: { id: "singleton" } }).catch(() => null);
-  return {
-    OWNER: s ? s.notifyOwner : true,
-    FLORIST: s ? s.notifyFlorists : true,
-    CUSTOMER_SERVICE: s ? s.notifyCustomerService : true,
-  };
+  if (!s) return { OWNER: true, FLORIST: true, CUSTOMER_SERVICE: true };
+  return scope === "ASSISTANT"
+    ? { OWNER: s.aiNotifyOwner, FLORIST: s.aiNotifyFlorists, CUSTOMER_SERVICE: s.aiNotifyCustomerService }
+    : { OWNER: s.notifyOwner, FLORIST: s.notifyFlorists, CUSTOMER_SERVICE: s.notifyCustomerService };
 }
 
-export async function isTelegramAudienceOn(prisma: PrismaClient, audience: TelegramAudience): Promise<boolean> {
-  return (await loadTelegramAudienceFlags(prisma))[audience];
+export async function isTelegramAudienceOn(
+  prisma: PrismaClient,
+  audience: TelegramAudience,
+  scope: TelegramAudienceScope = "SYSTEM"
+): Promise<boolean> {
+  return (await loadTelegramAudienceFlags(prisma, scope))[audience];
 }

@@ -61,9 +61,10 @@ export function buildTelegramNotifyHandler(prisma: PrismaClient): OutboxHandler 
 
     // Аудитория выключена владельцем («пока не пишем флористам»): молчим целиком, включая
     // правку уже отправленного сообщения — иначе выключенный адресат всё равно получал бы
-    // обновления по своим старым карточкам.
-    if (!(await isTelegramAudienceOn(prisma, def.audience))) {
-      console.info(`[telegram] ${p.type} пропущено: уведомления для ${def.audience} выключены`);
+    // обновления по своим старым карточкам. У событий ассистента свой набор адресатов.
+    const scope = def.fromAssistant ? "ASSISTANT" : "SYSTEM";
+    if (!(await isTelegramAudienceOn(prisma, def.audience, scope))) {
+      console.info(`[telegram] ${p.type} пропущено: уведомления ${def.fromAssistant ? "ассистента " : ""}для ${def.audience} выключены`);
       return;
     }
 

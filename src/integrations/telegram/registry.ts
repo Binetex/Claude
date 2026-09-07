@@ -43,6 +43,11 @@ export type DedupeContext = {
 export type TelegramEventDef = {
   type: TelegramEventType;
   audience: TelegramAudience;
+  /**
+   * Событие породил ассистент (ИИ), а не сам заказ. У таких свой набор адресатов в настройках:
+   * ИИ-поток выключают отдельно от уведомлений о заказах, оплатах и доставке.
+   */
+  fromAssistant?: boolean;
   /** Требует ли событие конкретного флориста (и, значит, его персонального бота). */
   perFlorist: boolean;
   dedupeKey: (ctx: DedupeContext) => string;
@@ -144,6 +149,7 @@ const REGISTRY: Record<TelegramEventType, TelegramEventDef> = {
   // публикации): назвал время дважды — два уведомления, а не правка первого.
   "customer.ready_time": {
     type: "customer.ready_time",
+    fromAssistant: true,
     audience: "OWNER",
     perFlorist: false,
     dedupeKey: ({ orderId, occurrence }) => `order:${orderId}:owner.ready_time:${occurrence ?? "-"}`,
@@ -151,6 +157,7 @@ const REGISTRY: Record<TelegramEventType, TelegramEventDef> = {
   },
   "customer.ready_time_florist": {
     type: "customer.ready_time_florist",
+    fromAssistant: true,
     audience: "FLORIST",
     perFlorist: true,
     dedupeKey: ({ orderId, floristId, occurrence }) => `order:${orderId}:florist:${floristId}:ready_time:${occurrence ?? "-"}`,
@@ -160,6 +167,7 @@ const REGISTRY: Record<TelegramEventType, TelegramEventDef> = {
   // свободен, тот и звонит. Каждая просьба — новое сообщение, а не правка прошлого.
   "customer.call_request": {
     type: "customer.call_request",
+    fromAssistant: true,
     audience: "OWNER",
     perFlorist: false,
     dedupeKey: ({ orderId, occurrence }) => `order:${orderId}:owner.call_request:${occurrence ?? "-"}`,
@@ -167,6 +175,7 @@ const REGISTRY: Record<TelegramEventType, TelegramEventDef> = {
   },
   "customer.call_request_cc": {
     type: "customer.call_request_cc",
+    fromAssistant: true,
     audience: "CUSTOMER_SERVICE",
     perFlorist: false,
     dedupeKey: ({ orderId, occurrence }) => `order:${orderId}:cs.call_request:${occurrence ?? "-"}`,

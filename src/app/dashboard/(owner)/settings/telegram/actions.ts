@@ -4,7 +4,7 @@ import { requireRole } from "@/lib/rbac";
 import { prisma } from "@/lib/db";
 import { enableReplies, disableReplies } from "@/integrations/telegram/replies";
 import { upsertBot, deleteBotToken, setBotEnabled, type BotPurpose } from "@/integrations/telegram/bots";
-import { setTelegramGlobalEnabled, setTelegramAudiences, type TelegramAudiences } from "@/integrations/telegram/settings";
+import { setTelegramGlobalEnabled, setTelegramAudiences, setTelegramAiAudiences, type TelegramAudiences } from "@/integrations/telegram/settings";
 import { verifyBot, type VerifyResult } from "@/integrations/telegram/verify";
 
 export type ActionResult = { ok?: true; message?: string; error?: string };
@@ -85,8 +85,20 @@ export async function setAudiences(a: TelegramAudiences): Promise<ActionResult> 
   await requireRole("OWNER");
   await setTelegramAudiences(prisma, a);
   revalidatePath(PATH);
+  return { ok: true, message: whoGets("Уведомления", a) };
+}
+
+/** Тот же выбор, но для уведомлений ассистента: их гасят отдельно от уведомлений о заказах. */
+export async function setAiAudiences(a: TelegramAudiences): Promise<ActionResult> {
+  await requireRole("OWNER");
+  await setTelegramAiAudiences(prisma, a);
+  revalidatePath(PATH);
+  return { ok: true, message: whoGets("Уведомления ассистента", a) };
+}
+
+function whoGets(what: string, a: TelegramAudiences): string {
   const on = [a.owner && "вам", a.florists && "флористам", a.customerService && "колл-центру"].filter(Boolean);
-  return { ok: true, message: on.length ? `Уведомления идут: ${on.join(", ")}.` : "Уведомления не идут никому." };
+  return on.length ? `${what} идут: ${on.join(", ")}.` : `${what} не идут никому.`;
 }
 
 /**

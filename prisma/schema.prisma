@@ -2044,6 +2044,12 @@ model TelegramSettings {
   notifyOwner           Boolean @default(true)
   notifyFlorists        Boolean @default(true)
   notifyCustomerService Boolean @default(true)
+  /// То же самое, но для уведомлений АССИСТЕНТА (ИИ): черновики ответов клиенту, «клиент назвал
+  /// время», «клиент просит позвонить». Отдельный набор, потому что выключают их по отдельной
+  /// причине: ИИ-поток можно погасить, оставив уведомления о заказах, оплатах и доставке.
+  aiNotifyOwner           Boolean @default(true)
+  aiNotifyFlorists        Boolean @default(true)
+  aiNotifyCustomerService Boolean @default(true)
   verifiedAt        DateTime?
   botUsername       String? // из getMe — показываем владельцу, что подключён нужный бот
   lastErrorSafe     String? // безопасная причина последней неудачи, без секретов

@@ -183,7 +183,7 @@ export async function notifyDraft(
   // «клиенту не уйдёт» только мешают.
   // Флористы выключены владельцем — черновик идёт ему самому, как при отсутствии бота: у
   // разговора всё равно должен быть живой адресат, иначе клиент останется без ответа.
-  const audiences = await loadTelegramAudienceFlags(prisma);
+  const audiences = await loadTelegramAudienceFlags(prisma, "ASSISTANT");
   let who = turn.order && !turn.site.aiDryRun
     ? pickRecipient({ storeHour: storeHour(turn.order.site?.timezone, now), hasFlorist: audiences.FLORIST && !!turn.order.currentFloristId })
     : "OWNER";
@@ -271,7 +271,7 @@ export async function notifyOwnerText(prisma: PrismaClient, text: string): Promi
 /** Тот же прямой сигнал, но в выбранный служебный бот: владельцу или колл-центру. */
 export async function notifyBotText(prisma: PrismaClient, who: "OWNER" | "CUSTOMER_SERVICE", text: string): Promise<boolean> {
   if (!(await isTelegramGloballyEnabled(prisma))) return false;
-  if (!(await isTelegramAudienceOn(prisma, who))) return false;
+  if (!(await isTelegramAudienceOn(prisma, who, "ASSISTANT"))) return false;
   const lookup = who === "OWNER" ? await resolveOwnerBot(prisma) : await resolveCustomerServiceBot(prisma);
   if (!("bot" in lookup)) return false;
   const res = await new TelegramSender(lookup.bot.token).sendMessage(lookup.bot.chatId, text).catch(() => null);

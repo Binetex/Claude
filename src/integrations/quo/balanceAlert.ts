@@ -16,9 +16,15 @@ import { resolveOwnerBot } from "@/integrations/telegram/bots";
 import { isTelegramGloballyEnabled, isTelegramAudienceOn } from "@/integrations/telegram/config";
 import { TelegramSender } from "@/integrations/telegram/sender";
 
-/** Ответ QUO «нет денег»: 402 Payment Required. */
+/**
+ * Ответ QUO «нет денег»: 402 Payment Required.
+ *
+ * Два формата записи, потому что поле кода провайдера появилось позже самих отказов: новый
+ * «402:0201402» и прежний «client:402». Старые записи обязаны читаться — иначе полоса в админке
+ * зажглась бы только после СЛЕДУЮЩЕГО отказа, то есть ровно тогда, когда она уже не новость.
+ */
 export function isQuoOutOfMoney(detail: string | null | undefined): boolean {
-  return (detail ?? "").startsWith("402");
+  return /(^|:)402(:|$)/.test(detail ?? "");
 }
 
 /** Сколько последних исходящих смотрим: дальше это уже история, а не текущее состояние. */
@@ -56,11 +62,15 @@ export async function loadQuoBalanceAlert(prisma: PrismaClient, now: Date = new 
   return null;
 }
 
-/** Код провайдера из записи об отправке: его кладёт `send.ts` в момент отказа. */
+/**
+ * Код отказа из записи об отправке. `providerCode` кладёт `send.ts` с 07.09.2026, `error` лежал
+ * там и раньше — по нему читаются отказы, случившиеся до появления нового поля.
+ */
 function providerCodeOf(raw: unknown): string | null {
   if (!raw || typeof raw !== "object") return null;
-  const v = (raw as Record<string, unknown>).providerCode;
-  return typeof v === "string" ? v : null;
+  const r = raw as Record<string, unknown>;
+  const code = typeof r.providerCode === "string" ? r.providerCode : null;
+  return code ?? (typeof r.error === "string" ? r.error : null);
 }
 
 /**

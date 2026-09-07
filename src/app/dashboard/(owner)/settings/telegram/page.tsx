@@ -30,13 +30,22 @@ export default async function TelegramSettingsPage() {
   // Состояние приёма спрашиваем у Telegram, а не у своей БД: см. integrations/telegram/replies.ts.
   const replies = await getRepliesStatusMap(prisma, bots.filter((b) => b.tokenConfigured).map((b) => b.id));
   // Рядом с каждым событием видно, дойдёт ли оно сейчас: иначе настройка «кому писать» выше
-  // выглядит как галочка без последствий, и непонятно, что именно она гасит.
-  const audienceOn: Record<string, boolean> = {
-    OWNER: global.audiences.owner,
-    FLORIST: global.audiences.florists,
-    CUSTOMER_SERVICE: global.audiences.customerService,
-  };
-  const events = listTelegramEvents().map((e) => ({ type: e.type, audience: e.audience, description: e.description }));
+  // выглядит как галочка без последствий, и непонятно, что именно она гасит. Наборов два —
+  // события ассистента смотрят на свой.
+  const flags = (a: { owner: boolean; florists: boolean; customerService: boolean }): Record<string, boolean> => ({
+    OWNER: a.owner,
+    FLORIST: a.florists,
+    CUSTOMER_SERVICE: a.customerService,
+  });
+  const systemOn = flags(global.audiences);
+  const aiOn = flags(global.aiAudiences);
+  const events = listTelegramEvents().map((e) => ({
+    type: e.type,
+    audience: e.audience,
+    description: e.description,
+    fromAssistant: !!e.fromAssistant,
+    on: (e.fromAssistant ? aiOn : systemOn)[e.audience],
+  }));
 
   return (
     <div className="mx-auto max-w-4xl space-y-4">
@@ -60,13 +69,16 @@ export default async function TelegramSettingsPage() {
           <h2 className="text-sm font-semibold text-slate-800">Какие события отправляются</h2>
           <ul className="space-y-1 text-xs text-slate-600">
             {events.map((e) => (
-              <li key={e.type} className={`flex gap-2 ${audienceOn[e.audience] ? "" : "opacity-50"}`}>
+              <li key={e.type} className={`flex gap-2 ${e.on ? "" : "opacity-50"}`}>
                 <span className={`shrink-0 rounded border px-1.5 py-px text-[11px] ${AUDIENCE_META[e.audience].className}`}>
                   {AUDIENCE_META[e.audience].label}
                 </span>
                 <span>
+                  {e.fromAssistant && (
+                    <span className="mr-1 rounded border border-violet-200 bg-violet-50 px-1 py-px text-[11px] text-violet-700">ИИ</span>
+                  )}
                   <code className="rounded bg-slate-100 px-1">{e.type}</code> — {e.description}
-                  {!audienceOn[e.audience] && <span className="text-amber-700"> Сейчас не отправляется.</span>}
+                  {!e.on && <span className="text-amber-700"> Сейчас не отправляется.</span>}
                 </span>
               </li>
             ))}
