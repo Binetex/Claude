@@ -2,10 +2,11 @@ import { describe, it, expect } from "vitest";
 import { describeSendFailure } from "./smsFailure";
 
 describe("describeSendFailure", () => {
-  it("402 объясняет, что делать: оплатить аккаунт Quo", () => {
+  it("402 объясняет, что делать: пополнить баланс QUO", () => {
     // Ровно этот случай владелец увидел в Telegram как голое «quo_client».
     const text = describeSendFailure("quo_client", "402:0201402");
-    expect(text).toContain("подписка истекла");
+    expect(text).toContain("закончились деньги");
+    expect(text).toContain("Пополните баланс");
     expect(text).toContain("402:0201402");
   });
 

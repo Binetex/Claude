@@ -10,6 +10,7 @@ import { BulkFillCompositions } from "./BulkFillCompositions";
 import { PurchaseListBlock } from "@/components/PurchaseListBlock";
 import { purchaseDayFor } from "@/modules/purchase/list";
 import { NoCouriersBanner } from "@/components/orders/NoCouriersBanner";
+import { QuoBalanceBanner } from "@/components/QuoBalanceBanner";
 import Link from "next/link";
 import { Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -84,6 +85,8 @@ export default async function OwnerOrdersPage({
 
       {/* Снаружи карточки заказа: узнать про отсутствие курьеров надо ДО того,
           как зайти в заказ. Молчит, когда всё в порядке. */}
+      {/* Пустой баланс QUO молчит громче всего: переписка с клиентами просто прекращается. */}
+      <QuoBalanceBanner />
       <NoCouriersBanner hrefBase="/dashboard/orders" />
 
       <PurchaseListBlock day={purchaseDayFor(filters.preset)} />

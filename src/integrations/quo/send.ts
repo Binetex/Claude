@@ -14,6 +14,7 @@ import { QuoApiError } from "./errors";
 import { toE164 } from "@/lib/phone";
 import { maskPhone, quoLog } from "./logging";
 import { isP2002 } from "@/lib/prismaErrors";
+import { isQuoOutOfMoney, alertQuoOutOfMoney } from "./balanceAlert";
 
 export const SMS_MAX_LENGTH = 1600;
 export type SendTarget = "CUSTOMER" | "RECIPIENT";
@@ -94,6 +95,9 @@ export async function sendOrderSms(prisma: PrismaClient, client: QuoClient | nul
     const detail = providerDetail(err);
     await prisma.orderCommunication.update({ where: { id: pendingId }, data: { status: "FAILED", rawMetadata: { error: safeCode, providerCode: detail ?? null } } });
     quoLog("sms.failed", { communicationId: pendingId, target: input.target, phone: maskPhone(e164), errorCode: safeCode, providerCode: detail });
+    // Пустой баланс QUO останавливает ВСЕ SMS магазина, а не одно сообщение: владелец должен
+    // узнать об этом сразу, а не из журнала через неделю.
+    if (isQuoOutOfMoney(detail)) await alertQuoOutOfMoney(prisma);
     return { ok: false, code: `quo_${kind}`, communicationId: pendingId, detail };
   }
 }
@@ -176,6 +180,7 @@ export async function sendUnlinkedSms(prisma: PrismaClient, client: QuoClient | 
     const detail = providerDetail(err);
     await prisma.orderCommunication.update({ where: { id: pendingId }, data: { status: "FAILED", rawMetadata: { error: safeCode, providerCode: detail ?? null } } });
     quoLog("sms.failed", { communicationId: pendingId, target: "UNKNOWN", phone: maskPhone(e164), errorCode: safeCode, providerCode: detail });
+    if (isQuoOutOfMoney(detail)) await alertQuoOutOfMoney(prisma);
     return { ok: false, code: `quo_${kind}`, communicationId: pendingId, detail };
   }
 }
