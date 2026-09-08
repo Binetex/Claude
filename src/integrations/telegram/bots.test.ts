@@ -63,10 +63,18 @@ describe("сохранение бота", () => {
     expect(lastUpdate!.tokenEncrypted).toBe("enc(999:BB)");
   });
 
-  it("смена чата сбрасывает проверку и выключает бота", async () => {
+  it("смена чата сбрасывает проверку, но не выключает бота", async () => {
+    // Галочка «включён» — решение владельца, и правка опечатки в Chat ID не должна молча
+    // отключать флориста от заказов. Отправку до проверки держит `not_verified` в toResolved.
     unique = bot();
     await upsertBot(prisma, { purpose: "FLORIST", floristId: "f1", label: "Наташа", token: "", chatId: "777" });
-    expect(lastUpdate).toMatchObject({ verifiedAt: null, enabled: false });
+    expect(lastUpdate).toMatchObject({ verifiedAt: null });
+    expect(lastUpdate).not.toHaveProperty("enabled");
+  });
+
+  it("непроверенный бот не отправляет, даже если включён", async () => {
+    unique = bot({ verifiedAt: null });
+    expect(await resolveFloristBot(prisma, "f1")).toEqual({ skip: "not_verified" });
   });
 
   it("сохранение без изменений проверку не сбрасывает", async () => {

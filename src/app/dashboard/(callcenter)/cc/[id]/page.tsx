@@ -28,6 +28,7 @@ import { OrderStatusBadge } from "@/components/StatusBadge";
 import { FloristAvatar } from "@/components/FloristAvatar";
 import { MARKETING_MARK_META } from "@/lib/marketingMark";
 import { BouquetPhotoButton } from "@/components/orders/BouquetPhotoButton";
+import { backToList } from "@/lib/backLink";
 
 export const dynamic = "force-dynamic";
 
@@ -39,8 +40,16 @@ export const dynamic = "force-dynamic";
  * действий: цен нет вовсе (их нет и в сериализации), назначенный флорист — справочная
  * подпись в шапке, переназначение и цена остаются владельцу.
  */
-export default async function CallCenterOrderPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function CallCenterOrderPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  /** `back` несёт запрос списка, из которого пришли: возврат обязан вести в ту же выборку. */
+  searchParams: Promise<{ back?: string }>;
+}) {
   const { id } = await params;
+  const backHref = backToList("/dashboard/cc", (await searchParams).back);
   const order = await getForCallCenter(id);
   if (!order) notFound();
 
@@ -49,7 +58,7 @@ export default async function CallCenterOrderPage({ params }: { params: Promise<
 
   return (
     <OrderPageShell
-      backHref="/dashboard/cc"
+      backHref={backHref}
       backLabel="Все заказы"
       orderNumber={order.orderNumber}
       siteName={order.site.name}

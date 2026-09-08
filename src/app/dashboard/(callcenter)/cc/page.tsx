@@ -3,6 +3,7 @@ import { listForCallCenter, countOrders, type OrderFilters } from "@/modules/ord
 import { prisma } from "@/lib/db";
 import { OrderFiltersBar } from "@/app/dashboard/(owner)/orders/OrderFiltersBar";
 import { OrdersTable } from "@/app/dashboard/(owner)/orders/OrdersTable";
+import { listQuery } from "@/lib/backLink";
 import { OrdersNavProvider, OrdersPendingArea } from "@/app/dashboard/(owner)/orders/OrdersNav";
 import { OrdersPager } from "@/app/dashboard/(owner)/orders/OrdersPager";
 import { resolvePaging, outOfRangePageUrl } from "@/app/dashboard/(owner)/orders/paging";
@@ -69,6 +70,7 @@ export default async function CallCenterOrders({
               orders={orders}
               hideFinance
               hrefBase={BASE_PATH}
+              backQuery={listQuery(sp)}
               groupByDay={filters.preset === "all"}
             />
             <OrdersPager page={page} perPage={perPage} total={total} basePath={BASE_PATH} />

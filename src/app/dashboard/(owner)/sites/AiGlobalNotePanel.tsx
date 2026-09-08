@@ -26,6 +26,7 @@ export function AiGlobalNotePanel({
 }) {
   const [text, setText] = useState(initial.text ?? "");
   const [until, setUntil] = useState(initial.activeUntil ?? "");
+  const [confirmClear, setConfirmClear] = useState(false);
   const [pending, start] = useTransition();
 
   const dirty = text.trim() !== (initial.text ?? "").trim() || until !== (initial.activeUntil ?? "");
@@ -87,19 +88,33 @@ export function AiGlobalNotePanel({
           <Button size="sm" disabled={pending || !dirty} onClick={() => save(text, until)}>
             {pending ? "Сохранение…" : "Сохранить"}
           </Button>
+          {/* Снятие бьёт сразу по ВСЕМ магазинам, и прошлый текст не восстанавливается: истории у
+              правила нет. Поэтому шаг подтверждения — тот же приём, что у удаления токена бота. */}
           {initial.text && (
-            <Button
-              size="sm"
-              variant="ghost"
-              disabled={pending}
-              onClick={() => {
-                setText("");
-                setUntil("");
-                save("", "");
-              }}
-            >
-              Снять правило
-            </Button>
+            confirmClear ? (
+              <>
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  disabled={pending}
+                  onClick={() => {
+                    setConfirmClear(false);
+                    setText("");
+                    setUntil("");
+                    save("", "");
+                  }}
+                >
+                  Снять со всех магазинов?
+                </Button>
+                <Button size="sm" variant="ghost" disabled={pending} onClick={() => setConfirmClear(false)}>
+                  Отмена
+                </Button>
+              </>
+            ) : (
+              <Button size="sm" variant="ghost" disabled={pending} onClick={() => setConfirmClear(true)}>
+                Снять правило
+              </Button>
+            )
           )}
           {initial.updatedAt && (
             <span className="text-[11px] text-slate-400">изменено {new Date(initial.updatedAt).toLocaleString("ru-RU")}</span>

@@ -90,7 +90,10 @@ export default async function FinanceDashboardPage({
     }),
   ]);
 
-  const delta = deltaLabel(selected.ownerNetCents, previous.ownerNetCents);
+  // Месяц, в котором не посчитан ни один день, сравнивать не с чем: «−100%» красным означал бы
+  // падение прибыли, хотя данных просто нет. Ключ — `readyDays`, а не число дней: бывает месяц,
+  // где заказы есть, но ни один день не досчитан, и зелёный ноль там врёт сильнее всего.
+  const delta = selected.readyDays === 0 ? null : deltaLabel(selected.ownerNetCents, previous.ownerNetCents);
 
   return (
     <div className="space-y-4">
@@ -119,7 +122,7 @@ export default async function FinanceDashboardPage({
             />
             <StatCard
               label="Моя прибыль"
-              tone={selected.ownerNetCents < 0 ? "danger" : "success"}
+              tone={selected.readyDays === 0 ? "default" : selected.ownerNetCents < 0 ? "danger" : "success"}
               value={
                 <WithShare cents={selected.ownerNetCents} revenueCents={selected.revenueCents}>
                   {delta && (

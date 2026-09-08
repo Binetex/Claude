@@ -61,7 +61,7 @@ export async function loadAirwallexSettings(prisma: PrismaClient, siteId: string
 export async function resolveAirwallexCreds(prisma: PrismaClient, siteId: string): Promise<AirwallexCreds | null> {
   const c = await prisma.wooCommerceConnection.findUnique({
     where: { siteId },
-    select: { airwallexApiClientIdEncrypted: true, airwallexApiKeyEncrypted: true, airwallexApiEnv: true },
+    select: { airwallexApiClientIdEncrypted: true, airwallexApiKeyEncrypted: true, airwallexApiEnv: true, airwallexMonitoringEnabled: true },
   });
   if (!c?.airwallexApiClientIdEncrypted || !c.airwallexApiKeyEncrypted) return null;
   try {
@@ -82,10 +82,18 @@ export type SaveInput = {
   pendingThresholdMin?: number;
 };
 
-export async function saveAirwallexSettings(prisma: PrismaClient, siteId: string, input: SaveInput): Promise<{ ok: true } | { error: string }> {
+export async function saveAirwallexSettings(
+  prisma: PrismaClient,
+  siteId: string,
+  input: SaveInput
+): Promise<{ ok: true; monitoringTurnedOff: boolean } | { error: string }> {
   const cur = await prisma.wooCommerceConnection.findUnique({
     where: { siteId },
-    select: { airwallexApiClientIdEncrypted: true, airwallexApiKeyEncrypted: true, airwallexApiEnv: true },
+    select: {
+      airwallexApiClientIdEncrypted: true, airwallexApiKeyEncrypted: true, airwallexApiEnv: true,
+      // Нужен, чтобы сказать человеку, что мониторинг именно ВЫКЛЮЧИЛСЯ, а не «и так был выключен».
+      airwallexMonitoringEnabled: true,
+    },
   });
   if (!cur) return { error: "WooCommerce не подключён для этого сайта." };
 
@@ -107,7 +115,9 @@ export async function saveAirwallexSettings(prisma: PrismaClient, siteId: string
       ...(credChanged ? { airwallexApiVerifiedAt: null, airwallexMonitoringEnabled: false, airwallexApiConnStatus: null, airwallexApiErrorSafe: null } : {}),
     },
   });
-  return { ok: true };
+  // Говорим вызывающему, что именно случилось: мониторинг выключен, и человеку это надо сказать
+  // словами. Тихое выключение владелец обнаруживал только по неподтверждённым оплатам.
+  return { ok: true, monitoringTurnedOff: credChanged && cur.airwallexMonitoringEnabled };
 }
 
 export type VerifyOutcome = { ok: boolean; message: string };

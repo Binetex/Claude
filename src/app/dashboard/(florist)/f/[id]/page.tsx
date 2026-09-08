@@ -30,6 +30,7 @@ import { OrderFinanceBreakdown } from "@/components/orders/OrderFinanceBreakdown
 import { OrderStatusBadge } from "@/components/StatusBadge";
 import { recipientMapsUrl, recipientAddressLines } from "@/components/orders/address";
 import { BouquetPhotoButton } from "@/components/orders/BouquetPhotoButton";
+import { backToList } from "@/lib/backLink";
 
 export const dynamic = "force-dynamic";
 
@@ -45,8 +46,16 @@ export const dynamic = "force-dynamic";
  * действия — общие компоненты, те же самые у владельца и колл-центра (см. OrderPageShell и
  * соседние в components/orders). Роль задаёт только НАБОР данных и действий.
  */
-export default async function FloristOrderPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function FloristOrderPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  /** `back` несёт запрос списка, из которого пришли: возврат обязан вести в ту же выборку. */
+  searchParams: Promise<{ back?: string }>;
+}) {
   const { id } = await params;
+  const backHref = backToList("/dashboard/f", (await searchParams).back);
   const user = await requireFlorist();
   const order = await getForFlorist(id, user.floristId);
   if (!order) notFound();
@@ -60,7 +69,7 @@ export default async function FloristOrderPage({ params }: { params: Promise<{ i
 
   return (
     <OrderPageShell
-      backHref="/dashboard/f"
+      backHref={backHref}
       backLabel="Мои заказы"
       orderNumber={order.orderNumber}
       siteName={order.site.name}

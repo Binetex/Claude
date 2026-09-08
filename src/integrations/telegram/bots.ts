@@ -15,14 +15,18 @@ export type BotPurpose = "OWNER" | "FLORIST" | "CUSTOMER_SERVICE";
 export type ResolvedBot = { id: string; token: string; chatId: string; label: string };
 
 /** Причина, по которой отправка невозможна. Различает «не настроено» и «выключено». */
-export type BotSkip = "no_bot" | "bot_disabled" | "no_token" | "no_chat" | "bad_token_ciphertext";
+export type BotSkip = "no_bot" | "bot_disabled" | "not_verified" | "no_token" | "no_chat" | "bad_token_ciphertext";
 
 export type BotLookup = { bot: ResolvedBot } | { skip: BotSkip };
 
 function toResolved(b: {
-  id: string; label: string; tokenEncrypted: string | null; chatId: string | null; enabled: boolean;
+  id: string; label: string; tokenEncrypted: string | null; chatId: string | null; enabled: boolean; verifiedAt: Date | null;
 }): BotLookup {
   if (!b.enabled) return { skip: "bot_disabled" };
+  // Настройки правили и проверку не проходили. Раньше это выражалось снятой галочкой «включён»,
+  // то есть правка опечатки в Chat ID молча выключала бота, и флорист переставал получать заказы.
+  // Теперь галочка — решение владельца, а отправку держит проверка: прошла — поток вернулся сам.
+  if (!b.verifiedAt) return { skip: "not_verified" };
   if (!b.tokenEncrypted) return { skip: "no_token" };
   if (!b.chatId?.trim()) return { skip: "no_chat" };
   let token: string;
@@ -119,8 +123,12 @@ export type UpsertBotInput = {
 };
 
 /**
- * Создание/обновление бота. Пустой токен не стирает существующий. Изменение токена или чата
- * сбрасывает проверку и выключает бота — включённая, но непроверенная конфигурация недопустима.
+ * Создание/обновление бота. Пустой токен не стирает существующий.
+ *
+ * Изменение токена или чата сбрасывает ПРОВЕРКУ, но не трогает галочку «включён»: включение —
+ * решение владельца, а готовность к отправке — факт проверки (см. `toResolved`). Раньше здесь
+ * снималось и то и другое, и правка опечатки в Chat ID молча выключала бота навсегда: владелец
+ * узнавал об этом по несделанному букету.
  */
 export async function upsertBot(prisma: PrismaClient, input: UpsertBotInput): Promise<{ id: string }> {
   const token = input.token?.trim();
@@ -135,7 +143,7 @@ export async function upsertBot(prisma: PrismaClient, input: UpsertBotInput): Pr
     purpose: input.purpose,
     chatId,
     ...(token ? { tokenEncrypted: encryptSecret(token) } : {}),
-    ...(changed ? { verifiedAt: null, enabled: false, botUsername: null, lastErrorSafe: null } : {}),
+    ...(changed ? { verifiedAt: null, botUsername: null, lastErrorSafe: null } : {}),
   };
 
   if (existing) {

@@ -34,7 +34,8 @@ export async function saveBot(input: {
     chatId,
   });
   revalidatePath(PATH);
-  return { ok: true, message: "Сохранено. Выполните проверку." };
+  // Прямо называем последствие: до проверки бот ничего не отправит, хотя галочка не снята.
+  return { ok: true, message: "Сохранено. До успешной проверки бот не отправляет — нажмите «Проверить»." };
 }
 
 export async function removeBotToken(botId: string): Promise<ActionResult> {

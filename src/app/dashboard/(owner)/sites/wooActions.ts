@@ -173,7 +173,15 @@ export async function ownerSaveAirwallex(_prev: FormState, formData: FormData): 
     pendingThresholdMin: Number(formData.get("airwallexPendingThresholdMin") ?? 30) || 30,
   });
   revalidatePath("/dashboard/sites");
-  return "error" in r ? { error: r.error } : { ok: true, message: "Сохранено. Выполните Verify." };
+  if ("error" in r) return { error: r.error };
+  // Смена ключей гасит мониторинг оплат. Раньше это происходило молча, и владелец узнавал о
+  // тишине по неподтверждённым платежам — теперь последствие названо прямо.
+  return {
+    ok: true,
+    message: r.monitoringTurnedOff
+      ? "Сохранено. Мониторинг ВЫКЛЮЧЕН до успешной проверки — нажмите Verify и включите его снова."
+      : "Сохранено. Выполните Verify.",
+  };
 }
 
 export async function ownerVerifyAirwallex(siteId: string): Promise<FormState> {

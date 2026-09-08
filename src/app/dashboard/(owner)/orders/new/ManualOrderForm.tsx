@@ -87,8 +87,23 @@ export function ManualOrderForm({
     setItems((list) => (list.some((i) => i.key === item.key) ? list.map((i) => (i.key === item.key ? item : i)) : [...list, item]));
   }
 
-  const canSubmit =
-    items.length > 0 && siteId && deliveryDate && recipientName.trim() && recipientPhone.trim() && addressLine.trim() && city.trim() && zip.trim();
+  /**
+   * Обязательное — ОДНИМ списком, и из него же берутся оба ответа: включена ли кнопка и чего не
+   * хватает. Раньше это были две независимые фразы, и они разошлись: подсказка не называла ни
+   * город, ни индекс, поэтому при заполненном адресе кнопка молча оставалась серой.
+   */
+  const required: [label: string, filled: boolean][] = [
+    ["позиция", items.length > 0],
+    ["магазин", !!siteId],
+    ["дата доставки", !!deliveryDate],
+    ["имя получателя", !!recipientName.trim()],
+    ["телефон получателя", !!recipientPhone.trim()],
+    ["адрес", !!addressLine.trim()],
+    ["город", !!city.trim()],
+    ["индекс", !!zip.trim()],
+  ];
+  const missing = required.filter(([, filled]) => !filled).map(([label]) => label);
+  const canSubmit = missing.length === 0;
 
   function submit() {
     start(async () => {
@@ -267,7 +282,7 @@ export function ManualOrderForm({
               <Field label="Дата доставки" htmlFor="f-date">
                 <Input id="f-date" type="date" value={deliveryDate} onChange={(e) => setDeliveryDate(e.target.value)} />
               </Field>
-              <Field label="Интервал" htmlFor="f-window">
+              <Field label="Интервал (необязательно)" htmlFor="f-window">
                 <Input id="f-window" value={deliveryWindow} onChange={(e) => setDeliveryWindow(e.target.value)} placeholder="12:00 – 16:00" />
               </Field>
               <Field label="Имя получателя" htmlFor="f-rname">
@@ -284,7 +299,7 @@ export function ManualOrderForm({
                   <Input id="f-addr" value={addressLine} onChange={(e) => setAddressLine(e.target.value)} required />
                 </Field>
               </div>
-              <Field label="Квартира / этаж" htmlFor="f-apt">
+              <Field label="Квартира / этаж (необязательно)" htmlFor="f-apt">
                 <Input id="f-apt" value={apartment} onChange={(e) => setApartment(e.target.value)} />
               </Field>
               <Field label="Индекс" htmlFor="f-zip">
@@ -385,8 +400,8 @@ export function ManualOrderForm({
                 {pending ? "Создаю…" : "Создать заказ"}
               </Button>
               {!canSubmit && (
-                <p className="text-[11px] text-slate-400">
-                  Нужны позиция, магазин, дата, получатель с телефоном и адрес.
+                <p className="text-[11px] text-slate-500">
+                  Не хватает: {missing.join(", ")}.
                 </p>
               )}
             </CardBody>

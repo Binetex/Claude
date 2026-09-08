@@ -2,6 +2,7 @@ import { listForOwner, countOrders, type OrderFilters } from "@/modules/orders/q
 import { prisma } from "@/lib/db";
 import { OrderFiltersBar } from "./OrderFiltersBar";
 import { OrdersTable } from "./OrdersTable";
+import { listQuery } from "@/lib/backLink";
 import { OrdersNavProvider, OrdersPendingArea } from "./OrdersNav";
 import { OrdersPager } from "./OrdersPager";
 import { resolvePaging, outOfRangePageUrl } from "./paging";
@@ -100,7 +101,7 @@ export default async function OwnerOrdersPage({
 
         <OrdersPendingArea>
           <div className="space-y-4">
-            <OrdersTable orders={orders} groupByDay={filters.preset === "all"} commIndicators={commIndicators} />
+            <OrdersTable orders={orders} groupByDay={filters.preset === "all"} commIndicators={commIndicators} backQuery={listQuery(sp)} />
             <OrdersPager page={page} perPage={perPage} total={total} />
           </div>
         </OrdersPendingArea>

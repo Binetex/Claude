@@ -119,6 +119,13 @@ function BotCard({
             Проверен{bot?.botUsername ? ` · @${bot.botUsername}` : ""}
           </span>
         )}
+        {/* Настройки правили — проверка сброшена. Галочка «включён» осталась вашим решением, но до
+            проверки бот молчит: так правка опечатки в Chat ID больше не отключает человека тихо. */}
+        {bot?.enabled && !verified && (
+          <span className="rounded border border-amber-300 bg-amber-50 px-1.5 py-px text-[11px] text-amber-900">
+            Включён, но ждёт проверки — сообщения не уходят
+          </span>
+        )}
         {bot?.tokenConfigured && (
           replies?.enabled ? (
             <span className="rounded border border-emerald-200 bg-emerald-50 px-1.5 py-px text-[11px] text-emerald-700">Приём ответов включён</span>

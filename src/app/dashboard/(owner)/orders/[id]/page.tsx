@@ -43,6 +43,7 @@ import { FloristAvatar } from "@/components/FloristAvatar";
 import { ChargesDialog } from "./ChargesDialog";
 import { MarketingMarkCard } from "./MarketingMarkCard";
 import { BouquetPhotoButton } from "@/components/orders/BouquetPhotoButton";
+import { backToList } from "@/lib/backLink";
 
 export const dynamic = "force-dynamic";
 
@@ -59,8 +60,16 @@ export const dynamic = "force-dynamic";
  * computeEstimatedProfit, не знающей ни про модели PRIMARY/SECONDARY, ни про резерв налога,
  * ни про дневной расчёт. Возвращать его нельзя — заработок считает финансовый модуль.
  */
-export default async function OwnerOrderPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function OwnerOrderPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  /** `back` несёт запрос списка, из которого пришли: возврат обязан вести в ту же выборку. */
+  searchParams: Promise<{ back?: string }>;
+}) {
   const { id } = await params;
+  const backHref = backToList("/dashboard/orders", (await searchParams).back);
   const order = await getForOwner(id);
   if (!order) notFound();
 
@@ -185,7 +194,7 @@ export default async function OwnerOrderPage({ params }: { params: Promise<{ id:
 
   return (
     <OrderPageShell
-      backHref="/dashboard/orders"
+      backHref={backHref}
       backLabel="Все заказы"
       orderNumber={order.orderNumber}
       siteName={order.site.name}

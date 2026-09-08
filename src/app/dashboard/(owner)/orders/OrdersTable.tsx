@@ -102,7 +102,12 @@ function ItemsList({ o, imgSize = "h-6 w-6", nameClass = "text-[11px]" }: { o: O
 }
 
 /** Десктоп — заказ отдельной плашкой (карточкой), без колонки прибыли. */
-function DesktopCard({ o, ind, hideFinance, hideFlorist, hrefBase, sideAmountLabel }: { o: OrdersTableOrder; ind?: OrderIndicator; hideFinance?: boolean; hideFlorist?: boolean; hrefBase: string; sideAmountLabel: string }) {
+/** Ссылка на заказ, несущая запрос списка: по нему карточка построит «Назад». */
+function orderHref(hrefBase: string, id: string, backQuery?: string): string {
+  return backQuery ? `${hrefBase}/${id}?back=${encodeURIComponent(backQuery)}` : `${hrefBase}/${id}`;
+}
+
+function DesktopCard({ o, ind, hideFinance, hideFlorist, hrefBase, backQuery, sideAmountLabel }: { o: OrdersTableOrder; ind?: OrderIndicator; hideFinance?: boolean; hideFlorist?: boolean; hrefBase: string; backQuery?: string; sideAmountLabel: string }) {
   return (
     // relative + «растянутая» ссылка (after:inset-0) → вся карточка кликабельна и ведёт в заказ;
     // симметричные отступы p-4 (16px слева и справа), чтобы правый блок не съезжал к краю.
@@ -111,7 +116,7 @@ function DesktopCard({ o, ind, hideFinance, hideFlorist, hrefBase, sideAmountLab
         {/* Заказ */}
         <div className="flex w-28 shrink-0 flex-col items-start gap-1">
           <StatusPill status={o.orderStatus} paymentFailed={o.paymentFailed} />
-          <Link href={`${hrefBase}/${o.id}`} className="font-semibold text-slate-800 hover:underline after:absolute after:inset-0 after:content-['']">
+          <Link href={orderHref(hrefBase, o.id, backQuery)} className="font-semibold text-slate-800 hover:underline after:absolute after:inset-0 after:content-['']">
             {formatOrderNumber(o.orderNumber)}
           </Link>
           <span className="text-[10px] text-slate-400">{o.site.name}</span>
@@ -178,13 +183,13 @@ function DesktopCard({ o, ind, hideFinance, hideFlorist, hrefBase, sideAmountLab
   );
 }
 
-function MobileCard({ o, ind, hideFinance, hideFlorist, hrefBase }: { o: OrdersTableOrder; ind?: OrderIndicator; hideFinance?: boolean; hideFlorist?: boolean; hrefBase: string }) {
+function MobileCard({ o, ind, hideFinance, hideFlorist, hrefBase, backQuery }: { o: OrdersTableOrder; ind?: OrderIndicator; hideFinance?: boolean; hideFlorist?: boolean; hrefBase: string; backQuery?: string }) {
   return (
     <Card className="relative p-2.5">
       <div className="flex flex-col gap-0.5">
         <StatusPill status={o.orderStatus} paymentFailed={o.paymentFailed} className="self-start" />
         <div className="flex items-baseline justify-between gap-2">
-          <Link href={`${hrefBase}/${o.id}`} className="font-semibold text-slate-800 after:absolute after:inset-0 after:content-['']">
+          <Link href={orderHref(hrefBase, o.id, backQuery)} className="font-semibold text-slate-800 after:absolute after:inset-0 after:content-['']">
             {formatOrderNumber(o.orderNumber)}
           </Link>
           {!hideFinance && o.finance && (
@@ -237,6 +242,7 @@ export function OrdersTable({
   hideFinance = false,
   hideFlorist = false,
   hrefBase = "/dashboard/orders",
+  backQuery,
   sideAmountLabel = "вам",
 }: {
   orders: OrdersTableOrder[];
@@ -245,6 +251,8 @@ export function OrdersTable({
   hideFinance?: boolean;
   hideFlorist?: boolean;
   hrefBase?: string;
+  /** Запрос текущего списка: карточка вернёт человека ровно в него, а не в голый список. */
+  backQuery?: string;
   /** Подпись под суммой в режиме hideFinance. По умолчанию — цена изготовления флориста. */
   sideAmountLabel?: string;
 }) {
@@ -261,8 +269,8 @@ export function OrdersTable({
         prevDay = day;
       }
     }
-    desktopItems.push(<DesktopCard key={o.id} o={o} ind={commIndicators[o.id]} hideFinance={hideFinance} hideFlorist={hideFlorist} hrefBase={hrefBase} sideAmountLabel={sideAmountLabel} />);
-    mobileItems.push(<MobileCard key={o.id} o={o} ind={commIndicators[o.id]} hideFinance={hideFinance} hideFlorist={hideFlorist} hrefBase={hrefBase} />);
+    desktopItems.push(<DesktopCard key={o.id} o={o} ind={commIndicators[o.id]} hideFinance={hideFinance} hideFlorist={hideFlorist} hrefBase={hrefBase} backQuery={backQuery} sideAmountLabel={sideAmountLabel} />);
+    mobileItems.push(<MobileCard key={o.id} o={o} ind={commIndicators[o.id]} hideFinance={hideFinance} hideFlorist={hideFlorist} hrefBase={hrefBase} backQuery={backQuery} />);
   }
 
   return (
