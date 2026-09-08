@@ -7,6 +7,7 @@ import "server-only";
  */
 import type { PrismaClient, Prisma } from "@/generated/prisma/client";
 import { consumablesForOrder, VASE_LABEL, type VaseKey } from "./rules";
+import { getOrderItemImages } from "@/modules/orders/images";
 
 export type ConsumableItemRow = {
   id: string;
@@ -14,6 +15,7 @@ export type ConsumableItemRow = {
   siteId: string | null;
   autoRule: string | null;
   autoKey: string | null;
+  imageUrl: string | null;
   sortOrder: number;
 };
 
@@ -23,6 +25,8 @@ export type OrderConsumableRow = {
   siteName: string;
   floristName: string | null;
   productSummary: string;
+  /** Фото букета — то же, что в очереди отзывов: строку узнают по картинке, а не по номеру. */
+  photoUrl: string | null;
   /** Что насчитало правило: itemId → количество. */
   auto: Map<string, number>;
   /** Что поправил человек: itemId → количество (перебивает правило). */
@@ -51,7 +55,7 @@ export async function loadConsumableItems(prisma: PrismaClient, includeArchived 
   const rows = await prisma.consumableItem.findMany({
     where: includeArchived ? {} : { archivedAt: null },
     orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
-    select: { id: true, name: true, siteId: true, autoRule: true, autoKey: true, sortOrder: true },
+    select: { id: true, name: true, siteId: true, autoRule: true, autoKey: true, imageUrl: true, sortOrder: true },
   });
   return rows;
 }
@@ -79,6 +83,7 @@ export async function loadOrdersWithConsumables(
       items: {
         select: {
           name: true, variantName: true, quantity: true, productId: true, variantId: true,
+          image: true, parentImageUrl: true, variantImageUrl: true,
         },
       },
       consumableUsages: { select: { itemId: true, quantity: true } },
@@ -115,6 +120,7 @@ export async function loadOrdersWithConsumables(
       siteName: o.site?.shortName || o.site?.name || "—",
       floristName: o.currentFlorist?.user.name ?? null,
       productSummary: o.items.map((i) => i.name).join(", "),
+      photoUrl: o.items.map((i) => getOrderItemImages(i).primary).find((u) => !!u) ?? null,
       auto,
       manual: new Map(o.consumableUsages.map((u) => [u.itemId, u.quantity])),
       unknownVases: calc.vasesByType.get("UNKNOWN") ?? 0,

@@ -49,6 +49,7 @@ export async function ownerSaveConsumableItem(input: {
   siteId: string | null;
   autoRule: string | null;
   autoKey: string | null;
+  imageUrl: string | null;
   sortOrder: number;
 }): Promise<Result> {
   await requireRole("OWNER");
@@ -60,6 +61,7 @@ export async function ownerSaveConsumableItem(input: {
     siteId: input.siteId || null,
     autoRule: input.autoRule || null,
     autoKey: input.autoKey || null,
+    imageUrl: input.imageUrl?.trim() || null,
     sortOrder: Number.isFinite(input.sortOrder) ? input.sortOrder : 100,
   };
 
@@ -98,6 +100,33 @@ export async function ownerAddConsumableReceipt(input: { itemId: string; day: st
   });
   revalidatePath(`${PATH}/receipts`);
   return { ok: true, message: "Приход записан." };
+}
+
+/** Правка записи прихода: ошиблись в количестве или дате — не надо удалять и заводить заново. */
+export async function ownerUpdateConsumableReceipt(input: {
+  id: string;
+  itemId: string;
+  day: string;
+  quantity: number;
+  note: string;
+}): Promise<Result> {
+  await requireRole("OWNER");
+  if (!input.id) return { error: "Не указана запись." };
+  if (!input.itemId) return { error: "Выберите позицию." };
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(input.day)) return { error: "Укажите дату." };
+  if (!Number.isInteger(input.quantity) || input.quantity === 0) return { error: "Количество должно быть целым и не нулевым." };
+
+  await prisma.consumableReceipt.update({
+    where: { id: input.id },
+    data: {
+      itemId: input.itemId,
+      day: new Date(`${input.day}T00:00:00.000Z`),
+      quantity: input.quantity,
+      note: input.note.trim() || null,
+    },
+  });
+  revalidatePath(`${PATH}/receipts`);
+  return { ok: true, message: "Изменено." };
 }
 
 export async function ownerDeleteConsumableReceipt(id: string): Promise<Result> {

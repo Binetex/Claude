@@ -42,7 +42,7 @@ export default async function ConsumableReceiptsPage() {
   const received = new Map<string, number>();
   for (const r of receipts) received.set(r.itemId, (received.get(r.itemId) ?? 0) + r.quantity);
 
-  const nameById = new Map(items.map((i) => [i.id, i.name]));
+  const byId = new Map(items.map((i) => [i.id, i]));
 
   return (
     <div className="space-y-4">
@@ -70,7 +70,15 @@ export default async function ConsumableReceiptsPage() {
                   const left = got - used;
                   return (
                     <tr key={i.id} className="border-b border-slate-100">
-                      <td className="px-3 py-1.5">{i.name}</td>
+                      <td className="px-3 py-1.5">
+                        <span className="flex items-center gap-2">
+                          {i.imageUrl && (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img src={i.imageUrl} alt="" className="size-8 rounded object-cover" />
+                          )}
+                          {i.name}
+                        </span>
+                      </td>
                       <td className="px-2 py-1.5 text-right tabular-nums text-slate-500">{got || "—"}</td>
                       <td className="px-2 py-1.5 text-right tabular-nums text-slate-500">{used || "—"}</td>
                       <td className={`px-2 py-1.5 text-right font-medium tabular-nums ${left < 0 ? "text-red-600" : left === 0 ? "text-slate-400" : "text-slate-800"}`}>
@@ -90,10 +98,12 @@ export default async function ConsumableReceiptsPage() {
       </p>
 
       <ReceiptsPanel
-        items={items.map((i) => ({ id: i.id, name: i.name }))}
+        items={items.map((i) => ({ id: i.id, name: i.name, imageUrl: i.imageUrl }))}
         receipts={receipts.map((r) => ({
           id: r.id,
-          itemName: nameById.get(r.itemId) ?? "—",
+          itemId: r.itemId,
+          itemName: byId.get(r.itemId)?.name ?? "—",
+          imageUrl: byId.get(r.itemId)?.imageUrl ?? null,
           day: r.day.toISOString().slice(0, 10),
           quantity: r.quantity,
           note: r.note,
