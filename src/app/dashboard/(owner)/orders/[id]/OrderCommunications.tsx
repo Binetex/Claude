@@ -5,7 +5,7 @@ import { Card, CardHeader, CardTitle, CardBody } from "@/components/ui/Card";
 import { Button } from "@/components/ui/button";
 import { sendOrderSmsAction } from "./commActions";
 import { sendOrderEmailReplyAction } from "./emailActions";
-import { CommunicationTimeline, type TimelineItem } from "./CommunicationTimeline";
+import { CommunicationTimeline, type TimelineItem } from "@/components/orders/CommunicationTimeline";
 import { buildCommTabs, commGroupOf, type CommTab } from "@/integrations/quo/communicationsView";
 
 const SMS_MAX = 1600;

@@ -7,10 +7,9 @@
  * (сотни записей outbox). Страница жива по /dashboard/settings/system-events — туда ведёт
  * красная полоса о нулевом балансе QUO, когда действительно надо посмотреть очередь.
  *
- * Вкладки «Доставка (Burq)» и «Нераспознанные» ведут ВНЕ сегмента: их страницы живут по
- * /dashboard/burq и /dashboard/communications, потому что доступны не только владельцу
- * (см. их layout.tsx). Поэтому компонент подключается и там, а активная вкладка ищется по
- * префиксу, а не по совпадению адреса.
+ * Вкладка «Доставка (Burq)» ведёт ВНЕ сегмента: страница живёт по /dashboard/burq, потому что
+ * доступна не только владельцу (см. dashboard/burq/layout.tsx). Поэтому компонент подключается
+ * и там, а активная вкладка ищется по префиксу, а не по совпадению адреса.
  */
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -20,7 +19,6 @@ const TABS = [
   { href: "/dashboard/settings/telegram", label: "Telegram" },
   { href: "/dashboard/settings/print", label: "Настройки печати" },
   { href: "/dashboard/burq", label: "Доставка (Burq)" },
-  { href: "/dashboard/communications", label: "Нераспознанные" },
 ] as const;
 
 export function SettingsTabs() {

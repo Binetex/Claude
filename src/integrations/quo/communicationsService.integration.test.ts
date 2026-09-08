@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { prisma } from "@/lib/db";
 import { Prisma } from "@/generated/prisma/client";
-import { markOrderCommunicationsRead, linkCommunicationToOrder, ignoreCommunication, listUnrecognized, suggestOrdersForCommunication } from "./communicationsService";
+import { markOrderCommunicationsRead, linkCommunicationToOrder, ignoreCommunication, suggestOrdersForCommunication, listOtherThreads, setThreadTopic } from "./communicationsService";
 
 const suffix = `quosvc-${Date.now()}`;
 let siteId: string;
@@ -59,23 +59,104 @@ describe("communicationsService", () => {
     expect(await markOrderCommunicationsRead(prisma, orderId)).toBe(0);
   });
 
-  it("listUnrecognized — только orderId=null и не ignored; фильтр по типу/направлению", async () => {
+  it("в раздел попадают только непривязанные и неигнорированные события", async () => {
     const p = uniquePhone();
-    const linked = await insertComm({ orderId: await makeOrder(p, uniquePhone()), externalPhoneNormalized: p });
-    const unl = await insertComm({ externalPhoneNormalized: uniquePhone(), type: "SMS", direction: "INBOUND" });
-    const call = await insertComm({ externalPhoneNormalized: uniquePhone(), type: "CALL", direction: "INBOUND", status: "MISSED" });
-    const ignored = await insertComm({ externalPhoneNormalized: uniquePhone(), ignoredAt: new Date() });
+    const linkedPhone = uniquePhone();
+    await insertComm({ orderId: await makeOrder(p, uniquePhone()), externalPhoneNormalized: linkedPhone, providerPhoneNumberId: `PN-${suffix}-sel` });
+    const freePhone = uniquePhone();
+    await insertComm({ externalPhoneNormalized: freePhone, providerPhoneNumberId: `PN-${suffix}-sel`, type: "SMS", direction: "INBOUND" });
+    const ignoredPhone = uniquePhone();
+    await insertComm({ externalPhoneNormalized: ignoredPhone, providerPhoneNumberId: `PN-${suffix}-sel`, ignoredAt: new Date() });
 
-    const all = await listUnrecognized(prisma, { take: 500 });
-    const ids = all.map((x) => x.id);
-    expect(ids).toContain(unl);
-    expect(ids).toContain(call);
-    expect(ids).not.toContain(linked); // привязан
-    expect(ids).not.toContain(ignored); // игнорирован
+    const { threads } = await listOtherThreads(prisma, { take: 2000 });
+    const phones = threads.map((t) => t.phone);
+    expect(phones).toContain(freePhone);
+    expect(phones).not.toContain(linkedPhone); // уже в заказе
+    expect(phones).not.toContain(ignoredPhone); // скрыт
+  });
 
-    const onlyCalls = await listUnrecognized(prisma, { type: "CALL", take: 500 });
-    expect(onlyCalls.map((x) => x.id)).toContain(call);
-    expect(onlyCalls.map((x) => x.id)).not.toContain(unl);
+  it("события без номера собеседника в переписки не собираются", async () => {
+    await insertComm({ externalPhoneNormalized: "", externalPhone: "", providerPhoneNumberId: `PN-${suffix}-empty` });
+    const { threads } = await listOtherThreads(prisma, { take: 2000 });
+    expect(threads.map((t) => t.phone)).not.toContain("");
+  });
+
+  it("listOtherThreads: события одного номера и магазина склеиваются в одну переписку", async () => {
+    const phone = uniquePhone();
+    const pn = `PN-${suffix}-a`;
+    const t0 = new Date(Date.now() - 3 * 3600_000);
+    await insertComm({ externalPhoneNormalized: phone, providerPhoneNumberId: pn, type: "SMS", direction: "INBOUND", messageText: "Can I place an order for today?", occurredAt: t0 });
+    await insertComm({ externalPhoneNormalized: phone, providerPhoneNumberId: pn, type: "SMS", direction: "OUTBOUND", status: "DELIVERED", messageText: "Sure!", occurredAt: new Date(t0.getTime() + 60_000) });
+    await insertComm({ externalPhoneNormalized: phone, providerPhoneNumberId: pn, type: "CALL", direction: "INBOUND", status: "MISSED", messageText: null, occurredAt: new Date(t0.getTime() + 120_000) });
+
+    const { threads } = await listOtherThreads(prisma, { take: 2000 });
+    const mine = threads.find((t) => t.phone === phone)!;
+    expect(mine).toBeTruthy();
+    expect(mine.smsCount).toBe(2);
+    expect(mine.callCount).toBe(1);
+    // Категория — по ВСЕЙ переписке, а не по последнему событию (последнее здесь без текста).
+    expect(mine.topic).toBe("NEW_ORDER");
+    expect(mine.topicIsManual).toBe(false);
+    expect(mine.waitingForUs).toBe(true); // последнее событие входящее
+    expect(mine.callsOnly).toBe(false);
+  });
+
+  it("listOtherThreads: один номер в двух магазинах — две разные переписки", async () => {
+    const phone = uniquePhone();
+    await insertComm({ externalPhoneNormalized: phone, providerPhoneNumberId: `PN-${suffix}-x`, messageText: "hi" });
+    await insertComm({ externalPhoneNormalized: phone, providerPhoneNumberId: `PN-${suffix}-y`, messageText: "hi" });
+    const threads = (await listOtherThreads(prisma, { take: 2000 })).threads.filter((t) => t.phone === phone);
+    expect(threads).toHaveLength(2);
+  });
+
+  it("listOtherThreads: переписка только из звонков помечается callsOnly", async () => {
+    const phone = uniquePhone();
+    const pn = `PN-${suffix}-calls`;
+    await insertComm({ externalPhoneNormalized: phone, providerPhoneNumberId: pn, type: "CALL", direction: "INBOUND", status: "MISSED", messageText: null });
+    await insertComm({ externalPhoneNormalized: phone, providerPhoneNumberId: pn, type: "CALL", direction: "INBOUND", status: "MISSED", messageText: null });
+    const mine = (await listOtherThreads(prisma, { take: 2000 })).threads.find((t) => t.phone === phone)!;
+    expect(mine.callsOnly).toBe(true);
+    expect(mine.callCount).toBe(2);
+    expect(mine.topic).toBe("OTHER");
+  });
+
+  it("setThreadTopic перебивает правило и не трогает события, привязанные к заказу", async () => {
+    const phone = uniquePhone();
+    const pn = `PN-${suffix}-manual`;
+    const orderId = await makeOrder(phone, uniquePhone());
+    const linked = await insertComm({ orderId, externalPhoneNormalized: phone, providerPhoneNumberId: pn, messageText: "Can I place an order?" });
+    await insertComm({ externalPhoneNormalized: phone, providerPhoneNumberId: pn, messageText: "Can I place an order?" });
+
+    expect((await listOtherThreads(prisma, { take: 2000 })).threads.find((t) => t.phone === phone)!.topic).toBe("NEW_ORDER");
+
+    const changed = await setThreadTopic(prisma, { phoneE164: phone, providerPhoneNumberId: pn, topic: "SPAM" });
+    expect(changed).toBe(1); // только непривязанное событие
+
+    const mine = (await listOtherThreads(prisma, { take: 2000 })).threads.find((t) => t.phone === phone)!;
+    expect(mine.topic).toBe("SPAM");
+    expect(mine.topicIsManual).toBe(true);
+    // Событие в заказе метку не получило — иначе «Спам» сел бы на живую переписку по заказу.
+    expect((await prisma.orderCommunication.findUnique({ where: { id: linked } }))!.topicManual).toBeNull();
+
+    // Снятие ручной метки возвращает переписку под правило.
+    await setThreadTopic(prisma, { phoneE164: phone, providerPhoneNumberId: pn, topic: null });
+    const back = (await listOtherThreads(prisma, { take: 2000 })).threads.find((t) => t.phone === phone)!;
+    expect(back.topic).toBe("NEW_ORDER");
+    expect(back.topicIsManual).toBe(false);
+  });
+
+  it("setThreadTopic с providerPhoneNumberId=null метит ТОЛЬКО переписку без магазина", async () => {
+    // Самый опасный случай: в Prisma `where: { field: null }` означает «IS NULL», а не
+    // «условие не задано». Если бы условие игнорировалось, «Спам» уехал бы на переписки того
+    // же номера во всех магазинах сразу.
+    const phone = uniquePhone();
+    const withStore = await insertComm({ externalPhoneNormalized: phone, providerPhoneNumberId: `PN-${suffix}-real`, messageText: "hi" });
+    const noStore = await insertComm({ externalPhoneNormalized: phone, providerPhoneNumberId: null, messageText: "hi" });
+
+    const changed = await setThreadTopic(prisma, { phoneE164: phone, providerPhoneNumberId: null, topic: "SPAM" });
+    expect(changed).toBe(1);
+    expect((await prisma.orderCommunication.findUnique({ where: { id: noStore } }))!.topicManual).toBe("SPAM");
+    expect((await prisma.orderCommunication.findUnique({ where: { id: withStore } }))!.topicManual).toBeNull();
   });
 
   it("linkCommunicationToOrder переносит событие в заказ (§16.6)", async () => {
@@ -86,15 +167,16 @@ describe("communicationsService", () => {
     const c = await prisma.orderCommunication.findUnique({ where: { id: commId } });
     expect(c).toMatchObject({ orderId });
     expect(c!.ignoredAt).toBeNull(); // привязка снимает игнор
-    // Появляется в истории заказа, исчезает из нераспознанных.
-    expect((await listUnrecognized(prisma, { take: 500 })).map((x) => x.id)).not.toContain(commId);
+    // Появляется в истории заказа, исчезает из «Других сообщений».
+    expect((await prisma.orderCommunication.findUnique({ where: { id: commId } }))!.orderId).toBe(orderId);
   });
 
   it("ignoreCommunication убирает из активного списка (§16.7)", async () => {
-    const commId = await insertComm({ externalPhoneNormalized: uniquePhone() });
-    expect((await listUnrecognized(prisma, { take: 500 })).map((x) => x.id)).toContain(commId);
+    const phone = uniquePhone();
+    const commId = await insertComm({ externalPhoneNormalized: phone, providerPhoneNumberId: `PN-${suffix}-ign` });
+    expect((await listOtherThreads(prisma, { take: 2000 })).threads.map((t) => t.phone)).toContain(phone);
     await ignoreCommunication(prisma, commId);
-    expect((await listUnrecognized(prisma, { take: 500 })).map((x) => x.id)).not.toContain(commId);
+    expect((await listOtherThreads(prisma, { take: 2000 })).threads.map((t) => t.phone)).not.toContain(phone);
   });
 
   it("suggestOrdersForCommunication предлагает заказ по номеру", async () => {

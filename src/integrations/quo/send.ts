@@ -115,6 +115,8 @@ export type SendUnlinkedSmsInput = {
   idempotencyKey: string;
   /** Заказ, к которому отнести запись: разговор привязан, но пишет номер, которого в заказе нет. */
   orderId?: string | null;
+  /** Кто из сотрудников отправил — иначе ответ из «Других сообщений» окажется в ленте без автора. */
+  sentByUserId?: string | null;
 };
 
 /**
@@ -150,7 +152,7 @@ export async function sendUnlinkedSms(prisma: PrismaClient, client: QuoClient | 
         partyRole: "UNKNOWN", status: "PENDING",
         storePhone: site.quoPhoneNumber ?? null, externalPhone: e164, externalPhoneNormalized: e164,
         messageText: text, providerPhoneNumberId: fromId, occurredAt: new Date(),
-        sendKey: input.idempotencyKey,
+        sendKey: input.idempotencyKey, sentByUserId: input.sentByUserId ?? null,
       },
       select: { id: true },
     });

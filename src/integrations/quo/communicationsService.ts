@@ -5,13 +5,15 @@ import "server-only";
  * Серверные операции истории коммуникаций (чтение из локальной БД, не из QUO):
  *  - markOrderCommunicationsRead: при открытии заказа помечает входящие SMS и пропущенные звонки прочитанными (глобально/командно);
  *  - linkCommunicationToOrder / ignoreCommunication: ручная привязка / игнор нераспознанных;
- *  - listUnrecognized: непривязанные (orderId=null) и неигнорированные, с фильтрами;
+ *  - listOtherThreads: непривязанные события, собранные в переписки (раздел «Другие сообщения»);
  *  - suggestOrdersForCommunication: предполагаемые заказы по номеру;
  *  - indicatorsForOrders: агрегаты для списка заказов.
  * Доступ к этим операциям — на уровне вызывающих server actions (любой аутентифицированный).
  */
 import type { PrismaClient, Prisma } from "@/generated/prisma/client";
 import { findCandidateOrdersByPhone } from "./ingest";
+import { classifyThread, isTopicKey, type TopicKey } from "./otherMessages";
+import { isCallRequest } from "@/modules/assistant/policy";
 import { toE164 } from "@/lib/phone";
 
 export type OrderPhoneSide = "CUSTOMER" | "RECIPIENT";
@@ -173,16 +175,32 @@ async function namesOf(prisma: PrismaClient, rows: { sentByUserId: string | null
  */
 export async function loadPhoneCommunicationsCard(
   prisma: PrismaClient,
-  input: { phoneE164: string; siteId: string; take?: number }
+  input: {
+    phoneE164: string;
+    /** null — переписка на QUO-номере, который не привязан ни к одному магазину. */
+    siteId: string | null;
+    take?: number;
+    /**
+     * Сузить ленту до одного QUO-номера магазина. Нужно «Другим сообщениям»: один и тот же
+     * человек мог писать в два разных магазина, и мешать эти разговоры в одну ленту нельзя.
+     * По умолчанию не задан — экран отзывов показывает всю переписку с номером, как и раньше.
+     */
+    providerPhoneNumberId?: string | null;
+  }
 ): Promise<{ communications: CommunicationCardItem[]; storeHasQuoNumber: boolean; storeTimeZone: string | undefined }> {
   const [comms, site] = await Promise.all([
     prisma.orderCommunication.findMany({
-      where: { externalPhoneNormalized: input.phoneE164 },
+      where: {
+        externalPhoneNormalized: input.phoneE164,
+        ...(input.providerPhoneNumberId !== undefined ? { providerPhoneNumberId: input.providerPhoneNumberId } : {}),
+      },
       orderBy: { occurredAt: "desc" },
       take: input.take ?? 200,
       select: CARD_SELECT,
     }),
-    prisma.site.findUnique({ where: { id: input.siteId }, select: { quoPhoneNumberId: true, quoEnabled: true, timezone: true } }),
+    input.siteId
+      ? prisma.site.findUnique({ where: { id: input.siteId }, select: { quoPhoneNumberId: true, quoEnabled: true, timezone: true } })
+      : Promise.resolve(null),
   ]);
   const nameById = await namesOf(prisma, comms);
   return {
@@ -250,21 +268,164 @@ export async function ignoreCommunication(prisma: PrismaClient, communicationId:
   return { ok: true };
 }
 
-export type UnrecognizedFilters = { type?: "SMS" | "CALL" | "VOICEMAIL"; direction?: "INBOUND" | "OUTBOUND"; phone?: string; from?: Date; to?: Date; take?: number };
+/**
+ * ── «Другие сообщения»: переписки, а не отдельные события ──────────────────────────────────
+ *
+ * Одна строка списка = разговор с одним номером через один QUO-номер магазина. Плоский список
+ * событий читать невозможно: половина входящих вне контекста бессмысленна («Yes», «?», «Here»),
+ * а на 2355 событий приходится всего ~1100 разговоров.
+ *
+ * Группируем В ПАМЯТИ, а не через groupBy: нужен текст последней реплики и список типов, а
+ * groupBy их не отдаёт. Выборка ограничена take — раздел смотрят за период, а не за всю историю.
+ */
+export type OtherThread = {
+  /** Ключ строки и адрес карточки: номер собеседника + QUO-номер магазина. */
+  phone: string;
+  phoneDisplay: string;
+  providerPhoneNumberId: string | null;
+  storePhone: string | null;
+  /** Категория: ручная, если её поставил человек, иначе посчитанная правилом. */
+  topic: TopicKey;
+  topicIsManual: boolean;
+  lastText: string | null;
+  lastAt: Date;
+  firstAt: Date;
+  smsCount: number;
+  callCount: number;
+  /** Последнее событие — входящее: ход за нами. */
+  waitingForUs: boolean;
+  /** В переписке есть просьба перезвонить. */
+  wantsCall: boolean;
+  /** Ни одной SMS — только звонки. Отдельная вкладка по просьбе владельца. */
+  callsOnly: boolean;
+};
 
-/** Непривязанные и неигнорированные события (раздел «Нераспознанные»), с фильтрами. */
-export async function listUnrecognized(prisma: PrismaClient, f: UnrecognizedFilters = {}) {
+export type OtherThreadFilters = { from?: Date; to?: Date; phone?: string; providerPhoneNumberId?: string; take?: number };
+
+export type OtherThreadsResult = {
+  threads: OtherThread[];
+  /**
+   * Выборка упёрлась в лимит: часть событий за период не прочитана, и числа в строках занижены.
+   * Экран обязан сказать об этом вслух — молча обрезанный список выглядит как полный.
+   */
+  truncated: boolean;
+};
+
+export async function listOtherThreads(prisma: PrismaClient, f: OtherThreadFilters = {}): Promise<OtherThreadsResult> {
   const where: Prisma.OrderCommunicationWhereInput = { orderId: null, ignoredAt: null };
-  if (f.type) where.type = f.type;
-  if (f.direction) where.direction = f.direction;
   if (f.phone) where.externalPhoneNormalized = { contains: f.phone.replace(/[^\d+]/g, "") };
-  if (f.from || f.to) where.occurredAt = { ...(f.from ? { gte: f.from } : {}), ...(f.to ? { lte: f.to } : {}) };
-  return prisma.orderCommunication.findMany({
+  if (f.providerPhoneNumberId) where.providerPhoneNumberId = f.providerPhoneNumberId;
+  // Верхняя граница — СТРОГО меньше: вызывающий передаёт начало следующего дня. С `lte` на
+  // полуночи выбранный день отрезался целиком, и фильтр «по сегодня» отдавал пустой список.
+  if (f.from || f.to) where.occurredAt = { ...(f.from ? { gte: f.from } : {}), ...(f.to ? { lt: f.to } : {}) };
+
+  const take = f.take ?? 3000;
+  const rows = await prisma.orderCommunication.findMany({
     where,
     orderBy: { occurredAt: "desc" },
-    take: f.take ?? 200,
-    select: { id: true, type: true, direction: true, status: true, partyRole: true, externalPhone: true, externalPhoneNormalized: true, messageText: true, durationSeconds: true, recordingUrl: true, transcript: true, summary: true, occurredAt: true },
+    take,
+    select: {
+      type: true, direction: true, externalPhone: true, externalPhoneNormalized: true,
+      providerPhoneNumberId: true, storePhone: true, messageText: true, transcript: true,
+      summary: true, occurredAt: true, topicManual: true,
+    },
   });
+
+  type Acc = Omit<OtherThread, "topic" | "topicIsManual" | "callsOnly"> & { inboundTexts: string[]; manual: string | null };
+  const byKey = new Map<string, Acc>();
+
+  for (const r of rows) {
+    // События без номера собеседника (в базе такие есть: служебные и обрывки вебхуков) в
+    // переписки не собираем — иначе все они склеились бы в одну фальшивую строку «».
+    if (!r.externalPhoneNormalized?.trim()) continue;
+    const key = `${r.externalPhoneNormalized}|${r.providerPhoneNumberId ?? ""}`;
+    let acc = byKey.get(key);
+    if (!acc) {
+      acc = {
+        phone: r.externalPhoneNormalized, phoneDisplay: r.externalPhone,
+        providerPhoneNumberId: r.providerPhoneNumberId, storePhone: r.storePhone,
+        lastText: null, lastAt: r.occurredAt, firstAt: r.occurredAt,
+        smsCount: 0, callCount: 0, waitingForUs: false, wantsCall: false,
+        inboundTexts: [], manual: null,
+      };
+      byKey.set(key, acc);
+      // rows отсортированы по убыванию времени, значит первая встреченная запись — последняя
+      // по времени: только по ней определяем «ход за нами» и текст превью.
+      acc.waitingForUs = r.direction === "INBOUND";
+      acc.lastText = r.messageText ?? r.summary ?? null;
+    }
+    if (r.type === "SMS") acc.smsCount += 1;
+    else acc.callCount += 1;
+    if (r.occurredAt < acc.firstAt) acc.firstAt = r.occurredAt;
+    if (r.direction === "INBOUND") {
+      const text = [r.messageText, r.transcript, r.summary].filter(Boolean).join(" ");
+      if (text) acc.inboundTexts.push(text);
+      if (r.messageText && isCallRequest(r.messageText)) acc.wantsCall = true;
+    }
+    // Ручная категория ставится сразу всей переписке, но подстраховываемся: берём первую
+    // непустую, чтобы одна недообновлённая строка не отменяла решение человека.
+    if (!acc.manual && r.topicManual) acc.manual = r.topicManual;
+  }
+
+  const threads = [...byKey.values()]
+    .map(({ inboundTexts, manual, ...rest }) => ({
+      ...rest,
+      topic: manual && isTopicKey(manual) ? manual : classifyThread(inboundTexts),
+      topicIsManual: !!(manual && isTopicKey(manual)),
+      callsOnly: rest.smsCount === 0,
+    }))
+    .sort((a, b) => b.lastAt.getTime() - a.lastAt.getTime());
+
+  return { threads, truncated: rows.length >= take };
+}
+
+/**
+ * Привязать к заказу ВСЮ переписку, а не одно событие.
+ *
+ * Поштучная привязка (linkCommunicationToOrder) оставляла остальные события разговора
+ * непривязанными: строка не уходила из списка, и тот же разговор просил разбора снова.
+ *
+ * `orderId: null` в условии обязателен — уже привязанные к другим заказам события не трогаем.
+ */
+export async function linkThreadToOrder(
+  prisma: PrismaClient,
+  input: { phoneE164: string; providerPhoneNumberId: string | null; orderId: string }
+): Promise<{ ok: boolean; linked: number; reason?: string }> {
+  const order = await prisma.order.findUnique({ where: { id: input.orderId }, select: { id: true } });
+  if (!order) return { ok: false, linked: 0, reason: "order_not_found" };
+
+  const res = await prisma.orderCommunication.updateMany({
+    where: {
+      orderId: null,
+      externalPhoneNormalized: input.phoneE164,
+      providerPhoneNumberId: input.providerPhoneNumberId,
+    },
+    // ignoredAt снимаем по той же причине, что и в поштучной привязке: событие вернулось в работу.
+    data: { orderId: input.orderId, ignoredAt: null },
+  });
+  return { ok: true, linked: res.count };
+}
+
+/**
+ * Ручная категория для ВСЕЙ переписки. Пишем всем её событиям, чтобы решение не зависело от
+ * того, какое событие пришло последним.
+ *
+ * `orderId: null` в условии обязателен: тот же номер может фигурировать в живых заказах, и
+ * метка «Спам» не должна сесть на переписку по заказу.
+ */
+export async function setThreadTopic(
+  prisma: PrismaClient,
+  input: { phoneE164: string; providerPhoneNumberId: string | null; topic: TopicKey | null }
+): Promise<number> {
+  const res = await prisma.orderCommunication.updateMany({
+    where: {
+      orderId: null,
+      externalPhoneNormalized: input.phoneE164,
+      providerPhoneNumberId: input.providerPhoneNumberId,
+    },
+    data: { topicManual: input.topic },
+  });
+  return res.count;
 }
 
 export type SuggestedOrder = { orderId: string; orderNumber: string; deliveryDate: Date; role: "CUSTOMER" | "RECIPIENT" };

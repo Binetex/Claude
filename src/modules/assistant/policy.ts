@@ -68,8 +68,12 @@ export function isSmallTalk(raw: string): boolean {
   return words.length <= 5 && words.some((w) => SMALL_TALK.has(w)) && words.every((w) => SMALL_TALK.has(w) || FILLER.has(w));
 }
 
-/** Телефоны подставляют типографский апостроф: «don’t» — то же слово, что «don't». */
-function normalizeApostrophes(text: string): string {
+/**
+ * Телефоны подставляют типографский апостроф: «don’t» — то же слово, что «don't».
+ * Экспортируется: тем же нормализатором пользуются правила категорий «Других сообщений»
+ * (integrations/quo/otherMessages.ts) — второй копии быть не должно.
+ */
+export function normalizeApostrophes(text: string): string {
   return text.replace(/[\u2018\u2019\u02BC]/g, "'");
 }
 
