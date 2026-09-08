@@ -300,6 +300,17 @@ export async function recordCustomerReply(db: PrismaClient, requestId: string, n
   });
 }
 
+/**
+ * Человек сам решил, что клиент игнорирует, не дожидаясь суток.
+ *
+ * Автоматический проход ставит этот статус через сутки молчания, но оператор часто знает раньше:
+ * две попытки дозвона, ссылка отправлена, в ответ тишина. Ждать сутки ради очевидного незачем.
+ * Обратный путь тот же, что у автоматического: ответил — запрос сам вернётся в работу.
+ */
+export async function recordIgnoring(db: PrismaClient, requestId: string, actor: RequestActor): Promise<void> {
+  await transition(db, requestId, { status: "IGNORING", nextActionAt: null }, "IGNORED", actor, "вручную");
+}
+
 /** Клиент говорит, что отзыв уже оставлен, — на проверку. */
 export async function recordClaimed(db: PrismaClient, requestId: string, actor: RequestActor): Promise<void> {
   await transition(db, requestId, { status: "READY_TO_CHECK", nextActionAt: null }, "CLAIMED", actor);

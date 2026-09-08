@@ -17,7 +17,7 @@ vi.mock("./sendLink", () => ({
 
 import { prisma } from "@/lib/db";
 import { processPromisedDeadlines, processIgnoredRequests } from "./deadlines";
-import { createReviewRequest, recordPromised, recordLinkSent, recordCustomerReply } from "./requests";
+import { createReviewRequest, recordPromised, recordLinkSent, recordCustomerReply, recordIgnoring } from "./requests";
 import { listToday, listWaiting, queueCounts } from "./queue";
 
 const RUN = `rdl-${Date.now()}`;
@@ -178,6 +178,17 @@ describe("клиент игнорирует", () => {
     const id = await overduePromise();
     expect(await recordCustomerReply(prisma, id)).toBe(false);
     expect((await prisma.orderReviewRequest.findUniqueOrThrow({ where: { id } })).status).toBe("PROMISED");
+  });
+
+  it("«игнорирует» можно поставить руками, не дожидаясь суток — и ответ всё равно вернёт в работу", async () => {
+    // Оператор видит тишину раньше прохода: две попытки дозвона, ссылка ушла, в ответ ничего.
+    const { id, phone } = await staleLinkSent(2);
+    await recordIgnoring(prisma, id, actor);
+    expect((await prisma.orderReviewRequest.findUniqueOrThrow({ where: { id } })).status).toBe("IGNORING");
+
+    await inbound(phone, new Date());
+    expect(await recordCustomerReply(prisma, id)).toBe(true);
+    expect((await prisma.orderReviewRequest.findUniqueOrThrow({ where: { id } })).status).toBe("REPLIED");
   });
 
   it("решение человека входящим не перебивается", async () => {

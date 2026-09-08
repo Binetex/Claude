@@ -21,6 +21,7 @@ import {
   recordTalked,
   recordPromised,
   recordClaimed,
+  recordIgnoring,
   confirmReview,
   declineReview,
   giveUpReview,
@@ -100,6 +101,14 @@ export async function promisedAction(requestId: string): Promise<ReviewActionRes
   await recordPromised(prisma, requestId, { userId: user.id });
   refresh(requestId);
   return { ok: true, message: "Ждём отзыв. Если не появится — напомним сами." };
+}
+
+/** «Игнорирует» вручную: оператор видит тишину раньше, чем её увидит суточный проход. */
+export async function markIgnoringAction(requestId: string): Promise<ReviewActionResult> {
+  const user = await requireOperator();
+  await recordIgnoring(prisma, requestId, { userId: user.id });
+  refresh(requestId);
+  return { ok: true, message: "Отмечено: клиент игнорирует." };
 }
 
 export async function claimedAction(requestId: string): Promise<ReviewActionResult> {

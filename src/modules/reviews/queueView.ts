@@ -6,15 +6,15 @@ import "server-only";
  */
 import { format } from "date-fns";
 import { prisma } from "@/lib/db";
-import { listToday, listWaiting, listToCheck, listClosed, queueCounts, type QueueCard } from "./queue";
+import { listToday, listWaiting, listToCheck, listConfirmed, listClosed, queueCounts, type QueueCard } from "./queue";
 import { resolveReviewSettings } from "./requests";
 import { REVIEW_STATUS_LABELS, REVIEW_EVENT_LABELS, reviewStatusText } from "@/lib/reviewStatus";
 import { getOrderItemImages } from "@/modules/orders/images";
 import { toE164 } from "@/lib/phone";
 import type { CardVM } from "@/components/reviews/ReviewQueue";
 
-export type QueueTab = "today" | "waiting" | "check" | "closed";
-export const QUEUE_TABS: QueueTab[] = ["today", "waiting", "check", "closed"];
+export type QueueTab = "today" | "waiting" | "check" | "done" | "closed";
+export const QUEUE_TABS: QueueTab[] = ["today", "waiting", "check", "done", "closed"];
 
 export function parseQueueTab(raw: string | undefined): QueueTab {
   return QUEUE_TABS.includes(raw as QueueTab) ? (raw as QueueTab) : "today";
@@ -22,7 +22,7 @@ export function parseQueueTab(raw: string | undefined): QueueTab {
 
 export type QueueScreenData = {
   cards: CardVM[];
-  counts: { today: number; waiting: number; toCheck: number };
+  counts: { today: number; waiting: number; toCheck: number; done: number };
   locationsBySite: Record<string, { id: string; name: string }[]>;
 };
 
@@ -35,7 +35,15 @@ export async function loadQueueScreen(
   detailHref: (requestId: string) => string
 ): Promise<QueueScreenData> {
   const [cards, counts] = await Promise.all([
-    tab === "today" ? listToday() : tab === "waiting" ? listWaiting() : tab === "check" ? listToCheck() : listClosed(),
+    tab === "today"
+      ? listToday()
+      : tab === "waiting"
+        ? listWaiting()
+        : tab === "check"
+          ? listToCheck()
+          : tab === "done"
+            ? listConfirmed()
+            : listClosed(),
     queueCounts(),
   ]);
 

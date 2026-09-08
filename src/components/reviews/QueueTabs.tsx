@@ -8,7 +8,7 @@ export function QueueTabs({
   basePath,
 }: {
   active: string;
-  counts: { today: number; waiting: number; toCheck: number };
+  counts: { today: number; waiting: number; toCheck: number; done: number };
   /** Один компонент на два экрана: очередь оператора и её вкладку у владельца. */
   basePath: string;
 }) {
@@ -16,7 +16,9 @@ export function QueueTabs({
     { key: "today", label: "Сегодня", count: counts.today, hot: counts.today > 0 },
     { key: "waiting", label: "Ждут ответа", count: counts.waiting, hot: false },
     { key: "check", label: "На проверке", count: counts.toCheck, hot: false },
-    { key: "closed", label: "Закрытые", count: null, hot: false },
+    // Победы отдельно от неудач: «сколько получилось» — первый вопрос владельца к разделу.
+    { key: "done", label: "Оставили отзыв", count: counts.done, hot: false },
+    { key: "closed", label: "Не получилось", count: null, hot: false },
   ];
 
   return (

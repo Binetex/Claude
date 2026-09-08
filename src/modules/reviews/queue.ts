@@ -81,9 +81,24 @@ export async function listToCheck() {
   });
 }
 
+/**
+ * «Оставили отзыв» — то, ради чего всё и делается, поэтому у него своя вкладка, а не общая куча
+ * закрытых: победы и неудачи вперемешку не отвечают ни на «сколько получилось», ни на «кого мы
+ * потеряли».
+ */
+export async function listConfirmed(limit = 50) {
+  return prisma.orderReviewRequest.findMany({
+    where: { status: "CONFIRMED" },
+    select: CARD,
+    orderBy: [{ confirmedAt: "desc" }],
+    take: limit,
+  });
+}
+
+/** «Не получилось» — закрытые без отзыва: клиент отказался или добиться не удалось. */
 export async function listClosed(limit = 50) {
   return prisma.orderReviewRequest.findMany({
-    where: { status: { in: ["CONFIRMED", "DECLINED", "GAVE_UP"] } },
+    where: { status: { in: ["DECLINED", "GAVE_UP"] } },
     select: CARD,
     orderBy: [{ closedAt: "desc" }],
     take: limit,
@@ -91,12 +106,13 @@ export async function listClosed(limit = 50) {
 }
 
 export async function queueCounts(now = new Date()) {
-  const [today, waiting, toCheck] = await Promise.all([
+  const [today, waiting, toCheck, done] = await Promise.all([
     prisma.orderReviewRequest.count({ where: { status: { in: OPERATOR_TURN }, nextActionAt: { lte: endOfDay(now) } } }),
     prisma.orderReviewRequest.count({ where: { status: { in: ["LINK_SENT", "IGNORING", "PROMISED", "FORGOT"] } } }),
     prisma.orderReviewRequest.count({ where: { status: "READY_TO_CHECK" } }),
+    prisma.orderReviewRequest.count({ where: { status: "CONFIRMED" } }),
   ]);
-  return { today, waiting, toCheck };
+  return { today, waiting, toCheck, done };
 }
 
 /**

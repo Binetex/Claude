@@ -41,7 +41,7 @@ export type CardVM = {
   guidance: string;
 };
 
-type Tab = "today" | "waiting" | "check" | "closed";
+type Tab = "today" | "waiting" | "check" | "done" | "closed";
 
 /**
  * Очередь запросов отзывов. Каждый исход разговора — одна кнопка: оператор говорит с
@@ -56,12 +56,14 @@ export function ReviewQueue({ tab, cards }: { tab: Tab; cards: CardVM[] }) {
       <div className="space-y-2">
         <p className="rounded-xl border border-slate-200 bg-white px-4 py-8 text-center text-sm text-slate-500">
           {tab === "today"
-          ? "На сегодня звонков нет."
-          : tab === "waiting"
-            ? "Никто не ждёт ответа."
-            : tab === "check"
-              ? "Проверять нечего."
-                : "Закрытых запросов пока нет."}
+            ? "На сегодня звонков нет."
+            : tab === "waiting"
+              ? "Никто не ждёт ответа."
+              : tab === "check"
+                ? "Проверять нечего."
+                : tab === "done"
+                  ? "Отзывов пока нет."
+                  : "Здесь будут запросы, по которым отзыв получить не удалось."}
         </p>
       </div>
     );
