@@ -55,7 +55,14 @@ export async function loadAiModelSettings(prisma: PrismaClient): Promise<AiModel
  * Рабочая конфигурация вызова модели. База сильнее окружения; если ключа нет нигде — null, и
  * ассистент молчит (это не ошибка, так было и раньше).
  */
-export async function resolveDeepseekConfig(prisma: PrismaClient): Promise<DeepseekConfig | null> {
+export async function resolveDeepseekConfig(
+  prisma: PrismaClient,
+  /**
+   * Чем перекрыть сохранённое. Нужно кнопке «Проверить»: человек выбрал вариант в форме и жмёт
+   * проверку, ещё не сохранив, — проверять при этом старую настройку значит врать ему в глаза.
+   */
+  override?: { baseUrl?: string | null; model?: string | null; apiKey?: string | null }
+): Promise<DeepseekConfig | null> {
   const env = getDeepseekConfig();
   const row = await prisma.aiAssistantSettings.findUnique({
     where: { id: SINGLETON },
@@ -72,10 +79,11 @@ export async function resolveDeepseekConfig(prisma: PrismaClient): Promise<Deeps
       apiKey = env?.apiKey ?? null;
     }
   }
+  if (override?.apiKey?.trim()) apiKey = override.apiKey.trim();
   if (!apiKey) return null;
 
-  const baseUrl = (row?.baseUrl ?? env?.baseUrl ?? "https://api.deepseek.com").replace(/\/+$/, "");
-  const model = row?.model ?? env?.model ?? "deepseek-chat";
+  const baseUrl = (override?.baseUrl?.trim() || row?.baseUrl || env?.baseUrl || "https://api.deepseek.com").replace(/\/+$/, "");
+  const model = override?.model?.trim() || row?.model || env?.model || "deepseek-chat";
   return { apiKey, baseUrl, model };
 }
 

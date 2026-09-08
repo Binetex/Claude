@@ -48,9 +48,12 @@ export async function ownerClearAiKey(): Promise<Result> {
  * Просим ответить одним словом в JSON — так проверяются сразу три вещи: ключ принят, модель
  * существует и она умеет отвечать в нужном формате (у ассистента ответ разбирается кодом).
  */
-export async function ownerCheckAiModel(): Promise<Result> {
+export async function ownerCheckAiModel(input?: { baseUrl?: string; model?: string; apiKey?: string }): Promise<Result> {
   await requireRole("OWNER");
-  const cfg = await resolveDeepseekConfig(prisma);
+  // Проверяем ТО, ЧТО СЕЙЧАС В ФОРМЕ, а не сохранённое: иначе человек выбирает вариант, жмёт
+  // «Проверить» и получает ответ про прежнюю настройку. Ключ из формы берётся, только если его
+  // ввели; пустое поле означает «проверить сохранённым ключом».
+  const cfg = await resolveDeepseekConfig(prisma, input);
   if (!cfg) return { error: "Ключ не задан ни в настройках, ни в окружении — проверять нечего." };
 
   const client = createDeepseekClient(cfg);
@@ -61,7 +64,7 @@ export async function ownerCheckAiModel(): Promise<Result> {
     ]);
     await recordAiModelCheck(prisma, { ok: true });
     revalidatePath(PATH);
-    return { ok: true, message: `Модель ${cfg.model} ответила за ${res.latencyMs} мс.` };
+    return { ok: true, message: `Модель ${cfg.model} ответила за ${res.latencyMs} мс. Если это то, что нужно, — нажмите «Сохранить».` };
   } catch (err) {
     // Наружу отдаём только безопасный текст: в сообщении провайдера может быть эхо запроса.
     const safe = err instanceof Error ? err.message.slice(0, 200) : "неизвестная ошибка";

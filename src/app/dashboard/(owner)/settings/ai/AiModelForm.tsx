@@ -162,12 +162,19 @@ export function AiModelForm({ current }: { current: AiModelFormState }) {
             />
             <span className="block text-[11px] text-slate-400">
               Хранится зашифрованным. Обратно не показывается — только последние символы.
+              У DeepSeek и OpenAI ключи РАЗНЫЕ: меняя адрес API, введите ключ того же сервиса.
             </span>
           </label>
 
           <div className="flex flex-wrap items-center gap-2">
             <Button type="submit" size="sm" disabled={saving || pending}>{saving ? "Сохраняем…" : "Сохранить"}</Button>
-            <Button type="button" size="sm" variant="outline" disabled={saving || pending} onClick={() => run(ownerCheckAiModel)}>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={saving || pending}
+              onClick={() => run(() => ownerCheckAiModel({ baseUrl, model, apiKey }))}
+            >
               Проверить
             </Button>
             {current.apiKeyMask && (

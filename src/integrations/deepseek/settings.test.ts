@@ -47,6 +47,25 @@ describe("настройки модели ассистента", () => {
     expect(await resolveDeepseekConfig(prisma)).toMatchObject({ apiKey: "env-key", model: "gpt-4.1-mini" });
   });
 
+  it("«Проверить» проверяет то, что в форме, а не сохранённое", async () => {
+    row.value = { apiKeyEncrypted: "enc(saved-key)", baseUrl: "https://api.deepseek.com", model: "deepseek-chat" };
+    const cfg = await resolveDeepseekConfig(prisma, { baseUrl: "https://api.openai.com/v1", model: "gpt-4.1-mini" });
+    // Ключ остался сохранённый (в форме его не вводили), адрес и модель — из формы.
+    expect(cfg).toEqual({ apiKey: "saved-key", baseUrl: "https://api.openai.com/v1", model: "gpt-4.1-mini" });
+  });
+
+  it("введённый в форме ключ проверяется ДО сохранения", async () => {
+    row.value = { apiKeyEncrypted: "enc(saved-key)", baseUrl: null, model: "deepseek-chat" };
+    const cfg = await resolveDeepseekConfig(prisma, { apiKey: "  fresh-key  ", model: "deepseek-reasoner" });
+    expect(cfg).toMatchObject({ apiKey: "fresh-key", model: "deepseek-reasoner" });
+  });
+
+  it("пустые поля формы не затирают сохранённое", async () => {
+    row.value = { apiKeyEncrypted: "enc(saved-key)", baseUrl: "https://api.openai.com/v1", model: "gpt-4.1-mini" };
+    const cfg = await resolveDeepseekConfig(prisma, { apiKey: "", baseUrl: "", model: "" });
+    expect(cfg).toEqual({ apiKey: "saved-key", baseUrl: "https://api.openai.com/v1", model: "gpt-4.1-mini" });
+  });
+
   it("хвостовой слэш в адресе не ломает путь запроса", async () => {
     row.value = { apiKeyEncrypted: "enc(k)", baseUrl: "https://api.openai.com/v1/", model: "gpt-4.1-mini" };
     expect((await resolveDeepseekConfig(prisma))!.baseUrl).toBe("https://api.openai.com/v1");
