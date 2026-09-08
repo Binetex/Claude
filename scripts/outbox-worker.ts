@@ -59,7 +59,7 @@ import { recoverWooOrders } from "@/integrations/woocommerce/ordersRecovery";
 import { isBurqRuntimeEnabled, featureFlags } from "@/lib/featureFlags";
 import { MessagingService } from "@/messaging/service";
 import { createMockProviders } from "@/messaging/providers/mock";
-import { processPromisedDeadlines } from "@/modules/reviews/deadlines";
+import { processPromisedDeadlines, processIgnoredRequests } from "@/modules/reviews/deadlines";
 
 function log(event: string, extra: Record<string, unknown> = {}) {
   console.log(JSON.stringify({ ts: new Date().toISOString(), level: "info", event, ...extra }));
@@ -275,8 +275,14 @@ async function main() {
     enabled: true,
     intervalMs: Number(process.env.REVIEWS_DEADLINE_MS ?? 3_600_000), // 1ч
     kickoffMs: 80_000,
-    run: () => processPromisedDeadlines(prisma),
-    report: (r) => r.moved > 0,
+    run: async () => {
+      // Два срока в одном проходе: обещал и забыл → напоминание; ссылка у клиента больше суток
+      // и от него ни слова → «игнорирует». Второй интервальной задачи ради этого не заводим.
+      const promised = await processPromisedDeadlines(prisma);
+      const ignored = await processIgnoredRequests(prisma);
+      return { ...promised, ignoring: ignored.moved, replied: ignored.replied };
+    },
+    report: (r) => r.moved > 0 || r.ignoring > 0 || r.replied > 0,
   });
 
   // Диспетчер Airwallex: один индексированный SELECT, LIMIT 50, задачи — в outbox.

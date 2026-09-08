@@ -12,11 +12,15 @@ import type { ReviewRequestStatus } from "@/generated/prisma/client";
 /**
  * Статусы, где ход за ОПЕРАТОРОМ. Только они попадают в «сегодня».
  *
+ * REPLIED здесь потому, что ответ клиента — это ровно то, ради чего человек и открывает очередь:
+ * он написал, и дальше решение за нами. Без этого ответ лежал бы в «ждут ответа» вместе с теми,
+ * от кого ничего нет.
+ *
  * У «обещал оставить» тоже есть срок, но он принадлежит автоматике напоминания, а не звонку:
  * без этого разделения оператор звонил бы человеку, которому через час и так уйдёт
  * напоминание, а один и тот же запрос висел бы разом в «сегодня» и в «ждут ответа».
  */
-const OPERATOR_TURN: ReviewRequestStatus[] = ["NEW", "CALLING"];
+const OPERATOR_TURN: ReviewRequestStatus[] = ["NEW", "CALLING", "REPLIED"];
 
 const CARD = {
   id: true,
@@ -59,10 +63,10 @@ export async function listToday(now = new Date()) {
   });
 }
 
-/** «Ждут ответа» — ход за клиентом: ссылка у него либо он обещал. */
+/** «Ждут ответа» — ход за клиентом: ссылка у него, он обещал или молчит («игнорирует»). */
 export async function listWaiting() {
   return prisma.orderReviewRequest.findMany({
-    where: { status: { in: ["LINK_SENT", "PROMISED", "FORGOT"] } },
+    where: { status: { in: ["LINK_SENT", "IGNORING", "PROMISED", "FORGOT"] } },
     select: CARD,
     orderBy: [{ linkSentAt: "desc" }],
   });
@@ -89,7 +93,7 @@ export async function listClosed(limit = 50) {
 export async function queueCounts(now = new Date()) {
   const [today, waiting, toCheck] = await Promise.all([
     prisma.orderReviewRequest.count({ where: { status: { in: OPERATOR_TURN }, nextActionAt: { lte: endOfDay(now) } } }),
-    prisma.orderReviewRequest.count({ where: { status: { in: ["LINK_SENT", "PROMISED", "FORGOT"] } } }),
+    prisma.orderReviewRequest.count({ where: { status: { in: ["LINK_SENT", "IGNORING", "PROMISED", "FORGOT"] } } }),
     prisma.orderReviewRequest.count({ where: { status: "READY_TO_CHECK" } }),
   ]);
   return { today, waiting, toCheck };

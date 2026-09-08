@@ -21,7 +21,8 @@ export default async function ReviewRequestsPage({ searchParams }: { searchParam
     getFunnelCounts(),
     loadQueueScreen(tab, (id) => `/dashboard/orders/${id}`, (id) => `${PATH}/${id}`),
   ]);
-  const inWork = funnel.NEW + funnel.CALLING + funnel.LINK_SENT + funnel.PROMISED + funnel.FORGOT + funnel.READY_TO_CHECK;
+  const inWork =
+    funnel.NEW + funnel.CALLING + funnel.REPLIED + funnel.LINK_SENT + funnel.IGNORING + funnel.PROMISED + funnel.FORGOT + funnel.READY_TO_CHECK;
   const lost = funnel.DECLINED + funnel.GAVE_UP;
 
   return (

@@ -276,6 +276,8 @@ enum ReviewRequestStatus {
   NEW // владелец пометил заказ, оператор ещё не брался
   CALLING // звонили, не дозвонились — ждём следующей попытки
   LINK_SENT // ссылка у клиента, ждём его слова
+  IGNORING // ссылка у клиента больше суток, и от него ни слова
+  REPLIED // клиент ответил — ход снова за нами
   PROMISED // клиент обещал оставить отзыв
   FORGOT // обещал и пропал; отправлено напоминание
   READY_TO_CHECK // клиент говорит, что оставил, — нужна проверка
@@ -317,6 +319,8 @@ enum ReviewEventKind {
   CLAIMED
   LINK_SENT
   LINK_FAILED
+  IGNORED
+  REPLIED
   PROMISED
   REMINDED
   CONFIRMED

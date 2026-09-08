@@ -6,6 +6,8 @@ export const REVIEW_STATUS_LABELS: Record<string, string> = {
   NEW: "ждёт звонка",
   CALLING: "звоним",
   LINK_SENT: "ссылка отправлена",
+  IGNORING: "игнорирует",
+  REPLIED: "клиент ответил",
   PROMISED: "обещал оставить",
   FORGOT: "обещал и забыл",
   READY_TO_CHECK: "на проверке",
@@ -27,6 +29,10 @@ export function reviewStatusText(status: string, callAttempts: number, maxAttemp
       return `звоним, попытка ${Math.min(callAttempts + 1, maxAttempts)} из ${maxAttempts}`;
     case "LINK_SENT":
       return "ссылка отправлена, ждём клиента";
+    case "IGNORING":
+      return "игнорирует: ссылка у него, ответа нет";
+    case "REPLIED":
+      return "клиент ответил — ход за вами";
     case "PROMISED":
       return "обещал оставить отзыв";
     case "FORGOT":
@@ -52,6 +58,10 @@ export const REVIEW_STATUS_BADGE: Record<string, string> = {
   NEW: "border-sky-200 bg-sky-50 text-sky-800",
   CALLING: "border-amber-300 bg-amber-50 text-amber-900",
   LINK_SENT: "border-indigo-200 bg-indigo-50 text-indigo-800",
+  // «Игнорирует» — не тревога, а факт: серым, чтобы не соревноваться с просрочкой.
+  IGNORING: "border-slate-300 bg-slate-100 text-slate-700",
+  // «Ответил» — единственное, что требует человека прямо сейчас.
+  REPLIED: "border-amber-300 bg-amber-50 text-amber-900",
   PROMISED: "border-violet-200 bg-violet-50 text-violet-800",
   FORGOT: "border-orange-300 bg-orange-50 text-orange-900",
   READY_TO_CHECK: "border-teal-300 bg-teal-50 text-teal-900",
@@ -68,6 +78,8 @@ export const REVIEW_EVENT_LABELS: Record<string, string> = {
   CLAIMED: "клиент сказал, что оставил отзыв",
   LINK_SENT: "ссылка отправлена",
   LINK_FAILED: "ссылку отправить не удалось",
+  IGNORED: "клиент не отвечает больше суток",
+  REPLIED: "клиент ответил",
   PROMISED: "клиент обещал оставить отзыв",
   REMINDED: "отправлено напоминание",
   CONFIRMED: "отзыв засчитан",

@@ -262,6 +262,44 @@ export async function recordLinkFailed(
   });
 }
 
+/**
+ * Статусы, из которых ответ клиента возвращает запрос в работу.
+ *
+ * Только ожидание ссылки. PROMISED и FORGOT сюда НЕ входят: у них свой срок в `nextActionAt`, по
+ * которому уходит напоминание, и перезапись этого срока ответом означала бы, что «спасибо!» в
+ * переписке навсегда отменяет напоминание об обещанном отзыве. Что клиент написал, человек и так
+ * увидит: карточка подсвечивает последнее входящее.
+ *
+ * Решение человека (засчитал, отказался, закрыл) входящим не перебивается тем более.
+ */
+export const REPLY_REOPENS_FROM: ReviewRequestStatus[] = ["LINK_SENT", "IGNORING"];
+
+/**
+ * Клиент ответил сам, после нашего сообщения. Запрос возвращается человеку СЕГОДНЯ: пока он
+ * висел в «ждём клиента» или «игнорирует», ответ было легко не заметить, и на этом терялись
+ * люди — человек писал «да, оставлю», а к нему больше не возвращались.
+ *
+ * ЧТО именно он написал, мы не разбираем: это работа человека. Наше дело — вернуть запрос ему
+ * на глаза и записать в журнал, что ответ был.
+ */
+export async function recordCustomerReply(db: PrismaClient, requestId: string, now: Date = new Date()): Promise<boolean> {
+  return db.$transaction(async (tx) => {
+    // Условие в UPDATE, а не отдельной выборкой: между чтением и записью статус мог сменить
+    // человек, и его решение важнее входящего сообщения.
+    const claimed = await tx.orderReviewRequest.updateMany({
+      where: { id: requestId, status: { in: REPLY_REOPENS_FROM } },
+      // Срок — СЕЙЧАС, а не время ответа: ответ, найденный проходом задним числом, иначе
+      // приезжал бы к человеку сразу «просроченным», хотя он видит его впервые.
+      data: { status: "REPLIED", nextActionAt: now },
+    });
+    if (claimed.count === 0) return false;
+    // Переход и его след в журнале — одной транзакцией, как у остальных переходов воронки:
+    // статус без записи в журнале починить нечем, «звонили трижды» должно быть видно всегда.
+    await tx.reviewRequestEvent.create({ data: { requestId, kind: "REPLIED" } });
+    return true;
+  });
+}
+
 /** Клиент говорит, что отзыв уже оставлен, — на проверку. */
 export async function recordClaimed(db: PrismaClient, requestId: string, actor: RequestActor): Promise<void> {
   await transition(db, requestId, { status: "READY_TO_CHECK", nextActionAt: null }, "CLAIMED", actor);

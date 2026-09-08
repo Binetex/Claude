@@ -171,6 +171,10 @@ function guidanceFor(status: string, callAttempts: number, maxAttempts: number, 
       return "Ход за вами: позвоните клиенту. Поговорили — «Поговорили»; обещал оставить отзыв — «Обещал оставить»; не взял трубку — «Не дозвонились».";
     case "CALLING":
       return `Ход за вами: позвоните ещё раз (сделано попыток: ${callAttempts} из ${maxAttempts}). После ${maxAttempts}-й неудачной система сама отправит клиенту ссылку.`;
+    case "IGNORING":
+      return "Клиент молчит больше суток. Позвоните ещё раз или закройте запрос — «Отказался» или «Не удалось».";
+    case "REPLIED":
+      return "Клиент ответил: прочитайте его сообщение в общении и отметьте, чем кончилось.";
     case "LINK_SENT":
       return `Ход за клиентом: ссылка у него${linkChannelLabel ? ` (ушла ${linkChannelLabel})` : ""}. Скажет, что оставил отзыв, — жмите «Сказал, что оставил».`;
     case "PROMISED":
@@ -245,7 +249,7 @@ function toVM(
 
 /** Ход за человеком: только в этих шагах он что-то должен сделать сам. */
 function operatorTurn(status: string): boolean {
-  return status === "NEW" || status === "CALLING";
+  return status === "NEW" || status === "CALLING" || status === "REPLIED";
 }
 
 function startOfToday(now: Date): Date {

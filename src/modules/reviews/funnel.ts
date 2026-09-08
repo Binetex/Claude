@@ -11,7 +11,7 @@ import type { ReviewRequestStatus } from "@/generated/prisma/client";
 export type FunnelCounts = Record<ReviewRequestStatus, number> & { total: number; overdue: number };
 
 const ZERO: Record<string, number> = {
-  NEW: 0, CALLING: 0, LINK_SENT: 0, PROMISED: 0, FORGOT: 0,
+  NEW: 0, CALLING: 0, LINK_SENT: 0, IGNORING: 0, REPLIED: 0, PROMISED: 0, FORGOT: 0,
   READY_TO_CHECK: 0, CONFIRMED: 0, DECLINED: 0, GAVE_UP: 0,
 };
 
@@ -22,7 +22,7 @@ export async function getFunnelCounts(now = new Date()): Promise<FunnelCounts> {
     // напомнить», и занимается этим система: считать его просрочкой значило бы показывать
     // владельцу тревогу там, где всё идёт по плану.
     prisma.orderReviewRequest.count({
-      where: { status: { in: ["NEW", "CALLING"] }, nextActionAt: { lt: startOfToday(now) } },
+      where: { status: { in: ["NEW", "CALLING", "REPLIED"] }, nextActionAt: { lt: startOfToday(now) } },
     }),
   ]);
 

@@ -16,8 +16,8 @@ vi.mock("./sendLink", () => ({
 }));
 
 import { prisma } from "@/lib/db";
-import { processPromisedDeadlines } from "./deadlines";
-import { createReviewRequest, recordPromised } from "./requests";
+import { processPromisedDeadlines, processIgnoredRequests } from "./deadlines";
+import { createReviewRequest, recordPromised, recordLinkSent, recordCustomerReply } from "./requests";
 import { listToday, listWaiting, queueCounts } from "./queue";
 
 const RUN = `rdl-${Date.now()}`;
@@ -25,7 +25,13 @@ let siteId = "";
 let actor = { userId: "" };
 const orderIds: string[] = [];
 
+/** Свой номер на заказ: ответ ищется по телефону, и общий номер связал бы разные запросы. */
+function customerPhone(n: number): string {
+  return `+1424555${String(n).padStart(4, "0")}`;
+}
+
 async function makeOrder() {
+  const phone = customerPhone(orderIds.length);
   const order = await prisma.order.create({
     data: {
       orderNumber: `${RUN}-${orderIds.length}`,
@@ -36,7 +42,7 @@ async function makeOrder() {
       deliveryDate: new Date("2026-08-20T00:00:00Z"),
       deliveryWindow: "12:00 – 16:00",
       senderName: "Заказчик",
-      senderPhone: "+14245550000",
+      senderPhone: customerPhone(orderIds.length),
       recipientName: "Получатель",
       recipientPhone: "+14245551111",
       addressLine: "1 Main St",
@@ -47,12 +53,13 @@ async function makeOrder() {
     },
   });
   orderIds.push(order.id);
-  return order.id;
+  return { id: order.id, phone };
 }
 
 /** Запрос, у которого срок обещания уже прошёл. */
 async function overduePromise(daysAgo = 1) {
-  const { id } = await createReviewRequest(prisma, await makeOrder(), actor);
+  const order = await makeOrder();
+  const { id } = await createReviewRequest(prisma, order.id, actor);
   await recordPromised(prisma, id, actor);
   await prisma.orderReviewRequest.update({
     where: { id },
@@ -75,6 +82,9 @@ beforeAll(async () => {
 beforeEach(async () => {
   sent.length = 0;
   await prisma.orderReviewRequest.deleteMany({ where: { order: { siteId } } });
+  // Переписка не привязана к заказу и живёт дольше запросов: ответ из прошлого теста иначе
+  // засчитался бы следующему — поиск идёт по номеру.
+  await prisma.orderCommunication.deleteMany({ where: { externalPhoneNormalized: { startsWith: "+1424555" } } });
 });
 
 afterAll(async () => {
@@ -82,6 +92,102 @@ afterAll(async () => {
   await prisma.order.deleteMany({ where: { siteId } }).catch(() => {});
   await prisma.user.delete({ where: { id: actor.userId } }).catch(() => {});
   await prisma.site.delete({ where: { id: siteId } }).catch(() => {});
+});
+
+/** Запрос со ссылкой, отправленной больше суток назад. */
+async function staleLinkSent(hoursAgo = 30) {
+  const order = await makeOrder();
+  const { id } = await createReviewRequest(prisma, order.id, actor);
+  await recordLinkSent(prisma, id, "SMS", actor);
+  await prisma.orderReviewRequest.update({
+    where: { id },
+    data: { linkSentAt: new Date(Date.now() - hoursAgo * 3_600_000) },
+  });
+  return { id, orderId: order.id, phone: order.phone };
+}
+
+/** Входящее с конкретного номера. `orderId` нарочно не ставим: приём часто не привязывает звонок. */
+async function inbound(phone: string, at: Date) {
+  await prisma.orderCommunication.create({
+    data: {
+      provider: "QUO", type: "SMS", direction: "INBOUND", status: "RECEIVED",
+      externalPhone: phone, externalPhoneNormalized: phone,
+      messageText: "ok", occurredAt: at,
+    },
+  });
+}
+
+describe("клиент игнорирует", () => {
+  it("сутки тишины после ссылки → «игнорирует» и строка в журнале", async () => {
+    const { id } = await staleLinkSent();
+
+    const res = await processIgnoredRequests(prisma);
+    expect(res).toMatchObject({ moved: 1 });
+
+    const row = await prisma.orderReviewRequest.findUniqueOrThrow({ where: { id } });
+    expect(row.status).toBe("IGNORING");
+    const events = await prisma.reviewRequestEvent.findMany({ where: { requestId: id, kind: "IGNORED" } });
+    expect(events).toHaveLength(1);
+  });
+
+  it("клиент ответил после ссылки — не «игнорирует», а обратно в работу", async () => {
+    // И это же подбирает ответы, случившиеся до появления самого статуса: иначе такие строки
+    // попадали бы в каждый проход и партия из пятидесяти закрыла бы дорогу остальным.
+    const { id, phone } = await staleLinkSent();
+    // Ответ НЕ привязан к заказу — так и бывает в жизни: приём цепляет входящее к заказу с
+    // ближайшей доставкой либо не цепляет вовсе. По номеру он всё равно наш.
+    await inbound(phone, new Date(Date.now() - 3_600_000));
+
+    const res = await processIgnoredRequests(prisma);
+
+    expect(res).toMatchObject({ moved: 0, replied: 1 });
+    expect((await prisma.orderReviewRequest.findUniqueOrThrow({ where: { id } })).status).toBe("REPLIED");
+  });
+
+  it("ссылка ушла только что — ждём, а не обвиняем в молчании", async () => {
+    const { id } = await staleLinkSent(2);
+    expect(await processIgnoredRequests(prisma)).toMatchObject({ checked: 0, moved: 0 });
+    expect((await prisma.orderReviewRequest.findUniqueOrThrow({ where: { id } })).status).toBe("LINK_SENT");
+  });
+
+  it("ответ клиента возвращает запрос человеку — сегодня", async () => {
+    const { id } = await staleLinkSent();
+    await processIgnoredRequests(prisma);
+
+    expect(await recordCustomerReply(prisma, id)).toBe(true);
+
+    const row = await prisma.orderReviewRequest.findUniqueOrThrow({ where: { id } });
+    expect(row.status).toBe("REPLIED");
+    expect(row.nextActionAt).not.toBeNull();
+    // И он виден в «сегодня»: ответ — это то, ради чего очередь и открывают.
+    const today = await listToday();
+    expect(today.map((c) => c.id)).toContain(id);
+  });
+
+  it("ответ ПОЛУЧАТЕЛЯ букета за ответ заказчика не считается", async () => {
+    // Отзыв просят у заказчика; «спасибо, красивые» от получателя не значит, что заказчик ответил.
+    const { id } = await staleLinkSent();
+    await inbound("+14245551111", new Date(Date.now() - 3_600_000));
+
+    expect(await processIgnoredRequests(prisma)).toMatchObject({ moved: 1, replied: 0 });
+    expect((await prisma.orderReviewRequest.findUniqueOrThrow({ where: { id } })).status).toBe("IGNORING");
+  });
+
+  it("обещание ответом не сбрасывается: напоминание должно уйти", async () => {
+    // Иначе «спасибо!» в переписке навсегда отменяло бы напоминание об обещанном отзыве.
+    const id = await overduePromise();
+    expect(await recordCustomerReply(prisma, id)).toBe(false);
+    expect((await prisma.orderReviewRequest.findUniqueOrThrow({ where: { id } })).status).toBe("PROMISED");
+  });
+
+  it("решение человека входящим не перебивается", async () => {
+    // Запрос закрыт («не удалось») — ответ клиента не должен воскрешать его молча.
+    const { id } = await staleLinkSent();
+    await prisma.orderReviewRequest.update({ where: { id }, data: { status: "GAVE_UP", closedAt: new Date() } });
+
+    expect(await recordCustomerReply(prisma, id)).toBe(false);
+    expect((await prisma.orderReviewRequest.findUniqueOrThrow({ where: { id } })).status).toBe("GAVE_UP");
+  });
 });
 
 describe("обещал и забыл", () => {
@@ -109,7 +215,7 @@ describe("обещал и забыл", () => {
   });
 
   it("обещание, срок которого ещё не наступил, не трогается", async () => {
-    const { id } = await createReviewRequest(prisma, await makeOrder(), actor);
+    const { id } = await createReviewRequest(prisma, (await makeOrder()).id, actor);
     await recordPromised(prisma, id, actor);
 
     expect(await processPromisedDeadlines(prisma)).toMatchObject({ moved: 0 });
@@ -127,14 +233,14 @@ describe("обещал и забыл", () => {
 
 describe("очередь оператора", () => {
   it("новый запрос попадает в «сегодня»", async () => {
-    const { id } = await createReviewRequest(prisma, await makeOrder(), actor);
+    const { id } = await createReviewRequest(prisma, (await makeOrder()).id, actor);
     const today = await listToday();
     expect(today.map((c) => c.id)).toContain(id);
   });
 
   it("просроченный вчерашний остаётся в «сегодня», а не выпадает", async () => {
     // Срок в прошлом означает «пора было вчера», а не «запрос выбыл».
-    const { id } = await createReviewRequest(prisma, await makeOrder(), actor);
+    const { id } = await createReviewRequest(prisma, (await makeOrder()).id, actor);
     await prisma.orderReviewRequest.update({
       where: { id },
       data: { status: "CALLING", nextActionAt: new Date(Date.now() - 3 * 86_400_000) },
@@ -145,7 +251,7 @@ describe("очередь оператора", () => {
 
   it("запрос, назначенный на сегодня вечером, виден уже утром", async () => {
     // Иначе оператор увидел бы его только к вечеру, когда звонить уже поздно.
-    const { id } = await createReviewRequest(prisma, await makeOrder(), actor);
+    const { id } = await createReviewRequest(prisma, (await makeOrder()).id, actor);
     const tonight = new Date();
     tonight.setHours(21, 0, 0, 0);
     await prisma.orderReviewRequest.update({ where: { id }, data: { status: "CALLING", nextActionAt: tonight } });
@@ -166,7 +272,7 @@ describe("очередь оператора", () => {
   });
 
   it("ожидающий ответа не мешается в «сегодня»", async () => {
-    const { id } = await createReviewRequest(prisma, await makeOrder(), actor);
+    const { id } = await createReviewRequest(prisma, (await makeOrder()).id, actor);
     await prisma.orderReviewRequest.update({
       where: { id },
       data: { status: "LINK_SENT", nextActionAt: null, linkSentAt: new Date() },
@@ -177,7 +283,7 @@ describe("очередь оператора", () => {
   });
 
   it("закрытый запрос не попадает ни в одну рабочую вкладку", async () => {
-    const { id } = await createReviewRequest(prisma, await makeOrder(), actor);
+    const { id } = await createReviewRequest(prisma, (await makeOrder()).id, actor);
     await prisma.orderReviewRequest.update({
       where: { id },
       data: { status: "CONFIRMED", nextActionAt: new Date(0), closedAt: new Date() },

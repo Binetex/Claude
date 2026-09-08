@@ -33,7 +33,8 @@ export function RequestScreen({ vm, backHref }: { vm: RequestDetailVM; backHref:
             {vm.statusText}
           </span>
           {vm.overdue && <span className="rounded bg-amber-100 px-1.5 py-px text-[11px] text-amber-900">просрочено</span>}
-          {vm.awaitingUs && (
+          {/* Статус REPLIED говорит то же самое — второй раз тем же цветом не повторяем. */}
+          {vm.awaitingUs && vm.status !== "REPLIED" && (
             <span className="rounded border border-amber-300 bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-900">
               Клиент ответил — ход за вами
             </span>

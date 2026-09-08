@@ -119,7 +119,9 @@ export async function loadRequestDetail(
     loadOrderEmailPanel(prisma, r.order.id).catch(() => ({ emails: [], customerEmail: null })),
   ]);
   const maxAttempts = settings?.maxCallAttempts ?? 2;
-  const operatorTurn = r.status === "NEW" || r.status === "CALLING";
+  // Тот же набор, что в очереди (`queueView::operatorTurn`): ответ клиента — наш ход, и
+  // «просрочено» обязано читаться одинаково в списке и в самой карточке.
+  const operatorTurn = r.status === "NEW" || r.status === "CALLING" || r.status === "REPLIED";
 
   return {
     id: r.id,
@@ -180,6 +182,10 @@ function guidanceFor(status: string, callAttempts: number, maxAttempts: number):
       return "Ход за вами: позвоните клиенту и отметьте, чем кончился разговор.";
     case "CALLING":
       return `Ход за вами: позвоните ещё раз (попыток: ${callAttempts} из ${maxAttempts}). После последней неудачной система сама отправит ссылку.`;
+    case "IGNORING":
+      return "Клиент молчит больше суток. Позвоните ещё раз или закройте запрос — «Отказался» или «Не удалось».";
+    case "REPLIED":
+      return "Клиент ответил: прочитайте его сообщение в общении и отметьте, чем кончилось.";
     case "LINK_SENT":
       return "Ход за клиентом: ссылка у него. Скажет, что оставил, — отметьте «Сказал, что оставил».";
     case "PROMISED":

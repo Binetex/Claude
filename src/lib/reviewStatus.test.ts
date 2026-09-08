@@ -16,6 +16,12 @@ describe("reviewStatusText", () => {
     expect(reviewStatusText("CALLING", 5, 2)).toBe("звоним, попытка 2 из 2");
   });
 
+  it("игнорирует и ответил — разные состояния, а не одно «ждём»", () => {
+    // Ровно этого не хватало: после звонка и SMS запрос висел «ждём клиента» бесконечно.
+    expect(reviewStatusText("IGNORING", 2, 2)).toContain("игнорирует");
+    expect(reviewStatusText("REPLIED", 2, 2)).toContain("ход за вами");
+  });
+
   it("ход клиента и закрытые состояния тоже словами", () => {
     expect(reviewStatusText("LINK_SENT", 2, 2)).toContain("ждём клиента");
     expect(reviewStatusText("READY_TO_CHECK", 0, 2)).toContain("проверить");
