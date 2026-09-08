@@ -519,7 +519,7 @@ export async function ownerCreateUser(
     }
   });
 
-  revalidatePath("/dashboard/users");
+  revalidatePath("/dashboard/settings/users");
   revalidatePath("/dashboard/florists");
   return { success: true, email, password };
 }
@@ -580,7 +580,7 @@ export async function ownerUpdateUser(
     }
   });
 
-  revalidatePath("/dashboard/users");
+  revalidatePath("/dashboard/settings/users");
   revalidatePath("/dashboard/florists");
   return { success: true };
 }

@@ -75,7 +75,7 @@ export default async function FloristsPage() {
       </div>
 
       <p className="text-xs text-slate-400">
-        Приоритет флористов задаётся у каждого магазина — <Link href="/dashboard/sites" className="text-sky-600 underline">Сайты</Link>, вкладка «Флористы».
+        Приоритет флористов задаётся у каждого магазина — <Link href="/dashboard/sites" className="text-sky-600 underline">Магазины</Link>, вкладка «Флористы».
         Держать один и тот же редактор в двух местах значит однажды поправить один из них.
       </p>
     </div>

@@ -113,7 +113,7 @@ export default async function ExpensesPage({
         actions={
           <div className="flex items-center gap-2">
             <Button asChild variant="outline">
-              <Link href="/dashboard/expenses/categories">Категории</Link>
+              <Link href="/dashboard/expenses/categories">Справочник категорий</Link>
             </Button>
             <ExpenseDialog actions={actions} categories={categories} trigger="Добавить расход" variant="default" size="default" />
           </div>

@@ -7,7 +7,6 @@ import {
   FLOW_CANCEL_REASON_LABELS,
   FLOW_STEP_TYPE_LABELS,
 } from "@/modules/automations/flows/display";
-import { AutomationsTabs } from "../AutomationsTabs";
 import { FlowStats } from "../flows/FlowStats";
 
 export const dynamic = "force-dynamic";
@@ -39,11 +38,7 @@ export default async function FlowHistoryPage() {
   for (const r of runs) for (const s of r.steps) stepById.set(s.stepId, { position: s.position, type: s.type });
 
   return (
-    <div className="mx-auto max-w-6xl space-y-5">
-      <h1 className="text-xl font-bold text-slate-800">Автоматизации</h1>
-
-      <AutomationsTabs />
-
+    <div className="space-y-5">
       <FlowStats />
 
       {runs.length === 0 && (
@@ -157,7 +152,7 @@ export default async function FlowHistoryPage() {
       <p className="text-[11px] text-slate-500">
         История одиночных уведомлений — во вкладке «Статистика» конкретного правила в{" "}
         <Link href="/dashboard/automations" className="text-sky-600 hover:underline">
-          Order Notifications
+          Уведомления по заказам
         </Link>
         .
       </p>

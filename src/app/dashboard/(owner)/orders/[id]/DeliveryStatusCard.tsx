@@ -135,7 +135,7 @@ export async function DeliveryStatusCard({
 
   return (
     <Card>
-      <CardHeader className="py-2.5"><CardTitle icon={Truck}>Доставка</CardTitle></CardHeader>
+      <CardHeader className="py-2.5"><CardTitle icon={Truck}>Курьер и доставка</CardTitle></CardHeader>
       <CardBody className="space-y-2.5 text-sm">
         {deliveryInstructions?.trim() && (
           <div className="rounded-md border border-amber-200 bg-amber-50 p-2">

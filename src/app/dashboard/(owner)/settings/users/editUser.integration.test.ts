@@ -20,7 +20,7 @@ vi.mock("@/lib/rbac", () => ({
 }));
 vi.mock("next/cache", () => ({ revalidatePath: () => {} }));
 
-const { ownerUpdateUser } = await import("../actions");
+const { ownerUpdateUser } = await import("../../actions");
 
 const RUN = `eu-${Date.now()}`;
 const userIds: string[] = [];

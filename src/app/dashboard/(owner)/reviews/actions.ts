@@ -11,7 +11,8 @@ import { requireRole } from "@/lib/rbac";
 import { prisma } from "@/lib/db";
 import { saveGoogleLocation, deleteGoogleLocation, resolveLocationForZip } from "@/modules/reviews/locations";
 
-const PATH = "/dashboard/reviews";
+// Точки переехали на подстраницу: корень раздела теперь редирект на «Запросы».
+const PATH = "/dashboard/reviews/locations";
 
 export type LocationFormResult = { ok?: true; error?: string };
 

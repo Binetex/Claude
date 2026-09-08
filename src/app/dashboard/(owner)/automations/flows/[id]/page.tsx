@@ -3,7 +3,6 @@ import Link from "next/link";
 import { prisma } from "@/lib/db";
 import { listFlowTriggers } from "@/modules/automations/triggers";
 import { SMS_VARIABLES } from "@/modules/messaging/variables";
-import { AutomationsTabs } from "../../AutomationsTabs";
 import { FlowForm } from "../FlowForm";
 import { FlowStats } from "../FlowStats";
 
@@ -38,8 +37,6 @@ export default async function EditFlowPage({ params }: { params: Promise<{ id: s
           История запусков →
         </Link>
       </div>
-
-      <AutomationsTabs />
 
       <FlowStats flowId={flow.id} />
 

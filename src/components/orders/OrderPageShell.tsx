@@ -77,7 +77,7 @@ export function OrderPageShell({
           собственная плоскость: иконка-якорь слева, дата и интервал крупно, действие справа. */}
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 shadow-sm">
         <CalendarDays className="size-4 shrink-0 text-slate-400" />
-        <span className="text-[11px] font-medium tracking-wider text-slate-400 uppercase">Доставка</span>
+        <span className="text-[11px] font-medium tracking-wider text-slate-400 uppercase">Дата доставки</span>
         <span className="text-base font-semibold text-slate-900 tabular-nums">{fmtDate(deliveryDate)}</span>
         {deliveryWindow && (
           <span className="text-base font-semibold text-slate-900 tabular-nums">{fmtTimeWindow(deliveryWindow)}</span>

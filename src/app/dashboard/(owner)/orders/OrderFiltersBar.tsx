@@ -156,7 +156,7 @@ export function OrderFiltersBar({
               onChange={(e) => update({ siteId: e.target.value || undefined })}
               wrapperClassName="w-full sm:w-44"
             >
-              <option value="">Все сайты</option>
+              <option value="">Все магазины</option>
               {sites.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
             </Select>
           )}

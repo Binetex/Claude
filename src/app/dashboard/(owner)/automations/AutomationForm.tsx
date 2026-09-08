@@ -480,7 +480,7 @@ export function AutomationForm({
 
 const EMAIL_SKIP_LABEL: Record<string, string> = {
   site_or_trigger_missing: "выберите магазин для preview/test выше",
-  email_not_configured: "не настроен общий Brevo API key (см. страницу «Сайты»)",
+  email_not_configured: "не настроен общий Brevo API key (см. страницу «Магазины»)",
   site_email_disabled: "Email выключен у этого магазина",
   site_email_not_configured: "не задан отправитель у этого магазина",
   site_domain_not_verified: "домен отправителя не подтверждён",
@@ -502,7 +502,7 @@ function EmailReadinessHint({ status, siteChosen, siteName }: { status: SiteEmai
       <p className="text-[11px] text-emerald-700">
         {status.source === "automation"
           ? `Используется шаблон правила: ID ${status.templateId}.`
-          : `Используется шаблон магазина по умолчанию: ID ${status.templateId} (задан на странице «Сайты»).`}
+          : `Используется шаблон магазина по умолчанию: ID ${status.templateId} (задан на странице «Магазины»).`}
       </p>
     );
   }
@@ -511,7 +511,7 @@ function EmailReadinessHint({ status, siteChosen, siteName }: { status: SiteEmai
     : EMAIL_SKIP_LABEL[status.reason] ?? status.reason;
   return (
     <p className="text-[11px] text-amber-600">
-      Email для «{siteName}» пока не отправится: {hint}. Укажите Template ID выше или настройте магазин на странице «Сайты».
+      Email для «{siteName}» пока не отправится: {hint}. Укажите Template ID выше или настройте магазин на странице «Магазины».
     </p>
   );
 }

@@ -178,5 +178,5 @@ pm2 start ecosystem.worker.config.js
 - `senderTelegramId`/`senderPushToken` в модели `Order` отсутствуют → Telegram/push для отправителя
   пока не резолвятся (нужны поля подписок, см. PROPOSED_SCHEMA_CHANGES.md).
 - Провайдеры — mock; реальной отправки нет.
-- Admin-страница `/dashboard/system-events` до применения миграции показывает уведомление
+- Admin-страница `/dashboard/settings/system-events` до применения миграции показывает уведомление
   «таблица не создана» (defensive), в навигацию не добавлена.

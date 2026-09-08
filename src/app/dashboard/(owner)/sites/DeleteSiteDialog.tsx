@@ -64,7 +64,7 @@ export function DeleteSiteDialog({ siteId, siteName }: { siteId: string; siteNam
         onClick={openDialog}
       >
         <Trash2 className="size-4" />
-        Удалить сайт
+        Удалить магазин
       </Button>
 
       <Dialog open={open} onOpenChange={setOpen}>

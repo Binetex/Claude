@@ -5,7 +5,16 @@ import type { Role } from "@/generated/prisma/enums";
 import { SidebarNav } from "./AppShellNav";
 import { Button } from "@/components/ui/button";
 
-export type NavItem = { href: string; label: string };
+export type NavItem = {
+  href: string;
+  label: string;
+  /**
+   * Дополнительные адреса, на которых пункт считается активным. Нужен там, где страница
+   * раздела лежит вне его сегмента: «Настройки» открывают вкладку Burq по адресу
+   * /dashboard/burq, и без этого списка подсветка в сайдбаре гасла.
+   */
+  match?: string[];
+};
 
 const roleLabel: Record<Role, string> = {
   OWNER: "Владелец",

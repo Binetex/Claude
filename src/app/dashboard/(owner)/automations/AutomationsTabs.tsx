@@ -7,10 +7,10 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 const TABS = [
-  { href: "/dashboard/automations", label: "Order Notifications" },
-  { href: "/dashboard/automations/flows", label: "Marketing Flows" },
-  { href: "/dashboard/automations/templates", label: "Templates" },
-  { href: "/dashboard/automations/history", label: "History" },
+  { href: "/dashboard/automations", label: "Уведомления по заказам" },
+  { href: "/dashboard/automations/flows", label: "Цепочки" },
+  { href: "/dashboard/automations/templates", label: "Шаблоны" },
+  { href: "/dashboard/automations/history", label: "История отправок" },
 ] as const;
 
 export function AutomationsTabs() {

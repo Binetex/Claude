@@ -32,7 +32,7 @@ export async function QuoBalanceBanner() {
             ответы ассистента, ни уведомления о доставке, ни ссылки на отзывы. Пополните баланс
             QUO — полоса погаснет сама, как только уйдёт первое сообщение.
           </p>
-          <Link href="/dashboard/system-events" className="mt-1 inline-block text-xs text-red-700 underline">
+          <Link href="/dashboard/settings/system-events" className="mt-1 inline-block text-xs text-red-700 underline">
             Системные события
           </Link>
         </div>

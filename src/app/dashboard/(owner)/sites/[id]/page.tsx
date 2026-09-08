@@ -164,7 +164,9 @@ export default async function SiteSettingsPage({ params }: { params: Promise<{ i
     },
     {
       key: "florists",
-      label: "Флористы",
+      // Не «Флористы»: тем же словом называется раздел со списком сотрудников, а здесь —
+      // порядок, в котором заказы этого магазина предлагаются флористам.
+      label: "Приоритет флористов",
       state: { ok: site.floristPriorities.length > 0, title: site.floristPriorities.length > 0 ? "Приоритет задан" : "Приоритет не задан — заказы некому назначать" },
       content: (
         <Card>
@@ -278,7 +280,7 @@ export default async function SiteSettingsPage({ params }: { params: Promise<{ i
                 <div className="font-medium text-slate-700">Магазин не подключён</div>
                 <p className="text-xs text-slate-500">
                   Здесь появятся данные подключения, проверка и синхронизация. Подключить магазин
-                  можно в блоке «Подключить новый магазин» на <Link href="/dashboard/sites" className="text-sky-600 underline">списке сайтов</Link>.
+                  можно в блоке «Подключить новый магазин» на <Link href="/dashboard/sites" className="text-sky-600 underline">списке магазинов</Link>.
                 </p>
               </CardBody>
             </Card>
@@ -416,7 +418,7 @@ export default async function SiteSettingsPage({ params }: { params: Promise<{ i
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2">
-          <Link href="/dashboard/sites" className="text-sm text-slate-400 hover:text-slate-600">← Сайты</Link>
+          <Link href="/dashboard/sites" className="text-sm text-slate-400 hover:text-slate-600">← Магазины</Link>
           <span className="h-3 w-3 shrink-0 rounded-full" style={{ background: site.colorTag }} />
           <h1 className="text-lg font-semibold text-slate-900">{site.name}</h1>
           <span className="text-xs text-slate-400">{site.shortName}</span>

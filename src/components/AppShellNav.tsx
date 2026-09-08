@@ -6,17 +6,15 @@ import {
   Store,
   Package,
   Flower2,
-  Users,
   Headphones,
   Wallet,
   ShoppingBasket,
   MapPin,
   Printer,
-  Truck,
   Zap,
   Star,
   Receipt,
-  Send,
+  Settings,
   Circle,
 } from "lucide-react";
 import { cn } from "@/lib/cn";
@@ -36,32 +34,47 @@ function iconFor(href: string) {
   // иначе выиграла бы иконка флористов, и раздел выглядел бы их дубликатом.
   if (href.includes("/finance")) return Wallet;
   if (href.includes("/florists")) return Flower2;
-  if (href.includes("/users")) return Users;
-  if (href.includes("/burq")) return Truck;
   if (href.includes("/automations")) return Zap;
   if (href.includes("/reviews")) return Star;
   if (href.includes("/expenses")) return Receipt;
-  if (href.includes("/telegram")) return Send;
+  // Пользователи, Telegram, печать и Burq стали вкладками внутри «Настроек» — в меню их
+  // адресов больше нет, и своих иконок им не нужно.
+  if (href.includes("/settings")) return Settings;
   // Кружок остаётся запасным вариантом для пунктов, которые появятся позже: пустое место на
   // их строке ломало бы выравнивание всего списка.
   return Circle;
 }
 
 /**
- * Активен пункт с САМЫМ ДЛИННЫМ подходящим href, а не любой подходящий.
+ * Самый длинный адрес пункта, которому подходит текущий путь, — или null.
+ * Кроме собственного href учитываются чужие адреса из item.match: страница раздела может
+ * лежать вне его сегмента (вкладка Burq в «Настройках» живёт по /dashboard/burq).
+ */
+function matchedPrefix(pathname: string, item: NavItem): string | null {
+  let best: string | null = null;
+  for (const prefix of [item.href, ...(item.match ?? [])]) {
+    if (pathname !== prefix && !pathname.startsWith(prefix + "/")) continue;
+    if (!best || prefix.length > best.length) best = prefix;
+  }
+  return best;
+}
+
+/**
+ * Активен пункт с САМЫМ ДЛИННЫМ подходящим адресом, а не любой подходящий.
  *
  * Иначе «Мои заказы» (/dashboard/f) подсвечивались всегда: их адрес — префикс всех
  * остальных страниц кабинета (/dashboard/f/finance, /dashboard/f/pickup …), и по правилу
  * «начинается с» они выигрывали на каждой вкладке.
  */
-function isActive(pathname: string, href: string, nav: NavItem[]) {
-  if (pathname === href) return true;
-  if (!pathname.startsWith(href + "/")) return false;
+function isActive(pathname: string, item: NavItem, nav: NavItem[]) {
+  const mine = matchedPrefix(pathname, item);
+  if (!mine) return false;
 
-  const longest = nav
-    .filter((t) => pathname === t.href || pathname.startsWith(t.href + "/"))
-    .reduce((a, b) => (a.href.length >= b.href.length ? a : b));
-  return longest.href === href;
+  const longest = nav.reduce((acc, other) => {
+    const prefix = matchedPrefix(pathname, other);
+    return prefix && prefix.length > acc ? prefix.length : acc;
+  }, 0);
+  return mine.length === longest;
 }
 
 export function SidebarNav({ nav, variant }: { nav: NavItem[]; variant: "sidebar" | "mobile" }) {
@@ -72,7 +85,7 @@ export function SidebarNav({ nav, variant }: { nav: NavItem[]; variant: "sidebar
       <nav className="flex gap-1 overflow-x-auto border-b border-slate-200 bg-white px-2 py-2 md:hidden">
         {nav.map((item) => {
           const Icon = iconFor(item.href);
-          const active = isActive(pathname, item.href, nav);
+          const active = isActive(pathname, item, nav);
           return (
             <Link
               key={item.href}
@@ -95,7 +108,7 @@ export function SidebarNav({ nav, variant }: { nav: NavItem[]; variant: "sidebar
     <nav className="flex flex-col gap-0.5 px-3">
       {nav.map((item) => {
         const Icon = iconFor(item.href);
-        const active = isActive(pathname, item.href, nav);
+        const active = isActive(pathname, item, nav);
         return (
           <Link
             key={item.href}

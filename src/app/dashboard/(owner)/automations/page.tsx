@@ -6,7 +6,6 @@ import { getSmsTrigger, CHAINED_TRIGGER } from "@/modules/automations/triggers";
 import { orderByChain, formatWait } from "@/modules/automations/chain";
 import { audienceLabel, delayLabel } from "@/modules/automations/display";
 import { getAutomationSettings } from "@/modules/automations/settings";
-import { AutomationsTabs } from "./AutomationsTabs";
 import { StatTiles, type StatTile } from "./StatTiles";
 import { AutomationRowActions } from "./AutomationRowActions";
 import { SiteReviewUrlPanel } from "./SiteReviewUrlPanel";
@@ -84,16 +83,12 @@ export default async function AutomationsPage() {
   };
 
   return (
-    <div className="mx-auto max-w-6xl space-y-5">
-      <h1 className="text-xl font-bold text-slate-800">Автоматизации</h1>
-
-      <AutomationsTabs />
-
+    <div className="space-y-5">
       <div className="space-y-3">
         <StatTiles tiles={channelTiles(byChannel.SMS, "sms")} caption="SMS через API" />
         <StatTiles tiles={channelTiles(byChannel.EMAIL, "email")} caption="Email через API" />
         <p className="text-[11px] text-slate-400">
-          Только отправки правил. Переписка сотрудников из QUO и шаги Marketing Flows сюда не входят.
+          Только отправки правил. Переписка сотрудников из QUO и шаги цепочек сюда не входят.
         </p>
       </div>
 

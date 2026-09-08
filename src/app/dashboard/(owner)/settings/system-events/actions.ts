@@ -15,5 +15,5 @@ export async function retryOutboxEvent(formData: FormData): Promise<void> {
   if (!id) return;
   const repo = new PrismaOutboxRepository(prisma);
   await repo.requeue(id);
-  revalidatePath("/dashboard/system-events");
+  revalidatePath("/dashboard/settings/system-events");
 }

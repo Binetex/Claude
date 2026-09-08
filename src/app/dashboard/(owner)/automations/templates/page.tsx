@@ -2,7 +2,6 @@ import Link from "next/link";
 import { prisma } from "@/lib/db";
 import { Card, CardBody } from "@/components/ui/Card";
 import { getSmsTrigger } from "@/modules/automations/triggers";
-import { AutomationsTabs } from "../AutomationsTabs";
 
 export const dynamic = "force-dynamic";
 
@@ -39,11 +38,7 @@ export default async function TemplatesPage() {
   const triggerLabel = (t: string) => getSmsTrigger(t)?.label ?? t;
 
   return (
-    <div className="mx-auto max-w-6xl space-y-5">
-      <h1 className="text-xl font-bold text-slate-800">Автоматизации</h1>
-
-      <AutomationsTabs />
-
+    <div className="space-y-5">
       <Card>
         <CardBody className="space-y-2 p-0">
           <div className="border-b border-slate-100 px-3 py-2">
@@ -101,7 +96,7 @@ export default async function TemplatesPage() {
         <CardBody className="space-y-2 p-0">
           <div className="border-b border-slate-100 px-3 py-2">
             <h2 className="text-sm font-semibold text-slate-800">Свой шаблон у правила</h2>
-            <p className="text-[11px] text-slate-500">Правила Order Notifications, которые перекрывают общий шаблон магазина.</p>
+            <p className="text-[11px] text-slate-500">Правила уведомлений по заказам, которые перекрывают общий шаблон магазина.</p>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full min-w-[640px] text-sm">

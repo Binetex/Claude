@@ -59,7 +59,7 @@ export function SiteEmailFactoryPanel({ siteId, current }: { siteId: string; cur
 
         {loadError && (
           <div className="rounded-md border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800">
-            Не удалось получить список доменов: {loadError.replace(/\.$/, "")}. Токен задаётся на странице «Сайты».
+            Не удалось получить список доменов: {loadError.replace(/\.$/, "")}. Токен задаётся на странице «Магазины».
           </div>
         )}
 

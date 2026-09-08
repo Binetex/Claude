@@ -32,6 +32,10 @@ export default async function CallCenterOrders({
     status: sp.status as OrderStatus | undefined,
     siteId: sp.siteId,
     search: sp.search,
+    // Выпадашка сортировки живёт в общем OrderFiltersBar и рисуется здесь тоже — без этих
+    // двух строк оператор её выбирал, а список не менялся.
+    sortBy: sp.sortBy as OrderFilters["sortBy"],
+    sortDir: sp.sortDir as OrderFilters["sortDir"],
     page,
     perPage,
   };

@@ -25,8 +25,8 @@ export const dynamic = "force-dynamic";
  *
  * Под списком — то, что НЕ принадлежит магазину: подключение нового и подпись вебхуков QUO
  * (она общая на всю систему, в отличие от ключа Brevo — тот теперь у каждого магазина свой).
- * Именно под, а не над: инструкция по подключению занимает целый экран, и страница «Сайты»
- * начиналась бы не с сайтов.
+ * Именно под, а не над: инструкция по подключению занимает целый экран, и страница «Магазины»
+ * начиналась бы не со списка магазинов.
  */
 export default async function SitesPage() {
   const emailFactoryView = await loadEmailFactoryView(prisma);
@@ -50,7 +50,7 @@ export default async function SitesPage() {
 
   return (
     <div className="space-y-4">
-      <h1 className="text-lg font-semibold text-slate-900">Сайты</h1>
+      <h1 className="text-lg font-semibold text-slate-900">Магазины</h1>
 
       <AiGlobalNotePanel
         // Правило одно на систему и меняется из другой вкладки или другим человеком. Ключ по

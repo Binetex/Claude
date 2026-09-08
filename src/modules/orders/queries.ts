@@ -102,7 +102,10 @@ function buildWhere(f: OrderFilters): Prisma.OrderWhereInput {
  * Явный выбор сортировки в фильтрах имеет приоритет.
  */
 function buildOrderBy(f: OrderFilters): Prisma.OrderOrderByWithRelationInput[] {
-  const dir = f.sortDir ?? "asc";
+  // Значение приходит из адресной строки, а Prisma принимает строго "asc"/"desc": на любом
+  // другом ("DESC" из руками собранной ссылки) запрос падает валидацией, и сотрудник видит
+  // не список, а общий экран ошибки.
+  const dir: Prisma.SortOrder = f.sortDir === "desc" ? "desc" : "asc";
   // id в конце — тай-брейк: без него заказы с одинаковой датой могут переставляться между
   // страницами (порядок неустойчив), и один и тот же заказ попадёт на две страницы либо ни на одну.
   const tail: Prisma.OrderOrderByWithRelationInput = { id: "desc" };

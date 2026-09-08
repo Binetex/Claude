@@ -19,7 +19,7 @@ export default async function PrintSettingsPage() {
   return (
     <div className="space-y-4">
       <PageHeader
-        title="Печать записок"
+        title="Настройки печати"
         description="Поля, кегли и переходы размеров для двух форматов листа. Значения применяются сразу — флористу достаточно обновить страницу печати."
       />
       <PrintSettingsForm layout="tall" initial={settings.tall} />

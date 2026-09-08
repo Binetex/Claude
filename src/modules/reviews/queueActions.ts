@@ -32,7 +32,9 @@ import { sendReviewLinkAndRecord } from "./sendLink";
 import { sendReviewCoupon } from "./reward";
 
 const OPERATOR_PATH = "/dashboard/cc/reviews";
-const OWNER_PATH = "/dashboard/reviews/queue";
+// Именно /requests, а не /queue: «Очередь» слита с «Запросами» и осталась редиректом —
+// сброс кеша по адресу редиректа не обновлял ни список, ни карточку.
+const OWNER_PATH = "/dashboard/reviews/requests";
 
 export type ReviewActionResult = { ok?: true; message?: string; error?: string };
 
@@ -47,7 +49,6 @@ async function requireOperator() {
 function refresh(requestId?: string) {
   revalidatePath(OPERATOR_PATH);
   revalidatePath(OWNER_PATH);
-  revalidatePath("/dashboard/reviews/requests");
   // И карточку запроса, если действие пришло с неё: иначе человек нажал «Поговорили» и остался
   // смотреть на прежний статус.
   if (requestId) {

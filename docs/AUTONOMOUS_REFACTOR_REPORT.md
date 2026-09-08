@@ -359,7 +359,7 @@ In-process шина `events/bus.ts` (singleton, всё в памяти): соб�
   фан-аутит SMS/Telegram/email/push/completion-sync НЕЗАВИСИМО (сбой одного не блокирует другие).
 - **Observability**: структурированный PII-безопасный логгер (queued/processing/succeeded/failed/
   retry_scheduled/dead_letter) — без payload/адреса/телефона/открытки/секретов.
-- **Admin**: read-only `/dashboard/system-events` (владелец) — тип/статус/попытки/время/последняя
+- **Admin**: read-only `/dashboard/settings/system-events` (владелец) — тип/статус/попытки/время/последняя
   безопасная ошибка + «Повторить» для FAILED/DEAD_LETTER; defensive при неприменённой миграции;
   в навигацию НЕ добавлена.
 - **PM2**: пример `ecosystem.worker.example.js` (`floremart-worker`) + предложенный diff (не применён).
@@ -381,7 +381,7 @@ retryable→повтор; non-retryable/исчерпание→DEAD_LETTER; за
 блокирует SMS; graceful shutdown; payload не попадает в логи.
 
 ### Проверки
-typecheck ✅ · lint ✅ · build ✅ (роут `/dashboard/system-events` в сборке) · outbox/messaging/
+typecheck ✅ · lint ✅ · build ✅ (роут `/dashboard/settings/system-events` в сборке) · outbox/messaging/
 publisher тесты — все зелёные. Визуально проверена admin-страница (graceful «таблица не создана»).
 Не мой код: `composition`/`assignments` БД-тесты флейкуют на PGlite (prepared statements) —
 задокументированное ограничение, не регрессия.

@@ -4,7 +4,6 @@ import { Card, CardBody } from "@/components/ui/Card";
 import { Button } from "@/components/ui/button";
 import { getSmsTrigger } from "@/modules/automations/triggers";
 import { flowStepSummary, FLOW_STEP_TYPE_LABELS } from "@/modules/automations/flows/display";
-import { AutomationsTabs } from "../AutomationsTabs";
 import { FlowRowActions } from "./FlowRowActions";
 import { FlowStats } from "./FlowStats";
 
@@ -33,11 +32,7 @@ export default async function FlowsPage() {
   }
 
   return (
-    <div className="mx-auto max-w-6xl space-y-5">
-      <h1 className="text-xl font-bold text-slate-800">Автоматизации</h1>
-
-      <AutomationsTabs />
-
+    <div className="space-y-5">
       <FlowStats />
 
       <div className="flex justify-end">
