@@ -19,7 +19,7 @@ export default async function ReviewRequestsPage({ searchParams }: { searchParam
   const tab = parseQueueTab((await searchParams).tab);
   const [funnel, screen] = await Promise.all([
     getFunnelCounts(),
-    loadQueueScreen(tab, (id) => `/dashboard/orders/${id}`),
+    loadQueueScreen(tab, (id) => `/dashboard/orders/${id}`, (id) => `${PATH}/${id}`),
   ]);
   const inWork = funnel.NEW + funnel.CALLING + funnel.LINK_SENT + funnel.PROMISED + funnel.FORGOT + funnel.READY_TO_CHECK;
   const lost = funnel.DECLINED + funnel.GAVE_UP;
@@ -48,7 +48,7 @@ export default async function ReviewRequestsPage({ searchParams }: { searchParam
             <Tile n={lost} label="не получилось" />
           </div>
           <QueueTabs active={tab} counts={screen.counts} basePath={PATH} />
-          <ReviewQueue tab={tab} cards={screen.cards} locationsBySite={screen.locationsBySite} />
+          <ReviewQueue tab={tab} cards={screen.cards} />
         </>
       )}
     </div>

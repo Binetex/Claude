@@ -2,13 +2,16 @@ import { requireRole } from "@/lib/rbac";
 import { listReviewSettings, DEFAULT_TEXTS } from "@/modules/reviews/settings";
 import { SMS_VARIABLES } from "@/modules/messaging/variables";
 import { MessagesPanel } from "./MessagesPanel";
+import { CouponPanel } from "./CouponPanel";
+import { loadReviewReward, DEFAULT_COUPON_SMS } from "@/modules/reviews/reward";
+import { prisma } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 
 /** Что увидит клиент и по каким срокам работает воронка. Настраивается на каждый магазин. */
 export default async function ReviewMessagesPage() {
   await requireRole("OWNER");
-  const sites = await listReviewSettings();
+  const [sites, reward] = await Promise.all([listReviewSettings(), loadReviewReward(prisma)]);
 
   return (
     <div className="space-y-4">
@@ -20,6 +23,11 @@ export default async function ReviewMessagesPage() {
           англоязычные.
         </p>
       </div>
+      <CouponPanel
+        initial={{ couponCode: reward.couponCode, couponSms: reward.couponSms }}
+        defaultSms={DEFAULT_COUPON_SMS}
+      />
+
       <MessagesPanel
         sites={sites}
         defaults={DEFAULT_TEXTS}

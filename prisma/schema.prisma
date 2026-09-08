@@ -284,6 +284,17 @@ enum ReviewRequestStatus {
   GAVE_UP // исчерпаны попытки и сроки
 }
 
+/// Купон за отзыв: ОДИН код на все магазины (решение владельца 08.09.2026). Синглтон, потому что
+/// вознаграждение одно на систему: пять копий одного кода по магазинам разъехались бы в первый же
+/// месяц, и клиент одного магазина получил бы не тот купон.
+model ReviewRewardSettings {
+  id         String   @id @default("singleton")
+  couponCode String?
+  /// Текст SMS клиенту. Пусто — работает текст по умолчанию (см. modules/reviews/reward.ts).
+  couponSms  String?
+  updatedAt  DateTime @updatedAt
+}
+
 /// Чем ушла ссылка на отзыв. SMS — основной путь, письмо — когда SMS не смогла.
 enum ReviewLinkChannel {
   SMS
@@ -1727,6 +1738,11 @@ model OrderReviewRequest {
   confirmedBy       User?             @relation("ReviewConfirmedBy", fields: [confirmedByUserId], references: [id], onDelete: SetNull)
 
   closedAt DateTime?
+
+  /// Когда клиенту ушёл купон за отзыв и с каким кодом. Снимок нужен, потому что код меняют, а
+  /// «что мы обещали этому человеку» обязано остаться правдой.
+  couponSentAt       DateTime?
+  couponCodeSnapshot String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

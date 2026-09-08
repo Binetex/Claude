@@ -1,9 +1,8 @@
 "use client";
 import { useState, useTransition } from "react";
 import Link from "next/link";
-import { Phone, Send, Check, X, RotateCcw, MapPin, History } from "lucide-react";
+import { Phone, Send, Check, RotateCcw, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Select } from "@/components/ui/select";
 import { REVIEW_STATUS_BADGE } from "@/lib/reviewStatus";
 import {
   noAnswerAction,
@@ -11,11 +10,8 @@ import {
   promisedAction,
   claimedAction,
   confirmAction,
-  declineAction,
-  giveUpAction,
   reopenAction,
   sendLinkAction,
-  changeLocationAction,
 } from "@/modules/reviews/queueActions";
 
 export type CardVM = {
@@ -34,6 +30,10 @@ export type CardVM = {
   orderId: string;
   /** Куда ведёт номер заказа: у оператора своя карточка, у владельца своя. */
   orderHref: string;
+  /** Куда ведёт сам запрос: карточка со всей историей, перепиской и купоном. */
+  detailHref: string;
+  /** Последним в разговоре высказался клиент — ход за нами. */
+  repliedLast: boolean;
   orderNumber: string;
   siteName: string;
   customerName: string | null;
@@ -43,7 +43,7 @@ export type CardVM = {
   /** Журнал запроса, старые сверху: когда кто связывался и что было сделано. */
   journal: { at: string; label: string; by: string | null; detail: string | null }[];
   /** Последнее общение с этим номером: звонок, расшифровка или сообщение. */
-  lastContact: { at: string; who: string; text: string | null } | null;
+  lastContact: { at: string; who: string; inbound: boolean; text: string | null } | null;
   /** Что сейчас делать и что нажать — по состоянию запроса. */
   guidance: string;
 };
@@ -60,16 +60,7 @@ const CALL_STATUSES = new Set(["NEW", "CALLING"]);
  * Кнопки зависят от СОСТОЯНИЯ запроса, а не от вкладки: на карточке «обещал оставить»
  * кнопкам звонка делать нечего, а «на проверке» главное действие — засчитать отзыв.
  */
-export function ReviewQueue({
-  tab,
-  cards,
-  locationsBySite,
-}: {
-  tab: Tab;
-  cards: CardVM[];
-  /** Точки, разложенные по магазинам: карточка получает только свои. */
-  locationsBySite: Record<string, { id: string; name: string }[]>;
-}) {
+export function ReviewQueue({ tab, cards }: { tab: Tab; cards: CardVM[] }) {
   // Сообщение живёт НАД списком, а не в карточке: после отметки карточка уходит из вкладки
   // вместе с ответом, и оператор не узнал бы, ушла ли ссылка при исчерпании попыток.
   const [note, setNote] = useState<string | null>(null);
@@ -102,12 +93,7 @@ export function ReviewQueue({
     <div className="space-y-2">
       {banner}
       {cards.map((c) => (
-        <RequestCard
-          key={c.id}
-          card={c}
-          locations={locationsBySite[c.siteId] ?? []}
-          onResult={{ setNote, setError }}
-        />
+        <RequestCard key={c.id} card={c} onResult={{ setNote, setError }} />
       ))}
     </div>
   );
@@ -115,11 +101,9 @@ export function ReviewQueue({
 
 function RequestCard({
   card,
-  locations,
   onResult,
 }: {
   card: CardVM;
-  locations: { id: string; name: string }[];
   onResult: { setNote: (v: string | null) => void; setError: (v: string | null) => void };
 }) {
   const [pending, start] = useTransition();
@@ -137,7 +121,6 @@ function RequestCard({
   const closed = CLOSED_STATUSES.has(card.status);
   const calling = CALL_STATUSES.has(card.status);
   const waitingClient = card.status === "LINK_SENT" || card.status === "PROMISED" || card.status === "FORGOT";
-  const lastEvent = card.journal.length > 0 ? card.journal[card.journal.length - 1] : null;
 
   return (
     <div
@@ -170,12 +153,18 @@ function RequestCard({
       </div>
 
       {/* Что с этим человеком уже было. Без этой строки карточка выглядела одинаково и у того,
-          кто вчера всё сказал по телефону, и у того, с кем не общались ни разу. */}
+          кто вчера всё сказал по телефону, и у того, с кем не общались ни разу.
+          Ответ КЛИЕНТА выделен: именно он терялся — человек писал «да, оставлю», и это пропадало. */}
       {card.lastContact && (
-        <p className="mt-1.5 rounded-md bg-slate-50 px-2 py-1.5 text-xs text-slate-600">
-          <span className="text-slate-400">{card.lastContact.at} · </span>
+        <p
+          className={`mt-1.5 rounded-md px-2 py-1.5 text-xs ${
+            card.repliedLast ? "border border-amber-300 bg-amber-50 text-amber-900" : "bg-slate-50 text-slate-600"
+          }`}
+        >
+          {card.repliedLast && <span className="mr-1 font-semibold">Клиент ответил — ход за вами.</span>}
+          <span className={card.repliedLast ? "text-amber-700" : "text-slate-400"}>{card.lastContact.at} · </span>
           <span className="font-medium">{card.lastContact.who}</span>
-          {card.lastContact.text ? <>: {card.lastContact.text}</> : <span className="text-slate-400"> · без текста</span>}
+          {card.lastContact.text ? <>: {card.lastContact.text}</> : <span className="opacity-60"> · без текста</span>}
         </p>
       )}
 
@@ -200,10 +189,6 @@ function RequestCard({
                 <Button size="sm" variant="outline" disabled={pending} onClick={() => run(() => promisedAction(card.id))}>
                   Обещал оставить
                 </Button>
-                {/* Сказал «уже оставил» прямо в разговоре — переход есть и отсюда. */}
-                <Button size="sm" variant="outline" disabled={pending} onClick={() => run(() => claimedAction(card.id))}>
-                  Сказал, что оставил
-                </Button>
                 {/* Ссылку слать некуда, пока у магазина нет ни точки, ни запасной. */}
                 <Button size="sm" disabled={pending || !card.hasLink} onClick={() => run(() => sendLinkAction(card.id))}>
                   <Send className="size-4" /> Отправить ссылку
@@ -220,60 +205,18 @@ function RequestCard({
                 <Check className="size-4" /> Засчитать отзыв
               </Button>
             )}
-            <Button size="sm" variant="ghost" disabled={pending} onClick={() => run(() => declineAction(card.id))} className="text-slate-500">
-              <X className="size-4" /> Отказался
-            </Button>
-            <Button size="sm" variant="ghost" disabled={pending} onClick={() => run(() => giveUpAction(card.id))} className="text-slate-500">
-              Не удалось
-            </Button>
           </>
         )}
+
+        {/* Всё остальное — переписка, звонки, журнал, купон, точка, «отказался» — на карточке
+            запроса. В списке им не место: из-за них он и превратился в кашу. */}
+        <Link
+          href={card.detailHref}
+          className="ml-auto inline-flex items-center gap-1 text-xs font-medium text-sky-700 hover:underline"
+        >
+          Открыть <ChevronRight className="size-3.5" />
+        </Link>
       </div>
-
-      {/* Журнал: «звонили трижды за неделю» должно быть видно, а не стёрто последним статусом. */}
-      {card.journal.length > 0 && (
-        <details className="mt-2 text-xs text-slate-500">
-          <summary className="flex cursor-pointer list-none items-center gap-1.5 hover:text-slate-700">
-            <History className="size-3.5" />
-            <span>
-              Журнал ({card.journal.length}) · последнее: {lastEvent!.label} · {lastEvent!.at}
-            </span>
-          </summary>
-          <ul className="mt-1.5 space-y-0.5 border-l border-slate-200 pl-3">
-            {card.journal.map((e, i) => (
-              <li key={i}>
-                <span className="font-mono text-[11px] text-slate-400">{e.at}</span>{" "}
-                <span className="text-slate-700">{e.label}</span>
-                {e.by && <span className="text-slate-400"> · {e.by}</span>}
-                {e.detail && <span className="text-slate-400"> · {e.detail}</span>}
-              </li>
-            ))}
-          </ul>
-        </details>
-      )}
-
-      {/* Точка подставлена по ZIP — это догадка, а оператор говорит с клиентом и знает лучше. */}
-      {!closed && locations.length > 1 && (
-        <div className="mt-2 flex items-center gap-2 text-xs text-slate-500">
-          <MapPin className="size-3.5" />
-          <span>Отзыв на точку</span>
-          <Select
-            value={card.locationId ?? ""}
-            disabled={pending}
-            onChange={(e) => run(() => changeLocationAction(card.id, e.target.value))}
-            className="h-7 w-auto text-xs"
-          >
-            <option value="" disabled>
-              {card.locationName ?? "не выбрана"}
-            </option>
-            {locations.map((l) => (
-              <option key={l.id} value={l.id}>
-                {l.name}
-              </option>
-            ))}
-          </Select>
-        </div>
-      )}
 
     </div>
   );

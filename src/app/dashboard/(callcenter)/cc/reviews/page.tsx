@@ -22,7 +22,11 @@ export default async function ReviewsQueuePage({ searchParams }: { searchParams:
   if (user.role === "FLORIST") notFound();
 
   const tab = parseQueueTab((await searchParams).tab);
-  const { cards, counts, locationsBySite } = await loadQueueScreen(tab, (id) => `/dashboard/cc/${id}`);
+  const { cards, counts } = await loadQueueScreen(
+    tab,
+    (id) => `/dashboard/cc/${id}`,
+    (id) => `${PATH}/${id}`
+  );
 
   return (
     <div className="space-y-4">
@@ -34,7 +38,7 @@ export default async function ReviewsQueuePage({ searchParams }: { searchParams:
         </p>
       </div>
       <QueueTabs active={tab} counts={counts} basePath={PATH} />
-      <ReviewQueue tab={tab} cards={cards} locationsBySite={locationsBySite} />
+      <ReviewQueue tab={tab} cards={cards} />
     </div>
   );
 }

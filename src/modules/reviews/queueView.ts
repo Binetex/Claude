@@ -25,8 +25,14 @@ export type QueueScreenData = {
   locationsBySite: Record<string, { id: string; name: string }[]>;
 };
 
-/** `orderHref` строит вызывающий: у оператора своя карточка заказа, у владельца своя. */
-export async function loadQueueScreen(tab: QueueTab, orderHref: (orderId: string) => string): Promise<QueueScreenData> {
+/**
+ * `orderHref` и `detailHref` строит вызывающий: у оператора свои адреса, у владельца свои.
+ */
+export async function loadQueueScreen(
+  tab: QueueTab,
+  orderHref: (orderId: string) => string,
+  detailHref: (requestId: string) => string
+): Promise<QueueScreenData> {
   const [cards, counts] = await Promise.all([
     tab === "today" ? listToday() : tab === "waiting" ? listWaiting() : tab === "check" ? listToCheck() : listClosed(),
     queueCounts(),
@@ -80,6 +86,7 @@ export async function loadQueueScreen(tab: QueueTab, orderHref: (orderId: string
         now,
         settingsBySite.get(c.order.site.id)?.maxCallAttempts ?? 2,
         orderHref,
+        detailHref,
         journalByRequest.get(c.id) ?? [],
         lastContactByPhone.get(toE164(c.order.senderPhone) ?? "") ?? null
       )
@@ -148,6 +155,9 @@ export function describeContact(r: {
   return {
     at: format(r.occurredAt, "dd.MM HH:mm"),
     who,
+    // Последним высказался клиент — значит ход за нами. Из-за отсутствия этой мелочи владелец
+    // терял людей: человек отвечал «да, оставлю», и ответ пропадал среди входящих.
+    inbound,
     // У звонка текста может не быть вовсе: расшифровка приходит позже, а иногда не приходит.
     text: body ? body.slice(0, 240) : null,
   };
@@ -184,6 +194,7 @@ function toVM(
   now: Date,
   maxAttempts: number,
   orderHref: (orderId: string) => string,
+  detailHref: (requestId: string) => string,
   journal: CardVM["journal"],
   lastContact: CardVM["lastContact"]
 ): CardVM {
@@ -206,6 +217,9 @@ function toVM(
     linkChannelLabel: c.linkChannel === "SMS" ? "в SMS" : c.linkChannel === "EMAIL" ? "письмом" : null,
     orderId: c.order.id,
     orderHref: orderHref(c.order.id),
+    detailHref: detailHref(c.id),
+    // Ход за нами, и это главное, что видно на карточке: клиент что-то сказал последним.
+    repliedLast: !!lastContact?.inbound,
     orderNumber: c.order.orderNumber,
     siteName: c.order.site.name,
     customerName: c.order.senderName,
