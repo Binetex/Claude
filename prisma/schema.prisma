@@ -1369,6 +1369,8 @@ model Order {
   @@unique([siteId, externalId])
   @@index([siteId])
   @@index([deliveryDate])
+  consumableUsages ConsumableUsage[]
+
   @@index([currentFloristId])
   @@index([orderStatus])
   @@index([isBackfilled])
@@ -1580,6 +1582,90 @@ model SiteQuoNumber {
   createdAt DateTime @default(now())
 
   @@index([siteId])
+}
+
+// ─────────────────────────────  РАСХОДНИКИ (ШТУКИ)  ─────────────────────────────
+// Денег здесь нет: себестоимость расходников — ставка на заказ в ConsumablesRate.
+// Здесь только штуки: что положили в заказ и сколько купили.
+
+/// Позиция справочника — одна КОЛОНКА привычной таблицы владельца.
+///
+/// «Small Box THEFLOW» и «Small Box» — ДВЕ строки, а не одна с разбивкой: это физически разная
+/// упаковка, и владелец ведёт их двумя колонками.
+///
+/// siteId — свободная строка, а НЕ связь: магазины удаляются из интерфейса, и жёсткая связь
+/// либо запретила бы удаление, либо молча превратила брендированную позицию в общую.
+model ConsumableItem {
+  id     String  @id @default(cuid())
+  name   String
+  /// Позиция только для этого магазина (брендированная упаковка). NULL — для всех.
+  siteId String?
+
+  /// Код правила автоподсчёта. NULL — только руками (коробки, обычный конверт).
+  /// Свободная строка, а не enum: набор правил задаёт код (modules/consumables/rules.ts),
+  /// и добавление правила не должно стоить миграции.
+  /// CARE_GUIDE_VASE | CARE_GUIDE_BOUQUET | BRANDED_ENVELOPE | VASE_BOTTOM | VASE_TYPE
+  autoRule String?
+  /// Для VASE_TYPE — ключ типа вазы (BUD, SAGE, WHITE_MATTE…).
+  autoKey  String?
+
+  /// Убрана из списка. Не удаляем: у прошлых дней остались проставленные количества.
+  archivedAt DateTime?
+  sortOrder  Int       @default(100)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  usages   ConsumableUsage[]
+  receipts ConsumableReceipt[]
+
+  @@index([archivedAt, sortOrder])
+}
+
+/// Сколько расходника ушло на КОНКРЕТНЫЙ заказ — по решению ЧЕЛОВЕКА.
+///
+/// Автоматика сюда не пишет никогда: количество по правилу считается на лету из снимка позиций
+/// заказа (тот же приём, что у OrderCommunication.topicManual). Поэтому правило можно уточнять
+/// задним числом без бэкфилла, и раздел работает на всей истории с первого дня.
+///
+/// quantity = 0 ЗНАЧИМО: «правило насчитало записку, а её не положили». Отсутствие строки —
+/// «действует правило», и это не одно и то же. Вернуться к расчёту = УДАЛИТЬ строку.
+model ConsumableUsage {
+  id      String @id @default(cuid())
+  orderId String
+  order   Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  itemId String
+  item   ConsumableItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+
+  quantity        Int
+  updatedByUserId String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([orderId, itemId])
+  @@index([itemId])
+}
+
+/// Поступление расходников на склад: купили N штук такого-то числа.
+///
+/// Нужно ради остатка: владелец ведёт вазы в инвентаре, и без прихода остаток всегда уходил бы
+/// в минус. Расход берётся из заказов, приход — отсюда.
+model ConsumableReceipt {
+  id     String         @id @default(cuid())
+  itemId String
+  item   ConsumableItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+
+  /// UTC-полночь локального дня — конвенция Order.deliveryDate.
+  day      DateTime
+  quantity Int
+  note     String?
+
+  createdByUserId String?
+  createdAt       DateTime @default(now())
+
+  @@index([itemId, day])
+  @@index([day])
 }
 
 // Зарегистрированные Shopify webhook-подписки по Site — чтобы не создавать дубли и

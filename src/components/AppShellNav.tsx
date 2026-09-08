@@ -15,6 +15,7 @@ import {
   Star,
   Receipt,
   MessageSquare,
+  Boxes,
   Settings,
   Circle,
 } from "lucide-react";
@@ -39,6 +40,7 @@ function iconFor(href: string) {
   if (href.includes("/reviews")) return Star;
   if (href.includes("/expenses")) return Receipt;
   if (href.includes("/communications")) return MessageSquare;
+  if (href.includes("/consumables")) return Boxes;
   // Пользователи, Telegram, печать и Burq стали вкладками внутри «Настроек» — в меню их
   // адресов больше нет, и своих иконок им не нужно.
   if (href.includes("/settings")) return Settings;
