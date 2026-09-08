@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { prisma } from "@/lib/db";
 import { Prisma } from "@/generated/prisma/client";
-import { markOrderCommunicationsRead, linkCommunicationToOrder, ignoreCommunication, suggestOrdersForCommunication, listOtherThreads, setThreadTopic } from "./communicationsService";
+import { markOrderCommunicationsRead, suggestOrdersForCommunication, listOtherThreads, setThreadTopic, linkThreadToOrder } from "./communicationsService";
 
 const suffix = `quosvc-${Date.now()}`;
 let siteId: string;
@@ -159,24 +159,31 @@ describe("communicationsService", () => {
     expect((await prisma.orderCommunication.findUnique({ where: { id: withStore } }))!.topicManual).toBeNull();
   });
 
-  it("linkCommunicationToOrder переносит событие в заказ (§16.6)", async () => {
+  it("linkThreadToOrder переносит В ЗАКАЗ ВСЮ переписку, а не одно событие (§16.6)", async () => {
+    const phone = uniquePhone();
+    const pn = `PN-${suffix}-link`;
     const orderId = await makeOrder(uniquePhone(), uniquePhone());
-    const commId = await insertComm({ externalPhoneNormalized: uniquePhone(), ignoredAt: new Date() });
-    const r = await linkCommunicationToOrder(prisma, commId, orderId);
-    expect(r.ok).toBe(true);
-    const c = await prisma.orderCommunication.findUnique({ where: { id: commId } });
-    expect(c).toMatchObject({ orderId });
-    expect(c!.ignoredAt).toBeNull(); // привязка снимает игнор
-    // Появляется в истории заказа, исчезает из «Других сообщений».
-    expect((await prisma.orderCommunication.findUnique({ where: { id: commId } }))!.orderId).toBe(orderId);
+    await insertComm({ externalPhoneNormalized: phone, providerPhoneNumberId: pn, messageText: "hi" });
+    await insertComm({ externalPhoneNormalized: phone, providerPhoneNumberId: pn, type: "CALL", status: "MISSED", messageText: null });
+    // Событие того же номера, но ЧУЖОГО магазина — трогать нельзя.
+    const other = await insertComm({ externalPhoneNormalized: phone, providerPhoneNumberId: `PN-${suffix}-other`, messageText: "hi" });
+
+    const r = await linkThreadToOrder(prisma, { phoneE164: phone, providerPhoneNumberId: pn, orderId });
+    expect(r).toMatchObject({ ok: true, linked: 2 });
+    expect((await prisma.orderCommunication.findUnique({ where: { id: other } }))!.orderId).toBeNull();
+
+    // Переписка ушла из раздела целиком.
+    const left = (await listOtherThreads(prisma, { take: 2000 })).threads.filter((t) => t.phone === phone && t.providerPhoneNumberId === pn);
+    expect(left).toHaveLength(0);
   });
 
-  it("ignoreCommunication убирает из активного списка (§16.7)", async () => {
+  it("linkThreadToOrder на несуществующем заказе ничего не трогает", async () => {
     const phone = uniquePhone();
-    const commId = await insertComm({ externalPhoneNormalized: phone, providerPhoneNumberId: `PN-${suffix}-ign` });
-    expect((await listOtherThreads(prisma, { take: 2000 })).threads.map((t) => t.phone)).toContain(phone);
-    await ignoreCommunication(prisma, commId);
-    expect((await listOtherThreads(prisma, { take: 2000 })).threads.map((t) => t.phone)).not.toContain(phone);
+    const pn = `PN-${suffix}-noorder`;
+    const id = await insertComm({ externalPhoneNormalized: phone, providerPhoneNumberId: pn, messageText: "hi" });
+    const r = await linkThreadToOrder(prisma, { phoneE164: phone, providerPhoneNumberId: pn, orderId: "нет-такого" });
+    expect(r).toMatchObject({ ok: false, linked: 0, reason: "order_not_found" });
+    expect((await prisma.orderCommunication.findUnique({ where: { id } }))!.orderId).toBeNull();
   });
 
   it("suggestOrdersForCommunication предлагает заказ по номеру", async () => {

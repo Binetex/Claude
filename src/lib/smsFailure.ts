@@ -32,6 +32,7 @@ const CODES: Record<string, string> = {
   too_long: "Сообщение слишком длинное.",
   invalid_target_phone: "Номер получателя не распознан.",
   store_no_quo_number: "У магазина не задан номер отправителя QUO.",
+  from_number_not_owned: "Этот QUO-номер не принадлежит магазину — отправка с него запрещена.",
   store_quo_disabled: "SMS через QUO у этого магазина выключены.",
   quo_not_configured: "Интеграция QUO не настроена.",
   order_not_found: "Заказ не найден.",

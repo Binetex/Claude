@@ -15,7 +15,8 @@ const QUICK_REPLY = "Hey! Sorry we missed you. Do you need help with an order, p
 export type ThreadActionsProps = {
   phone: string;
   pn: string;
-  siteId: string | null;
+  /** Магазин по номеру переписки известен — только тогда можно ответить. */
+  storeKnown: boolean;
   storeCanSend: boolean;
   storeName: string;
   topic: TopicKey;
@@ -70,13 +71,13 @@ function TopicCard({ phone, pn, topic, topicIsManual }: ThreadActionsProps) {
   );
 }
 
-function ReplyCard({ phone, pn, siteId, storeCanSend, storeName }: ThreadActionsProps) {
+function ReplyCard({ phone, pn, storeKnown, storeCanSend, storeName }: ThreadActionsProps) {
   const [text, setText] = useState("");
   const [idem, setIdem] = useState<string>(newKey);
   const [pending, setPending] = useState(false);
   const [result, setResult] = useState<{ ok?: boolean; error?: string } | null>(null);
 
-  if (!siteId) {
+  if (!storeKnown) {
     return (
       <Card>
         <CardHeader className="py-2.5"><CardTitle icon={MessageSquare}>Ответить</CardTitle></CardHeader>

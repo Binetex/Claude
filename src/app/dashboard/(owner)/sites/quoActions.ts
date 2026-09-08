@@ -90,6 +90,8 @@ export async function ownerQuoSaveNumber(siteId: string, phoneNumberId: string):
       quoConnectionError: null,
     },
   });
+  // Номер стал основным — в списке дополнительных ему делать нечего.
+  await prisma.siteQuoNumber.deleteMany({ where: { quoPhoneNumberId: id } });
   revalidatePath("/dashboard/sites");
   return { ok: true };
 }
@@ -115,6 +117,8 @@ export async function ownerQuoSaveManual(siteId: string, phoneNumberId: string, 
       quoConnectionError: "Сохранено вручную без проверки через QUO API.",
     },
   });
+  // Номер стал основным — в списке дополнительных ему делать нечего.
+  await prisma.siteQuoNumber.deleteMany({ where: { quoPhoneNumberId: id } });
   revalidatePath("/dashboard/sites");
   return { ok: true };
 }

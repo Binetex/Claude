@@ -156,7 +156,8 @@ export async function sendUnlinkedSms(prisma: PrismaClient, client: QuoClient | 
   const requested = input.fromPhoneNumberId ?? null;
   const extra = requested ? site.quoExtraNumbers.find((n) => n.quoPhoneNumberId === requested) : undefined;
   const useExtra = !!requested && requested !== site.quoPhoneNumberId && !!extra;
-  if (requested && requested !== site.quoPhoneNumberId && !extra) return { ok: false, code: "store_no_quo_number" };
+  // Отдельный код, а не store_no_quo_number: номер у магазина есть, просто просят чужой.
+  if (requested && requested !== site.quoPhoneNumberId && !extra) return { ok: false, code: "from_number_not_owned" };
   const fromId = useExtra ? requested! : site.quoPhoneNumberId;
   const fromNumber = useExtra ? extra!.quoPhoneNumber ?? null : site.quoPhoneNumber ?? null;
   if (!client) return { ok: false, code: "quo_not_configured" };

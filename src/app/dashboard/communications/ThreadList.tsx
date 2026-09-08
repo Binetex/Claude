@@ -31,6 +31,8 @@ const TOPIC_TONE: Record<TopicKey, string> = {
 
 function preview(row: ThreadRow): string {
   if (row.lastText?.trim()) return row.lastText.trim();
+  // Звонков нет, а текста всё равно нет — это MMS без подписи: фото прислали, слов не написали.
+  if (row.callCount === 0) return "Сообщение без текста (фото или вложение)";
   if (row.callCount === 1) return "Звонок без сообщения";
   return `${row.callCount} ${pluralRu(row.callCount, "звонок", "звонка", "звонков")} без сообщений`;
 }

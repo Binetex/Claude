@@ -87,7 +87,8 @@ describe("sendUnlinkedSms — отправка без заказа (раздел
     const r = await sendUnlinkedSms(prisma, fakeClient(send as never), {
       siteId: siteWithNumber, toPhone: CUST, text: "Hi", idempotencyKey: `unl-${suffix}-3`, fromPhoneNumberId: STRANGER_PN,
     });
-    expect(r).toEqual({ ok: false, code: "store_no_quo_number" });
+    // Отдельный код, а не «у магазина нет номера»: номер есть, просто просят чужой.
+    expect(r).toEqual({ ok: false, code: "from_number_not_owned" });
     expect(send).not.toHaveBeenCalled();
     expect(await prisma.orderCommunication.count({ where: { sendKey: `unl-${suffix}-3` } })).toBe(0);
   });

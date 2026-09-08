@@ -2,6 +2,7 @@ import { prisma } from "@/lib/db";
 import { PageHeader } from "@/components/ui/misc";
 import { Card, CardBody } from "@/components/ui/Card";
 import { fmtDateTime } from "@/lib/format";
+import { DEFAULT_STORE_TZ, localDateStr, zonedLocalTimeToUtc } from "@/lib/tz";
 import { listOtherThreads, loadQuoNumberOwners, type OtherThread } from "@/integrations/quo/communicationsService";
 import { quoLog } from "@/integrations/quo/logging";
 import { TOPIC_LABEL, type TopicKey } from "@/integrations/quo/otherMessages";
@@ -31,10 +32,25 @@ const TABS: { key: string; label: string; match: (t: OtherThread) => boolean }[]
   { key: "OTHER", label: TOPIC_LABEL.OTHER, match: (t) => t.topic === "OTHER" || t.topic === "JOB" || t.topic === "SERVICE" },
 ];
 
-function parseDate(v: string | undefined): Date | undefined {
-  if (!v) return undefined;
-  const d = new Date(v);
-  return Number.isNaN(d.getTime()) ? undefined : d;
+/**
+ * Границы периода — по КАЛЕНДАРНОМУ ДНЮ МАГАЗИНА, а не по UTC.
+ *
+ * Полночь UTC наступает в Лос-Анджелесе в 17:00, поэтому new Date("2026-09-08") как граница
+ * отрезала вечер выбранного дня — ровно то время, когда люди и пишут «can I come now».
+ */
+const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+function dayStart(dateStr: string | undefined, tz: string): Date | undefined {
+  if (!dateStr || !DAY_RE.test(dateStr)) return undefined;
+  return zonedLocalTimeToUtc(dateStr, "00:00", tz);
+}
+
+/** Конец периода — начало СЛЕДУЮЩЕГО локального дня (в сервисе стоит `lt`). */
+function dayAfter(dateStr: string | undefined, tz: string): Date | undefined {
+  if (!dateStr || !DAY_RE.test(dateStr)) return undefined;
+  const next = new Date(`${dateStr}T00:00:00Z`);
+  next.setUTCDate(next.getUTCDate() + 1);
+  return zonedLocalTimeToUtc(next.toISOString().slice(0, 10), "00:00", tz);
 }
 
 export default async function OtherMessagesPage({ searchParams }: { searchParams: Promise<Record<string, string | undefined>> }) {
@@ -42,22 +58,29 @@ export default async function OtherMessagesPage({ searchParams }: { searchParams
   const phone = sp.phone?.trim() || undefined;
   const activeTab = TABS.some((t) => t.key === sp.topic) ? (sp.topic as string) : "ALL";
   const now = new Date();
-  const from = parseDate(sp.from) ?? new Date(now.getTime() - DEFAULT_DAYS * 86_400_000);
-  // Верхняя граница — начало СЛЕДУЮЩЕГО дня: иначе «По = сегодня» отрезало сегодняшний день
-  // целиком и фильтр отдавал пустой список (в сервисе стоит `lt`).
-  const toRaw = parseDate(sp.to);
-  const to = toRaw ? new Date(toRaw.getTime() + 86_400_000) : undefined;
+  // Все магазины сейчас в Лос-Анджелесе; когда появятся другие зоны, брать Site.timezone
+  // выбранного магазина (см. lib/tz.deliveryDayBucket — там уже описан этот переход).
+  const tz = DEFAULT_STORE_TZ;
+  const defaultFromDay = new Date(now.getTime() - DEFAULT_DAYS * 86_400_000);
+  const from = dayStart(sp.from, tz) ?? dayStart(localDateStr(defaultFromDay, tz), tz);
+  const to = dayAfter(sp.to, tz);
+  const type = sp.type === "SMS" || sp.type === "CALL" || sp.type === "VOICEMAIL" ? sp.type : undefined;
+  const direction = sp.direction === "INBOUND" || sp.direction === "OUTBOUND" ? sp.direction : undefined;
   // Пустая строка в select — «все магазины»; "NONE" — переписки на номерах, которых нет ни у
   // одного магазина (их пятая часть, и это отдельный разговор с владельцем).
+  // Значение фильтра — id МАГАЗИНА, а не один его номер: у магазина номеров бывает несколько.
   const storeFilter = sp.store ?? "";
 
   // Магазин определяется и по основному номеру, и по дополнительным (модель SiteQuoNumber):
   // у магазина бывает несколько номеров, и входящее на второй не должно быть «ничьим».
   const ownerByPn = await loadQuoNumberOwners(prisma);
-  const storeOptions = [...ownerByPn.entries()]
-    .filter(([, o]) => o.isPrimary)
-    .map(([pn, o]) => ({ pn, label: o.shortName || o.name }))
+  const storeOptions = [...new Map([...ownerByPn.values()].map((o) => [o.siteId, o.shortName || o.name])).entries()]
+    .map(([siteId, label]) => ({ siteId, label }))
     .sort((a, b) => a.label.localeCompare(b.label, "ru"));
+  // Все номера выбранного магазина — основной и дополнительные.
+  const filterPns = storeFilter && storeFilter !== "NONE"
+    ? [...ownerByPn.entries()].filter(([, o]) => o.siteId === storeFilter).map(([pn]) => pn)
+    : undefined;
 
   let threads: OtherThread[] = [];
   let truncated = false;
@@ -67,7 +90,9 @@ export default async function OtherMessagesPage({ searchParams }: { searchParams
       from,
       to,
       phone,
-      providerPhoneNumberId: storeFilter && storeFilter !== "NONE" ? storeFilter : undefined,
+      providerPhoneNumberIds: filterPns,
+      type,
+      direction,
     });
     threads = res.threads;
     truncated = res.truncated;
@@ -120,9 +145,26 @@ export default async function OtherMessagesPage({ searchParams }: { searchParams
               <select name="store" defaultValue={storeFilter} className="rounded border border-slate-300 px-2 py-1">
                 <option value="">все</option>
                 {storeOptions.map((s) => (
-                  <option key={s.pn} value={s.pn}>{s.label}</option>
+                  <option key={s.siteId} value={s.siteId}>{s.label}</option>
                 ))}
                 <option value="NONE">магазин не определён</option>
+              </select>
+            </label>
+            <label className="flex flex-col gap-0.5">
+              Тип
+              <select name="type" defaultValue={type ?? ""} className="rounded border border-slate-300 px-2 py-1">
+                <option value="">все</option>
+                <option value="SMS">SMS</option>
+                <option value="CALL">звонки</option>
+                <option value="VOICEMAIL">voicemail</option>
+              </select>
+            </label>
+            <label className="flex flex-col gap-0.5">
+              Направление
+              <select name="direction" defaultValue={direction ?? ""} className="rounded border border-slate-300 px-2 py-1">
+                <option value="">все</option>
+                <option value="INBOUND">входящие</option>
+                <option value="OUTBOUND">исходящие</option>
               </select>
             </label>
             <label className="flex flex-col gap-0.5">

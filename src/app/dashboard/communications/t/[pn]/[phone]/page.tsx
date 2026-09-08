@@ -6,7 +6,7 @@ import { CommunicationTimeline } from "@/components/orders/CommunicationTimeline
 import { fmtDateTime } from "@/lib/format";
 import { pluralRu } from "@/lib/plural";
 import { requireUser } from "@/lib/rbac";
-import { loadPhoneCommunicationsCard, suggestOrdersForCommunication, loadQuoNumberOwners } from "@/integrations/quo/communicationsService";
+import { loadPhoneCommunicationsCard, suggestOrdersForCommunication, findSiteByQuoNumber } from "@/integrations/quo/communicationsService";
 import { classifyThread, isTopicKey, TOPIC_LABEL, type TopicKey } from "@/integrations/quo/otherMessages";
 import { ThreadActions } from "../../../ThreadActions";
 import { parseThreadPn, decodeSegment, NO_STORE } from "../../../threadKey";
@@ -27,15 +27,13 @@ export default async function ThreadPage({ params }: { params: Promise<{ pn: str
   const pn = parseThreadPn(pnRaw);
   if (!phone) notFound();
 
-  // Магазин ищем и среди дополнительных номеров: человек мог написать на второй номер магазина.
-  const owner = pn ? (await loadQuoNumberOwners(prisma)).get(pn) ?? null : null;
-  const site = owner
-    ? await prisma.site.findUnique({ where: { id: owner.siteId }, select: { id: true, name: true, shortName: true, quoPhoneNumber: true, quoEnabled: true } })
-    : null;
+  // Магазин ищем и среди дополнительных номеров — ОДНИМ запросом: человек мог написать на
+  // второй номер магазина.
+  const owner = pn ? await findSiteByQuoNumber(prisma, pn) : null;
 
   const { communications, storeHasQuoNumber, storeTimeZone } = await loadPhoneCommunicationsCard(prisma, {
     phoneE164: phone,
-    siteId: site?.id ?? null,
+    siteId: owner?.siteId ?? null,
     providerPhoneNumberId: pn,
     take: 300,
   });
@@ -57,16 +55,29 @@ export default async function ThreadPage({ params }: { params: Promise<{ pn: str
   // Переписки нет: все её события уже уехали в заказы или скрыты — показывать нечего.
   if (rows.length === 0) notFound();
 
-  const suggestions = await suggestOrdersForCommunication(prisma, rows[0].id);
+  const threadWhere = { externalPhoneNormalized: phone, providerPhoneNumberId: pn } as const;
 
-  // Числа шапки считаем по НЕПРИВЯЗАННЫМ событиям — ровно тем, что показаны строкой в списке.
-  // Лента ниже намеренно шире: в ней видна и переписка, уже привязанная к заказам, — без неё
-  // разговор читался бы кусками.
-  const smsCount = rows.filter((r) => r.type === "SMS").length;
-  const callCount = rows.length - smsCount;
-  const first = rows[rows.length - 1];
-  const last = rows[0];
-  const linkedCount = communications.length - rows.length;
+  // Числа шапки считаем ЗАПРОСАМИ, а не по загруженным 300 строкам: иначе на длинной переписке
+  // «первый контакт» показывал бы трёхсотое с конца событие, а счётчики молча занижались.
+  const [suggestions, byType, span, linkedCount] = await Promise.all([
+    suggestOrdersForCommunication(prisma, rows[0].id),
+    prisma.orderCommunication.groupBy({
+      by: ["type"],
+      where: { ...threadWhere, orderId: null, ignoredAt: null },
+      _count: { _all: true },
+    }),
+    prisma.orderCommunication.aggregate({
+      where: { ...threadWhere, orderId: null, ignoredAt: null },
+      _min: { occurredAt: true },
+      _max: { occurredAt: true },
+    }),
+    prisma.orderCommunication.count({ where: { ...threadWhere, orderId: { not: null } } }),
+  ]);
+
+  const smsCount = byType.find((g) => g.type === "SMS")?._count._all ?? 0;
+  const callCount = byType.reduce((n, g) => (g.type === "SMS" ? n : n + g._count._all), 0);
+  const firstAt = span._min.occurredAt;
+  const lastAt = span._max.occurredAt;
 
   return (
     <div className="space-y-4">
@@ -77,7 +88,7 @@ export default async function ThreadPage({ params }: { params: Promise<{ pn: str
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
         <h1 className="text-xl font-bold text-slate-800 tabular-nums">{communications[0].externalPhone}</h1>
         <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] text-slate-600">
-          {owner ? `${owner.shortName || owner.name} · ${owner.quoPhoneNumber ?? ""}` : "магазин не определён"}
+          {owner ? `${owner.shortName || owner.name} · ${owner.numberOnThread ?? ""}` : "магазин не определён"}
         </span>
         <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] text-slate-600">
           {TOPIC_LABEL[topic]}
@@ -88,7 +99,7 @@ export default async function ThreadPage({ params }: { params: Promise<{ pn: str
       <div className="text-xs text-slate-500">
         {smsCount > 0 && <>{smsCount} SMS · </>}
         {callCount > 0 && <>{callCount} {pluralRu(callCount, "звонок", "звонка", "звонков")} · </>}
-        первый контакт {fmtDateTime(first.occurredAt)} · последний {fmtDateTime(last.occurredAt)}
+        первый контакт {fmtDateTime(firstAt)} · последний {fmtDateTime(lastAt)}
         {linkedCount > 0 && <> · ещё {linkedCount} по заказам, они видны в ленте</>}
       </div>
 
@@ -103,7 +114,7 @@ export default async function ThreadPage({ params }: { params: Promise<{ pn: str
         <ThreadActions
           phone={phone}
           pn={pn ?? ""}
-          siteId={site?.id ?? null}
+          storeKnown={!!owner}
           storeCanSend={storeHasQuoNumber}
           storeName={owner ? owner.shortName || owner.name : NO_STORE}
           topic={topic}

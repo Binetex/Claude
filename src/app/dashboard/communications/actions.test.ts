@@ -10,6 +10,7 @@ vi.mock("@/lib/db", () => ({
 }));
 vi.mock("@/lib/rbac", () => ({ requireUser: vi.fn() }));
 vi.mock("@/integrations/quo/communicationsService", () => ({ linkThreadToOrder: vi.fn(), setThreadTopic: vi.fn(), loadQuoNumberOwners: vi.fn() }));
+vi.mock("@/modules/assistant/prompt", () => ({ looksEnglish: (t: string) => !/[\u0400-\u04FF]/.test(t) }));
 vi.mock("@/integrations/quo/config", () => ({ getQuoConfig: () => ({ apiKey: "k" }) }));
 vi.mock("@/integrations/quo/client", () => ({ createQuoClient: () => ({}) }));
 vi.mock("@/lib/featureFlags", () => ({ featureFlags: { quo: true } }));
@@ -87,6 +88,14 @@ describe("«Другие сообщения» — действия", () => {
     mock(loadQuoNumberOwners).mockResolvedValue(new Map());
     const res = await sendThreadSmsAction(null, fd({ phone: "+13105550101", pn: "PNunknown", text: "hi", idempotencyKey: "k3" }));
     expect(res?.error).toBeTruthy();
+    expect(sendUnlinkedSms).not.toHaveBeenCalled();
+  });
+
+  it("ОТПРАВКА: русский текст клиенту не уходит", async () => {
+    mock(prisma.orderCommunication.findFirst).mockResolvedValue({ id: "c1" });
+    mock(loadQuoNumberOwners).mockResolvedValue(new Map([["PN1", { siteId: "s1", name: "S", shortName: null, quoPhoneNumber: null, isPrimary: true }]]));
+    const res = await sendThreadSmsAction(null, fd({ phone: "+13105550101", pn: "PN1", text: "Да, приезжайте, мы до 19:00", idempotencyKey: "kru" }));
+    expect(res?.error).toContain("английск");
     expect(sendUnlinkedSms).not.toHaveBeenCalled();
   });
 

@@ -42,7 +42,12 @@ export function isTopicKey(v: string): v is TopicKey {
  * ломали бы `can't find`, регистр и переносы — всё остальное.
  */
 export function normalizeForRules(raw: string): string {
-  return normalizeApostrophes(raw).toLowerCase().replace(/\s+/g, " ").trim();
+  return normalizeApostrophes(raw)
+    // Длинные тире с телефонов: «same–day» — то же слово, что «same-day».
+    .replace(/[\u2010-\u2015\u2212]/g, "-")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 /**

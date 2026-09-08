@@ -9,6 +9,7 @@ import { getQuoConfig } from "@/integrations/quo/config";
 import { createQuoClient } from "@/integrations/quo/client";
 import { sendUnlinkedSms } from "@/integrations/quo/send";
 import { describeSendFailure } from "@/lib/smsFailure";
+import { looksEnglish } from "@/modules/assistant/prompt";
 import { threadHref } from "./threadKey";
 
 type FormState = { ok?: boolean; error?: string } | null;
@@ -87,6 +88,14 @@ export async function sendThreadSmsAction(_prev: FormState, formData: FormData):
   if (!phone) return { error: "Не указан номер." };
 
   const pn = pnRaw === "" ? null : pnRaw;
+  if (!pn) return { error: "У этого номера не определён магазин — ответить из дашборда нельзя." };
+
+  // Клиенту пишем ТОЛЬКО по-английски (CLAUDE.md). Проверка та же, что у ассистента: подпись
+  // рядом с полем ничего не гарантирует, а по-русски написанная SMS уйдёт живому человеку в
+  // Лос-Анджелесе. Отказ, а не молчаливый перевод: оператор должен видеть, что именно уйдёт.
+  if (text.trim() && !looksEnglish(text)) {
+    return { error: "Клиенту пишем только по-английски — перепишите текст на английском." };
+  }
 
   // Писать можно ТОЛЬКО тому, кто сам написал, и только от имени того магазина, на номер
   // которого он написал. Ни адресат, ни магазин из браузера не берутся: иначе подменой полей
@@ -96,7 +105,6 @@ export async function sendThreadSmsAction(_prev: FormState, formData: FormData):
     select: { id: true },
   });
   if (!anchor) return { error: "Переписка не найдена." };
-  if (!pn) return { error: "У этого номера не определён магазин — ответить из дашборда нельзя." };
 
   // Магазин определяет СЕРВЕР — по основному или дополнительному номеру магазина.
   const owner = (await loadQuoNumberOwners(prisma)).get(pn);

@@ -4,7 +4,7 @@ import "server-only";
 /**
  * Серверные операции истории коммуникаций (чтение из локальной БД, не из QUO):
  *  - markOrderCommunicationsRead: при открытии заказа помечает входящие SMS и пропущенные звонки прочитанными (глобально/командно);
- *  - linkCommunicationToOrder / ignoreCommunication: ручная привязка / игнор нераспознанных;
+ *  - linkThreadToOrder: привязка ВСЕЙ переписки (номер + QUO-номер магазина) к заказу;
  *  - listOtherThreads: непривязанные события, собранные в переписки (раздел «Другие сообщения»);
  *  - suggestOrdersForCommunication: предполагаемые заказы по номеру;
  *  - indicatorsForOrders: агрегаты для списка заказов.
@@ -250,24 +250,6 @@ export async function markOrderCommunicationsRead(prisma: PrismaClient, orderId:
   return r.count;
 }
 
-export async function linkCommunicationToOrder(prisma: PrismaClient, communicationId: string, orderId: string): Promise<{ ok: boolean; reason?: string }> {
-  const [comm, order] = await Promise.all([
-    prisma.orderCommunication.findUnique({ where: { id: communicationId }, select: { id: true } }),
-    prisma.order.findUnique({ where: { id: orderId }, select: { id: true } }),
-  ]);
-  if (!comm) return { ok: false, reason: "communication_not_found" };
-  if (!order) return { ok: false, reason: "order_not_found" };
-  await prisma.orderCommunication.update({ where: { id: communicationId }, data: { orderId, ignoredAt: null } });
-  return { ok: true };
-}
-
-export async function ignoreCommunication(prisma: PrismaClient, communicationId: string): Promise<{ ok: boolean; reason?: string }> {
-  const comm = await prisma.orderCommunication.findUnique({ where: { id: communicationId }, select: { id: true } });
-  if (!comm) return { ok: false, reason: "communication_not_found" };
-  await prisma.orderCommunication.update({ where: { id: communicationId }, data: { ignoredAt: new Date() } });
-  return { ok: true };
-}
-
 /**
  * ── «Другие сообщения»: переписки, а не отдельные события ──────────────────────────────────
  *
@@ -300,7 +282,21 @@ export type OtherThread = {
   callsOnly: boolean;
 };
 
-export type OtherThreadFilters = { from?: Date; to?: Date; phone?: string; providerPhoneNumberId?: string; take?: number };
+export type OtherThreadFilters = {
+  from?: Date;
+  /** Верхняя граница СТРОГО меньше: передавайте начало следующего локального дня. */
+  to?: Date;
+  phone?: string;
+  /**
+   * Номера магазина, а не один номер: у магазина их бывает несколько (модель SiteQuoNumber),
+   * и фильтр «магазин = TheFlow» обязан показывать переписки со ВСЕХ его номеров.
+   */
+  providerPhoneNumberIds?: string[];
+  /** Фильтры по СОБЫТИЯМ до сборки в переписки — как на прежнем экране нераспознанных. */
+  type?: "SMS" | "CALL" | "VOICEMAIL";
+  direction?: "INBOUND" | "OUTBOUND";
+  take?: number;
+};
 
 export type OtherThreadsResult = {
   threads: OtherThread[];
@@ -314,16 +310,20 @@ export type OtherThreadsResult = {
 export async function listOtherThreads(prisma: PrismaClient, f: OtherThreadFilters = {}): Promise<OtherThreadsResult> {
   const where: Prisma.OrderCommunicationWhereInput = { orderId: null, ignoredAt: null };
   if (f.phone) where.externalPhoneNormalized = { contains: f.phone.replace(/[^\d+]/g, "") };
-  if (f.providerPhoneNumberId) where.providerPhoneNumberId = f.providerPhoneNumberId;
+  if (f.providerPhoneNumberIds?.length) where.providerPhoneNumberId = { in: f.providerPhoneNumberIds };
+  if (f.type) where.type = f.type;
+  if (f.direction) where.direction = f.direction;
   // Верхняя граница — СТРОГО меньше: вызывающий передаёт начало следующего дня. С `lte` на
   // полуночи выбранный день отрезался целиком, и фильтр «по сегодня» отдавал пустой список.
   if (f.from || f.to) where.occurredAt = { ...(f.from ? { gte: f.from } : {}), ...(f.to ? { lt: f.to } : {}) };
 
   const take = f.take ?? 3000;
+  // Берём на одну строку больше лимита: только так «упёрлись в лимит» отличается от «ровно
+  // столько событий и есть». Лишнюю строку отбрасываем ниже.
   const rows = await prisma.orderCommunication.findMany({
     where,
     orderBy: { occurredAt: "desc" },
-    take,
+    take: take + 1,
     select: {
       type: true, direction: true, externalPhone: true, externalPhoneNormalized: true,
       providerPhoneNumberId: true, storePhone: true, messageText: true, transcript: true,
@@ -331,10 +331,13 @@ export async function listOtherThreads(prisma: PrismaClient, f: OtherThreadFilte
     },
   });
 
+  const truncated = rows.length > take;
+  const used = truncated ? rows.slice(0, take) : rows;
+
   type Acc = Omit<OtherThread, "topic" | "topicIsManual" | "callsOnly"> & { inboundTexts: string[]; manual: string | null };
   const byKey = new Map<string, Acc>();
 
-  for (const r of rows) {
+  for (const r of used) {
     // События без номера собеседника (в базе такие есть: служебные и обрывки вебхуков) в
     // переписки не собираем — иначе все они склеились бы в одну фальшивую строку «».
     if (!r.externalPhoneNormalized?.trim()) continue;
@@ -376,13 +379,13 @@ export async function listOtherThreads(prisma: PrismaClient, f: OtherThreadFilte
     }))
     .sort((a, b) => b.lastAt.getTime() - a.lastAt.getTime());
 
-  return { threads, truncated: rows.length >= take };
+  return { threads, truncated };
 }
 
 /**
  * Привязать к заказу ВСЮ переписку, а не одно событие.
  *
- * Поштучная привязка (linkCommunicationToOrder) оставляла остальные события разговора
+ * Поштучная привязка (по одному событию) оставляла остальные события разговора
  * непривязанными: строка не уходила из списка, и тот же разговор просил разбора снова.
  *
  * `orderId: null` в условии обязателен — уже привязанные к другим заказам события не трогаем.
@@ -434,6 +437,34 @@ export async function setThreadTopic(
  * второй не должно оказываться «ничьим».
  */
 export type QuoNumberOwner = { siteId: string; name: string; shortName: string | null; quoPhoneNumber: string | null; isPrimary: boolean };
+
+/**
+ * Магазин по ОДНОМУ QUO-номеру — одним запросом, без чтения всех магазинов и всех их номеров.
+ * Нужен странице переписки: там резолвится ровно один номер.
+ */
+export async function findSiteByQuoNumber(
+  prisma: PrismaClient,
+  quoPhoneNumberId: string
+): Promise<{ siteId: string; name: string; shortName: string | null; quoEnabled: boolean; numberOnThread: string | null } | null> {
+  const site = await prisma.site.findFirst({
+    where: {
+      OR: [{ quoPhoneNumberId }, { quoExtraNumbers: { some: { quoPhoneNumberId } } }],
+    },
+    select: {
+      id: true, name: true, shortName: true, quoEnabled: true, quoPhoneNumberId: true, quoPhoneNumber: true,
+      quoExtraNumbers: { where: { quoPhoneNumberId }, select: { quoPhoneNumber: true } },
+    },
+  });
+  if (!site) return null;
+  return {
+    siteId: site.id,
+    name: site.name,
+    shortName: site.shortName,
+    quoEnabled: site.quoEnabled,
+    // Номер, на который человек написал: основной или найденный дополнительный.
+    numberOnThread: site.quoPhoneNumberId === quoPhoneNumberId ? site.quoPhoneNumber : site.quoExtraNumbers[0]?.quoPhoneNumber ?? null,
+  };
+}
 
 export async function loadQuoNumberOwners(prisma: PrismaClient): Promise<Map<string, QuoNumberOwner>> {
   const [sites, extras] = await Promise.all([

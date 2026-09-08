@@ -9,9 +9,9 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const listPhoneNumbers = vi.fn<() => Promise<{ id: string; number?: string }[]>>();
 const siteUpdate = vi.fn<(a: { where: unknown; data: Record<string, unknown> }) => Promise<unknown>>();
 const siteFindFirst = vi.fn<(a: unknown) => Promise<unknown>>();
-const extraFindFirst = vi.fn(async () => null as unknown);
-const extraUpsert = vi.fn(async () => ({}));
-const extraDeleteMany = vi.fn(async () => ({ count: 0 }));
+const extraFindFirst = vi.fn<(a: unknown) => Promise<unknown>>(async () => null);
+const extraUpsert = vi.fn<(a: unknown) => Promise<unknown>>(async () => ({}));
+const extraDeleteMany = vi.fn<(a: unknown) => Promise<{ count: number }>>(async () => ({ count: 0 }));
 const siteFindUnique = vi.fn<(a: unknown) => Promise<unknown>>();
 
 vi.mock("@/lib/rbac", () => ({ requireRole: vi.fn(async () => ({ id: "u", role: "OWNER" })) }));
