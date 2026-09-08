@@ -9,16 +9,25 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const listPhoneNumbers = vi.fn<() => Promise<{ id: string; number?: string }[]>>();
 const siteUpdate = vi.fn<(a: { where: unknown; data: Record<string, unknown> }) => Promise<unknown>>();
 const siteFindFirst = vi.fn<(a: unknown) => Promise<unknown>>();
+const extraFindFirst = vi.fn(async () => null as unknown);
+const extraUpsert = vi.fn(async () => ({}));
+const extraDeleteMany = vi.fn(async () => ({ count: 0 }));
 const siteFindUnique = vi.fn<(a: unknown) => Promise<unknown>>();
 
 vi.mock("@/lib/rbac", () => ({ requireRole: vi.fn(async () => ({ id: "u", role: "OWNER" })) }));
-vi.mock("@/lib/db", () => ({ prisma: { site: { update: (a: unknown) => siteUpdate(a as { where: unknown; data: Record<string, unknown> }), findFirst: (a: unknown) => siteFindFirst(a), findUnique: (a: unknown) => siteFindUnique(a) } } }));
+vi.mock("@/lib/db", () => ({
+  prisma: {
+    site: { update: (a: unknown) => siteUpdate(a as { where: unknown; data: Record<string, unknown> }), findFirst: (a: unknown) => siteFindFirst(a), findUnique: (a: unknown) => siteFindUnique(a) },
+    // Дополнительные номера магазина тоже занимают Phone Number ID — проверка занятости ходит и сюда.
+    siteQuoNumber: { findFirst: (a: unknown) => extraFindFirst(a), upsert: (a: unknown) => extraUpsert(a), deleteMany: (a: unknown) => extraDeleteMany(a) },
+  },
+}));
 vi.mock("@/integrations/quo/config", () => ({ getQuoConfig: () => ({ apiKey: "secret", baseUrl: "https://api" }) }));
 vi.mock("@/lib/featureFlags", () => ({ featureFlags: { quo: true } }));
 vi.mock("@/integrations/quo/client", () => ({ createQuoClient: () => ({ listPhoneNumbers: () => listPhoneNumbers() }) }));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
-import { ownerQuoListNumbers, ownerQuoSaveNumber, ownerQuoCheckConnection, ownerQuoUnlink } from "./quoActions";
+import { ownerQuoListNumbers, ownerQuoSaveNumber, ownerQuoCheckConnection, ownerQuoUnlink, ownerQuoAddExtraNumber } from "./quoActions";
 
 beforeEach(() => {
   listPhoneNumbers.mockReset();
@@ -85,5 +94,37 @@ describe("ownerQuoUnlink — чистит только привязку, ист�
     expect(r).toEqual({ ok: true });
     expect(siteUpdate.mock.calls[0][0].data).toMatchObject({ quoPhoneNumberId: null, quoPhoneNumber: null, quoEnabled: false });
     // prisma-мок не содержит orderCommunication — если бы действие его дёргало, тест упал бы.
+  });
+});
+
+describe("ownerQuoAddExtraNumber — второй номер того же магазина", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("добавляет номер магазину", async () => {
+    siteFindUnique.mockResolvedValue({ quoPhoneNumberId: "PN_main" });
+    siteFindFirst.mockResolvedValue(null);
+    extraFindFirst.mockResolvedValue(null);
+    const r = await ownerQuoAddExtraNumber("s1", " PN_second ", " +13238004481 ");
+    expect(r).toEqual({ ok: true });
+    expect(extraUpsert).toHaveBeenCalledWith(expect.objectContaining({
+      where: { quoPhoneNumberId: "PN_second" },
+      create: { siteId: "s1", quoPhoneNumberId: "PN_second", quoPhoneNumber: "+13238004481" },
+    }));
+  });
+
+  it("основной номер магазина повторно не добавляется", async () => {
+    siteFindUnique.mockResolvedValue({ quoPhoneNumberId: "PN_main" });
+    const r = await ownerQuoAddExtraNumber("s1", "PN_main", "+1323");
+    expect(r.error).toBeTruthy();
+    expect(extraUpsert).not.toHaveBeenCalled();
+  });
+
+  it("номер, занятый ДРУГИМ магазином, не отдаём", async () => {
+    siteFindUnique.mockResolvedValue({ quoPhoneNumberId: "PN_main" });
+    siteFindFirst.mockResolvedValue(null);
+    extraFindFirst.mockResolvedValue({ id: "x" }); // уже дополнительный у другого магазина
+    const r = await ownerQuoAddExtraNumber("s1", "PN_taken", "+1323");
+    expect(r.error).toBeTruthy();
+    expect(extraUpsert).not.toHaveBeenCalled();
   });
 });

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { prisma } from "@/lib/db";
 import { Prisma } from "@/generated/prisma/client";
-import { sendOrderSms } from "./send";
+import { sendOrderSms, sendUnlinkedSms } from "./send";
 import { ingestQuoEvent } from "./ingest";
 import { parseQuoWebhook } from "./envelope";
 import { quoErrorFromStatus, quoNetworkError } from "./errors";
@@ -50,9 +50,47 @@ beforeAll(async () => {
   siteNoNumber = (await prisma.site.create({ data: { name: `S2 ${suffix}`, shortName: "S2", platform: "WOOCOMMERCE" } })).id;
 });
 afterAll(async () => {
+  await prisma.orderCommunication.deleteMany({ where: { sendKey: { startsWith: `unl-${suffix}` } } });
+  await prisma.siteQuoNumber.deleteMany({ where: { siteId: { in: [siteWithNumber, siteNoNumber] } } });
   await prisma.orderCommunication.deleteMany({ where: { orderId: { in: orderIds } } });
   await prisma.order.deleteMany({ where: { siteId: { in: [siteWithNumber, siteNoNumber] } } });
   await prisma.site.deleteMany({ where: { id: { in: [siteWithNumber, siteNoNumber] } } });
+});
+
+describe("sendUnlinkedSms — отправка без заказа (раздел «Другие сообщения»)", () => {
+  const EXTRA_PN = `PN_extra_${suffix}`;
+  const EXTRA_NUM = "+13238004481";
+  const STRANGER_PN = `PN_stranger_${suffix}`;
+
+  it("по умолчанию уходит с ОСНОВНОГО номера магазина", async () => {
+    const r = await sendUnlinkedSms(prisma, okClient("AC_unl1"), {
+      siteId: siteWithNumber, toPhone: CUST, text: "Hi", idempotencyKey: `unl-${suffix}-1`,
+    });
+    expect(r).toMatchObject({ ok: true, status: "SENT" });
+    const c = await prisma.orderCommunication.findUnique({ where: { sendKey: `unl-${suffix}-1` } });
+    expect(c).toMatchObject({ orderId: null, providerPhoneNumberId: STORE_PN, storePhone: STORE_NUM });
+  });
+
+  it("с ДОПОЛНИТЕЛЬНОГО номера магазина — уходит с него же", async () => {
+    await prisma.siteQuoNumber.create({ data: { siteId: siteWithNumber, quoPhoneNumberId: EXTRA_PN, quoPhoneNumber: EXTRA_NUM } });
+    const r = await sendUnlinkedSms(prisma, okClient("AC_unl2"), {
+      siteId: siteWithNumber, toPhone: CUST, text: "Hi", idempotencyKey: `unl-${suffix}-2`, fromPhoneNumberId: EXTRA_PN,
+    });
+    expect(r).toMatchObject({ ok: true, status: "SENT" });
+    const c = await prisma.orderCommunication.findUnique({ where: { sendKey: `unl-${suffix}-2` } });
+    // Человек написал на второй номер — ответ обязан прийти с него, а не с основного.
+    expect(c).toMatchObject({ providerPhoneNumberId: EXTRA_PN, storePhone: EXTRA_NUM });
+  });
+
+  it("ЧУЖОЙ номер отправителем не принимается — ничего не уходит", async () => {
+    const send = vi.fn();
+    const r = await sendUnlinkedSms(prisma, fakeClient(send as never), {
+      siteId: siteWithNumber, toPhone: CUST, text: "Hi", idempotencyKey: `unl-${suffix}-3`, fromPhoneNumberId: STRANGER_PN,
+    });
+    expect(r).toEqual({ ok: false, code: "store_no_quo_number" });
+    expect(send).not.toHaveBeenCalled();
+    expect(await prisma.orderCommunication.count({ where: { sendKey: `unl-${suffix}-3` } })).toBe(0);
+  });
 });
 
 describe("sendOrderSms", () => {

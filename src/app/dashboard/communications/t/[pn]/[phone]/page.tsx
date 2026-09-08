@@ -6,7 +6,7 @@ import { CommunicationTimeline } from "@/components/orders/CommunicationTimeline
 import { fmtDateTime } from "@/lib/format";
 import { pluralRu } from "@/lib/plural";
 import { requireUser } from "@/lib/rbac";
-import { loadPhoneCommunicationsCard, suggestOrdersForCommunication } from "@/integrations/quo/communicationsService";
+import { loadPhoneCommunicationsCard, suggestOrdersForCommunication, loadQuoNumberOwners } from "@/integrations/quo/communicationsService";
 import { classifyThread, isTopicKey, TOPIC_LABEL, type TopicKey } from "@/integrations/quo/otherMessages";
 import { ThreadActions } from "../../../ThreadActions";
 import { parseThreadPn, decodeSegment, NO_STORE } from "../../../threadKey";
@@ -27,11 +27,10 @@ export default async function ThreadPage({ params }: { params: Promise<{ pn: str
   const pn = parseThreadPn(pnRaw);
   if (!phone) notFound();
 
-  const site = pn
-    ? await prisma.site.findFirst({
-        where: { quoPhoneNumberId: pn },
-        select: { id: true, name: true, shortName: true, quoPhoneNumber: true, quoEnabled: true },
-      })
+  // Магазин ищем и среди дополнительных номеров: человек мог написать на второй номер магазина.
+  const owner = pn ? (await loadQuoNumberOwners(prisma)).get(pn) ?? null : null;
+  const site = owner
+    ? await prisma.site.findUnique({ where: { id: owner.siteId }, select: { id: true, name: true, shortName: true, quoPhoneNumber: true, quoEnabled: true } })
     : null;
 
   const { communications, storeHasQuoNumber, storeTimeZone } = await loadPhoneCommunicationsCard(prisma, {
@@ -78,7 +77,7 @@ export default async function ThreadPage({ params }: { params: Promise<{ pn: str
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
         <h1 className="text-xl font-bold text-slate-800 tabular-nums">{communications[0].externalPhone}</h1>
         <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] text-slate-600">
-          {site ? `${site.shortName || site.name} · ${site.quoPhoneNumber ?? ""}` : "магазин не определён"}
+          {owner ? `${owner.shortName || owner.name} · ${owner.quoPhoneNumber ?? ""}` : "магазин не определён"}
         </span>
         <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] text-slate-600">
           {TOPIC_LABEL[topic]}
@@ -106,7 +105,7 @@ export default async function ThreadPage({ params }: { params: Promise<{ pn: str
           pn={pn ?? ""}
           siteId={site?.id ?? null}
           storeCanSend={storeHasQuoNumber}
-          storeName={site ? site.shortName || site.name : NO_STORE}
+          storeName={owner ? owner.shortName || owner.name : NO_STORE}
           topic={topic}
           topicIsManual={!!manual}
           suggestions={suggestions.map((s) => ({ orderId: s.orderId, orderNumber: s.orderNumber, role: s.role }))}

@@ -2,7 +2,7 @@
 import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/rbac";
 import { prisma } from "@/lib/db";
-import { linkThreadToOrder, setThreadTopic } from "@/integrations/quo/communicationsService";
+import { linkThreadToOrder, setThreadTopic, loadQuoNumberOwners } from "@/integrations/quo/communicationsService";
 import { isTopicKey } from "@/integrations/quo/otherMessages";
 import { featureFlags } from "@/lib/featureFlags";
 import { getQuoConfig } from "@/integrations/quo/config";
@@ -98,13 +98,18 @@ export async function sendThreadSmsAction(_prev: FormState, formData: FormData):
   if (!anchor) return { error: "Переписка не найдена." };
   if (!pn) return { error: "У этого номера не определён магазин — ответить из дашборда нельзя." };
 
-  const site = await prisma.site.findFirst({ where: { quoPhoneNumberId: pn }, select: { id: true } });
-  if (!site) return { error: "QUO-номер не привязан ни к одному магазину — ответить нельзя." };
+  // Магазин определяет СЕРВЕР — по основному или дополнительному номеру магазина.
+  const owner = (await loadQuoNumberOwners(prisma)).get(pn);
+  if (!owner) return { error: "QUO-номер не привязан ни к одному магазину — ответить нельзя." };
 
   const cfg = getQuoConfig();
   const client = cfg && featureFlags.quo ? createQuoClient({ ...cfg, maxRetries: 0 }) : null;
 
-  const res = await sendUnlinkedSms(prisma, client, { siteId: site.id, toPhone: phone, text, idempotencyKey, sentByUserId: user.id });
+  // Отправляем С ТОГО ЖЕ номера, на который человек написал: иначе он получит ответ с
+  // незнакомого номера магазина.
+  const res = await sendUnlinkedSms(prisma, client, {
+    siteId: owner.siteId, toPhone: phone, text, idempotencyKey, sentByUserId: user.id, fromPhoneNumberId: pn,
+  });
   revalidatePath("/dashboard/communications");
   revalidatePath(threadHref(phone, pn));
   if (res.ok) return { ok: true };

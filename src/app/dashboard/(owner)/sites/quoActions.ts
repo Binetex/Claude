@@ -49,8 +49,13 @@ export async function ownerQuoListNumbers(): Promise<{ numbers?: QuoNumberOption
 
 /** Один phoneNumberId — не более чем у одного Site. */
 async function isNumberTakenByOther(phoneNumberId: string, siteId: string): Promise<boolean> {
-  const other = await prisma.site.findFirst({ where: { quoPhoneNumberId: phoneNumberId, id: { not: siteId } }, select: { id: true } });
-  return !!other;
+  const [otherSite, extra] = await Promise.all([
+    prisma.site.findFirst({ where: { quoPhoneNumberId: phoneNumberId, id: { not: siteId } }, select: { id: true } }),
+    // Дополнительные номера тоже занимают идентификатор: иначе входящее на него нельзя было бы
+    // отнести к магазину однозначно.
+    prisma.siteQuoNumber.findFirst({ where: { quoPhoneNumberId: phoneNumberId, siteId: { not: siteId } }, select: { id: true } }),
+  ]);
+  return !!otherSite || !!extra;
 }
 
 /**
@@ -165,5 +170,42 @@ export async function ownerQuoUnlink(siteId: string): Promise<Result> {
     data: { quoPhoneNumberId: null, quoPhoneNumber: null, quoEnabled: false, quoLastCheckAt: null, quoConnectionError: null },
   });
   revalidatePath("/dashboard/sites");
+  return { ok: true };
+}
+
+/**
+ * Добавить магазину ДОПОЛНИТЕЛЬНЫЙ QUO-номер.
+ *
+ * Зачем: у магазина бывает несколько номеров (второй в рекламе, старый). Входящие на них
+ * приходили «ничьими» — в «Других сообщениях» такая переписка помечалась «магазин не определён»,
+ * и ответить из дашборда было нельзя. Основной номер (Site.quoPhoneNumberId) не меняется: он
+ * остаётся отправителем по умолчанию и точкой проверки подключения.
+ */
+export async function ownerQuoAddExtraNumber(siteId: string, phoneNumberId: string, phoneNumber: string): Promise<Result> {
+  await requireRole("OWNER");
+  const id = phoneNumberId.trim();
+  const num = phoneNumber.trim();
+  if (!id) return { error: "Укажите Phone Number ID." };
+
+  const site = await prisma.site.findUnique({ where: { id: siteId }, select: { quoPhoneNumberId: true } });
+  if (site?.quoPhoneNumberId === id) return { error: "Это основной номер магазина — он уже привязан." };
+  if (await isNumberTakenByOther(id, siteId)) return { error: "Этот номер уже привязан к другому магазину." };
+
+  await prisma.siteQuoNumber.upsert({
+    where: { quoPhoneNumberId: id },
+    create: { siteId, quoPhoneNumberId: id, quoPhoneNumber: num || null },
+    update: { siteId, quoPhoneNumber: num || null },
+  });
+  revalidatePath("/dashboard/sites");
+  revalidatePath("/dashboard/communications");
+  return { ok: true };
+}
+
+/** Убрать дополнительный номер. Сообщения, уже пришедшие на него, снова станут «ничьими». */
+export async function ownerQuoRemoveExtraNumber(rowId: string): Promise<Result> {
+  await requireRole("OWNER");
+  await prisma.siteQuoNumber.deleteMany({ where: { id: rowId } });
+  revalidatePath("/dashboard/sites");
+  revalidatePath("/dashboard/communications");
   return { ok: true };
 }

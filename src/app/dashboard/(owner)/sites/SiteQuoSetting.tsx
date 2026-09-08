@@ -8,8 +8,12 @@ import {
   ownerQuoCheckConnection,
   ownerQuoSetEnabled,
   ownerQuoUnlink,
+  ownerQuoAddExtraNumber,
+  ownerQuoRemoveExtraNumber,
   type QuoNumberOption,
 } from "./quoActions";
+
+export type SiteQuoExtraNumber = { id: string; quoPhoneNumberId: string; quoPhoneNumber: string | null };
 
 export type SiteQuoState = {
   quoPhoneNumberId: string | null;
@@ -17,6 +21,8 @@ export type SiteQuoState = {
   quoEnabled: boolean;
   quoLastCheckAt: string | null;
   quoConnectionError: string | null;
+  /** «Тоже наши» номера того же магазина — см. модель SiteQuoNumber. */
+  extraNumbers: SiteQuoExtraNumber[];
 };
 
 function statusMeta(s: SiteQuoState): { label: string; cls: string } {
@@ -32,6 +38,8 @@ export function SiteQuoSetting({ siteId, current }: { siteId: string; current: S
   const [selected, setSelected] = useState(current.quoPhoneNumberId ?? "");
   const [manualId, setManualId] = useState("");
   const [manualNum, setManualNum] = useState("");
+  const [extraId, setExtraId] = useState("");
+  const [extraNum, setExtraNum] = useState("");
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [pending, start] = useTransition();
 
@@ -115,6 +123,79 @@ export function SiteQuoSetting({ siteId, current }: { siteId: string; current: S
           Отвязать номер
         </Button>
         {msg && <span className={msg.ok ? "text-xs text-emerald-700" : "text-xs text-red-600"}>{msg.text}</span>}
+      </div>
+
+      {/* Дополнительные номера магазина: входящие на них должны узнавать свой магазин */}
+      <div className="space-y-1.5 border-t border-slate-100 pt-2">
+        <div className="text-xs font-semibold text-slate-500">Другие номера этого магазина</div>
+        <p className="text-[11px] text-slate-400">
+          Если у магазина несколько номеров QUO, добавьте их здесь. Тогда входящие на них не будут
+          «ничьими» в «Других сообщениях», а ответ уйдёт с того же номера, на который написал человек.
+          Отправитель по умолчанию не меняется — им остаётся основной номер выше.
+        </p>
+
+        {current.extraNumbers.length > 0 ? (
+          <ul className="space-y-1">
+            {current.extraNumbers.map((n) => (
+              <li key={n.id} className="flex flex-wrap items-center gap-2 text-[11px]">
+                <span className="text-slate-800">{n.quoPhoneNumber || "—"}</span>
+                <span className="font-mono text-slate-400">{n.quoPhoneNumberId}</span>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  disabled={pending}
+                  onClick={() => run(() => ownerQuoRemoveExtraNumber(n.id), "Номер убран")}
+                >
+                  убрать
+                </Button>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <div className="text-[11px] text-slate-400">Пока нет.</div>
+        )}
+
+        <div className="flex flex-wrap items-end gap-2">
+          <div className="space-y-1">
+            <label className="text-[11px] text-slate-400">Phone Number ID</label>
+            <select
+              value={extraId}
+              onChange={(e) => {
+                setExtraId(e.target.value);
+                const found = numbers?.find((n) => n.id === e.target.value);
+                if (found?.number) setExtraNum(found.number);
+              }}
+              disabled={pending || !numbers}
+              className="rounded-md border border-slate-300 px-2 py-1 text-sm disabled:bg-slate-50"
+            >
+              {!numbers && <option value="">Обновите список номеров выше</option>}
+              {numbers && <option value="">Выберите номер…</option>}
+              {numbers?.map((n) => <option key={n.id} value={n.id}>{n.label}</option>)}
+            </select>
+          </div>
+          <div className="space-y-1">
+            <label className="text-[11px] text-slate-400">или вручную: ID</label>
+            <input value={extraId} onChange={(e) => setExtraId(e.target.value)} placeholder="PN…" className="w-32 rounded-md border border-slate-300 px-2 py-1 text-sm" />
+          </div>
+          <div className="space-y-1">
+            <label className="text-[11px] text-slate-400">Номер (E.164)</label>
+            <input value={extraNum} onChange={(e) => setExtraNum(e.target.value)} placeholder="+1323…" className="w-36 rounded-md border border-slate-300 px-2 py-1 text-sm" />
+          </div>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={pending || !extraId.trim()}
+            onClick={() => run(async () => {
+              const r = await ownerQuoAddExtraNumber(siteId, extraId, extraNum);
+              if (r.ok) { setExtraId(""); setExtraNum(""); }
+              return r;
+            }, "Номер добавлен")}
+          >
+            Добавить номер
+          </Button>
+        </div>
       </div>
 
       {/* Ручной ввод — на случай, если list endpoint недоступен */}

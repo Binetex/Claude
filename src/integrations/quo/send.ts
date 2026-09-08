@@ -117,6 +117,12 @@ export type SendUnlinkedSmsInput = {
   orderId?: string | null;
   /** Кто из сотрудников отправил — иначе ответ из «Других сообщений» окажется в ленте без автора. */
   sentByUserId?: string | null;
+  /**
+   * Отправить С КОНКРЕТНОГО номера магазина, а не с основного. Нужно «Другим сообщениям»:
+   * если человек написал на второй номер магазина, ответ обязан уйти с него же — иначе он
+   * увидит ответ с незнакомого номера. Значение проверяется: чужой номер не принимается.
+   */
+  fromPhoneNumberId?: string | null;
 };
 
 /**
@@ -137,11 +143,22 @@ export async function sendUnlinkedSms(prisma: PrismaClient, client: QuoClient | 
 
   const site = await prisma.site.findUnique({
     where: { id: input.siteId },
-    select: { quoPhoneNumberId: true, quoPhoneNumber: true, quoEnabled: true },
+    select: {
+      quoPhoneNumberId: true, quoPhoneNumber: true, quoEnabled: true,
+      quoExtraNumbers: { select: { quoPhoneNumberId: true, quoPhoneNumber: true } },
+    },
   });
-  const fromId = site?.quoPhoneNumberId ?? null;
-  if (!fromId) return { ok: false, code: "store_no_quo_number" };
-  if (!site?.quoEnabled) return { ok: false, code: "store_quo_disabled" };
+  if (!site?.quoPhoneNumberId) return { ok: false, code: "store_no_quo_number" };
+  if (!site.quoEnabled) return { ok: false, code: "store_quo_disabled" };
+
+  // Отправитель: запрошенный номер, если он ДЕЙСТВИТЕЛЬНО принадлежит этому магазину, иначе
+  // основной. Проверка обязательна: без неё параметром можно было бы отправить с чужого номера.
+  const requested = input.fromPhoneNumberId ?? null;
+  const extra = requested ? site.quoExtraNumbers.find((n) => n.quoPhoneNumberId === requested) : undefined;
+  const useExtra = !!requested && requested !== site.quoPhoneNumberId && !!extra;
+  if (requested && requested !== site.quoPhoneNumberId && !extra) return { ok: false, code: "store_no_quo_number" };
+  const fromId = useExtra ? requested! : site.quoPhoneNumberId;
+  const fromNumber = useExtra ? extra!.quoPhoneNumber ?? null : site.quoPhoneNumber ?? null;
   if (!client) return { ok: false, code: "quo_not_configured" };
 
   let pendingId: string;
@@ -150,7 +167,7 @@ export async function sendUnlinkedSms(prisma: PrismaClient, client: QuoClient | 
       data: {
         orderId: input.orderId ?? null, provider: "QUO", type: "SMS", direction: "OUTBOUND",
         partyRole: "UNKNOWN", status: "PENDING",
-        storePhone: site.quoPhoneNumber ?? null, externalPhone: e164, externalPhoneNormalized: e164,
+        storePhone: fromNumber, externalPhone: e164, externalPhoneNormalized: e164,
         messageText: text, providerPhoneNumberId: fromId, occurredAt: new Date(),
         sendKey: input.idempotencyKey, sentByUserId: input.sentByUserId ?? null,
       },

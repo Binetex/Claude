@@ -428,6 +428,38 @@ export async function setThreadTopic(
   return res.count;
 }
 
+/**
+ * Магазин по QUO-номеру, на который пришло входящее: сначала основной номер магазина, затем
+ * дополнительные (модель SiteQuoNumber). У магазина бывает несколько номеров, и входящее на
+ * второй не должно оказываться «ничьим».
+ */
+export type QuoNumberOwner = { siteId: string; name: string; shortName: string | null; quoPhoneNumber: string | null; isPrimary: boolean };
+
+export async function loadQuoNumberOwners(prisma: PrismaClient): Promise<Map<string, QuoNumberOwner>> {
+  const [sites, extras] = await Promise.all([
+    prisma.site.findMany({
+      where: { quoPhoneNumberId: { not: null } },
+      select: { id: true, name: true, shortName: true, quoPhoneNumberId: true, quoPhoneNumber: true },
+      orderBy: { name: "asc" },
+    }),
+    prisma.siteQuoNumber.findMany({
+      select: { quoPhoneNumberId: true, quoPhoneNumber: true, site: { select: { id: true, name: true, shortName: true } } },
+    }),
+  ]);
+
+  const byPn = new Map<string, QuoNumberOwner>();
+  for (const s of sites) {
+    if (!s.quoPhoneNumberId) continue;
+    byPn.set(s.quoPhoneNumberId, { siteId: s.id, name: s.name, shortName: s.shortName, quoPhoneNumber: s.quoPhoneNumber, isPrimary: true });
+  }
+  for (const e of extras) {
+    // Основной номер магазина сильнее: если один и тот же id попал в обе таблицы, побеждает он.
+    if (byPn.has(e.quoPhoneNumberId)) continue;
+    byPn.set(e.quoPhoneNumberId, { siteId: e.site.id, name: e.site.name, shortName: e.site.shortName, quoPhoneNumber: e.quoPhoneNumber, isPrimary: false });
+  }
+  return byPn;
+}
+
 export type SuggestedOrder = { orderId: string; orderNumber: string; deliveryDate: Date; role: "CUSTOMER" | "RECIPIENT" };
 
 /** Предполагаемые заказы для нераспознанного события (по нормализованному номеру + приоритет matcher'а). */

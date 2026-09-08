@@ -9,7 +9,7 @@ vi.mock("@/lib/db", () => ({
   },
 }));
 vi.mock("@/lib/rbac", () => ({ requireUser: vi.fn() }));
-vi.mock("@/integrations/quo/communicationsService", () => ({ linkThreadToOrder: vi.fn(), setThreadTopic: vi.fn() }));
+vi.mock("@/integrations/quo/communicationsService", () => ({ linkThreadToOrder: vi.fn(), setThreadTopic: vi.fn(), loadQuoNumberOwners: vi.fn() }));
 vi.mock("@/integrations/quo/config", () => ({ getQuoConfig: () => ({ apiKey: "k" }) }));
 vi.mock("@/integrations/quo/client", () => ({ createQuoClient: () => ({}) }));
 vi.mock("@/lib/featureFlags", () => ({ featureFlags: { quo: true } }));
@@ -18,7 +18,7 @@ vi.mock("@/integrations/quo/send", () => ({ sendUnlinkedSms: vi.fn() }));
 import { linkThreadAction, sendThreadSmsAction, setThreadTopicAction } from "./actions";
 import { requireUser } from "@/lib/rbac";
 import { prisma } from "@/lib/db";
-import { linkThreadToOrder, setThreadTopic } from "@/integrations/quo/communicationsService";
+import { linkThreadToOrder, setThreadTopic, loadQuoNumberOwners } from "@/integrations/quo/communicationsService";
 import { sendUnlinkedSms } from "@/integrations/quo/send";
 
 const fd = (o: Record<string, string>) => { const f = new FormData(); for (const [k, v] of Object.entries(o)) f.set(k, v); return f; };
@@ -47,7 +47,7 @@ describe("«Другие сообщения» — действия", () => {
 
   it("ОТПРАВКА: магазин определяет сервер по номеру переписки, siteId из формы игнорируется", async () => {
     mock(prisma.orderCommunication.findFirst).mockResolvedValue({ id: "c1" });
-    mock(prisma.site.findFirst).mockResolvedValue({ id: "site-real" });
+    mock(loadQuoNumberOwners).mockResolvedValue(new Map([["PN1", { siteId: "site-real", name: "TheFlow", shortName: null, quoPhoneNumber: "+13238008421", isPrimary: true }]]));
     mock(sendUnlinkedSms).mockResolvedValue({ ok: true, status: "SENT" });
 
     const res = await sendThreadSmsAction(null, fd({
@@ -56,9 +56,22 @@ describe("«Другие сообщения» — действия", () => {
     }));
 
     expect(res).toEqual({ ok: true });
-    expect(prisma.site.findFirst).toHaveBeenCalledWith({ where: { quoPhoneNumberId: "PN1" }, select: { id: true } });
     expect(sendUnlinkedSms).toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.objectContaining({
       siteId: "site-real", toPhone: "+13105550101", sentByUserId: "u1",
+      // Ответ уходит С ТОГО ЖЕ номера, на который написал человек.
+      fromPhoneNumberId: "PN1",
+    }));
+  });
+
+  it("ОТПРАВКА: работает и со ВТОРОГО номера магазина — ответ уйдёт с него же", async () => {
+    mock(prisma.orderCommunication.findFirst).mockResolvedValue({ id: "c1" });
+    mock(loadQuoNumberOwners).mockResolvedValue(new Map([["PNsecond", { siteId: "site-theflow", name: "TheFlow", shortName: null, quoPhoneNumber: "+13238004481", isPrimary: false }]]));
+    mock(sendUnlinkedSms).mockResolvedValue({ ok: true, status: "SENT" });
+
+    const res = await sendThreadSmsAction(null, fd({ phone: "+13105550101", pn: "PNsecond", text: "hi", idempotencyKey: "k9" }));
+    expect(res).toEqual({ ok: true });
+    expect(sendUnlinkedSms).toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.objectContaining({
+      siteId: "site-theflow", fromPhoneNumberId: "PNsecond",
     }));
   });
 
@@ -71,7 +84,7 @@ describe("«Другие сообщения» — действия", () => {
 
   it("ОТПРАВКА: QUO-номер не привязан к магазину — не отправляем", async () => {
     mock(prisma.orderCommunication.findFirst).mockResolvedValue({ id: "c1" });
-    mock(prisma.site.findFirst).mockResolvedValue(null);
+    mock(loadQuoNumberOwners).mockResolvedValue(new Map());
     const res = await sendThreadSmsAction(null, fd({ phone: "+13105550101", pn: "PNunknown", text: "hi", idempotencyKey: "k3" }));
     expect(res?.error).toBeTruthy();
     expect(sendUnlinkedSms).not.toHaveBeenCalled();
@@ -79,7 +92,7 @@ describe("«Другие сообщения» — действия", () => {
 
   it("ОТПРАВКА: отказ провайдера переводится человеческим текстом", async () => {
     mock(prisma.orderCommunication.findFirst).mockResolvedValue({ id: "c1" });
-    mock(prisma.site.findFirst).mockResolvedValue({ id: "s1" });
+    mock(loadQuoNumberOwners).mockResolvedValue(new Map([["PN1", { siteId: "s1", name: "S", shortName: null, quoPhoneNumber: null, isPrimary: true }]]));
     mock(sendUnlinkedSms).mockResolvedValue({ ok: false, code: "quo_client", detail: "402" });
     const res = await sendThreadSmsAction(null, fd({ phone: "+13105550101", pn: "PN1", text: "hi", idempotencyKey: "k4" }));
     expect(res?.error).toContain("деньги");

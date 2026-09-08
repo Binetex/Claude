@@ -509,6 +509,12 @@ model Site {
   quoLastCheckAt     DateTime? // время последней успешной проверки подключения к QUO
   quoConnectionError String? // безопасный текст ошибки последней проверки (без секретов)
 
+  /// Дополнительные QUO-номера того же магазина: у магазина их бывает несколько (второй номер
+  /// в рекламе, старый номер). Исходящие по умолчанию уходят с ОСНОВНОГО (quoPhoneNumberId);
+  /// дополнительные нужны, чтобы входящие на них узнавали свой магазин, а ответ уходил с того
+  /// же номера, на который человек написал.
+  quoExtraNumbers SiteQuoNumber[]
+
   // ── SMS-маркетинг ──
   reviewUrl       String? // ссылка на отзыв для {{review_url}}; пусто → review-правила не отправляются
   automationSites AutomationSite[]
@@ -1554,6 +1560,26 @@ model OrderCommunication {
   @@index([providerResourceId])
   @@index([orderId, readAt])
   aiTurn               AiTurn?  @relation("AiTurnIncoming")
+}
+
+/**
+ * Дополнительный QUO-номер магазина. Основной живёт полями Site.quo* — он остаётся отправителем
+ * по умолчанию и точкой проверки подключения; здесь только «тоже наши» номера.
+ *
+ * quoPhoneNumberId уникален глобально: один номер не может принадлежать двум магазинам, иначе
+ * входящее на него нельзя было бы отнести к магазину однозначно.
+ */
+model SiteQuoNumber {
+  id     String @id @default(cuid())
+  siteId String
+  site   Site   @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  quoPhoneNumberId String  @unique // QUO phone number id (PN…)
+  quoPhoneNumber   String? // E.164 для отображения
+
+  createdAt DateTime @default(now())
+
+  @@index([siteId])
 }
 
 // Зарегистрированные Shopify webhook-подписки по Site — чтобы не создавать дубли и

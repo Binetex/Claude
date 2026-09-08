@@ -56,6 +56,7 @@ export default async function SiteSettingsPage({ params }: { params: Promise<{ i
       aiUnknownKnowledgeBase: true,
       aiTemplatesJson: true,
       quoPhoneNumberId: true, quoPhoneNumber: true, quoEnabled: true, quoLastCheckAt: true, quoConnectionError: true,
+      quoExtraNumbers: { select: { id: true, quoPhoneNumberId: true, quoPhoneNumber: true }, orderBy: { createdAt: "asc" } },
       authMode: true, shopifyConnStatus: true, lastConnectionCheckAt: true, lastSyncAt: true,
       clientSecretMask: true, accessTokenMask: true,
       grantedScopes: true, connectionError: true,
@@ -312,6 +313,7 @@ export default async function SiteSettingsPage({ params }: { params: Promise<{ i
                 quoEnabled: site.quoEnabled,
                 quoLastCheckAt: site.quoLastCheckAt ? site.quoLastCheckAt.toISOString() : null,
                 quoConnectionError: site.quoConnectionError,
+                extraNumbers: site.quoExtraNumbers,
               }}
             />
           </CardBody>

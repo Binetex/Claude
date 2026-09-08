@@ -2,7 +2,7 @@ import { prisma } from "@/lib/db";
 import { PageHeader } from "@/components/ui/misc";
 import { Card, CardBody } from "@/components/ui/Card";
 import { fmtDateTime } from "@/lib/format";
-import { listOtherThreads, type OtherThread } from "@/integrations/quo/communicationsService";
+import { listOtherThreads, loadQuoNumberOwners, type OtherThread } from "@/integrations/quo/communicationsService";
 import { quoLog } from "@/integrations/quo/logging";
 import { TOPIC_LABEL, type TopicKey } from "@/integrations/quo/otherMessages";
 import { ThreadTabs, type ThreadTab } from "./ThreadTabs";
@@ -51,12 +51,13 @@ export default async function OtherMessagesPage({ searchParams }: { searchParams
   // одного магазина (их пятая часть, и это отдельный разговор с владельцем).
   const storeFilter = sp.store ?? "";
 
-  const sites = await prisma.site.findMany({
-    where: { quoPhoneNumberId: { not: null } },
-    select: { id: true, name: true, shortName: true, quoPhoneNumberId: true, quoPhoneNumber: true },
-    orderBy: { name: "asc" },
-  });
-  const siteByPn = new Map(sites.filter((s) => s.quoPhoneNumberId).map((s) => [s.quoPhoneNumberId as string, s]));
+  // Магазин определяется и по основному номеру, и по дополнительным (модель SiteQuoNumber):
+  // у магазина бывает несколько номеров, и входящее на второй не должно быть «ничьим».
+  const ownerByPn = await loadQuoNumberOwners(prisma);
+  const storeOptions = [...ownerByPn.entries()]
+    .filter(([, o]) => o.isPrimary)
+    .map(([pn, o]) => ({ pn, label: o.shortName || o.name }))
+    .sort((a, b) => a.label.localeCompare(b.label, "ru"));
 
   let threads: OtherThread[] = [];
   let truncated = false;
@@ -66,7 +67,7 @@ export default async function OtherMessagesPage({ searchParams }: { searchParams
       from,
       to,
       phone,
-      providerPhoneNumberId: storeFilter && storeFilter !== "NONE" ? siteByPn.get(storeFilter)?.quoPhoneNumberId ?? storeFilter : undefined,
+      providerPhoneNumberId: storeFilter && storeFilter !== "NONE" ? storeFilter : undefined,
     });
     threads = res.threads;
     truncated = res.truncated;
@@ -77,18 +78,18 @@ export default async function OtherMessagesPage({ searchParams }: { searchParams
     quoLog("other_messages.list_failed", { error: err instanceof Error ? err.message : String(err) });
   }
 
-  if (storeFilter === "NONE") threads = threads.filter((t) => !t.providerPhoneNumberId || !siteByPn.has(t.providerPhoneNumberId));
+  if (storeFilter === "NONE") threads = threads.filter((t) => !t.providerPhoneNumberId || !ownerByPn.has(t.providerPhoneNumberId));
 
   const tabs: ThreadTab[] = TABS.map((t) => ({ key: t.key, label: t.label, count: threads.filter(t.match).length }));
   const shown = threads.filter(TABS.find((t) => t.key === activeTab)!.match);
 
   const rows: ThreadRow[] = shown.slice(0, 300).map((t) => {
-    const site = t.providerPhoneNumberId ? siteByPn.get(t.providerPhoneNumberId) : undefined;
+    const owner = t.providerPhoneNumberId ? ownerByPn.get(t.providerPhoneNumberId) : undefined;
     return {
       href: threadHref(t.phone, t.providerPhoneNumberId),
       phoneDisplay: t.phoneDisplay,
-      storeLabel: site ? site.shortName || site.name : t.storePhone ?? "магазин не определён",
-      storeKnown: !!site,
+      storeLabel: owner ? owner.shortName || owner.name : t.storePhone ?? "магазин не определён",
+      storeKnown: !!owner,
       topic: t.topic as TopicKey,
       topicIsManual: t.topicIsManual,
       lastText: t.lastText,
@@ -118,8 +119,8 @@ export default async function OtherMessagesPage({ searchParams }: { searchParams
               Магазин
               <select name="store" defaultValue={storeFilter} className="rounded border border-slate-300 px-2 py-1">
                 <option value="">все</option>
-                {sites.map((s) => (
-                  <option key={s.id} value={s.quoPhoneNumberId ?? s.id}>{s.shortName || s.name}</option>
+                {storeOptions.map((s) => (
+                  <option key={s.pn} value={s.pn}>{s.label}</option>
                 ))}
                 <option value="NONE">магазин не определён</option>
               </select>
