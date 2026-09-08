@@ -1,6 +1,7 @@
 import "server-only";
 /**
- * HTTP-клиент DeepSeek (OpenAI-совместимый `/chat/completions`).
+ * HTTP-клиент модели ассистента. Протокол — OpenAI-совместимый `/chat/completions`, поэтому за
+ * ним одинаково работают и DeepSeek, и OpenAI: адрес и модель приходят из настроек.
  *
  * Отвечает клиенту живой человек по ту сторону SMS, поэтому ждать бесконечно нельзя: жёсткий
  * таймаут и ровно один повтор на временную ошибку. Не ответила — ассистент молчит, а сигнал
@@ -28,16 +29,37 @@ export type DeepseekClientDeps = {
 };
 
 const TIMEOUT_MS = 20_000;
+/**
+ * Рассуждающим моделям (gpt-5*, o1/o3/o4, deepseek-reasoner) двадцати секунд мало: в замерах на
+ * реальном промпте они отвечали 12–30 с. Ждём дольше — ответ всё равно уходит человеку черновиком.
+ */
+const REASONING_TIMEOUT_MS = 60_000;
 const RETRY_DELAY_MS = 1_500;
 
+/**
+ * Модель «рассуждающая»: тратит токены на размышление перед ответом.
+ *
+ * Это не косметика. У таких моделей OpenAI ДРУГИЕ имена параметров: `max_completion_tokens`
+ * вместо `max_tokens`, и `temperature` они не принимают вовсе — запрос со старыми полями
+ * отклоняется с 400. А общий лимит должен покрывать и размышление, и сам ответ: с 700 токенами
+ * ответ возвращается пустым.
+ */
+export function isReasoningModel(model: string): boolean {
+  const m = model.toLowerCase();
+  if (m.includes("chat-latest")) return false; // gpt-5-chat-latest — обычная чат-модель
+  return /^(gpt-5|o[1-9])/.test(m) || m.includes("reasoner");
+}
+
 export function createDeepseekClient(config: DeepseekConfig, deps: DeepseekClientDeps = {}) {
+  const reasoning = isReasoningModel(config.model);
+  const timeoutMs = reasoning ? REASONING_TIMEOUT_MS : TIMEOUT_MS;
   const doFetch = deps.fetchImpl ?? fetch;
   const sleep = deps.sleep ?? ((ms: number) => new Promise((r) => setTimeout(r, ms)));
   const now = deps.now ?? (() => Date.now());
 
   async function once(messages: DeepseekMessage[]): Promise<string> {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
       const res = await doFetch(`${config.baseUrl}/chat/completions`, {
         method: "POST",
@@ -47,21 +69,22 @@ export function createDeepseekClient(config: DeepseekConfig, deps: DeepseekClien
           messages,
           // Ответ читает не человек, а код: нужен предсказуемый JSON, а не свободный текст.
           response_format: { type: "json_object" },
-          // Низкая температура: это служебная переписка, а не сочинение.
-          temperature: 0.2,
-          max_tokens: 700,
+          // Рассуждающие модели не принимают temperature и считают лимит вместе с размышлением.
+          ...(reasoning
+            ? { max_completion_tokens: 4000 }
+            : { temperature: 0.2, max_tokens: 700 }),
         }),
         signal: controller.signal,
       });
       if (!res.ok) throw deepseekErrorFromStatus(res.status, await res.text().catch(() => ""));
       const json = (await res.json()) as { choices?: { message?: { content?: string } }[] };
       const text = json.choices?.[0]?.message?.content?.trim();
-      if (!text) throw new DeepseekError("empty", "DeepSeek вернул пустой ответ", true);
+      if (!text) throw new DeepseekError("empty", "Модель вернула пустой ответ", true);
       return text;
     } catch (err) {
       if (err instanceof DeepseekError) throw err;
       if (err instanceof Error && err.name === "AbortError") {
-        throw new DeepseekError("timeout", `DeepSeek не ответил за ${TIMEOUT_MS / 1000} с`, true);
+        throw new DeepseekError("timeout", `Модель не ответила за ${timeoutMs / 1000} с`, true);
       }
       throw new DeepseekError("network", err instanceof Error ? err.message : String(err), true);
     } finally {

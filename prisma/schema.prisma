@@ -2483,6 +2483,22 @@ model AiAssistantSettings {
   globalNote      String?
   /// Последний день действия включительно; NULL — бессрочно.
   activeUntil     DateTime?
+
+  // ── Доступ к модели. Пусто во ВСЕХ трёх полях — работают переменные окружения, как раньше ──
+  /// Ключ доступа к API модели, зашифрован (secretBox). Наружу не отдаётся никогда.
+  apiKeyEncrypted String?
+  /// «********cQAA» — последние символы для интерфейса, без расшифровки.
+  apiKeyMask      String?
+  /// Адрес API: https://api.deepseek.com или https://api.openai.com/v1. NULL — из окружения.
+  baseUrl         String?
+  /// Имя модели (deepseek-chat, gpt-4.1-mini…). NULL — из окружения.
+  model           String?
+  /// Результат последней проверки: "ok" | "error" | "saved_not_checked".
+  checkStatus     String?
+  checkAt         DateTime?
+  /// Безопасный текст ошибки проверки — без ключа и без текста промпта.
+  checkErrorSafe  String?
+
   updatedByUserId String?
   updatedAt       DateTime  @updatedAt
 }

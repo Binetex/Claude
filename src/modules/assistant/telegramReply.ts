@@ -12,7 +12,7 @@ import "server-only";
 import type { PrismaClient } from "@/generated/prisma/client";
 import { TelegramSender } from "@/integrations/telegram/sender";
 import { resolveBotById } from "@/integrations/telegram/bots";
-import { getDeepseekConfig } from "@/integrations/deepseek/config";
+import { resolveDeepseekConfig } from "@/integrations/deepseek/settings";
 import { createDeepseekClient, type DeepseekClient } from "@/integrations/deepseek/client";
 import { sendAssistantReply, discardAssistantReply, escapeHtml, SEND_ACTION_PREFIX, DISCARD_ACTION_PREFIX } from "./deliver";
 import { looksEnglish, stripDashes } from "./prompt";
@@ -183,7 +183,7 @@ export function buildTelegramUpdateHandler(prisma: PrismaClient, deps: Deps = {}
 
     // Свой текст: переводим и показываем на подтверждение. Отправлять сразу нельзя — владелец
     // должен увидеть, что именно уйдёт клиенту по-английски.
-    const cfg = getDeepseekConfig();
+    const cfg = await resolveDeepseekConfig(prisma);
     const client = deps.client ?? (cfg ? createDeepseekClient(cfg) : null);
     const english = client ? await translateForCustomer(client, text) : looksEnglish(text) ? text : null;
     if (!english) {

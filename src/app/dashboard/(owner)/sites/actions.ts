@@ -22,7 +22,7 @@ import { writeTemplates } from "@/modules/assistant/templates";
 import { saveGlobalNote, GLOBAL_NOTE_MAX } from "@/modules/assistant/globalNote";
 import { parseLocalDayToUtcMidnight, todayStrInTz, isValidTimeZone, DEFAULT_STORE_TZ } from "@/lib/tz";
 import { translateTemplate } from "@/modules/assistant/translate";
-import { getDeepseekConfig } from "@/integrations/deepseek/config";
+import { resolveDeepseekConfig } from "@/integrations/deepseek/settings";
 import { createDeepseekClient } from "@/integrations/deepseek/client";
 
 import { rescheduleSiteFutureOrders } from "@/integrations/delivery/burq/scheduleService";
@@ -91,7 +91,7 @@ export async function ownerSetSiteAiSettings(
       const unknown = extractVariables(tpl.text).filter((v) => !allowed.has(v));
       if (unknown.length) return { error: `В заготовке «${key}» неизвестная переменная: ${unknown.join(", ")}` };
       if (/[Ѐ-ӿ]/.test(tpl.text)) {
-        const cfg = getDeepseekConfig();
+        const cfg = await resolveDeepseekConfig(prisma);
         const english = cfg ? await translateTemplate(createDeepseekClient(cfg), tpl.text) : null;
         if (!english) return { error: `Заготовка «${key}» на русском, а перевести не удалось — напишите её по-английски.` };
         tpl.text = english;

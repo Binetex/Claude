@@ -12,7 +12,7 @@ import "server-only";
  */
 import { Prisma, type PrismaClient } from "@/generated/prisma/client";
 import { parseAttachments } from "@/integrations/quo/communicationsService";
-import { getDeepseekConfig } from "@/integrations/deepseek/config";
+import { resolveDeepseekConfig } from "@/integrations/deepseek/settings";
 import { createDeepseekClient, type DeepseekClient } from "@/integrations/deepseek/client";
 import { DeepseekError } from "@/integrations/deepseek/errors";
 import { buildMessages, parseReply, describeDeliveryDay, type HistoryLine, type OrderSnapshot } from "./prompt";
@@ -204,7 +204,7 @@ export function buildAssistantHandler(prisma: PrismaClient, deps: AssistantDeps 
       }
     }
 
-    const cfg = getDeepseekConfig();
+    const cfg = await resolveDeepseekConfig(prisma);
     const client = deps.client ?? (cfg ? createDeepseekClient(cfg) : null);
     if (!client) {
       await logSkip(prisma, site.id, order?.id ?? null, incoming.id, "model_not_configured");
