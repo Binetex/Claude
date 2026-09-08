@@ -1,4 +1,5 @@
 import { commGroupOf } from "./communicationsView";
+import { collapseSendAttempts } from "./collapseAttempts";
 import "server-only";
 /**
  * Серверные операции истории коммуникаций (чтение из локальной БД, не из QUO):
@@ -76,6 +77,8 @@ export type CommunicationCardItem = {
   attachments: CommAttachment[];
   occurredAt: string;
   sentByName: string | null;
+  /** Ключ отправки: по нему свёртываются попытки одного job'а (collapseSendAttempts). */
+  sendKey?: string | null;
 };
 
 /** Нормализует OrderCommunication.attachmentsJson (MMS media [{url,type}]) в безопасный массив. */
@@ -131,6 +134,66 @@ export async function countUnreadBySide(
   return out;
 }
 
+/** Что выбираем из строки общения для ленты. Один список на всех, кто её показывает. */
+const CARD_SELECT = {
+  id: true, type: true, direction: true, status: true, partyRole: true, externalPhone: true,
+  messageText: true, durationSeconds: true, recordingUrl: true, transcript: true, summary: true,
+  attachmentsJson: true, occurredAt: true, sentByUserId: true, sendKey: true,
+} as const;
+
+/** Строка БД → элемент ленты. Третьей копии этого маппинга быть не должно. */
+function toCardItem(
+  c: Prisma.OrderCommunicationGetPayload<{ select: typeof CARD_SELECT }>,
+  nameById: Map<string, string>
+): CommunicationCardItem {
+  return {
+    id: c.id, type: c.type, direction: c.direction, status: c.status, partyRole: c.partyRole,
+    externalPhone: c.externalPhone, messageText: c.messageText, durationSeconds: c.durationSeconds,
+    recordingUrl: c.recordingUrl, transcript: c.transcript, summary: c.summary,
+    attachments: parseAttachments(c.attachmentsJson),
+    occurredAt: c.occurredAt.toISOString(),
+    sentByName: c.sentByUserId ? nameById.get(c.sentByUserId) ?? null : null,
+    sendKey: c.sendKey,
+  };
+}
+
+async function namesOf(prisma: PrismaClient, rows: { sentByUserId: string | null }[]): Promise<Map<string, string>> {
+  const ids = [...new Set(rows.map((r) => r.sentByUserId).filter((x): x is string => !!x))];
+  const users = ids.length ? await prisma.user.findMany({ where: { id: { in: ids } }, select: { id: true, name: true } }) : [];
+  return new Map(users.map((u) => [u.id, u.name]));
+}
+
+/**
+ * Лента общения ПО НОМЕРУ, а не по заказу — для экранов, где предмет разговора человек, а не
+ * заказ (карточка запроса отзыва).
+ *
+ * Отличий от заказной версии два, и оба намеренные: прочитанным ничего НЕ помечаем (открытие
+ * чужого экрана не должно гасить счётчик непрочитанного у заказа) и не считаем `unread` —
+ * счётчик по сторонам заказа здесь бессмыслен.
+ */
+export async function loadPhoneCommunicationsCard(
+  prisma: PrismaClient,
+  input: { phoneE164: string; siteId: string; take?: number }
+): Promise<{ communications: CommunicationCardItem[]; storeHasQuoNumber: boolean; storeTimeZone: string | undefined }> {
+  const [comms, site] = await Promise.all([
+    prisma.orderCommunication.findMany({
+      where: { externalPhoneNormalized: input.phoneE164 },
+      orderBy: { occurredAt: "desc" },
+      take: input.take ?? 200,
+      select: CARD_SELECT,
+    }),
+    prisma.site.findUnique({ where: { id: input.siteId }, select: { quoPhoneNumberId: true, quoEnabled: true, timezone: true } }),
+  ]);
+  const nameById = await namesOf(prisma, comms);
+  return {
+    // Попытки одной отправки (провал + удачный повтор) сворачиваются в одно сообщение — иначе
+    // лента показывает их как дубли клиенту.
+    communications: collapseSendAttempts(comms.map((c) => toCardItem(c, nameById))),
+    storeHasQuoNumber: !!(site?.quoPhoneNumberId && site?.quoEnabled),
+    storeTimeZone: site?.timezone ?? undefined,
+  };
+}
+
 export async function loadOrderCommunicationsCard(prisma: PrismaClient, orderId: string): Promise<{ communications: CommunicationCardItem[]; storeHasQuoNumber: boolean; storeTimeZone: string | undefined; unread: { customer: number; recipient: number } }> {
   const unread = await countUnreadBySide(prisma, orderId).catch(() => ({ customer: 0, recipient: 0 }));
   await markOrderCommunicationsRead(prisma, orderId).catch(() => 0);
@@ -139,21 +202,13 @@ export async function loadOrderCommunicationsCard(prisma: PrismaClient, orderId:
       where: { orderId },
       orderBy: { occurredAt: "desc" },
       take: 200,
-      select: { id: true, type: true, direction: true, status: true, partyRole: true, externalPhone: true, messageText: true, durationSeconds: true, recordingUrl: true, transcript: true, summary: true, attachmentsJson: true, occurredAt: true, sentByUserId: true },
+      select: CARD_SELECT,
     }),
     prisma.site.findFirst({ where: { orders: { some: { id: orderId } } }, select: { quoPhoneNumberId: true, quoEnabled: true, timezone: true } }),
   ]);
-  const senderIds = [...new Set(comms.map((c) => c.sentByUserId).filter((x): x is string => !!x))];
-  const users = senderIds.length ? await prisma.user.findMany({ where: { id: { in: senderIds } }, select: { id: true, name: true } }) : [];
-  const nameById = new Map(users.map((u) => [u.id, u.name]));
+  const nameById = await namesOf(prisma, comms);
   return {
-    communications: comms.map((c) => ({
-      id: c.id, type: c.type, direction: c.direction, status: c.status, partyRole: c.partyRole,
-      externalPhone: c.externalPhone, messageText: c.messageText, durationSeconds: c.durationSeconds,
-      recordingUrl: c.recordingUrl, transcript: c.transcript, summary: c.summary,
-      attachments: parseAttachments(c.attachmentsJson),
-      occurredAt: c.occurredAt.toISOString(), sentByName: c.sentByUserId ? nameById.get(c.sentByUserId) ?? null : null,
-    })),
+    communications: comms.map((c) => toCardItem(c, nameById)),
     storeHasQuoNumber: !!(site?.quoPhoneNumberId && site?.quoEnabled),
     storeTimeZone: site?.timezone ?? undefined,
     unread,

@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 import { requireUser } from "@/lib/rbac";
 import { loadRequestDetail } from "@/modules/reviews/requestView";
-import { RequestDetail } from "@/components/reviews/RequestDetail";
+import { RequestScreen } from "@/components/reviews/RequestScreen";
 
 export const dynamic = "force-dynamic";
 
@@ -12,5 +12,5 @@ export default async function CcReviewRequestPage({ params }: { params: Promise<
   const { id } = await params;
   const vm = await loadRequestDetail(id, (orderId) => `/dashboard/cc/${orderId}`);
   if (!vm) notFound();
-  return <RequestDetail vm={vm} backHref="/dashboard/cc/reviews" />;
+  return <RequestScreen vm={vm} backHref="/dashboard/cc/reviews" />;
 }

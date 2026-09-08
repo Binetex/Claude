@@ -14,29 +14,20 @@ import "server-only";
 import { format } from "date-fns";
 import { prisma } from "@/lib/db";
 import { toE164 } from "@/lib/phone";
-import { REVIEW_STATUS_LABELS, REVIEW_EVENT_LABELS } from "@/lib/reviewStatus";
-import { parseAttachments } from "@/integrations/quo/communicationsService";
+import { REVIEW_STATUS_LABELS, REVIEW_EVENT_LABELS, reviewStatusText } from "@/lib/reviewStatus";
+import { getOrderItemImages } from "@/modules/orders/images";
+import type { OrderItemView } from "@/components/orders/OrderItemsCard";
+import type { CommunicationCardItem } from "@/integrations/quo/communicationsService";
+import { loadPhoneCommunicationsCard } from "@/integrations/quo/communicationsService";
+import { loadOrderEmailPanel } from "@/integrations/emailFactory/read";
 import { loadReviewReward } from "./reward";
-
-/** Сколько последних событий переписки показываем: дальше это уже архив, а не контекст. */
-const THREAD_LIMIT = 50;
-
-export type ThreadItem = {
-  id: string;
-  at: string;
-  inbound: boolean;
-  /** «сообщение», «звонок», «пропущенный звонок», «голосовое». */
-  kind: string;
-  text: string | null;
-  /** Не ушедшее исходящее: человек его не видел, и выглядеть как отправленное оно не должно. */
-  failed: boolean;
-  photos: number;
-};
 
 export type RequestDetailVM = {
   id: string;
   status: string;
   statusLabel: string;
+  /** Статус фразой: первое, что спрашивают, — «а что с ним сейчас». */
+  statusText: string;
   guidance: string;
   callAttempts: number;
   maxAttempts: number;
@@ -53,22 +44,31 @@ export type RequestDetailVM = {
     customerName: string | null;
     customerPhone: string | null;
     customerEmail: string | null;
-    items: string;
+    items: OrderItemView[];
+    deliveryDate: string;
     deliveryLabel: string;
     address: string | null;
+    /** Телефон получателя нужен блоку общения: у него вкладки по сторонам заказа. */
+    recipientPhone: string;
+    recipientName: string;
+    photoUrl: string | null;
   };
   location: { id: string | null; name: string | null; url: string | null };
   locations: { id: string; name: string }[];
   linkSentLabel: string | null;
   journal: { at: string; label: string; by: string | null; detail: string | null }[];
-  thread: ThreadItem[];
+  /** Переписка и звонки по номеру заказчика — для общего блока «Общение». */
+  comm: { communications: CommunicationCardItem[]; storeHasQuoNumber: boolean; storeTimeZone: string | undefined };
+  emails: Awaited<ReturnType<typeof loadOrderEmailPanel>>;
   coupon: { code: string; sentAt: string | null; sentCode: string | null };
 };
 
-/** Ход за нами: последним в переписке высказался клиент, а не мы. */
-export function awaitingUs(thread: ThreadItem[]): boolean {
-  const last = thread[thread.length - 1];
-  return !!last?.inbound;
+/**
+ * Ход за нами: последним в разговоре высказался клиент, а не мы. Лента приходит НОВЫМИ СВЕРХУ,
+ * как её отдаёт общий загрузчик, поэтому смотрим на первый элемент.
+ */
+export function awaitingUs(newestFirst: { direction: string }[]): boolean {
+  return newestFirst[0]?.direction === "INBOUND";
 }
 
 export async function loadRequestDetail(
@@ -84,9 +84,10 @@ export async function loadRequestDetail(
       order: {
         select: {
           id: true, orderNumber: true, senderName: true, senderPhone: true, senderEmail: true,
-          deliveryDate: true, addressLine: true, apartment: true, city: true, zip: true, recipientName: true,
+          deliveryDate: true, addressLine: true, apartment: true, city: true, zip: true,
+          recipientName: true, recipientPhone: true,
           site: { select: { id: true, name: true } },
-          items: { select: { name: true, quantity: true } },
+          items: { select: { name: true, quantity: true, image: true, parentImageUrl: true, variantImageUrl: true } },
         },
       },
     },
@@ -108,7 +109,15 @@ export async function loadRequestDetail(
     loadReviewReward(prisma),
   ]);
 
-  const thread = await loadThread(r.order.senderPhone);
+  // Переписка по НОМЕРУ заказчика: звонок из QUO приходит без привязки к заказу, а разговор
+  // может идти по прошлому заказу того же человека.
+  const phoneE164 = toE164(r.order.senderPhone);
+  const [comm, emails] = await Promise.all([
+    phoneE164
+      ? loadPhoneCommunicationsCard(prisma, { phoneE164, siteId: r.order.site.id })
+      : Promise.resolve({ communications: [], storeHasQuoNumber: false, storeTimeZone: undefined }),
+    loadOrderEmailPanel(prisma, r.order.id).catch(() => ({ emails: [], customerEmail: null })),
+  ]);
   const maxAttempts = settings?.maxCallAttempts ?? 2;
   const operatorTurn = r.status === "NEW" || r.status === "CALLING";
 
@@ -116,12 +125,13 @@ export async function loadRequestDetail(
     id: r.id,
     status: r.status,
     statusLabel: REVIEW_STATUS_LABELS[r.status] ?? r.status,
+    statusText: reviewStatusText(r.status, r.callAttempts, maxAttempts),
     guidance: guidanceFor(r.status, r.callAttempts, maxAttempts),
     callAttempts: r.callAttempts,
     maxAttempts,
     overdue: !!r.nextActionAt && operatorTurn && r.nextActionAt.getTime() < startOfToday().getTime(),
     nextActionLabel: r.nextActionAt && operatorTurn ? `вернуться ${format(r.nextActionAt, "dd.MM")}` : null,
-    awaitingUs: awaitingUs(thread),
+    awaitingUs: awaitingUs(comm.communications),
     order: {
       id: r.order.id,
       href: orderHref(r.order.id),
@@ -131,9 +141,16 @@ export async function loadRequestDetail(
       customerName: r.order.senderName,
       customerPhone: r.order.senderPhone,
       customerEmail: r.order.senderEmail,
-      items: r.order.items.map((i) => `${i.name}${i.quantity > 1 ? ` ×${i.quantity}` : ""}`).join(", ") || "без позиций",
+      items: r.order.items.map((i, idx) => {
+        const img = getOrderItemImages(i);
+        return { id: `${r.id}-${idx}`, name: i.name, quantity: i.quantity, image: img.primary, variantImage: img.variant };
+      }),
+      deliveryDate: r.order.deliveryDate.toISOString(),
       deliveryLabel: format(r.order.deliveryDate, "dd.MM.yyyy"),
       address: [r.order.addressLine, r.order.apartment, r.order.city, r.order.zip].filter(Boolean).join(", ") || null,
+      recipientPhone: r.order.recipientPhone,
+      recipientName: r.order.recipientName,
+      photoUrl: r.order.items.map((i) => getOrderItemImages(i).primary).find((u) => !!u) ?? null,
     },
     location: { id: r.location?.id ?? null, name: r.location?.name ?? null, url: r.reviewUrlSnapshot },
     locations,
@@ -146,49 +163,14 @@ export async function loadRequestDetail(
       by: e.user?.name ?? null,
       detail: e.detailSafe,
     })),
-    thread,
+    comm,
+    emails,
     coupon: {
       code: reward.couponCode,
       sentAt: r.couponSentAt ? format(r.couponSentAt, "dd.MM.yyyy HH:mm") : null,
       sentCode: r.couponCodeSnapshot,
     },
   };
-}
-
-/** Переписка и звонки с этим номером — старые сверху, как в обычном чате. */
-async function loadThread(phone: string | null): Promise<ThreadItem[]> {
-  const e164 = toE164(phone);
-  if (!e164) return [];
-  const rows = await prisma.orderCommunication.findMany({
-    where: { externalPhoneNormalized: e164 },
-    orderBy: { occurredAt: "desc" },
-    take: THREAD_LIMIT,
-    select: {
-      id: true, type: true, direction: true, status: true, messageText: true, transcript: true,
-      summary: true, attachmentsJson: true, occurredAt: true, durationSeconds: true,
-    },
-  });
-
-  return rows
-    .map((c) => {
-      const inbound = c.direction === "INBOUND";
-      const isCall = c.type === "CALL" || c.type === "VOICEMAIL";
-      const kind = isCall
-        ? c.status === "MISSED"
-          ? inbound ? "пропущенный звонок" : "не дозвонились"
-          : c.type === "VOICEMAIL" ? "голосовое" : "звонок"
-        : "сообщение";
-      return {
-        id: c.id,
-        at: format(c.occurredAt, "dd.MM HH:mm"),
-        inbound,
-        kind: isCall && c.durationSeconds ? `${kind}, ${Math.round(c.durationSeconds / 60)} мин` : kind,
-        text: (c.messageText || c.transcript || c.summary || "").trim() || null,
-        failed: !inbound && c.status === "FAILED",
-        photos: parseAttachments(c.attachmentsJson).length,
-      };
-    })
-    .reverse();
 }
 
 /** Подсказка «что сейчас делать». Тот же текст, что в очереди: правда должна быть одна. */

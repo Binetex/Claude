@@ -48,6 +48,7 @@ export function OrderCommunications({
   emails,
   storeTimeZone,
   unread,
+  initialSide,
 }: {
   orderId: string;
   customerPhone: string;
@@ -59,9 +60,17 @@ export function OrderCommunications({
   emails: EmailItem[];
   storeTimeZone?: string;
   unread?: { customer: number; recipient: number };
+  /**
+   * С какой вкладки открыть. По умолчанию первая — как было в карточке заказа. Странице запроса
+   * отзыва нужен ЗАКАЗЧИК: отзыв просят у него, и открывать её на переписке с получателем значит
+   * прятать ровно тот ответ, ради которого страницу и открыли.
+   */
+  initialSide?: "CUSTOMER" | "RECIPIENT";
 }) {
   const tabs = buildCommTabs(customerPhone, recipientPhone);
-  const [activeKey, setActiveKey] = useState<CommTab["key"] | "EMAIL">(tabs[0].key);
+  const [activeKey, setActiveKey] = useState<CommTab["key"] | "EMAIL">(
+    (initialSide && tabs.find((t) => t.key === initialSide)?.key) ?? tabs[0].key
+  );
   const [text, setText] = useState("");
   const [idem, setIdem] = useState<string>(newKey);
   const [pending, setPending] = useState(false);

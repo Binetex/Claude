@@ -15,6 +15,36 @@ export const REVIEW_STATUS_LABELS: Record<string, string> = {
 };
 
 /**
+ * Статус ЧЕЛОВЕЧЕСКОЙ фразой — то, что владелец спрашивает первым: «а что с ним сейчас?».
+ * Короткая подпись выше отвечает «на каком шаге», а это — «что происходит»: «ещё не звонили»
+ * понятнее, чем «ждёт звонка», а у звонков видно, сколько попыток осталось.
+ */
+export function reviewStatusText(status: string, callAttempts: number, maxAttempts: number): string {
+  switch (status) {
+    case "NEW":
+      return "ещё не звонили";
+    case "CALLING":
+      return `звоним, попытка ${Math.min(callAttempts + 1, maxAttempts)} из ${maxAttempts}`;
+    case "LINK_SENT":
+      return "ссылка отправлена, ждём клиента";
+    case "PROMISED":
+      return "обещал оставить отзыв";
+    case "FORGOT":
+      return "обещал и забыл, напомнили";
+    case "READY_TO_CHECK":
+      return "говорит, что оставил — проверить";
+    case "CONFIRMED":
+      return "отзыв получен";
+    case "DECLINED":
+      return "клиент отказался";
+    case "GAVE_UP":
+      return "получить отзыв не удалось";
+    default:
+      return REVIEW_STATUS_LABELS[status] ?? status;
+  }
+}
+
+/**
  * Цвет статуса. Один взгляд на очередь должен отвечать «где что»: серые плашки на всех
  * карточках читались как «статус вообще непонятно» (прямая жалоба владельца).
  */

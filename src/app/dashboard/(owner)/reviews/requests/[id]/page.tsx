@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 import { requireRole } from "@/lib/rbac";
 import { loadRequestDetail } from "@/modules/reviews/requestView";
-import { RequestDetail } from "@/components/reviews/RequestDetail";
+import { RequestScreen } from "@/components/reviews/RequestScreen";
 
 export const dynamic = "force-dynamic";
 
@@ -14,5 +14,5 @@ export default async function OwnerReviewRequestPage({ params }: { params: Promi
   const { id } = await params;
   const vm = await loadRequestDetail(id, (orderId) => `/dashboard/orders/${orderId}`);
   if (!vm) notFound();
-  return <RequestDetail vm={vm} backHref="/dashboard/reviews/requests" />;
+  return <RequestScreen vm={vm} backHref="/dashboard/reviews/requests" />;
 }

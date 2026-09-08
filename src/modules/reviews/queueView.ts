@@ -8,7 +8,8 @@ import { format } from "date-fns";
 import { prisma } from "@/lib/db";
 import { listToday, listWaiting, listToCheck, listClosed, queueCounts, type QueueCard } from "./queue";
 import { resolveReviewSettings } from "./requests";
-import { REVIEW_STATUS_LABELS, REVIEW_EVENT_LABELS } from "@/lib/reviewStatus";
+import { REVIEW_STATUS_LABELS, REVIEW_EVENT_LABELS, reviewStatusText } from "@/lib/reviewStatus";
+import { getOrderItemImages } from "@/modules/orders/images";
 import { toE164 } from "@/lib/phone";
 import type { CardVM } from "@/components/reviews/ReviewQueue";
 
@@ -204,6 +205,11 @@ function toVM(
     id: c.id,
     status: c.status,
     statusLabel: REVIEW_STATUS_LABELS[c.status],
+    // «Что происходит» словами: короткого ярлыка шага владельцу не хватало.
+    statusText: reviewStatusText(c.status, c.callAttempts, maxAttempts),
+    // Фото букета: заказ узнают по картинке быстрее, чем по номеру.
+    photoUrl: c.order.items.map((i) => getOrderItemImages(i).primary).find((u) => !!u) ?? null,
+    recipientName: c.order.recipientName,
     callAttempts: c.callAttempts,
     maxAttempts,
     // У «обещал оставить» срок означает «пора напомнить», и занимается этим система. Показывать

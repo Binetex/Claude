@@ -37,8 +37,10 @@ const CARD = {
       senderPhone: true,
       senderEmail: true,
       deliveryDate: true,
+      recipientName: true,
       site: { select: { id: true, name: true } },
-      items: { select: { name: true, quantity: true } },
+      // Фото букета — то, по чему заказ узнают в лицо; правила выбора картинки в orders/images.
+      items: { select: { name: true, quantity: true, image: true, parentImageUrl: true, variantImageUrl: true } },
     },
   },
 } as const;

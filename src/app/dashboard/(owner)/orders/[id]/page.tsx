@@ -30,7 +30,7 @@ import { DeliveryStatusCard } from "./DeliveryStatusCard";
 import { OrderPickupCard } from "./OrderPickupCard";
 import { OrderCommunications, type CommItem } from "./OrderCommunications";
 import { OrderAssistantCard, type AssistantTurn } from "./OrderAssistantCard";
-import { collapseSendAttempts } from "./collapseAttempts";
+import { collapseSendAttempts } from "@/integrations/quo/collapseAttempts";
 import { OrderExpensesSection } from "@/components/finance/OrderExpensesSection";
 import {
   addOrderExpenseAction,
