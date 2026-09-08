@@ -71,7 +71,7 @@ describe("параметры под разные семейства моделе
     const client = createDeepseekClient({ apiKey: "k", baseUrl: "https://api.openai.com/v1", model: "gpt-5.1" }, { fetchImpl });
     await client.complete([{ role: "user", content: "hi" }]);
 
-    expect(body.max_completion_tokens).toBe(4000);
+    expect(body.max_completion_tokens).toBe(8000);
     expect(body).not.toHaveProperty("temperature");
     expect(body).not.toHaveProperty("max_tokens");
   });
@@ -84,7 +84,7 @@ describe("параметры под разные семейства моделе
     }) as unknown as typeof fetch;
     const client = createDeepseekClient({ apiKey: "k", baseUrl: "https://api.deepseek.com", model: "deepseek-reasoner" }, { fetchImpl });
     await client.complete([{ role: "user", content: "hi" }]);
-    expect(body.max_completion_tokens).toBe(4000);
+    expect(body.max_completion_tokens).toBe(8000);
   });
 
   it("обычные модели сохраняют прежние параметры", async () => {

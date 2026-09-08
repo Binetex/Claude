@@ -34,6 +34,13 @@ const TIMEOUT_MS = 20_000;
  * реальном промпте они отвечали 12–30 с. Ждём дольше — ответ всё равно уходит человеку черновиком.
  */
 const REASONING_TIMEOUT_MS = 60_000;
+/**
+ * Потолок токенов для рассуждающих моделей. Замер на боевом ключе: deepseek-reasoner тратит
+ * 750–3200 токенов даже на «ping», а на настоящем промпте (11 КБ) при лимите 4000 один ответ из
+ * трёх возвращался ПУСТЫМ — модель израсходовала лимит на размышление и до ответа не дошла.
+ * Пустой ответ хуже лишних токенов: клиент остаётся без ответа, а владелец без черновика.
+ */
+const REASONING_MAX_TOKENS = 8000;
 const RETRY_DELAY_MS = 1_500;
 
 /**
@@ -71,7 +78,7 @@ export function createDeepseekClient(config: DeepseekConfig, deps: DeepseekClien
           response_format: { type: "json_object" },
           // Рассуждающие модели не принимают temperature и считают лимит вместе с размышлением.
           ...(reasoning
-            ? { max_completion_tokens: 4000 }
+            ? { max_completion_tokens: REASONING_MAX_TOKENS }
             : { temperature: 0.2, max_tokens: 700 }),
         }),
         signal: controller.signal,

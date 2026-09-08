@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle, CardBody } from "@/components/ui/Card";
 import { Cpu } from "lucide-react";
 import { ownerSaveAiModel, ownerClearAiKey, ownerCheckAiModel } from "./actions";
+import type { ModelBalance } from "@/integrations/deepseek/balance";
 
 export type AiModelFormState = {
   apiKeyMask: string | null;
@@ -59,7 +60,29 @@ function statusMeta(s: AiModelFormState): { label: string; cls: string } {
   return { label: "Не проверялось", cls: "bg-slate-100 text-slate-600 border-slate-200" };
 }
 
-export function AiModelForm({ current }: { current: AiModelFormState }) {
+/** Ниже этой суммы предупреждаем красным: рассуждающая модель съедает её за считаные ответы. */
+const LOW_BALANCE_USD = 5;
+
+function BalanceRow({ balance }: { balance: ModelBalance | null }) {
+  if (!balance) return null;
+  if (!balance.supported) return <p className="text-[11px] text-slate-400">Остаток: {balance.reason}</p>;
+
+  const num = Number(balance.total);
+  const low = Number.isFinite(num) && num < LOW_BALANCE_USD;
+  return (
+    <div
+      className={`rounded-lg border px-3 py-2 text-xs ${
+        low ? "border-red-200 bg-red-50 text-red-700" : "border-emerald-200 bg-emerald-50 text-emerald-800"
+      }`}
+    >
+      Остаток на аккаунте модели: <span className="font-semibold tabular-nums">{balance.total} {balance.currency}</span>
+      {!balance.available && " · провайдер отметил аккаунт как недоступный"}
+      {low && " — на нуле ассистент замолчит. Рассуждающая модель тратит по несколько тысяч токенов на ответ, этого хватит ненадолго."}
+    </div>
+  );
+}
+
+export function AiModelForm({ current, balance }: { current: AiModelFormState; balance: ModelBalance | null }) {
   const [state, action, saving] = useActionState(ownerSaveAiModel, null);
   const [baseUrl, setBaseUrl] = useState(current.baseUrl ?? "https://api.deepseek.com");
   const [model, setModel] = useState(current.model ?? current.effectiveModel ?? "deepseek-chat");
@@ -92,6 +115,8 @@ export function AiModelForm({ current }: { current: AiModelFormState }) {
         </div>
 
         {current.checkErrorSafe && <p className="text-xs text-red-600">⚠ {current.checkErrorSafe}</p>}
+
+        <BalanceRow balance={balance} />
 
         {current.usingEnvKey && (
           <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
