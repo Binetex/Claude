@@ -28,8 +28,9 @@ import { buildWooStatusPushHandler } from "@/integrations/woocommerce/statusPush
 import { buildWooRefundPushHandler } from "@/integrations/woocommerce/refundPushHandler";
 import { WOO_STATUS_PUSH_EVENT } from "@/integrations/woocommerce/statusPushEvents";
 import { WOO_REFUND_PUSH_EVENT } from "@/integrations/woocommerce/refundPushEvents";
-import { buildBurqDraftCreateHandler } from "@/integrations/delivery/burq/outboxHandler";
+import { buildBurqDraftCreateHandler, buildBurqCourierCheckHandler } from "@/integrations/delivery/burq/outboxHandler";
 import { BURQ_DRAFT_CREATE_EVENT } from "@/integrations/delivery/burq/schedule";
+import { BURQ_COURIER_CHECK_EVENT } from "@/integrations/delivery/burq/precheck";
 import { buildBurqWebhookHandler, BURQ_WEBHOOK_EVENT } from "@/integrations/delivery/burq/webhookHandler";
 import { buildBurqPodRefetchHandler, BURQ_POD_REFETCH_EVENT } from "@/integrations/delivery/burq/podService";
 import { buildQuoWebhookHandler, QUO_WEBHOOK_EVENT } from "@/integrations/quo/webhookHandler";
@@ -111,6 +112,9 @@ async function main() {
     // Burq: отложенное автосоздание черновика доставки (draft-first). Реальные вызовы Burq
     // включаются только при BURQ_ENABLED + креды; иначе mock-клиент (sandbox-gate).
     [BURQ_DRAFT_CREATE_EVENT]: buildBurqDraftCreateHandler(prisma, (event, extra) => log(event, extra)),
+    // Burq: предварительная проверка «есть ли курьеры на маршрут». Идёт РАНЬШЕ черновика —
+    // как только у заказа появляются флорист и точка забора (см. precheck.ts).
+    [BURQ_COURIER_CHECK_EVENT]: buildBurqCourierCheckHandler(prisma, (event, extra) => log(event, extra)),
     // Burq: приём статус-событий доставки из webhook (anti-rollback, publish completed на DELIVERED).
     [BURQ_WEBHOOK_EVENT]: buildBurqWebhookHandler(prisma),
     // Burq: отложенный ОДНОразовый refetch Proof of Delivery (delivered без фото).

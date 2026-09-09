@@ -15,9 +15,9 @@ import { fmtDate } from "@/lib/format";
  * `couriersAvailable = NULL` («не проверяли») сюда не попадает: молчание проверки не повод
  * поднимать тревогу.
  *
- * Проверка делается в момент создания черновика — ночью, — поэтому в тексте прямо сказано,
- * что к моменту доставки курьеры могут появиться. Без этой оговорки баннер читается как
- * приговор и быстро приучает себя игнорировать.
+ * Проверка идёт заранее — как только у заказа появляются флорист и точка забора, — поэтому в
+ * тексте прямо сказано, что к моменту доставки курьеры могут появиться. Без этой оговорки
+ * баннер читается как приговор и быстро приучает себя игнорировать.
  */
 export async function NoCouriersBanner({
   floristId,
@@ -32,7 +32,12 @@ export async function NoCouriersBanner({
     where: {
       ...(floristId ? { currentFloristId: floristId } : {}),
       orderStatus: { notIn: ["DELIVERED", "CANCELLED"] },
-      deliveries: { some: { isCurrentAttempt: true, couriersAvailable: 0 } },
+      // Проверка переехала с Delivery на Order. Старое условие оставлено ради заказов, которые
+      // уже в работе и проверялись прежним способом: без него они молча потеряли бы предупреждение.
+      OR: [
+        { couriersAvailable: 0 },
+        { deliveries: { some: { isCurrentAttempt: true, couriersAvailable: 0 } } },
+      ],
     },
     select: {
       id: true,

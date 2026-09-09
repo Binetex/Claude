@@ -14,6 +14,7 @@ import { isBurqRuntimeEnabled } from "@/lib/featureFlags";
 import { utcDayRangeForLocalToday } from "@/lib/tz";
 import { TERMINAL_ORDER_STATUSES } from "@/lib/statuses";
 import { scheduleBurqDraftForOrder } from "./schedule";
+import { BURQ_COURIER_CHECK_EVENT, courierCheckIdempotencyKey } from "./precheck";
 import { handleFloristReassignment, type DeliveryCancellationReason, type ReassignmentResult } from "./reassignmentService";
 
 async function enqueueDraftTask(prisma: PrismaClient, orderId: string, scheduleVersion: number): Promise<Date | null> {
@@ -37,6 +38,26 @@ async function enqueueDraftTask(prisma: PrismaClient, orderId: string, scheduleV
   return availableAt;
 }
 
+/**
+ * Предварительная проверка курьеров — СРАЗУ, без отложки.
+ *
+ * Версия берётся из scheduleVersion: сменили флориста, адрес или точку забора — версия другая,
+ * значит маршрут другой, и это новая проверка, а не дубль. Без флориста задача отработает
+ * впустую и молча выйдет, но следующая смена данных поставит её заново.
+ */
+async function enqueueCourierCheck(prisma: PrismaClient, orderId: string, checkVersion: number): Promise<void> {
+  const repo = new PrismaOutboxRepository(prisma);
+  await repo.enqueue({
+    eventType: BURQ_COURIER_CHECK_EVENT,
+    aggregateType: "order",
+    aggregateId: orderId,
+    payload: { orderId, checkVersion },
+    idempotencyKey: courierCheckIdempotencyKey(orderId, checkVersion),
+    availableAt: new Date(),
+    maxAttempts: 3,
+  });
+}
+
 /** Первичное планирование после сохранения заказа (scheduleVersion=0). Идемпотентно. */
 export async function scheduleDeliveryForNewOrder(prisma: PrismaClient, orderId: string): Promise<{ scheduled: boolean; availableAt: Date | null }> {
   if (!isBurqRuntimeEnabled()) return { scheduled: false, availableAt: null }; // master gate: полный no-op
@@ -50,6 +71,7 @@ export async function scheduleDeliveryForNewOrder(prisma: PrismaClient, orderId:
     select: { scheduleVersion: true },
   });
   const availableAt = await enqueueDraftTask(prisma, orderId, intent.scheduleVersion);
+  await enqueueCourierCheck(prisma, orderId, intent.scheduleVersion);
   return { scheduled: true, availableAt };
 }
 
@@ -67,6 +89,8 @@ export async function rescheduleDeliveryForOrder(prisma: PrismaClient, orderId: 
     select: { scheduleVersion: true },
   });
   const availableAt = await enqueueDraftTask(prisma, orderId, intent.scheduleVersion);
+  // Маршрут мог измениться вместе с данными — проверяем заново под новой версией.
+  await enqueueCourierCheck(prisma, orderId, intent.scheduleVersion);
   return { availableAt };
 }
 

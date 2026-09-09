@@ -12,7 +12,6 @@ import { decideDraftEligibility } from "./eligibility";
 import { buildBurqDraftRequest, DEFAULT_BURQ_DIMENSIONS, type DraftOrderInput, type PickupInput, type BurqDimensions } from "./request";
 import type { PickupLocationInput } from "./pickupValidation";
 import type { BurqDraftCreatePayload } from "./schedule";
-import { checkCourierAvailability, probeExternalRef } from "./courierCheck";
 
 /** Контекст, необходимый для решения и создания черновика (без лишних PII-полей). */
 export type DraftContext = {
@@ -141,26 +140,9 @@ export async function handleBurqDraftCreate(deps: DraftHandlerDeps, payload: Bur
     rawStatus: res.status,
     referenceId,
   });
-  // Проверка курьеров идёт ПОСЛЕ сохранения черновика и ничего не может сломать: любая её
-  // ошибка оставляет «не проверяли» и молчит. Тревога — только по достоверному пустому ответу.
-  const check = await checkCourierAvailability(deps.client, req, probeExternalRef(ctx.order.id, attempt));
-  if (check.checked) {
-    try {
-      await deps.port.recordCourierAvailability({
-        orderId: ctx.order.id,
-        attemptNumber: attempt,
-        count: check.availability.count,
-        hasUber: check.availability.hasUber,
-        providers: check.availability.providers,
-      });
-    } catch {
-      /* запись результата — не повод ронять уже созданный черновик */
-    }
-    log("burq.couriers.checked", { orderId: ctx.order.id, count: check.availability.count, hasUber: check.availability.hasUber });
-  } else {
-    log("burq.couriers.check_skipped", { orderId: ctx.order.id, reason: check.reason });
-  }
-
+  // Проверки курьеров здесь БОЛЬШЕ НЕТ: она переехала в отдельную задачу и идёт раньше — как
+  // только у заказа появляются флорист и точка забора (см. precheck.ts). Узнавать об отсутствии
+  // курьеров в 04:00 дня доставки было поздно: заказ к этому моменту уже собран.
   log("burq.draft.created", { orderId: ctx.order.id, attempt, mode: deps.client.mode });
   return { outcome: "created", externalDeliveryId: res.id };
 }

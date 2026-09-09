@@ -13,9 +13,12 @@ import { getBurqDimensions } from "./settings";
 import { combineDropoffNotes } from "./dropoffNotes";
 import { resolvePickupForOrder } from "./pickupResolution";
 import type { DraftContext, DraftCreatePort, PersistDraftInput } from "./draftHandler";
+import type { CourierPrecheckPort } from "./precheck";
 import { resolveDropoffPhone } from "./dropoffPhone";
 
-export function createPrismaDraftPort(prisma: PrismaClient): DraftCreatePort {
+// Один порт на оба пути: контекст заказа им нужен один и тот же, а вторая его копия
+// разъехалась бы с первой при первом же изменении выборки.
+export function createPrismaDraftPort(prisma: PrismaClient): DraftCreatePort & CourierPrecheckPort {
   return {
     async loadContext(orderId: string): Promise<DraftContext | null> {
       const order = await prisma.order.findUnique({
@@ -166,6 +169,39 @@ export function createPrismaDraftPort(prisma: PrismaClient): DraftCreatePort {
      * Тревога поднимается ТОЛЬКО при нуле и только в Telegram владельцу: на экранах баннер
      * строится из этих же полей и отдельного уведомления не требует.
      */
+    /**
+     * Результат ПРЕДВАРИТЕЛЬНОЙ проверки — на заказ: она идёт до создания черновика, и строки
+     * Delivery ещё нет. Тревога та же, что у старой проверки, но ключ повторения — по версии
+     * данных, а не по попытке доставки.
+     */
+    async recordOrderCourierAvailability(input: { orderId: string; count: number; hasUber: boolean; providers: string[] }) {
+      const checkedAt = new Date();
+      await prisma.order.update({
+        where: { id: input.orderId },
+        data: { couriersCheckedAt: checkedAt, couriersAvailable: input.count },
+      });
+      if (input.count > 0) return;
+
+      await publishTelegramNotification(prisma, {
+        type: "delivery.no_couriers",
+        orderId: input.orderId,
+        occurrenceKey: `${input.orderId}:precheck:${checkedAt.toISOString().slice(0, 10)}`,
+        context: { checkedAt: checkedAt.toISOString().slice(11, 16) },
+      });
+      const order = await prisma.order.findUnique({
+        where: { id: input.orderId },
+        select: { currentFloristId: true },
+      });
+      if (order?.currentFloristId) {
+        await publishTelegramNotification(prisma, {
+          type: "delivery.no_couriers_florist",
+          orderId: input.orderId,
+          floristId: order.currentFloristId,
+          occurrenceKey: `${input.orderId}:precheck:${checkedAt.toISOString().slice(0, 10)}`,
+        });
+      }
+    },
+
     async recordCourierAvailability(input) {
       const checkedAt = new Date();
       await prisma.delivery.updateMany({
