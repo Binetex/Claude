@@ -11,6 +11,7 @@ import {
   renderFloristMessage,
   renderFloristHandedOver,
   renderOwnerCreated,
+  renderDeliveryChanged,
   renderOwnerDeliveryProblem,
   renderCustomerReadyTime,
   renderCustomerCallRequest,
@@ -255,6 +256,8 @@ function renderFor(type: TelegramNotifyPayload["type"], order: OrderSnapshot, ct
       return renderFloristHandedOver(order, ctx.toFloristName ?? null);
     case "order.created":
       return renderOwnerCreated(order, ctx.paymentLabel ?? "—");
+    case "order.delivery_changed":
+      return renderDeliveryChanged(order, ctx.fromText ?? null, ctx.toText ?? null);
     case "payment.failed":
       return renderOwnerPaymentProblem(order, ctx.safeReason ?? ctx.attemptStatus ?? "платёж отклонён");
     case "payment.pending_too_long":

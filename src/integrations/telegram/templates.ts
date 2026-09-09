@@ -246,6 +246,23 @@ export function renderCustomerCallRequest(o: OrderSnapshot, quote: string | null
   ).trimEnd();
 }
 
+/**
+ * Перенос доставки. Главное здесь — «было → стало»: флорист уже прочитал прежнюю дату и
+ * планировал день по ней, поэтому одной новой даты мало, нужно показать, что именно изменилось.
+ */
+export function renderDeliveryChanged(o: OrderSnapshot, fromText: string | null, toText: string | null): string {
+  return (
+    `📅 <b>Перенос доставки</b>\n` +
+    `<b>${esc(o.orderNumber)}</b> · ${esc(o.siteName)}\n\n` +
+    line("Было", fromText) +
+    line("Стало", toText) +
+    `\n` +
+    line("Получатель", o.recipientName) +
+    line("Адрес", addressText(o)) +
+    `\nПроверьте, успеваете ли к новому сроку.`
+  ).trimEnd();
+}
+
 export function renderOwnerDeliveryProblem(o: OrderSnapshot, status: string, safeReason: string | null): string {
   return (
     `🚨 <b>Проблема с доставкой</b>\n` +

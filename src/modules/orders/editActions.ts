@@ -4,8 +4,10 @@ import { requireOrderEditor } from "@/lib/rbac";
 import { prisma } from "@/lib/db";
 import { syncOrderToShopify } from "@/integrations/shopify/pushUpdate";
 import { onOrderDeliveryChangeSafe } from "@/integrations/delivery/burq/scheduleService";
+import { notifyDeliveryChanged } from "@/integrations/notifications/telegram";
+import { fmtDate, fmtTimeWindow } from "@/lib/format";
 import { scheduleDeliveryTodayTrigger } from "@/modules/automations/lifecycle";
-import { updateOrderBlock, type OrderBlock, type BlockFormData } from "./updateOrderBlock";
+import { updateOrderBlock, type OrderBlock, type BlockFormData, type OrderBlockChange } from "./updateOrderBlock";
 import { findUnlinkedCommunicationsForOrderPhone, attachUnlinkedCommunicationsToOrder, type OrderPhoneSide } from "@/integrations/quo/communicationsService";
 
 /**
@@ -23,7 +25,7 @@ export type SaveOrderBlockResult =
 
 // Побочные эффекты после успешного сохранения блока (как в owner-actions).
 // Внешние вызовы не должны «ронять» уже закоммиченное сохранение — оборачиваем безопасно.
-async function runPostSave(block: OrderBlock, orderId: string) {
+async function runPostSave(block: OrderBlock, orderId: string, changed: Record<string, OrderBlockChange> = {}) {
   try {
     if (block === "contacts") {
       await syncOrderToShopify(orderId);
@@ -31,6 +33,14 @@ async function runPostSave(block: OrderBlock, orderId: string) {
     } else if (block === "delivery") {
       await onOrderDeliveryChangeSafe(prisma, orderId); // дата/окно влияют на availableAt/dropoff_at
       await scheduleDeliveryTodayTrigger(prisma, orderId); // триггер «Доставка сегодня» — на новый день
+      // Перенос доставки — новость для флориста: он планирует день по дате из своей карточки.
+      // Без этого карточка молча оставалась со старой датой, а нового сообщения не приходило.
+      if ("deliveryDate" in changed || "deliveryWindow" in changed) {
+        await notifyDeliveryChanged(orderId, {
+          fromText: deliveryText(changed.deliveryDate?.from, changed.deliveryWindow?.from),
+          toText: deliveryText(changed.deliveryDate?.to, changed.deliveryWindow?.to),
+        });
+      }
     } else if (block === "cardNote") {
       await syncOrderToShopify(orderId); // cardMessage уходит в Shopify note
     }
@@ -77,7 +87,7 @@ export async function saveOrderBlock(
   });
 
   if (res.status === "ok") {
-    await runPostSave(block, orderId);
+    await runPostSave(block, orderId, res.changed);
     revalidateOrder(orderId);
     return { status: "ok", updatedAt: res.updatedAt };
   }
@@ -113,4 +123,15 @@ export async function attachUnlinkedComms(orderId: string, side: OrderPhoneSide)
   const r = await attachUnlinkedCommunicationsToOrder(prisma, orderId, side);
   if (r.attached > 0) revalidateOrder(orderId);
   return r;
+}
+
+/**
+ * «10.09.2026 9AM – 3PM» — как это читается в карточке. Если что-то из пары не менялось,
+ * значение берётся то же самое, поэтому строка всегда полная: флорист сравнивает две строки,
+ * а не догадывается, что именно поменялось.
+ */
+function deliveryText(date: unknown, window: unknown): string | null {
+  const d = date instanceof Date ? fmtDate(date) : typeof date === "string" && date ? fmtDate(new Date(date)) : null;
+  const w = typeof window === "string" && window ? fmtTimeWindow(window) : null;
+  return [d, w].filter(Boolean).join(" ") || null;
 }

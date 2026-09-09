@@ -16,6 +16,7 @@ export const TELEGRAM_EVENTS = [
   "order.assigned",
   "order.handed_over",
   "order.created",
+  "order.delivery_changed",
   "payment.failed",
   "payment.pending_too_long",
   "payment.status_mismatch",
@@ -76,6 +77,16 @@ const REGISTRY: Record<TelegramEventType, TelegramEventDef> = {
     perFlorist: false,
     dedupeKey: ({ orderId }) => `order:${orderId}:owner`,
     description: "Новый заказ (включая неоплаченные) — владельцу для наблюдения за потоком.",
+  },
+  "order.delivery_changed": {
+    type: "order.delivery_changed",
+    audience: "FLORIST",
+    perFlorist: true,
+    // Ключ включает НОВУЮ дату: каждый перенос — отдельное новое сообщение, а не правка
+    // прежнего. Молча поменять дату в старой карточке мало: флорист её уже прочитал и
+    // больше к ней не возвращается.
+    dedupeKey: ({ orderId, floristId, occurrence }) => `order:${orderId}:florist:${floristId}:delivery:${occurrence ?? "0"}`,
+    description: "Дату или окно доставки изменили — флористу новым сообщением.",
   },
   "payment.failed": {
     type: "payment.failed",

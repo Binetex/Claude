@@ -50,3 +50,54 @@ export async function notifyFloristAssigned(
     });
   }
 }
+
+/**
+ * Дату или окно доставки изменили.
+ *
+ * Два действия, и оба обязательны:
+ *  1) НОВОЕ сообщение флористу — прежнюю карточку он уже прочитал и планировал день по ней,
+ *     тихая правка старого сообщения до него не дойдёт;
+ *  2) обновление уже отправленных карточек (флориста и владельца), иначе они продолжат
+ *     показывать старую дату. Именно это и случилось с JF-1001374: заказ перенесли на
+ *     сегодня, а в Telegram у флориста осталось «10 Sep».
+ *
+ * `occurrenceKey` включает новую дату: outbox не считает это повтором прежней публикации,
+ * а реестр по своему dedupeKey решает, править существующее сообщение или слать новое.
+ */
+export async function notifyDeliveryChanged(
+  orderId: string,
+  change: { fromText: string | null; toText: string | null }
+): Promise<void> {
+  const order = await prisma.order
+    .findUnique({ where: { id: orderId }, select: { currentFloristId: true } })
+    .catch(() => null);
+
+  const stamp = `${change.toText ?? "-"}`.replace(/[^0-9A-Za-z]+/g, "");
+
+  if (order?.currentFloristId) {
+    await publishTelegramNotification(prisma, {
+      type: "order.delivery_changed",
+      orderId,
+      floristId: order.currentFloristId,
+      occurrenceKey: `${orderId}:${order.currentFloristId}:${stamp}`,
+      context: { fromText: change.fromText, toText: change.toText },
+    });
+
+    // Освежаем карточку заказа у флориста: она показывает дату и после переноса врёт.
+    await publishTelegramNotification(prisma, {
+      type: "order.assigned",
+      orderId,
+      floristId: order.currentFloristId,
+      occurrenceKey: `${orderId}:${order.currentFloristId}:refresh:${stamp}`,
+      context: {},
+    });
+  }
+
+  // И карточку у владельца — по той же причине.
+  await publishTelegramNotification(prisma, {
+    type: "order.created",
+    orderId,
+    occurrenceKey: `${orderId}:refresh:${stamp}`,
+    context: {},
+  });
+}
