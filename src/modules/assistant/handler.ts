@@ -661,16 +661,17 @@ async function liveTalkAfter(
 /**
  * Как звонок выглядит в истории, когда слушать нечего.
  *
- * Пишем по-английски и в скобках — вся история уходит модели на английском, и по скобкам она
- * отличает пометку системы от слов человека. Длительность важна: пятисекундный «звонок» — это
- * не разговор, а десятиминутный почти наверняка закрыл все вопросы.
+ * Пишем по-английски и в скобках: вся история уходит модели на английском, и по скобкам она
+ * отличает пометку системы от слов человека. Длинных тире здесь быть не должно, модель копирует
+ * стиль, который видит (см. проверку в prompt.test.ts). Длительность важна: пятисекундный
+ * «звонок» разговором не был, а десятиминутный почти наверняка закрыл все вопросы.
  */
 export function describeCall(r: { type: string; status: string; direction: string; durationSeconds: number | null }): string {
-  if (r.type === "VOICEMAIL") return "(voicemail left by the customer — we cannot read it)";
+  if (r.type === "VOICEMAIL") return "(voicemail left by the customer; we cannot read it)";
   if (r.status === "MISSED") return r.direction === "INBOUND" ? "(missed call from the customer)" : "(no answer)";
   const who = r.direction === "INBOUND" ? "customer called the shop" : "the shop called the customer";
   const mins = r.durationSeconds != null ? Math.max(1, Math.round(r.durationSeconds / 60)) : null;
-  return `(phone call — ${who}${mins ? `, about ${mins} min` : ""}; what was said is not available)`;
+  return `(phone call: ${who}${mins ? `, about ${mins} min` : ""}; what was said is not available)`;
 }
 
 async function loadHistory(prisma: PrismaClient, orderId: string | null, phone: string, storePhone: string | null, incoming: { id: string; occurredAt: Date }, tz: string | null, exceptIds: string[] = []): Promise<HistoryLine[]> {

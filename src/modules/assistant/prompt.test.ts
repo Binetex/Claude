@@ -206,3 +206,44 @@ describe("подсказка о заказе от незнакомого ном�
     expect(r.intent).toBe("spam");
   });
 });
+
+/**
+ * Звонок в истории. Слушать его модель не может, поэтому единственная защита от «а когда вам
+ * удобно принять?» после только что законченного об этом разговора — правило в промпте.
+ */
+describe("живой разговор в истории", () => {
+  const withCall = (incomingText: string) =>
+    buildMessages({
+      knowledgeBase: "We deliver 9-6",
+      order,
+      history: [
+        { at: "09-05 14:02", direction: "out", text: "Please let us know until what time you will be at this address today?" },
+        { at: "09-05 14:20", direction: "out", text: "(phone call: the shop called the customer, about 6 min; what was said is not available)" },
+      ],
+      incomingText,
+    });
+
+  it("правило говорит считать прежние вопросы отвеченными в звонке", () => {
+    const [system] = withCall("hi");
+    expect(system.content).toContain("By default it ANSWERED everything asked before it");
+    expect(system.content).toContain("Never ask");
+    expect(system.content).toContain("needs_human");
+  });
+
+  it("и для незнакомого номера правило то же: у заказа и без заказа звонок значит одно", () => {
+    const [system] = buildMessages({
+      knowledgeBase: "We deliver 9-6",
+      order: null,
+      history: [{ at: "09-05 14:20", direction: "in", text: "(phone call: customer called the shop, about 3 min; what was said is not available)" }],
+      incomingText: "hi",
+    });
+    expect(system.content).toContain("By default it ANSWERED everything asked before it");
+  });
+
+  it("сам звонок доходит до модели как строка истории, а не теряется", () => {
+    const [, user] = withCall("hi");
+    expect(user.content).toContain("phone call");
+    expect(user.content).toContain("6 min");
+  });
+});
+

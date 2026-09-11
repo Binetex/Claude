@@ -74,4 +74,13 @@ describe("описание звонка в истории для модели", 
     expect(describeCall({ type: "CALL", status: "COMPLETED", direction: "OUTBOUND", durationSeconds: 20 }))
       .toContain("1 min");
   });
+
+  it("без длинных тире: модель копирует стиль, который видит в истории", () => {
+    const all = [
+      describeCall({ type: "CALL", status: "COMPLETED", direction: "OUTBOUND", durationSeconds: 300 }),
+      describeCall({ type: "CALL", status: "MISSED", direction: "INBOUND", durationSeconds: null }),
+      describeCall({ type: "VOICEMAIL", status: "RECEIVED", direction: "INBOUND", durationSeconds: 10 }),
+    ].join(" ");
+    expect(all).not.toMatch(/[—–]/);
+  });
 });
