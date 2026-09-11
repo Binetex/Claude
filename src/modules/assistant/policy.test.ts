@@ -14,6 +14,7 @@ const base = {
   deliveredAt: null,
   text: "where is my order?",
   lastAutomatedAt: null,
+  liveTalkAfterIncoming: null,
   repliesToday: 0,
   repliesTotal: 0,
   now: NOW,
@@ -22,6 +23,21 @@ const base = {
 describe("когда ассистент вообще вступает", () => {
   it("обычный вопрос по живому заказу — разбираем", () => {
     expect(shouldConsider(base)).toEqual({ ok: true });
+  });
+
+  it("после состоявшегося звонка молчим: вопрос уже обсудили голосом", () => {
+    expect(shouldConsider({ ...base, liveTalkAfterIncoming: { at: NOW, kind: "call" } }))
+      .toEqual({ ok: false, reason: "call_after" });
+  });
+
+  it("голосовое от клиента — тоже молчим: прочитать его нечем", () => {
+    expect(shouldConsider({ ...base, liveTalkAfterIncoming: { at: NOW, kind: "voicemail" } }))
+      .toEqual({ ok: false, reason: "voicemail_after" });
+  });
+
+  it("звонок сильнее любых остальных проверок: даже пустой текст не важен", () => {
+    expect(shouldConsider({ ...base, text: "   ", liveTalkAfterIncoming: { at: NOW, kind: "call" } }))
+      .toEqual({ ok: false, reason: "call_after" });
   });
 
   it("выключен на магазине", () => {

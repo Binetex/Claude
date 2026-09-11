@@ -137,6 +137,7 @@ export function buildAssistantHandler(prisma: PrismaClient, deps: AssistantDeps 
       deliveredAt: deliveredMoment(order),
       text,
       lastAutomatedAt: order ? await lastAutomatedAfter(prisma, order.id, incoming.occurredAt) : null,
+      liveTalkAfterIncoming: await liveTalkAfter(prisma, phone, incoming.storePhone, incoming.occurredAt),
       ...(await countReplies(prisma, site, order?.id ?? null, phone, now())),
       now: now(),
     });
@@ -270,6 +271,9 @@ export function buildAssistantHandler(prisma: PrismaClient, deps: AssistantDeps 
             deliveredAt: deliveredMoment(found),
             text,
             lastAutomatedAt: null,
+            // Живой разговор проверен выше, до обращения к модели: сюда мы доходим только
+            // когда его не было.
+            liveTalkAfterIncoming: null,
             repliesToday: 0,
             repliesTotal: 0,
             now: now(),
@@ -624,6 +628,51 @@ async function logSkip(prisma: PrismaClient, siteId: string, orderId: string | n
  * заказа; у незнакомого номера — его разговор с этим номером магазина. Неотправленные и
  * упавшие исходящие не показываем: клиент их не видел, и модель не должна считать их сказанными.
  */
+/**
+ * Состоявшийся разговор голосом с этим номером ПОСЛЕ разбираемого сообщения.
+ *
+ * Считаем только СОСТОЯВШИЕСЯ звонки и голосовые: пропущенный входящий — это не разговор, там
+ * никто ничего не обсудил. Направление не важно: и «мы позвонили клиенту», и «клиент дозвонился
+ * до нас» одинаково означают, что вопрос разобрал человек.
+ */
+async function liveTalkAfter(
+  prisma: PrismaClient,
+  phone: string,
+  storePhone: string | null,
+  after: Date
+): Promise<{ at: Date; kind: "call" | "voicemail" } | null> {
+  const row = await prisma.orderCommunication.findFirst({
+    where: {
+      externalPhoneNormalized: phone,
+      ...(storePhone ? { storePhone } : {}),
+      occurredAt: { gt: after },
+      OR: [
+        { type: "CALL", status: "COMPLETED" },
+        { type: "VOICEMAIL" },
+      ],
+    },
+    orderBy: { occurredAt: "desc" },
+    select: { occurredAt: true, type: true },
+  });
+  if (!row) return null;
+  return { at: row.occurredAt, kind: row.type === "VOICEMAIL" ? "voicemail" : "call" };
+}
+
+/**
+ * Как звонок выглядит в истории, когда слушать нечего.
+ *
+ * Пишем по-английски и в скобках — вся история уходит модели на английском, и по скобкам она
+ * отличает пометку системы от слов человека. Длительность важна: пятисекундный «звонок» — это
+ * не разговор, а десятиминутный почти наверняка закрыл все вопросы.
+ */
+export function describeCall(r: { type: string; status: string; direction: string; durationSeconds: number | null }): string {
+  if (r.type === "VOICEMAIL") return "(voicemail left by the customer — we cannot read it)";
+  if (r.status === "MISSED") return r.direction === "INBOUND" ? "(missed call from the customer)" : "(no answer)";
+  const who = r.direction === "INBOUND" ? "customer called the shop" : "the shop called the customer";
+  const mins = r.durationSeconds != null ? Math.max(1, Math.round(r.durationSeconds / 60)) : null;
+  return `(phone call — ${who}${mins ? `, about ${mins} min` : ""}; what was said is not available)`;
+}
+
 async function loadHistory(prisma: PrismaClient, orderId: string | null, phone: string, storePhone: string | null, incoming: { id: string; occurredAt: Date }, tz: string | null, exceptIds: string[] = []): Promise<HistoryLine[]> {
   const rows = await prisma.orderCommunication.findMany({
     where: {
@@ -639,18 +688,35 @@ async function loadHistory(prisma: PrismaClient, orderId: string | null, phone: 
       // модель не должна отвечать на него, зная, чем разговор кончился.
       occurredAt: { lte: incoming.occurredAt },
       OR: [{ direction: "INBOUND" }, { direction: "OUTBOUND", status: { in: ["SENT", "DELIVERED"] } }],
-      // Звонок — такая же часть разговора, как SMS: клиент часто ссылается на сказанное голосом.
-      AND: [{ OR: [{ messageText: { not: null } }, { transcript: { not: null } }, { summary: { not: null } }, { attachmentsJson: { not: Prisma.DbNull } }] }],
+      // Звонок — такая же часть разговора, как SMS, и попадает сюда ДАЖЕ БЕЗ текста.
+      //
+      // Раньше условие требовало текст, транскрипт, резюме или вложение — а на аккаунте QUO
+      // транскриптов нет ни одного (1768 звонков за 90 дней, 0 транскриптов). Значит каждый
+      // разговор голосом выпадал из истории целиком, и модель отвечала так, будто его не было:
+      // владелец созванивался с клиентом, всё обсуждал, а следом уходил вопрос «когда вам удобно
+      // принять доставку?». Прочитать разговор модель по-прежнему не может, но знать, что он
+      // БЫЛ, обязана — иначе переспрашивает уже решённое.
+      AND: [
+        {
+          OR: [
+            { messageText: { not: null } },
+            { transcript: { not: null } },
+            { summary: { not: null } },
+            { attachmentsJson: { not: Prisma.DbNull } },
+            { type: { in: ["CALL", "VOICEMAIL"] } },
+          ],
+        },
+      ],
     },
     orderBy: { occurredAt: "desc" },
     take: HISTORY_LIMIT,
-    select: { direction: true, messageText: true, transcript: true, summary: true, type: true, occurredAt: true, attachmentsJson: true },
+    select: { direction: true, messageText: true, transcript: true, summary: true, type: true, status: true, durationSeconds: true, occurredAt: true, attachmentsJson: true },
   });
   return rows
     .reverse()
     .map((r) => {
-      const body = r.messageText ?? r.transcript ?? r.summary ?? "";
-      const prefix = parseAttachments(r.attachmentsJson).length ? "(photo) " : r.messageText ? "" : "(call) ";
+      const body = r.messageText ?? r.transcript ?? r.summary ?? describeCall(r);
+      const prefix = parseAttachments(r.attachmentsJson).length ? "(photo) " : r.messageText ? "" : "";
       const clock = localClock(tz, r.occurredAt);
       return {
         direction: r.direction === "INBOUND" ? ("in" as const) : ("out" as const),

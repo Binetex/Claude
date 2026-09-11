@@ -28,6 +28,16 @@ export type ConsiderInput = {
   text: string;
   /** Когда по заказу последний раз уходило АВТОМАТИЧЕСКОЕ сообщение (правило или цепочка). */
   lastAutomatedAt: Date | null;
+  /**
+   * Состоявшийся разговор голосом ПОСЛЕ разбираемого сообщения: звонок в любую сторону или
+   * голосовое от клиента. null — такого не было.
+   *
+   * Ассистент отвечает не мгновенно (сообщения копятся 15 минут), и за это время человек часто
+   * успевает позвонить и всё обсудить. Слышать разговор ассистент не может, значит не может и
+   * знать, что там уже решено, — а спросить «когда вам удобно принять?» после только что
+   * законченного об этом разговора хуже, чем промолчать.
+   */
+  liveTalkAfterIncoming: { at: Date; kind: "call" | "voicemail" } | null;
   /** Сколько ответов ассистента уже ушло за сутки и всего по заказу. */
   repliesToday: number;
   repliesTotal: number;
@@ -109,6 +119,12 @@ export function shouldConsider(input: ConsiderInput): ConsiderResult {
   if (input.deliveredAt) {
     const days = (input.now.getTime() - input.deliveredAt.getTime()) / 86_400_000;
     if (days > DELIVERED_GRACE_DAYS) return { ok: false, reason: "delivered_long_ago" };
+  }
+
+  // Раньше любого разбора текста: вопрос уже обсудили голосом, и что бы ни было написано
+  // раньше, отвечать на это письменно поздно.
+  if (input.liveTalkAfterIncoming) {
+    return { ok: false, reason: input.liveTalkAfterIncoming.kind === "voicemail" ? "voicemail_after" : "call_after" };
   }
 
   if (!input.text.trim()) return { ok: false, reason: "empty_text" };

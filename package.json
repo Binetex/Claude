@@ -23,7 +23,8 @@
     "backfill-shopify-orders": "NODE_OPTIONS=--conditions=react-server tsx scripts/backfill-shopify-orders.ts",
     "worker": "NODE_OPTIONS=--conditions=react-server tsx scripts/outbox-worker.ts",
     "finance:recompute": "NODE_OPTIONS=--conditions=react-server tsx scripts/finance-recompute-share.ts",
-    "test:db": "sh scripts/test-db.sh"
+    "test:db": "sh scripts/test-db.sh",
+    "email-factory:doctor": "NODE_OPTIONS=--conditions=react-server tsx scripts/email-factory-domain-doctor.ts"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.8.0",
