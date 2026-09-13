@@ -27,6 +27,7 @@ import { PrismaOutboxRepository } from "@/outbox/prismaRepository";
 import { sendAssistantReply, notifyDraft, notifyOwnerText, notifyBotText, escapeHtml } from "./deliver";
 import { prependReadyTimeNote, hasReadyTime, mentionsTime } from "./note";
 import { findOrderByHint, linkConversation } from "./link";
+import { junkReason } from "./junk";
 import { loadGlobalNote, activeGlobalNoteText } from "./globalNote";
 import { bouquetPageUrl } from "@/lib/bouquetPage";
 import { publishTelegramNotification } from "@/integrations/telegram/events";
@@ -144,6 +145,14 @@ export function buildAssistantHandler(prisma: PrismaClient, deps: AssistantDeps 
     if (!gate.ok) {
       // Отказ тоже записываем: «почему по заказу тишина» — первый вопрос владельца.
       if (gate.reason !== "assistant_off") await logSkip(prisma, site.id, order?.id ?? null, incoming.id, gate.reason);
+      return;
+    }
+
+    // Рассылки и автоответы операторов отсекаем правилом, ДО модели: ответ им не нужен ни при
+    // каких условиях, а запрос к модели за него ещё и платный. Строка в журнале остаётся.
+    const junk = junkReason(text);
+    if (junk) {
+      await logSkip(prisma, site.id, order?.id ?? null, incoming.id, junk);
       return;
     }
 

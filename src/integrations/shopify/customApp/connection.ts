@@ -7,15 +7,16 @@ import "server-only";
 import { prisma } from "@/lib/db";
 import { shopifyAdminGraphQL, ShopifyReauthRequiredError } from "./client";
 import { deriveConnectionResult, type ConnectionResult } from "./connectionLogic";
+import { normalizeStorefrontDomain } from "@/integrations/storefrontUrl";
 import { ShopifyAuthError } from "./tokenClient";
 
 const CHECK_QUERY = `{
-  shop { name myshopifyDomain }
+  shop { name myshopifyDomain primaryDomain { host } }
   currentAppInstallation { accessScopes { handle } }
 }`;
 
 type CheckData = {
-  shop: { name: string; myshopifyDomain: string };
+  shop: { name: string; myshopifyDomain: string; primaryDomain?: { host: string | null } | null };
   currentAppInstallation: { accessScopes: { handle: string }[] };
 };
 
@@ -49,6 +50,7 @@ export async function checkConnection(siteId: string): Promise<ConnectionResult>
   }
 
   const granted = data.currentAppInstallation.accessScopes.map((s) => s.handle);
+  const storefrontDomain = normalizeStorefrontDomain(data.shop.primaryDomain?.host);
   const result = deriveConnectionResult({
     enteredDomain: site.normalizedShopDomain,
     shop: { name: data.shop.name, myshopifyDomain: data.shop.myshopifyDomain },
@@ -63,6 +65,10 @@ export async function checkConnection(siteId: string): Promise<ConnectionResult>
       grantedScopes: result.grantedScopes,
       connectionError: result.error,
       lastConnectionCheckAt: new Date(),
+      // Публичный домен витрины, наоборот, берём: клиенту уходят ссылки на товары, и служебный
+      // *.myshopify.com в SMS читается как подделка. Shopify отдал что-то нераспознаваемое —
+      // прежнее значение не затираем, лучше старый верный домен, чем пустота.
+      ...(storefrontDomain ? { storefrontDomain } : {}),
       // timezone из Shopify API НЕ берём — Site.timezone задаётся владельцем вручную в карточке.
     },
   });

@@ -426,6 +426,10 @@ model Site {
   // LEGACY (старый общий OAuth-app): специфичные для магазина поля, полученные при установке.
   // Для нового режима CUSTOM_APP не используются — там всё в зашифрованных полях ниже.
   shopifyShopDomain  String? @unique // "example.myshopify.com"
+  /// Публичный домен витрины ("paradiseflowersart.com") — то, что видит клиент. У Shopify
+  /// служебный "*.myshopify.com" наружу показывать нельзя: ссылка в SMS читается как подделка.
+  /// Заполняется проверкой подключения (shop.primaryDomain) и правится владельцем руками.
+  storefrontDomain   String?
   shopifyAccessToken String? // shpat_... — LEGACY plain-text (общий OAuth); CUSTOM_APP использует accessTokenEncrypted
   timezone           String? // IANA-таймзона магазина (из Shopify shop.json) — для «сегодня» в списке закупки
 

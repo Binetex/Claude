@@ -171,12 +171,46 @@ describe("подсказка о заказе от незнакомого ном�
     expect(r.needsHuman).toBe(false);
   });
 
+  // Правила ниже выведены из боевых ошибок сентября 2026: каждое из них ассистент уже нарушил,
+  // и нарушение видел клиент. Тест держит формулировку, чтобы её не выкинули при правке промпта.
+  it("названное клиентом окно доступности — не просьба о ранней доставке", () => {
+    for (const rules of [buildMessages({ knowledgeBase: "", order, history: [], incomingText: "hi" })[0].content,
+                         buildMessages({ knowledgeBase: "", order: null, history: [], incomingText: "hi" })[0].content]) {
+      expect(rules).toContain("TELLING US WHEN THEY ARE AVAILABLE");
+      expect(rules).toContain("NEVER argue with this and never");
+    }
+  });
+
+  it("ответ обязан покрыть всё сообщение, а не первую его часть", () => {
+    const rules = buildMessages({ knowledgeBase: "", order, history: [], incomingText: "hi" })[0].content;
+    expect(rules).toContain("ANSWER THE WHOLE MESSAGE");
+    expect(rules).toContain("Say nothing the customer did not bring up");
+  });
+
+  it("статус доставки берётся только из данных заказа", () => {
+    const rules = buildMessages({ knowledgeBase: "", order, history: [], incomingText: "where is it?" })[0].content;
+    expect(rules).toContain("WHERE THE BOUQUET IS");
+    expect(rules).toContain("never say it is on the way");
+  });
+
+  it("ассистент не меняет данные и не обещает, что поменял", () => {
+    const rules = buildMessages({ knowledgeBase: "", order, history: [], incomingText: "remove my number" })[0].content;
+    expect(rules).toContain("YOU CANNOT CHANGE ANYTHING");
+  });
+
+  it("ссылки только из списка товаров: служебный домен наружу не уходит", () => {
+    const rules = buildMessages({ knowledgeBase: "", order: null, history: [], incomingText: "roses?" })[0].content;
+    expect(rules).toContain("copy them exactly");
+    expect(rules).toContain("never invent one");
+  });
+
   it("незнакомому без заказа не устраивают допрос, 5 PM не считается ранним", () => {
     const m = buildMessages({ knowledgeBase: "", order: null, history: [], incomingText: "no order yet" });
     expect(m[0].content).toContain("do NOT ask for an order name");
     expect(m[0].content).toContain("are NOT early");
     const k = buildMessages({ knowledgeBase: "", order, history: [], incomingText: "hi" });
-    expect(k[0].content).toContain('"as close to 5 pm as possible" are NOT early');
+    expect(k[0].content).toContain('"as close to 5 PM as possible"');
+    expect(k[0].content).toContain("These are NOT early");
   });
 
   it("общее правило владельца стоит выше базы знаний и объявлено сильнее её", () => {

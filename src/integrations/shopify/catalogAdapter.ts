@@ -141,7 +141,8 @@ export function normalizeProduct(shop: string, p: ShopifyProduct): NormalizedPro
     productType: p.product_type?.trim() || null,
     adminUrl: `https://${shop}/admin/products/${externalId}`,
     // Витрина открывается только по handle — по числовому id Shopify страницу не отдаёт.
-    // Домен myshopify.com редиректит на основной домен магазина, если он настроен.
+    // Домен здесь служебный (`*.myshopify.com`): наружу такую ссылку показывать нельзя, её
+    // подменяют на публичный домен витрины при чтении (integrations/storefrontUrl.ts).
     onlineUrl: p.handle ? `https://${shop}/products/${p.handle}` : null,
     variants,
   };

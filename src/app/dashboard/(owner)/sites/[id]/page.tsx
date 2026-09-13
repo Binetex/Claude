@@ -14,6 +14,7 @@ import { WooSettings } from "../WooSettings";
 import { AirwallexMonitoringPanel } from "../AirwallexMonitoringPanel";
 import { loadGlobalNote, activeGlobalNoteText } from "@/modules/assistant/globalNote";
 import { SiteTimezoneSetting } from "../SiteTimezoneSetting";
+import { SiteStorefrontDomainSetting } from "../SiteStorefrontDomainSetting";
 import { SiteBurqDropoffSetting } from "../SiteBurqDropoffSetting";
 import { SiteQuoSetting } from "../SiteQuoSetting";
 import { SiteEmailPanel } from "../SiteEmailPanel";
@@ -48,7 +49,7 @@ export default async function SiteSettingsPage({ params }: { params: Promise<{ i
     select: {
       id: true, name: true, shortName: true, platform: true, colorTag: true,
       burqDraftAutoCreateEnabled: true,
-      connectionStatus: true, shopifyShopDomain: true, timezone: true, burqDefaultDropoffInstructions: true,
+      connectionStatus: true, shopifyShopDomain: true, timezone: true, storefrontDomain: true, burqDefaultDropoffInstructions: true,
       emailFactoryDomain: true,
       aiMode: true,
       aiDryRun: true,
@@ -147,6 +148,7 @@ export default async function SiteSettingsPage({ params }: { params: Promise<{ i
                 )}
               </div>
               <SiteTimezoneSetting siteId={site.id} current={site.timezone} />
+              <SiteStorefrontDomainSetting siteId={site.id} current={site.storefrontDomain} />
             </CardBody>
           </Card>
 

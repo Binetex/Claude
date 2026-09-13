@@ -7,8 +7,14 @@ import "server-only";
  * этого хватает и на совет, и на то, чтобы человек сразу перешёл и купил.
  *
  * Берём только живые товары. Удалённый или скрытый товар в совете — это ссылка в никуда.
+ *
+ * Ссылка уходит клиенту, поэтому она обязана вести на витрину магазина, а не на служебный домен
+ * Shopify `*.myshopify.com`: 10.09.2026 клиенту ушло «order them at pnwhkj-02.myshopify.com» —
+ * так выглядит рассылка мошенников, а не письмо цветочного. Публичный домен не задан — товар
+ * идёт БЕЗ ссылки (см. publicProductUrl).
  */
 import type { PrismaClient } from "@/generated/prisma/client";
+import { publicProductUrl } from "@/integrations/storefrontUrl";
 
 export type CatalogItem = { name: string; price: string | null; url: string | null };
 
@@ -25,13 +31,20 @@ function priceLabel(min: unknown, max: unknown): string | null {
 }
 
 export async function loadCatalog(prisma: PrismaClient, siteId: string, limit = CATALOG_LIMIT): Promise<CatalogItem[]> {
-  const rows = await prisma.product.findMany({
-    where: { siteId, status: "ACTIVE", deletedAt: null, remoteDeleted: false },
-    select: { name: true, minPrice: true, maxPrice: true, onlineUrl: true },
-    orderBy: { name: "asc" },
-    take: limit,
-  });
-  return rows.map((r) => ({ name: r.name, price: priceLabel(r.minPrice, r.maxPrice), url: r.onlineUrl }));
+  const [site, rows] = await Promise.all([
+    prisma.site.findUnique({ where: { id: siteId }, select: { storefrontDomain: true } }),
+    prisma.product.findMany({
+      where: { siteId, status: "ACTIVE", deletedAt: null, remoteDeleted: false },
+      select: { name: true, minPrice: true, maxPrice: true, onlineUrl: true },
+      orderBy: { name: "asc" },
+      take: limit,
+    }),
+  ]);
+  return rows.map((r) => ({
+    name: r.name,
+    price: priceLabel(r.minPrice, r.maxPrice),
+    url: publicProductUrl(r.onlineUrl, site?.storefrontDomain ?? null),
+  }));
 }
 
 /**

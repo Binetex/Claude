@@ -26,6 +26,7 @@ import { resolveDeepseekConfig } from "@/integrations/deepseek/settings";
 import { createDeepseekClient } from "@/integrations/deepseek/client";
 
 import { rescheduleSiteFutureOrders } from "@/integrations/delivery/burq/scheduleService";
+import { normalizeStorefrontDomain } from "@/integrations/storefrontUrl";
 
 type FormState = { error?: string; ok?: boolean; message?: string } | null;
 
@@ -46,6 +47,24 @@ export async function ownerSetSiteTimezone(siteId: string, timezone: string): Pr
   }
   revalidatePath("/dashboard/sites");
   return { ok: true, message: `Часовой пояс: ${timezone}` };
+}
+
+/**
+ * Публичный домен витрины (Site.storefrontDomain): «paradiseflowersart.com».
+ *
+ * Его видит клиент: ассистент даёт ссылки на товары именно на этом домене. У Shopify каталог
+ * отдаёт служебный `*.myshopify.com`, и без этой настройки ссылка в SMS выглядит подделкой.
+ * Обычно домен приезжает сам при проверке подключения; поле — на случай, когда не приехал.
+ * Пусто → NULL: ассистент тогда отвечает вообще без ссылки, что безопаснее чужого домена.
+ */
+export async function ownerSetSiteStorefrontDomain(siteId: string, raw: string): Promise<FormState> {
+  await requireRole("OWNER");
+  const value = raw.trim();
+  const domain = value ? normalizeStorefrontDomain(value) : null;
+  if (value && !domain) return { error: "Нужен домен витрины, например paradiseflowersart.com (служебный *.myshopify.com не подходит)." };
+  await prisma.site.update({ where: { id: siteId }, data: { storefrontDomain: domain } });
+  revalidatePath("/dashboard/sites");
+  return { ok: true, message: domain ? `Домен витрины: ${domain}` : "Домен витрины очищен" };
 }
 
 /**

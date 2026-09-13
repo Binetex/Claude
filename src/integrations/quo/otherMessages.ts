@@ -60,11 +60,15 @@ export function normalizeForRules(raw: string): string {
  */
 const RULES: { topic: TopicKey; re: RegExp }[] = [
   // 1. Служебные автосообщения операторов и коды подтверждения — не спам и не клиент.
-  { topic: "SERVICE", re: /\b(verification|activation|security|confirmation)\s+code\b|\bcode is:?\s*\d{4,8}\b|\bnot set up for texting\b|\bno longer in service\b|\bmessage blocking is active\b/ },
+  { topic: "SERVICE", re: /\b(verification|activation|security|confirmation)\s+code\b|\bcode is:?\s*\d{4,8}\b|\bnot set up for texting\b|\bno longer in service\b|\bmessage blocking is active\b|\b(do not|don't|doesn't|does not) monitor this (line|number)\b|\bthis (line|number|mailbox) is not monitored\b|\bunable to receive (text|sms)\b|\bautomated (message|response)\b/ },
 
   // 2. Рассылки про кредиты и «финансирование бизнеса» — самая массовая помеха.
   //    Имя владельца отдельно НЕ ловим: в выборке есть живые клиенты «Emmanuelle» и «Manuel».
-  { topic: "SPAM", re: /\b(funding|lender|loan|loans|line of credit|working capital|merchant cash|merchant solution|payback|prepayment|pre-?approved|no middleman|financing|underwriting|term sheet|unsecured capital|ucc|mo rev|intake form|marketing campaign)\b|\breply (stop|yes)\b|\b(opt out|unsubscribe)\b|\bbaghoumian\b|\bparadise flower co\b|\bcould the business put to use\b/ },
+  //    Список слов расширен 14.09.2026 по боевой выборке: половина рассылок обходилась без слова
+  //    «loan» («I can pay off a lender or fund your business myself», «Up to 5M, no middlemen»),
+  //    и ассистент отвечал им как клиентам. Проверено на 260 живых входящих за 9 дней: совпали
+  //    все 18 рассылок и ни одно сообщение клиента.
+  { topic: "SPAM", re: /\b(funding|lender|lenders|loan|loans|line of credit|lines of credit|working capital|new capital|unsecured capital|merchant cash|merchant solution|payback|prepayment|pre-?approved|no middleman|no middlemen|financing|underwriting|underwriter|term sheet|term loans?|revolving|cash injection|cash advance|sba|mca|ucc|mo rev|intake form|marketing campaign|seo services)\b|\breply (stop|yes|go)\b|\b(opt out|opt-out|unsubscribe)\b|\bbaghoumian\b|\bparadise flower co\b|\bcould the business put to use\b|\bpay off (any|your|current)\b|\bbest email\b|\bup to \$?\d+(\.\d+)?\s?(m|mm|k|million)\b/ },
 
   // 3. Соискатели и курьеры. ВЫШЕ доставки: иначе «delivery driver» уедет в «Доставку».
   { topic: "JOB", re: /\b(are you hiring|hiring\?|looking for a job|need a job|part-?time job|delivery driver (job|position)|years of experience|clean driving record|my resume|apply for)\b/ },
