@@ -55,3 +55,22 @@ export async function isTelegramAudienceOn(
 ): Promise<boolean> {
   return (await loadTelegramAudienceFlags(prisma, scope))[audience];
 }
+
+/**
+ * Типы уведомлений, выключенные владельцем по одному.
+ *
+ * Отдельно от флагов адресата: те гасят весь поток («пока не пишем флористам»), а здесь владелец
+ * убирает конкретное сообщение, которое ему больше не нужно. 15.09.2026 так убраны «Новый заказ»
+ * (владелец видит их в чатах флористов) и «Расхождение статуса оплаты».
+ *
+ * Строки настроек нет — значит ничего не выключали: молчать в этом состоянии значит потерять
+ * уведомления там, где владелец их не трогал.
+ */
+export async function loadMutedTelegramEvents(prisma: PrismaClient): Promise<Set<string>> {
+  const s = await prisma.telegramSettings.findUnique({ where: { id: "singleton" }, select: { mutedEvents: true } }).catch(() => null);
+  return new Set(s?.mutedEvents ?? []);
+}
+
+export async function isTelegramEventMuted(prisma: PrismaClient, type: string): Promise<boolean> {
+  return (await loadMutedTelegramEvents(prisma)).has(type);
+}

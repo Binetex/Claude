@@ -4,7 +4,8 @@ import { requireRole } from "@/lib/rbac";
 import { prisma } from "@/lib/db";
 import { enableReplies, disableReplies } from "@/integrations/telegram/replies";
 import { upsertBot, deleteBotToken, setBotEnabled, type BotPurpose } from "@/integrations/telegram/bots";
-import { setTelegramGlobalEnabled, setTelegramAudiences, setTelegramAiAudiences, type TelegramAudiences } from "@/integrations/telegram/settings";
+import { setTelegramGlobalEnabled, setTelegramAudiences, setTelegramAiAudiences, setTelegramEventMuted, type TelegramAudiences } from "@/integrations/telegram/settings";
+import { isTelegramEventType } from "@/integrations/telegram/registry";
 import { verifyBot, type VerifyResult } from "@/integrations/telegram/verify";
 
 export type ActionResult = { ok?: true; message?: string; error?: string };
@@ -109,6 +110,17 @@ function whoGets(what: string, a: TelegramAudiences): string {
  * потому что Telegram просто некуда доставлять обновления. Секрет проверяется на приёме — адрес
  * попадает в логи и историю, одного его мало.
  */
+/** Выключить или включить ОДНО уведомление из реестра. */
+export async function setEventMuted(type: string, muted: boolean): Promise<ActionResult> {
+  await requireRole("OWNER");
+  // Тип берём только из реестра: строка из браузера иначе осела бы в настройках навсегда и
+  // молча гасила бы то, чего в реестре нет.
+  if (!isTelegramEventType(type)) return { error: "Неизвестное уведомление." };
+  await setTelegramEventMuted(prisma, type, muted);
+  revalidatePath("/dashboard/settings/telegram");
+  return { ok: true };
+}
+
 export async function enableBotRepliesAction(botId: string): Promise<ActionResult> {
   await requireRole("OWNER");
   const secret = process.env.TELEGRAM_WEBHOOK_SECRET?.trim();

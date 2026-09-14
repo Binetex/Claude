@@ -6,6 +6,7 @@ import { listTelegramEvents } from "@/integrations/telegram/registry";
 import { getRepliesStatusMap } from "@/integrations/telegram/replies";
 import { Card, CardBody } from "@/components/ui/Card";
 import { TelegramBotsPanel } from "./TelegramBotsPanel";
+import { EventToggle } from "./EventToggle";
 
 export const dynamic = "force-dynamic";
 
@@ -39,13 +40,20 @@ export default async function TelegramSettingsPage() {
   });
   const systemOn = flags(global.audiences);
   const aiOn = flags(global.aiAudiences);
-  const events = listTelegramEvents().map((e) => ({
-    type: e.type,
-    audience: e.audience,
-    description: e.description,
-    fromAssistant: !!e.fromAssistant,
-    on: (e.fromAssistant ? aiOn : systemOn)[e.audience],
-  }));
+  const muted = new Set(global.mutedEvents);
+  const events = listTelegramEvents().map((e) => {
+    const audienceOn = (e.fromAssistant ? aiOn : systemOn)[e.audience];
+    return {
+      type: e.type,
+      audience: e.audience,
+      description: e.description,
+      fromAssistant: !!e.fromAssistant,
+      audienceOff: !audienceOn,
+      muted: muted.has(e.type),
+      // Дойдёт ли уведомление на самом деле: адресат включён И само событие не выключено.
+      on: audienceOn && !muted.has(e.type),
+    };
+  });
 
   return (
     <div className="mx-auto max-w-4xl space-y-4">
@@ -67,9 +75,14 @@ export default async function TelegramSettingsPage() {
       <Card>
         <CardBody className="space-y-2">
           <h2 className="text-sm font-semibold text-slate-800">Какие события отправляются</h2>
+          <p className="text-xs text-slate-500">
+            Галочка выключает ОДНО уведомление, не трогая остальные. Настройки «кому писать» выше
+            сильнее: если адресат выключен целиком, галочка заблокирована.
+          </p>
           <ul className="space-y-1 text-xs text-slate-600">
             {events.map((e) => (
               <li key={e.type} className={`flex gap-2 ${e.on ? "" : "opacity-50"}`}>
+                <EventToggle type={e.type} muted={e.muted} audienceOff={e.audienceOff} />
                 <span className={`shrink-0 rounded border px-1.5 py-px text-[11px] ${AUDIENCE_META[e.audience].className}`}>
                   {AUDIENCE_META[e.audience].label}
                 </span>
@@ -78,7 +91,11 @@ export default async function TelegramSettingsPage() {
                     <span className="mr-1 rounded border border-violet-200 bg-violet-50 px-1 py-px text-[11px] text-violet-700">ИИ</span>
                   )}
                   <code className="rounded bg-slate-100 px-1">{e.type}</code> — {e.description}
-                  {!e.on && <span className="text-amber-700"> Сейчас не отправляется.</span>}
+                  {e.muted ? (
+                    <span className="text-amber-700"> Выключено владельцем.</span>
+                  ) : (
+                    e.audienceOff && <span className="text-amber-700"> Адресат выключен целиком.</span>
+                  )}
                 </span>
               </li>
             ))}

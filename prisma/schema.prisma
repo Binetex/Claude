@@ -2217,6 +2217,12 @@ model TelegramSettings {
   aiNotifyOwner           Boolean @default(true)
   aiNotifyFlorists        Boolean @default(true)
   aiNotifyCustomerService Boolean @default(true)
+  /// Типы уведомлений, выключенные ПО ОДНОМУ (`TelegramEventType`). Флаги выше гасят адресата
+  /// целиком, а это — точечная настройка: «новые заказы не нужны, я вижу их в чате флориста»,
+  /// но «нет курьеров на маршрут» и «клиент просит позвонить» приходить обязаны.
+  /// Массив строк, а не таблица: событий полтора десятка, у каждого ровно одно состояние,
+  /// правятся они на том же экране, и новый тип не должен стоить миграции.
+  mutedEvents             String[] @default([])
   verifiedAt        DateTime?
   botUsername       String? // из getMe — показываем владельцу, что подключён нужный бот
   lastErrorSafe     String? // безопасная причина последней неудачи, без секретов

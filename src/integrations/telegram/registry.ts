@@ -198,6 +198,11 @@ export function getTelegramEvent(type: string): TelegramEventDef | null {
   return (REGISTRY as Record<string, TelegramEventDef | undefined>)[type] ?? null;
 }
 
+/** Строка из браузера — тип уведомления или мусор. */
+export function isTelegramEventType(v: string): v is TelegramEventType {
+  return (TELEGRAM_EVENTS as readonly string[]).includes(v);
+}
+
 export function listTelegramEvents(): TelegramEventDef[] {
   return TELEGRAM_EVENTS.map((t) => REGISTRY[t]);
 }

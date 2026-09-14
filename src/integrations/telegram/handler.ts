@@ -4,7 +4,7 @@ import type { OutboxHandler } from "@/outbox/worker";
 import type { OutboxRecord } from "@/outbox/types";
 import { getTelegramEvent } from "./registry";
 import { resolveOwnerBot, resolveFloristBot, resolveCustomerServiceBot, resolveBotById, type BotLookup, type ResolvedBot } from "./bots";
-import { isTelegramGloballyEnabled, isTelegramAudienceOn } from "./config";
+import { isTelegramGloballyEnabled, isTelegramAudienceOn, isTelegramEventMuted } from "./config";
 import { TelegramSender } from "./sender";
 import {
   buttonsFor,
@@ -66,6 +66,14 @@ export function buildTelegramNotifyHandler(prisma: PrismaClient): OutboxHandler 
     const scope = def.fromAssistant ? "ASSISTANT" : "SYSTEM";
     if (!(await isTelegramAudienceOn(prisma, def.audience, scope))) {
       console.info(`[telegram] ${p.type} пропущено: уведомления ${def.fromAssistant ? "ассистента " : ""}для ${def.audience} выключены`);
+      return;
+    }
+
+    // Владелец выключил именно это уведомление («новые заказы я вижу в чате флориста»).
+    // Проверка ПОСЛЕ аудитории и рядом с ней: обе отвечают на один вопрос «писать ли вообще»,
+    // и обе одинаково гасят правку уже отправленного сообщения.
+    if (await isTelegramEventMuted(prisma, p.type)) {
+      console.info(`[telegram] ${p.type} пропущено: уведомление выключено владельцем`);
       return;
     }
 

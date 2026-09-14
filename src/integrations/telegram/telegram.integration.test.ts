@@ -8,6 +8,7 @@
  */
 import { describe, it, expect, afterAll, beforeEach, vi } from "vitest";
 import { prisma } from "@/lib/db";
+import { setTelegramEventMuted } from "./settings";
 import { Prisma } from "@/generated/prisma/client";
 import type { OutboxRecord } from "@/outbox/types";
 
@@ -513,6 +514,37 @@ describe("уведомления владельца", () => {
     expect(rows).toHaveLength(3);
     expect(rows.every((r) => r.chatId === "-100owner")).toBe(true);
     expect(tokenOfCall(0)).toBe("token-owner");
+  });
+
+  it("выключенное по одному уведомление молчит, соседние по тому же адресату идут", async () => {
+    await makeOwnerBot();
+    const site = await makeSite();
+    const order = await makeOrder(site.id);
+    // «Новые заказы не нужны, я вижу их в чате флориста» — но «проблема доставки» приходить обязана.
+    await setTelegramEventMuted(prisma, "order.created", true);
+
+    try {
+      await expect(handler(rec({ type: "order.created", orderId: order.id }))).resolves.toBeUndefined();
+      expect(fetchMock).not.toHaveBeenCalled();
+
+      fetchMock.mockResolvedValueOnce(okSend(2001));
+      await handler(rec({ type: "delivery.problem", orderId: order.id, context: { status: "FAILED" } }));
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    } finally {
+      await setTelegramEventMuted(prisma, "order.created", false);
+    }
+  });
+
+  it("галочку вернули — уведомление снова уходит", async () => {
+    await makeOwnerBot();
+    const site = await makeSite();
+    const order = await makeOrder(site.id);
+    await setTelegramEventMuted(prisma, "order.created", true);
+    await setTelegramEventMuted(prisma, "order.created", false);
+
+    fetchMock.mockResolvedValueOnce(okSend(2002));
+    await handler(rec({ type: "order.created", orderId: order.id }));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
 

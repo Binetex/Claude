@@ -18,6 +18,8 @@ export type TelegramGlobalView = {
   audiences: TelegramAudiences;
   /** То же для уведомлений ассистента (ИИ) — отдельный набор, выключается отдельно. */
   aiAudiences: TelegramAudiences;
+  /** Типы уведомлений, выключенные по одному (см. TelegramSettings.mutedEvents). */
+  mutedEvents: string[];
 };
 
 /** Три адресата уведомлений. Четвёртого в реестре событий нет. */
@@ -39,7 +41,27 @@ export async function loadTelegramGlobalView(prisma: PrismaClient): Promise<Tele
       florists: s ? s.aiNotifyFlorists : true,
       customerService: s ? s.aiNotifyCustomerService : true,
     },
+    mutedEvents: s?.mutedEvents ?? [],
   };
+}
+
+/**
+ * Выключить или включить ОДНО уведомление. Точечная настройка рядом с флагами адресатов: те
+ * гасят весь поток, а здесь владелец убирает конкретное сообщение, которое ему не нужно.
+ * Пишем не весь список, а одно значение: два человека, открывшие экран одновременно, иначе
+ * затирали бы правки друг друга.
+ */
+export async function setTelegramEventMuted(prisma: PrismaClient, type: string, muted: boolean): Promise<void> {
+  const s = await prisma.telegramSettings.findUnique({ where: { id: SINGLETON }, select: { mutedEvents: true } });
+  const current = new Set(s?.mutedEvents ?? []);
+  if (muted) current.add(type);
+  else current.delete(type);
+  const mutedEvents = [...current].sort();
+  await prisma.telegramSettings.upsert({
+    where: { id: SINGLETON },
+    create: { id: SINGLETON, enabled: false, mutedEvents },
+    update: { mutedEvents },
+  });
 }
 
 /**
