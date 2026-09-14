@@ -627,3 +627,92 @@ describe("Global kill switch + Execution Log", () => {
     expect(stages.indexOf("rendered")).toBeLessThan(stages.indexOf("sent"));
   });
 });
+
+describe("«сюрприз: получателю не пишем» — Order.recipientMuted", () => {
+  it("получателю ничего не уходит, и запрет НЕ превращается в письмо заказчику", async () => {
+    const site = await makeSite();
+    const order = await makeOrder(site.id, { recipientMuted: true, senderEmail: "buyer@example.com" });
+    // Email-fallback включён специально: главная ловушка правки в том, что запрет писать
+    // получателю мог свалиться в ветку «телефон недоступен» и обернуться письмом ЗАКАЗЧИКУ.
+    const rule = await makeAutomation(site.id, { audience: "RECIPIENT", smsEnabled: true, emailEnabled: false, emailFallbackEnabled: true });
+
+    await fireTrigger(order, "ORDER_CREATED");
+    const [job] = await jobsFor(rule.id, order.id);
+    // Планируется как обычно: решение принимает стадия отправки по свежим данным заказа.
+    expect(job).toMatchObject({ recipientType: "RECIPIENT", status: "SCHEDULED" });
+
+    await sendHandler(rec({ jobId: job.id, orderId: order.id }));
+
+    expect(await prisma.automationJob.findUnique({ where: { id: job.id } })).toMatchObject({ status: "SKIPPED", lastErrorSafe: "recipient_muted" });
+    expect(await prisma.automationJob.count({ where: { orderId: order.id, channel: "EMAIL" } })).toBe(0);
+    expect(await prisma.orderCommunication.count({ where: { orderId: order.id, direction: "OUTBOUND" } })).toBe(0);
+  });
+
+  it("галочку сняли до отправки — сообщение уходит, а не теряется навсегда", async () => {
+    const site = await makeSite();
+    const order = await makeOrder(site.id, { recipientMuted: true });
+    const rule = await makeAutomation(site.id, { audience: "RECIPIENT" });
+
+    await fireTrigger(order, "ORDER_CREATED");
+    const [job] = await jobsFor(rule.id, order.id);
+    // Заказчик перезвонил: «она уже знает, предупредите её». Владелец снимает пометку.
+    await prisma.order.update({ where: { id: order.id }, data: { recipientMuted: false } });
+    await sendHandler(rec({ jobId: job.id, orderId: order.id }));
+
+    expect(await prisma.automationJob.findUnique({ where: { id: job.id } })).toMatchObject({ status: "SENT" });
+  });
+
+  it("заказчику по тому же заказу правило срабатывает как обычно", async () => {
+    const site = await makeSite();
+    const order = await makeOrder(site.id, { recipientMuted: true });
+    const rule = await makeAutomation(site.id, { audience: "CUSTOMER" });
+
+    await fireTrigger(order, "ORDER_CREATED");
+    const [job] = await jobsFor(rule.id, order.id);
+    expect(job).toMatchObject({ recipientType: "CUSTOMER", status: "SCHEDULED" });
+    await sendHandler(rec({ jobId: job.id, orderId: order.id }));
+    expect(await prisma.automationJob.findUnique({ where: { id: job.id } })).toMatchObject({ status: "SENT" });
+  });
+
+  it("галочку поставили ПОСЛЕ планирования — отправка всё равно не уходит", async () => {
+    const site = await makeSite();
+    const order = await makeOrder(site.id);
+    const rule = await makeAutomation(site.id, { audience: "RECIPIENT" });
+
+    await fireTrigger(order, "ORDER_CREATED");
+    const [job] = await jobsFor(rule.id, order.id);
+    expect(job).toMatchObject({ status: "SCHEDULED" });
+
+    // Между планированием и отправкой проходят часы: «доставка сегодня» ставится на утро,
+    // шаг цепочки ждёт ответа, задержка правила продлевает окно.
+    await prisma.order.update({ where: { id: order.id }, data: { recipientMuted: true } });
+    await sendHandler(rec({ jobId: job.id, orderId: order.id }));
+
+    expect(await prisma.automationJob.findUnique({ where: { id: job.id } })).toMatchObject({ status: "SKIPPED", lastErrorSafe: "recipient_muted" });
+    expect(await prisma.orderCommunication.count({ where: { orderId: order.id, direction: "OUTBOUND" } })).toBe(0);
+  });
+
+  it("один телефон на обоих — запрет не затыкает заказчика", async () => {
+    const site = await makeSite();
+    // Заказчик указал свой номер и в billing, и в доставке: правило «Получателю» адресует его же.
+    const order = await makeOrder(site.id, { recipientMuted: true, recipientPhone: "+15551112222" });
+    const rule = await makeAutomation(site.id, { audience: "RECIPIENT" });
+
+    await fireTrigger(order, "ORDER_CREATED");
+    const [job] = await jobsFor(rule.id, order.id);
+    expect(job).toMatchObject({ recipientType: "CUSTOMER", status: "SCHEDULED" });
+    await sendHandler(rec({ jobId: job.id, orderId: order.id }));
+    expect(await prisma.automationJob.findUnique({ where: { id: job.id } })).toMatchObject({ status: "SENT" });
+  });
+
+  it("без галочки получателю уходит как раньше", async () => {
+    const site = await makeSite();
+    const order = await makeOrder(site.id);
+    const rule = await makeAutomation(site.id, { audience: "RECIPIENT" });
+
+    await fireTrigger(order, "ORDER_CREATED");
+    const [job] = await jobsFor(rule.id, order.id);
+    await sendHandler(rec({ jobId: job.id, orderId: order.id }));
+    expect(await prisma.automationJob.findUnique({ where: { id: job.id } })).toMatchObject({ status: "SENT", recipientType: "RECIPIENT" });
+  });
+});

@@ -94,6 +94,47 @@ describe("sendUnlinkedSms — отправка без заказа (раздел
   });
 });
 
+describe("sendOrderSms — «сюрприз: получателю не пишем»", () => {
+  it("получателю не уходит ничего, и запись в переписке не создаётся", async () => {
+    const orderId = await makeOrder(siteWithNumber);
+    await prisma.order.update({ where: { id: orderId }, data: { recipientMuted: true } });
+    const send = vi.fn();
+    const r = await sendOrderSms(prisma, fakeClient(send as never), { orderId, target: "RECIPIENT", text: "Hi", idempotencyKey: `mute-${orderId}-1` });
+    expect(r).toEqual({ ok: false, code: "recipient_muted" });
+    expect(send).not.toHaveBeenCalled();
+    // Пустой PENDING сжёг бы одноразовый ключ и сломал отправку после снятия галочки.
+    expect(await prisma.orderCommunication.count({ where: { sendKey: `mute-${orderId}-1` } })).toBe(0);
+  });
+
+  it("заказчику по тому же заказу уходит как обычно", async () => {
+    const orderId = await makeOrder(siteWithNumber);
+    await prisma.order.update({ where: { id: orderId }, data: { recipientMuted: true } });
+    const r = await sendOrderSms(prisma, okClient("AC_mute_cust"), { orderId, target: "CUSTOMER", text: "Hi", idempotencyKey: `mute-${orderId}-2` });
+    expect(r).toMatchObject({ ok: true, status: "SENT" });
+  });
+
+  it("ответ на СОБСТВЕННОЕ входящее получателя не гасится", async () => {
+    const orderId = await makeOrder(siteWithNumber);
+    await prisma.order.update({ where: { id: orderId }, data: { recipientMuted: true } });
+    const r = await sendOrderSms(prisma, okClient("AC_mute_reply"), { orderId, target: "RECIPIENT", text: "Yes", idempotencyKey: `mute-${orderId}-3`, replyToInbound: true });
+    expect(r).toMatchObject({ ok: true, status: "SENT" });
+  });
+
+  it("один телефон на заказчика и получателя — запрет НЕ затыкает плательщика", async () => {
+    const orderId = await makeOrder(siteWithNumber);
+    // Заказчик указал свой номер и в billing, и в доставке: «получатель» — это он сам.
+    await prisma.order.update({ where: { id: orderId }, data: { recipientMuted: true, recipientPhone: CUST } });
+    const r = await sendOrderSms(prisma, okClient("AC_mute_same"), { orderId, target: "RECIPIENT", text: "Hi", idempotencyKey: `mute-${orderId}-4` });
+    expect(r).toMatchObject({ ok: true, status: "SENT" });
+  });
+
+  it("без галочки получателю уходит как раньше", async () => {
+    const orderId = await makeOrder(siteWithNumber);
+    const r = await sendOrderSms(prisma, okClient("AC_not_muted"), { orderId, target: "RECIPIENT", text: "Hi", idempotencyKey: `mute-${orderId}-5` });
+    expect(r).toMatchObject({ ok: true, status: "SENT" });
+  });
+});
+
 describe("sendOrderSms", () => {
   it("успешная отправка покупателю → SENT + сохранён resource/conversation/phoneNumberId", async () => {
     const orderId = await makeOrder(siteWithNumber);

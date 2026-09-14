@@ -174,11 +174,17 @@ describe("подсказка о заказе от незнакомого ном�
   // Правила ниже выведены из боевых ошибок сентября 2026: каждое из них ассистент уже нарушил,
   // и нарушение видел клиент. Тест держит формулировку, чтобы её не выкинули при правке промпта.
   it("названное клиентом окно доступности — не просьба о ранней доставке", () => {
-    for (const rules of [buildMessages({ knowledgeBase: "", order, history: [], incomingText: "hi" })[0].content,
-                         buildMessages({ knowledgeBase: "", order: null, history: [], incomingText: "hi" })[0].content]) {
-      expect(rules).toContain("TELLING US WHEN THEY ARE AVAILABLE");
-      expect(rules).toContain("NEVER argue with this and never");
-    }
+    const rules = buildMessages({ knowledgeBase: "", order, history: [], incomingText: "hi" })[0].content;
+    expect(rules).toContain("TELLING US WHEN THEY ARE AVAILABLE");
+    expect(rules).toContain("NEVER argue with this and never");
+  });
+
+  it("незнакомому номеру про время НЕ обещают: там нет ни заказа, ни окна", () => {
+    const rules = buildMessages({ knowledgeBase: "", order: null, history: [], incomingText: "can you deliver after 5pm?" })[0].content;
+    expect(rules).toContain("You have no order and no delivery window");
+    // Правило «скажи да, привезём позже» живёт только там, где окно доставки вообще есть.
+    expect(rules).not.toContain("Say yes, a later delivery time can be arranged");
+    expect(rules).toContain("Never promise refunds, discounts, dates");
   });
 
   it("ответ обязан покрыть всё сообщение, а не первую его часть", () => {
@@ -207,7 +213,8 @@ describe("подсказка о заказе от незнакомого ном�
   it("незнакомому без заказа не устраивают допрос, 5 PM не считается ранним", () => {
     const m = buildMessages({ knowledgeBase: "", order: null, history: [], incomingText: "no order yet" });
     expect(m[0].content).toContain("do NOT ask for an order name");
-    expect(m[0].content).toContain("are NOT early");
+    // «Рано» и для незнакомого номера значит то же самое: до полудня и ничего больше.
+    expect(m[0].content).toContain("at or before 12 noon");
     const k = buildMessages({ knowledgeBase: "", order, history: [], incomingText: "hi" });
     expect(k[0].content).toContain('"as close to 5 PM as possible"');
     expect(k[0].content).toContain("These are NOT early");

@@ -102,8 +102,11 @@ export async function sendAssistantReply(prisma: PrismaClient, turnId: string, d
 
   // Без заказа, или пишет номер, которого в заказе нет: отвечаем в тот же номер от номера
   // магазина. Запись при этом относится к заказу, если он есть — разговор-то его.
+  // replyToInbound: ассистент отвечает ровно тому, кто нам написал. Если по заказу стоит
+  // «получателю не писать» (сюрприз), а написал именно получатель — отвечаем: сюрприз он уже
+  // раскрыл сам, а молчание в ответ на прямой вопрос выглядит хуже любого сюрприза.
   const res = target
-    ? await sendOrderSms(prisma, quoClient(), { orderId: turn.orderId!, target, text, idempotencyKey })
+    ? await sendOrderSms(prisma, quoClient(), { orderId: turn.orderId!, target, text, idempotencyKey, replyToInbound: true })
     : await sendUnlinkedSms(prisma, quoClient(), {
         siteId: turn.siteId, toPhone: incomingPhone, text, idempotencyKey, orderId: turn.orderId,
       });
@@ -337,7 +340,9 @@ export function buildAssistantNudgeHandler(prisma: PrismaClient, deps: { now?: (
 
     const target = turn.order ? pickOrderTarget(phone, turn.communication.partyRole, turn.order) : null;
     if (target) {
-      await sendOrderSms(prisma, quoClient(), { orderId: turn.orderId!, target, text: NUDGE_TEXT, idempotencyKey: `ai-nudge:${turn.id}` });
+      // Та же реакция на входящее, что и у самого ответа: «одну минуту» адресовано человеку,
+      // который нам только что написал.
+      await sendOrderSms(prisma, quoClient(), { orderId: turn.orderId!, target, text: NUDGE_TEXT, idempotencyKey: `ai-nudge:${turn.id}`, replyToInbound: true });
       return;
     }
     await sendUnlinkedSms(prisma, quoClient(), {

@@ -7,6 +7,7 @@ import { sendOrderSmsAction } from "./commActions";
 import { sendOrderEmailReplyAction } from "./emailActions";
 import { CommunicationTimeline, type TimelineItem } from "@/components/orders/CommunicationTimeline";
 import { buildCommTabs, commGroupOf, type CommTab } from "@/integrations/quo/communicationsView";
+import { RecipientMuteToggle } from "./RecipientMuteToggle";
 
 const SMS_MAX = 1600;
 const EMAIL_MAX = 10_000;
@@ -48,6 +49,8 @@ export function OrderCommunications({
   emails,
   storeTimeZone,
   unread,
+  recipientMuted,
+  canEditRecipientMute,
   initialSide,
 }: {
   orderId: string;
@@ -60,6 +63,13 @@ export function OrderCommunications({
   emails: EmailItem[];
   storeTimeZone?: string;
   unread?: { customer: number; recipient: number };
+  /** «Сюрприз: получателю не пишем» — состояние выключателя на заказе. */
+  recipientMuted?: boolean;
+  /**
+   * Можно ли этот выключатель ТРОГАТЬ. Ставит и снимает только владелец, но ВИДЕТЬ пометку
+   * обязаны и флорист, и оператор: иначе они гадают, почему получателю ничего не ушло.
+   */
+  canEditRecipientMute?: boolean;
   /**
    * С какой вкладки открыть. По умолчанию первая — как было в карточке заказа. Странице запроса
    * отзыва нужен ЗАКАЗЧИК: отзыв просят у него, и открывать её на переписке с получателем значит
@@ -130,6 +140,19 @@ export function OrderCommunications({
     <Card>
       <CardHeader className="py-2.5"><CardTitle icon={MessageSquare}>Общение</CardTitle></CardHeader>
       <CardBody className="space-y-3 text-sm">
+        {/* Сюрприз: выключатель стоит рядом со вкладками, а не в отдельной карточке — решение
+            принимают ровно в тот момент, когда смотрят на переписку с получателем. Показываем
+            только когда стороны РАЗНЫЕ: при одном телефоне на двоих получатель и есть заказчик,
+            и запрещать писать самому себе нечего. */}
+        {recipientMuted !== undefined && tabs.some((t) => t.key === "RECIPIENT") && (
+          canEditRecipientMute ? (
+            <RecipientMuteToggle orderId={orderId} muted={recipientMuted} />
+          ) : recipientMuted ? (
+            <div className="text-xs text-amber-700">
+              Сюрприз: получателю не пишем. Автосообщения ему молчат, снять пометку может владелец.
+            </div>
+          ) : null
+        )}
         {/* Вкладки по стороне: Получатель слева (по умолчанию), Заказчик справа. */}
         <div className="flex gap-2">
           {tabs.map((t) => {

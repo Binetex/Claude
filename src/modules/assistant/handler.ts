@@ -24,7 +24,7 @@ import { orderToVariableSource, SMS_ORDER_INCLUDE } from "@/modules/messaging/or
 import { shouldConsider, decideDelivery, isCallRequest, isSmallTalk, type AssistantMode } from "./policy";
 import { scheduleAssistantNudge, type AssistantIncomingPayload } from "./events";
 import { PrismaOutboxRepository } from "@/outbox/prismaRepository";
-import { sendAssistantReply, notifyDraft, notifyOwnerText, notifyBotText, escapeHtml } from "./deliver";
+import { sendAssistantReply, notifyDraft, notifyOwnerText, notifyBotText, escapeHtml, pickOrderTarget } from "./deliver";
 import { prependReadyTimeNote, hasReadyTime, mentionsTime } from "./note";
 import { findOrderByHint, linkConversation } from "./link";
 import { junkReason } from "./junk";
@@ -150,7 +150,7 @@ export function buildAssistantHandler(prisma: PrismaClient, deps: AssistantDeps 
 
     // Рассылки и автоответы операторов отсекаем правилом, ДО модели: ответ им не нужен ни при
     // каких условиях, а запрос к модели за него ещё и платный. Строка в журнале остаётся.
-    const junk = junkReason(text);
+    const junk = junkReason(text, !!order);
     if (junk) {
       await logSkip(prisma, site.id, order?.id ?? null, incoming.id, junk);
       return;
@@ -326,12 +326,20 @@ export function buildAssistantHandler(prisma: PrismaClient, deps: AssistantDeps 
       return;
     }
 
+    // Заказ помечен «сюрприз: получателю не пишем», и пишет как раз получатель. Ответить ему
+    // можно, но не автоматически: в данных заказа лежат дата, окно, адрес и трек, и на невинное
+    // «what time today?» ассистент подтвердил бы получателю сам факт подарка. Решает человек.
+    const mutedRecipient =
+      !!linkedOrder?.recipientMuted &&
+      pickOrderTarget(phone, incoming.partyRole, linkedOrder) === "RECIPIENT";
+
     const action = decideDelivery({
       mode: site.aiMode as AssistantMode,
       dryRun: site.aiDryRun,
       hasReply: !!parsed.replyEn,
       needsHuman: parsed.needsHuman,
       important: parsed.important,
+      mutedRecipient,
     });
 
     // Клиент назвал время — это данные заказа, а не только реплика: строка в заметку сверху и

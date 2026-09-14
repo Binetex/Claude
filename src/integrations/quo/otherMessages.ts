@@ -60,7 +60,10 @@ export function normalizeForRules(raw: string): string {
  */
 const RULES: { topic: TopicKey; re: RegExp }[] = [
   // 1. Служебные автосообщения операторов и коды подтверждения — не спам и не клиент.
-  { topic: "SERVICE", re: /\b(verification|activation|security|confirmation)\s+code\b|\bcode is:?\s*\d{4,8}\b|\bnot set up for texting\b|\bno longer in service\b|\bmessage blocking is active\b|\b(do not|don't|doesn't|does not) monitor this (line|number)\b|\bthis (line|number|mailbox) is not monitored\b|\bunable to receive (text|sms)\b|\bautomated (message|response)\b/ },
+  // «code is 4455» без уточнения — это ЧАЩЕ ВСЕГО клиент про домофон, а не код подтверждения:
+  // «The gate code is 4455», «the door code is 1234, leave them inside». Поэтому голый «code is»
+  // засчитывается только когда перед ним НЕ стоит слово про вход в дом.
+  { topic: "SERVICE", re: /\b(verification|activation|security|confirmation|one[- ]time|login|otp)\s+code\b|(?<!\b(?:gate|door|building|entry|entrance|callbox|call ?box|buzzer|lock|key|apartment|apt|unit|elevator|garage|front)\s)\bcode is:?\s*\d{4,8}\b|\bnot set up for texting\b|\bno longer in service\b|\bmessage blocking is active\b|\b(do not|don't|doesn't|does not) monitor this (line|number)\b|\bthis (line|number|mailbox) is not monitored\b|\bunable to receive (text|sms)\b/ },
 
   // 2. Рассылки про кредиты и «финансирование бизнеса» — самая массовая помеха.
   //    Имя владельца отдельно НЕ ловим: в выборке есть живые клиенты «Emmanuelle» и «Manuel».
@@ -68,7 +71,13 @@ const RULES: { topic: TopicKey; re: RegExp }[] = [
   //    «loan» («I can pay off a lender or fund your business myself», «Up to 5M, no middlemen»),
   //    и ассистент отвечал им как клиентам. Проверено на 260 живых входящих за 9 дней: совпали
   //    все 18 рассылок и ни одно сообщение клиента.
-  { topic: "SPAM", re: /\b(funding|lender|lenders|loan|loans|line of credit|lines of credit|working capital|new capital|unsecured capital|merchant cash|merchant solution|payback|prepayment|pre-?approved|no middleman|no middlemen|financing|underwriting|underwriter|term sheet|term loans?|revolving|cash injection|cash advance|sba|mca|ucc|mo rev|intake form|marketing campaign|seo services)\b|\breply (stop|yes|go)\b|\b(opt out|opt-out|unsubscribe)\b|\bbaghoumian\b|\bparadise flower co\b|\bcould the business put to use\b|\bpay off (any|your|current)\b|\bbest email\b|\bup to \$?\d+(\.\d+)?\s?(m|mm|k|million)\b/ },
+  //    Слова, которые встречаются и у живых клиентов, из правила УБРАНЫ (проверено на выдумках,
+  //    которые легко написал бы настоящий человек): «best email» («what is your best email so I
+  //    can send a picture»), «financing» («do you offer financing for a wedding order?»), «intake
+  //    form» (так пишут похоронные дома), «up to 2k» (бюджет). Ловить спам на 100% незачем:
+  //    непойманное всё равно разбирает модель и молчит по своему правилу, а вот проглоченный
+  //    живой клиент — это потерянный заказ.
+  { topic: "SPAM", re: /\b(funding|lender|lenders|loan|loans|line of credit|lines of credit|working capital|new capital|unsecured capital|merchant cash|merchant solution|payback|prepayment|pre-?approved|no middleman|no middlemen|underwriting|underwriter|term sheet|term loans?|cash injection|cash advance|sba|s\.b\.a|mca|ucc|mo rev|marketing campaign|seo services|invoice factoring|broker fee)\b|\breply (stop|yes|go)\b|\b(opt out|opt-out|unsubscribe)\b|\bbaghoumian\b|\bparadise flower co\b|\bcould the business put to use\b|\bpay ?off (any|your|current|option)\b|\bfund (your|the) business\b/ },
 
   // 3. Соискатели и курьеры. ВЫШЕ доставки: иначе «delivery driver» уедет в «Доставку».
   { topic: "JOB", re: /\b(are you hiring|hiring\?|looking for a job|need a job|part-?time job|delivery driver (job|position)|years of experience|clean driving record|my resume|apply for)\b/ },

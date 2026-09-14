@@ -19,7 +19,22 @@ import { isQuoOutOfMoney, alertQuoOutOfMoney } from "./balanceAlert";
 export const SMS_MAX_LENGTH = 1600;
 export type SendTarget = "CUSTOMER" | "RECIPIENT";
 
-export type SendSmsInput = { orderId: string; target: SendTarget; text: string; idempotencyKey: string; sentByUserId?: string | null };
+export type SendSmsInput = {
+  orderId: string;
+  target: SendTarget;
+  text: string;
+  idempotencyKey: string;
+  sentByUserId?: string | null;
+  /**
+   * Это ОТВЕТ на входящее от того же человека. Запрет «не писать получателю» (сюрприз) такой
+   * ответ не гасит: получатель написал нам сам, сюрприз он уже раскрыл, и молчание в ответ на
+   * прямой вопрос хуже любого сюрприза. Ставится только там, где входящее действительно есть.
+   */
+  replyToInbound?: boolean;
+};
+
+/** Заказ помечен «получателю не писать»: отправка не сбой, а запрет владельца. */
+export const RECIPIENT_MUTED_CODE = "recipient_muted";
 export type SendSmsResult =
   | { ok: true; communicationId: string; status: "PENDING" | "SENT"; duplicate: boolean }
   /** `detail` — ответ провайдера «402» или «402:0201402»: по нему видно, что именно чинить. */
@@ -34,12 +49,24 @@ export async function sendOrderSms(prisma: PrismaClient, client: QuoClient | nul
 
   const order = await prisma.order.findUnique({
     where: { id: input.orderId },
-    select: { id: true, senderPhone: true, recipientPhone: true, site: { select: { quoPhoneNumberId: true, quoPhoneNumber: true, quoEnabled: true } } },
+    select: { id: true, senderPhone: true, recipientPhone: true, recipientMuted: true, site: { select: { quoPhoneNumberId: true, quoPhoneNumber: true, quoEnabled: true } } },
   });
   if (!order) return { ok: false, code: "order_not_found" };
 
   const e164 = toE164(input.target === "CUSTOMER" ? order.senderPhone : order.recipientPhone);
   if (!e164) return { ok: false, code: "invalid_target_phone" };
+
+  // Сюрприз: по этому заказу получателю мы сами не пишем. Здесь единственная дверь наружу для
+  // SMS по заказу, поэтому проверка одна и закрывает всё: автоматизации, ручную отправку из
+  // карточки, всё, что появится потом.
+  //
+  // Сверяем НОМЕР, а не роль. Когда заказчик указал свой телефон и в billing, и в доставке,
+  // «получатель» — это он сам, и запрет заткнул бы переписку с плательщиком (ту же поправку
+  // делает resolveRecipients в автоматизациях).
+  if (order.recipientMuted && input.target === "RECIPIENT" && !input.replyToInbound && e164 !== toE164(order.senderPhone)) {
+    quoLog("sms.recipient_muted", { orderId: order.id, phone: maskPhone(e164) });
+    return { ok: false, code: RECIPIENT_MUTED_CODE };
+  }
 
   const fromId = order.site?.quoPhoneNumberId ?? null;
   if (!fromId) return { ok: false, code: "store_no_quo_number" }; // не отправляем без номера магазина

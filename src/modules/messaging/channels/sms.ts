@@ -6,7 +6,7 @@ import "server-only";
  * выполняется внутри sendOrderSms и мапится в skip-код (config-проблема, не сбой).
  */
 import type { QuoClient } from "@/integrations/quo/client";
-import { sendOrderSms, type SendTarget } from "@/integrations/quo/send";
+import { sendOrderSms, RECIPIENT_MUTED_CODE, type SendTarget } from "@/integrations/quo/send";
 import type { ChannelSender, ChannelSendContext, ChannelSendResult } from "./types";
 
 // Временные (повторяемые) коды QUO — повтор с backoff через outbox. `previous_attempt_failed` —
@@ -39,6 +39,10 @@ export const SMS_UNAVAILABLE_CODES = new Set([
 // Config/precondition-коды: не сбой отправки, а «нельзя отправить» → job SKIPPED (не FAILED).
 const SKIP_CODES = new Set([
   ...SMS_UNAVAILABLE_CODES,
+  // Владелец запретил писать получателю по этому заказу (сюрприз). Именно SKIP и НЕ в
+  // SMS_UNAVAILABLE_CODES: оттуда включается Email-fallback, и запрет писать получателю
+  // обернулся бы письмом ЗАКАЗЧИКУ на каждое такое правило — ровно то, чего запрет не хочет.
+  RECIPIENT_MUTED_CODE,
   "store_quo_disabled",
   "quo_not_configured",
   "empty_text",

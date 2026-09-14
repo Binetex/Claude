@@ -86,6 +86,9 @@ function baseFields(o: OrderListRow) {
     recipientName: o.recipientName,
     recipientPhone: o.recipientPhone,
     recipientEmail: o.recipientEmail,
+    // «Сюрприз: получателю не пишем» видят все роли — иначе флорист и оператор ломают голову,
+    // почему получателю ничего не ушло. Ставит и снимает только владелец.
+    recipientMuted: o.recipientMuted,
     addressLine: o.addressLine,
     apartment: o.apartment,
     city: o.city,

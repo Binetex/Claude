@@ -172,6 +172,7 @@ export default async function FloristOrderPage({
           communications={comm.communications}
             storeTimeZone={comm.storeTimeZone}
             unread={comm.unread}
+            recipientMuted={order.recipientMuted}
           />
 
           {/* Доставка целиком: курьер, Burq, точка забора и фото букета — в одном блоке. */}

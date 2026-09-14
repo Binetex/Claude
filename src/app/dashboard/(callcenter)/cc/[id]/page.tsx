@@ -164,6 +164,7 @@ export default async function CallCenterOrderPage({
           communications={comm.communications}
             storeTimeZone={comm.storeTimeZone}
             unread={comm.unread}
+            recipientMuted={order.recipientMuted}
           />
 
           <DeliveryStatusCard

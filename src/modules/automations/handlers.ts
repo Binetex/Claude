@@ -37,6 +37,8 @@ import { getSmsTrigger } from "./triggers";
 import { evaluateConditions, type SmsConditions } from "./conditions";
 import { isDeliveryToday } from "./dailySchedule";
 import { planSmsRecipients, DUPLICATE_PHONE_REASON, DUPLICATE_EMAIL_REASON, type SmsAudience, type SmsRecipientType } from "./audience";
+import { RECIPIENT_MUTED_CODE } from "@/integrations/quo/send";
+import { toE164 } from "@/lib/phone";
 import { resolveCustomerEmail } from "@/modules/messaging/emailAudience";
 import { computeScheduledAt, type SmsDelayUnit } from "./delay";
 import { buildOrderVariables } from "@/modules/messaging/variables";
@@ -305,6 +307,10 @@ export function buildAutomationTriggerHandler(prisma: PrismaClient): OutboxHandl
       if (a.smsEnabled && plan) {
         const { recipients, duplicates, skipped } = plan;
 
+        // Сюрприз («получателю не пишем») здесь НЕ проверяем намеренно. Планирование — это
+        // снимок прошлого: пометку ставят и снимают в любой момент, а созданный терминальным
+        // job обратно не оживает (ключ идемпотентности не зависит от статуса), и снятая галочка
+        // молча теряла бы сообщение навсегда. Решает стадия отправки — она читает свежий заказ.
         for (const r of recipients) {
           await createOrFindJob(prisma, repo, {
             automationId: a.id,
@@ -464,6 +470,16 @@ export function buildAutomationSendHandler(prisma: PrismaClient, deps: Automatio
     // и самой отправкой, и человек получает тревогу о букете, который уже у него на столе.
     if (isChainOccurrence(job.occurrenceKey) && (TERMINAL_ORDER_STATUSES.includes(order.orderStatus) || order.deliveryStatus === "DELIVERED")) {
       return skip("chain_order_closed");
+    }
+
+    // Сюрприз: по этому заказу получателю не пишем. Проверяем здесь, а не при планировании:
+    // пометку ставят в любой момент, а между планированием и отправкой легко проходят часы
+    // («доставка сегодня» ставится на утро, шаг цепочки ждёт ответа, задержка правила продлевает
+    // окно). Сверяем НОМЕР, а не роль job'а: телефон получателя могли исправить на телефон
+    // заказчика, и тогда это сообщение плательщику — ровно та же поправка, что в sendOrderSms.
+    // reviveSibling=false: запрет накрывает и погашенное дедупом правило, будить его незачем.
+    if (job.recipientType === "RECIPIENT" && order.recipientMuted && toE164(order.recipientPhone) !== toE164(order.senderPhone)) {
+      return skip(RECIPIENT_MUTED_CODE, { reviveSibling: false });
     }
 
     const cond = evaluateConditions(automation.conditionsJson as SmsConditions | null, {

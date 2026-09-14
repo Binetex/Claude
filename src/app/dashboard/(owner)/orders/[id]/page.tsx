@@ -327,6 +327,8 @@ export default async function OwnerOrderPage({
           communications={communications}
             storeTimeZone={storeTimeZone}
             unread={commUnread}
+            recipientMuted={order.recipientMuted}
+            canEditRecipientMute
           />
 
           {/* Разборы ассистента: единственное место, где видно его работу во время сухого прогона. */}

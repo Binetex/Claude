@@ -11,14 +11,32 @@ import { normalizeStorefrontDomain } from "@/integrations/storefrontUrl";
 import { ShopifyAuthError } from "./tokenClient";
 
 const CHECK_QUERY = `{
-  shop { name myshopifyDomain primaryDomain { host } }
+  shop { name myshopifyDomain }
   currentAppInstallation { accessScopes { handle } }
 }`;
 
+/**
+ * Публичный домен витрины спрашиваем ОТДЕЛЬНЫМ запросом, а не полем в CHECK_QUERY.
+ * shopifyAdminGraphQL бросает на любой непустой `errors`, даже когда данные частично пришли:
+ * одно закрытое scope-ом поле уронило бы всю проверку подключения и написало бы владельцу
+ * «не удалось связаться с Shopify» на работающем магазине (так уже было с fulfillmentOrders).
+ * Домен — приятное дополнение, а не условие подключения.
+ */
+const DOMAIN_QUERY = `{ shop { primaryDomain { host } } }`;
+
 type CheckData = {
-  shop: { name: string; myshopifyDomain: string; primaryDomain?: { host: string | null } | null };
+  shop: { name: string; myshopifyDomain: string };
   currentAppInstallation: { accessScopes: { handle: string }[] };
 };
+
+async function fetchStorefrontDomain(siteId: string): Promise<string | null> {
+  try {
+    const data = await shopifyAdminGraphQL<{ shop: { primaryDomain?: { host: string | null } | null } }>(siteId, DOMAIN_QUERY);
+    return normalizeStorefrontDomain(data.shop.primaryDomain?.host);
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Выполняет проверку подключения и обновляет Site. Возвращает результат для UI.
@@ -27,7 +45,7 @@ type CheckData = {
 export async function checkConnection(siteId: string): Promise<ConnectionResult> {
   const site = await prisma.site.findUnique({
     where: { id: siteId },
-    select: { normalizedShopDomain: true },
+    select: { normalizedShopDomain: true, storefrontDomain: true },
   });
   if (!site?.normalizedShopDomain) {
     return failResult("Site без домена — сначала введите credentials.");
@@ -50,7 +68,10 @@ export async function checkConnection(siteId: string): Promise<ConnectionResult>
   }
 
   const granted = data.currentAppInstallation.accessScopes.map((s) => s.handle);
-  const storefrontDomain = normalizeStorefrontDomain(data.shop.primaryDomain?.host);
+  // Домен берём из Shopify только когда своего ещё нет: владелец мог вписать руками другой
+  // (у магазина бывает несколько доменов, и primaryDomain — не всегда тот, что нужен в SMS),
+  // а перетереть его молча значит сломать ссылки клиентам без единого следа.
+  const storefrontDomain = site.storefrontDomain ? null : await fetchStorefrontDomain(siteId);
   const result = deriveConnectionResult({
     enteredDomain: site.normalizedShopDomain,
     shop: { name: data.shop.name, myshopifyDomain: data.shop.myshopifyDomain },

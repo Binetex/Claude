@@ -34,6 +34,7 @@ const CODES: Record<string, string> = {
   store_no_quo_number: "У магазина не задан номер отправителя QUO.",
   from_number_not_owned: "Этот QUO-номер не принадлежит магазину — отправка с него запрещена.",
   store_quo_disabled: "SMS через QUO у этого магазина выключены.",
+  recipient_muted: "По этому заказу получателю не пишем (сюрприз). Снять запрет может владелец в карточке заказа.",
   quo_not_configured: "Интеграция QUO не настроена.",
   order_not_found: "Заказ не найден.",
   missing_idempotency_key: "Повторите отправку.",

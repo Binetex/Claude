@@ -143,6 +143,20 @@ const TIMING_RULES = `- DELIVERY TIMING. First decide what the customer is doing
   Whatever the case, name the delivery day correctly: "today" only if the order data says the
   delivery is today, otherwise "tomorrow" or the day it names.`;
 
+/**
+ * То же про время, но для НЕЗНАКОМОГО номера. Отдельный текст, а не общий: у такого разговора
+ * нет ни окна доставки, ни заказа, и пункт «скажите да, привезём позже» из общего правила прямо
+ * спорил бы со стоящим ниже запретом обещать что-либо по конкретному заказу.
+ */
+const TIMING_RULES_UNKNOWN = `- DELIVERY TIMING. You have no order and no delivery window, so you
+  promise nothing about a specific delivery.
+  1. If they ask whether a delivery at or before 12 noon is possible, say we have a lot of
+     bouquets going out that day so we cannot make it that early, and ask until what time they
+     could receive it if it comes later.
+  2. For any other time, name the same day cutoff and the delivery windows from the knowledge
+     base, and say we cannot promise an exact minute. Never confirm a specific time for a
+     specific order: find the order first, or set "needs_human": true.`;
+
 const RULES_KNOWN_ORDER = `${VOICE}
 
 HARD RULES (never break them):
@@ -186,7 +200,7 @@ This person writes from a phone number that is NOT linked to any order.
 HARD RULES (never break them):
 ${COMMON_RULES}
 - "Now at the shop" below is the current date and time; never assume a delivery is today.
-${TIMING_RULES}
+${TIMING_RULES_UNKNOWN}
 - WHICH CONVERSATION IS THIS. If they refer to an EXISTING order ("my order", "my delivery",
   "where are my flowers"), find out which one:
   ask for the name on the order or the delivery address, ONE thing at a time.

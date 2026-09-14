@@ -153,6 +153,14 @@ export type DecideInput = {
   needsHuman: boolean;
   /** Тема из списка важных (отмена, возврат, жалоба). */
   important: boolean;
+  /**
+   * Отвечаем ПОЛУЧАТЕЛЮ по заказу, помеченному «сюрприз: получателю не пишем».
+   *
+   * Отвечать на его собственное входящее можно — молчать в ответ на прямой вопрос хуже. Но
+   * решать, что именно сказать, обязан человек: ассистент видит в данных заказа дату, окно,
+   * адрес и трек, и на невинное «what time today?» подтвердил бы получателю сам факт подарка.
+   */
+  mutedRecipient?: boolean;
 };
 
 /** Отправлять самому или нести человеку. */
@@ -162,5 +170,6 @@ export function decideDelivery(input: DecideInput): "send" | "draft" {
   if (input.mode !== "AUTO_SIMPLE") return "draft";
   // Важное и неуверенное человек смотрит всегда — цена ошибки здесь выше цены задержки.
   if (input.needsHuman || input.important) return "draft";
+  if (input.mutedRecipient) return "draft";
   return "send";
 }
