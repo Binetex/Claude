@@ -93,6 +93,15 @@ export async function notifyDeliveryChanged(
     });
   }
 
+  // Владельцу — отдельное короткое сообщение о самом факте переноса: обновление старой
+  // карточки он в ленте не заметит.
+  await publishTelegramNotification(prisma, {
+    type: "order.delivery_changed_owner",
+    orderId,
+    occurrenceKey: `${orderId}:owner:${stamp}`,
+    context: { toText: change.toText },
+  });
+
   // И карточку у владельца — по той же причине.
   await publishTelegramNotification(prisma, {
     type: "order.created",

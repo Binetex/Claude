@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { getTelegramEvent } from "./registry";
-import { renderDeliveryChanged } from "./templates";
+import { renderDeliveryChanged, renderOwnerDeliveryChanged } from "./templates";
 
 const order = {
   id: "o1",
@@ -54,6 +54,40 @@ describe("перенос доставки — уведомление флори�
   it("если прежнее значение неизвестно, сообщение всё равно осмысленно", () => {
     const text = renderDeliveryChanged(order, null, "09.09.2026");
     expect(text).toContain("09.09.2026");
+    expect(text).not.toContain("undefined");
+    expect(text).not.toContain("null");
+  });
+});
+
+describe("перенос доставки — короткое уведомление владельцу", () => {
+  it("тип есть в реестре, адресат — владелец, флорист не требуется", () => {
+    const def = getTelegramEvent("order.delivery_changed_owner");
+    expect(def).toBeTruthy();
+    expect(def!.audience).toBe("OWNER");
+    expect(def!.perFlorist).toBe(false);
+  });
+
+  it("каждый перенос — новое сообщение, а не правка прежнего", () => {
+    const def = getTelegramEvent("order.delivery_changed_owner")!;
+    expect(def.dedupeKey({ orderId: "o1", occurrence: "10Sep" }))
+      .not.toBe(def.dedupeKey({ orderId: "o1", occurrence: "9Sep" }));
+  });
+
+  it("в сообщении только номер заказа и новое время — владельцу нужна лента, а не карточка", () => {
+    const text = renderOwnerDeliveryChanged(order);
+    expect(text).toContain("Клиент изменил время доставки");
+    expect(text).toContain("JF-1001374");
+    expect(text).toContain("9 Sep");
+    // Подробности заказа сюда не тянем: они есть в карточке, которую освежает order.created.
+    expect(text).not.toContain("Ris Anderson");
+    expect(text).not.toContain("Alta Mesa");
+    expect(text.split("\n").length).toBeLessThanOrEqual(3);
+  });
+
+  it("время берётся из заказа целиком: смена одного окна не оставляет время без даты", () => {
+    const text = renderOwnerDeliveryChanged(order);
+    expect(text).toContain("9 Sep");
+    expect(text).toMatch(/9 Sep.*9AM|9 Sep,/);
     expect(text).not.toContain("undefined");
     expect(text).not.toContain("null");
   });

@@ -263,6 +263,22 @@ export function renderDeliveryChanged(o: OrderSnapshot, fromText: string | null,
   ).trimEnd();
 }
 
+/**
+ * Перенос доставки — владельцу. Нарочно короткое: владелец читает ленту таких сообщений
+ * подряд, и ему нужны только номер и новое время.
+ *
+ * Время берём из САМОГО заказа, а не из диффа правки: если поменяли одно окно, не трогая
+ * дату, дифф содержит только окно, и «14:00 – 18:00» без дня читается двусмысленно.
+ */
+export function renderOwnerDeliveryChanged(o: OrderSnapshot): string {
+  const when = [fmtDate(o.deliveryDate), fmtTimeWindow(o.deliveryWindow)].filter(Boolean).join(", ");
+  return (
+    `📅 <b>Клиент изменил время доставки</b>\n` +
+    `<b>${esc(o.orderNumber)}</b>\n` +
+    line("Новое время", when || null)
+  ).trimEnd();
+}
+
 export function renderOwnerDeliveryProblem(o: OrderSnapshot, status: string, safeReason: string | null): string {
   return (
     `🚨 <b>Проблема с доставкой</b>\n` +
