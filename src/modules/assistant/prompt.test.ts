@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildMessages, parseReply, looksEnglish, stripDashes, describeDeliveryDay, type OrderSnapshot } from "./prompt";
+import { buildMessages, parseReply, looksEnglish, stripDashes, describeDeliveryDay, forbiddenOffer, type OrderSnapshot } from "./prompt";
 
 /**
  * Что уходит в модель и как читается её ответ. Главное здесь — запреты: разбор устроен так,
@@ -288,3 +288,91 @@ describe("живой разговор в истории", () => {
   });
 });
 
+/**
+ * Три запрета, добавленные после боевого случая 18.09.2026: ассистент написал клиенту
+ * «we also make custom bouquets» и предложил оформить заказ «over the phone». Ни того,
+ * ни другого магазин не делает — обе фразы пришли из базы знаний магазина, а она помечена
+ * как authoritative. Поэтому запреты стоят в правилах и НАД базой знаний.
+ */
+describe("чего ассистент не говорит никогда", () => {
+  const withKb = (kb: string) =>
+    buildMessages({ knowledgeBase: kb, order, history: [], incomingText: "can you do peach tones?" })[0].content;
+
+  it("кастомные букеты запрещены и запрет перебивает базу знаний", () => {
+    const sys = withKb("We make custom bouquets to order and take orders by phone.");
+    expect(sys).toContain("WE DO NOT MAKE CUSTOM BOUQUETS");
+    expect(sys).toContain("OVERRIDES the knowledge base");
+  });
+
+  it("телефон как способ заказа запрещён, и поднимать тему тоже не надо", () => {
+    const sys = withKb("Order by phone: +1 (657) 427-7770");
+    expect(sys).toContain("NEVER SEND ANYONE TO A PHONE");
+    expect(sys).toContain("do not bring the phone up at all");
+  });
+
+  it("обратный звонок по просьбе клиента запретом не задет", () => {
+    const sys = withKb("");
+    expect(sys).toContain('"intent": "call_request"');
+  });
+
+  it("ассистент отвечает как флорист, а не пересылает разговор дальше", () => {
+    const sys = withKb("");
+    expect(sys).toContain("YOU ARE THE FLORIST, NOT A MIDDLEMAN");
+    expect(sys).toContain("I'll pass this to our team");
+    expect(sys).not.toContain(`"I'll pass that to the`);
+  });
+
+  it("запреты действуют и на незнакомый номер, не только на заказ", () => {
+    const sys = buildMessages({
+      knowledgeBase: "Custom bouquets available, call us.",
+      order: null, history: [], incomingText: "hi, do you do custom?",
+    })[0].content;
+    expect(sys).toContain("WE DO NOT MAKE CUSTOM BOUQUETS");
+    expect(sys).toContain("NEVER SEND ANYONE TO A PHONE");
+  });
+});
+
+/**
+ * Предохранитель в КОДЕ. Промпт — просьба, а это проверка: что бы модель ни вернула,
+ * обещание, которого магазин не выполняет, клиенту не уходит.
+ */
+describe("невыполнимое обещание не уходит клиенту", () => {
+  const parse = (reply: string) =>
+    parseReply(JSON.stringify({ reply_en: reply, intent: "other", important: false, needs_human: false, ready_time: null }));
+
+  it("боевой случай 18.09.2026 целиком гасится", () => {
+    const r = parse("Absolutely, we can do more colors, we also make custom bouquets, so just tell me the shades you have in mind. Orders and card payment go through paradiseflowersart.com or over the phone at +1 (657) 427-7770.");
+    expect(r.replyEn).toBe("");
+    expect(r.needsHuman).toBe(true);
+  });
+
+  it("кастомный букет ловится сам по себе", () => {
+    expect(forbiddenOffer("Sure, we make custom bouquets for any occasion.")).toBe("custom");
+    expect(parse("Sure, we make custom bouquets.").replyEn).toBe("");
+  });
+
+  it("любой телефонный номер в ответе гасится", () => {
+    expect(forbiddenOffer("Call us at +1 (657) 427-7770.")).toBeTruthy();
+    expect(forbiddenOffer("Reach us on 657-427-7770 anytime.")).toBeTruthy();
+  });
+
+  it("заказ по телефону гасится и без номера", () => {
+    expect(forbiddenOffer("You can place the order over the phone.")).toBe("phone-order");
+    expect(forbiddenOffer("Call the shop to order.")).toBe("phone-order");
+  });
+
+  it("нормальный ответ проходит — предохранитель не должен глушить всё подряд", () => {
+    const ok = "Your flowers are out for delivery today between 10am and 2pm, I'll make sure the courier has the gate code.";
+    expect(forbiddenOffer(ok)).toBeNull();
+    expect(parse(ok).replyEn).toBe(ok);
+  });
+
+  it("слово customer не путается с custom", () => {
+    expect(forbiddenOffer("I've noted it on the customer's order.")).toBeNull();
+  });
+
+  it("обратный звонок без номера проходит", () => {
+    const ok = "Of course, someone from the shop will call you back shortly.";
+    expect(forbiddenOffer(ok)).toBeNull();
+  });
+});

@@ -85,9 +85,26 @@ const COMMON_RULES = `- Reply ONLY in English, whatever language the customer wr
   plainly and never promise a delivery.
 - YOU CANNOT CHANGE ANYTHING. You cannot edit an order, add or remove a phone number, change an
   address or a date, cancel anything, hold, stop or redirect the courier, or make a refund. Never
-  say that you have done any of it or that you are doing it now. Passing on what the customer
-  wants is the one thing you can do: the shop reads this conversation, so "I'll pass that to the
-  courier" and "I'll note that" are true for delivery instructions and for the time they name.
+  say that you have done any of it or that you are doing it now. What you CAN do is write it down
+  yourself: the shop reads this conversation, so "I've got it", "I'll note that" and "I'll make
+  sure the courier has it" are true for delivery instructions and for the time they name.
+- YOU ARE THE FLORIST, NOT A MIDDLEMAN. Answer as the person handling this order. Never say you
+  will forward, relay or escalate anything, and never put a third party between you and the
+  customer: no "I'll pass this to our team", "I'll let the team know", "someone will get back to
+  you", "our manager will contact you", "I'll check with the shop". When you need to look
+  something up, say "let me check" and set "needs_human": true. The check happens silently.
+- WE DO NOT MAKE CUSTOM BOUQUETS. Not on any of our shops. Never offer to build an arrangement
+  to order, to swap the flowers in one, to mix particular shades on request, or to "do something
+  special": we sell the arrangements in the catalogue as they are. This OVERRIDES the knowledge
+  base: if it mentions custom, bespoke or made-to-order work, it is out of date, ignore it. When
+  someone asks for a colour or a look we do not have, offer the closest items from the product
+  list; if nothing fits, set "needs_human": true instead of promising anything.
+- NEVER SEND ANYONE TO A PHONE. You are already texting this person. Never say an order can be
+  placed, changed or paid for by phone, never give out a phone number for ordering, and never
+  suggest that calling would be quicker. Orders and payment go through the shop website only.
+  This OVERRIDES the knowledge base. Do not explain that we take no phone orders either: simply
+  do not bring the phone up at all. (A customer asking US to call them back is a different thing,
+  handled by the call_request rule below.)
 - Never invent facts. If the answer is not in the order data or the knowledge base, say you will
   check and set "needs_human": true. Never guess a price, an address, a website, a name or a
   distance.
@@ -336,6 +353,33 @@ export function stripDashes(text: string): string {
     .trim();
 }
 
+/**
+ * Обещания, которых магазин не выполняет. Стоят В КОДЕ, а не только в промпте: инструкцию
+ * модель может проигнорировать, а эту проверку нет — та же логика, что у запрета на русский
+ * текст ниже.
+ *
+ * Повод: 18.09.2026 клиенту ушло «we also make custom bouquets ... or over the phone at
+ * +1 (657) 427-7770». Обе фразы модель добросовестно взяла из базы знаний магазина, которая
+ * помечена как authoritative. Чинить каждую базу поздно и ненадёжно: запрет общий.
+ *
+ * Телефон гасим ЛЮБОЙ: переписка и так идёт по SMS, свой номер клиенту слать незачем, а ответ
+ * на просьбу перезвонить («someone will call you back») номера не содержит.
+ */
+const FORBIDDEN_OFFERS: { re: RegExp; what: string }[] = [
+  { re: /\bcustom\b|\bbespoke\b|\bmade[- ]to[- ]order\b|\bbuilt to order\b/i, what: "custom" },
+  { re: /\b(order|pay|purchase|book)\w*\b[^.?!]{0,40}\b(by|over|via|on) (the )?phone\b/i, what: "phone-order" },
+  { re: /\b(call|phone|ring) (us|the shop)\b[^.?!]{0,30}\b(to|and) (order|place|pay|buy)\b/i, what: "phone-order" },
+  { re: /(\+?1[\s.-]?)?\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}/, what: "phone-number" },
+];
+
+/**
+ * Что именно нарушено (или null). Экспортируется ради тестов и логов: в dead-letter полезно
+ * видеть причину, а не только факт, что ответ ушёл человеку.
+ */
+export function forbiddenOffer(replyEn: string): string | null {
+  return FORBIDDEN_OFFERS.find((r) => r.re.test(replyEn))?.what ?? null;
+}
+
 export function parseReply(raw: string): ParsedReply {
   let data: Record<string, unknown> = {};
   try {
@@ -361,6 +405,9 @@ export function parseReply(raw: string): ParsedReply {
   // Русский текст клиенту не уходит ни при каких условиях: правило владельца, и оно жёстче
   // любой инструкции в промпте — инструкцию модель может проигнорировать, эту проверку нет.
   if (replyEn && !looksEnglish(replyEn)) return { replyEn: "", intent, important, needsHuman: true, readyTime, orderHint };
+
+  // Обещание, которого магазин не выполняет, клиенту не уходит: отдаём человеку целиком.
+  if (replyEn && forbiddenOffer(replyEn)) return { replyEn: "", intent, important, needsHuman: true, readyTime, orderHint };
 
   return { replyEn, intent, important, needsHuman, readyTime, orderHint };
 }
