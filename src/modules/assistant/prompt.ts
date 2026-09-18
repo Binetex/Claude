@@ -365,19 +365,34 @@ export function stripDashes(text: string): string {
  * Телефон гасим ЛЮБОЙ: переписка и так идёт по SMS, свой номер клиенту слать незачем, а ответ
  * на просьбу перезвонить («someone will call you back») номера не содержит.
  */
-const FORBIDDEN_OFFERS: { re: RegExp; what: string }[] = [
-  { re: /\bcustom\b|\bbespoke\b|\bmade[- ]to[- ]order\b|\bbuilt to order\b/i, what: "custom" },
-  { re: /\b(order|pay|purchase|book)\w*\b[^.?!]{0,40}\b(by|over|via|on) (the )?phone\b/i, what: "phone-order" },
-  { re: /\b(call|phone|ring) (us|the shop)\b[^.?!]{0,30}\b(to|and) (order|place|pay|buy)\b/i, what: "phone-order" },
-  { re: /(\+?1[\s.-]?)?\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}/, what: "phone-number" },
-];
+const CUSTOM_OFFER = /\bcustom\b|\bbespoke\b|\bmade[- ]to[- ]order\b|\bbuilt to order\b/i;
+const PHONE_ORDER = /\b(order|pay|purchase|book)\w*\b[^.?!]{0,40}\b(by|over|via|on) (the )?phone\b|\b(call|phone|ring) (us|the shop)\b[^.?!]{0,30}\b(to|and) (order|place|pay|buy)\b/i;
+const PHONE_NUMBER = /(\+?1[\s.-]?)?\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}/;
 
 /**
- * Что именно нарушено (или null). Экспортируется ради тестов и логов: в dead-letter полезно
+ * Отрицание рядом. Отказ — законный ответ и гасить его нельзя: «We don't build custom
+ * bouquets, but the catalogue has…» — ровно то, что ассистент и должен говорить. Ловим
+ * ПРЕДЛОЖЕНИЕ услуги, а не упоминание слова.
+ */
+const NEGATED = /\b(don'?t|do not|doesn'?t|does not|didn'?t|can'?t|cannot|can not|won'?t|will not|no|not|never|unable|afraid|only)\b/i;
+
+/**
+ * Что именно нарушено (или null). Экспортируется ради тестов и логов: в разборе полезно
  * видеть причину, а не только факт, что ответ ушёл человеку.
+ *
+ * Разбираем ПО ФРАЗАМ, как isCallRequest в policy.ts: в одном сообщении рядом стоят и отказ,
+ * и предложение альтернативы, и общий запрет на всё сообщение гасил бы правильные ответы.
  */
 export function forbiddenOffer(replyEn: string): string | null {
-  return FORBIDDEN_OFFERS.find((r) => r.re.test(replyEn))?.what ?? null;
+  const text = replyEn.replace(/[\u2018\u2019\u02BC]/g, "'");
+  // Телефонный номер не зависит от фразы: своего номера в SMS быть не должно нигде.
+  if (PHONE_NUMBER.test(text)) return "phone-number";
+  for (const clause of text.split(/[,;.!?]+/)) {
+    if (NEGATED.test(clause)) continue;
+    if (CUSTOM_OFFER.test(clause)) return "custom";
+    if (PHONE_ORDER.test(clause)) return "phone-order";
+  }
+  return null;
 }
 
 export function parseReply(raw: string): ParsedReply {

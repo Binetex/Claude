@@ -376,3 +376,29 @@ describe("невыполнимое обещание не уходит клиен
     expect(forbiddenOffer(ok)).toBeNull();
   });
 });
+
+/**
+ * Отказ — законный ответ. Первая версия предохранителя ловила любое слово «custom» и гасила
+ * правильное «We don't build custom bouquets, but…»: клиент не получал НИЧЕГО там, где должен
+ * был получить хороший ответ. Проверено на живой модели 18.09.2026.
+ */
+describe("предохранитель не глушит отказ", () => {
+  it("отказ от кастома проходит к клиенту", () => {
+    expect(forbiddenOffer("We don't build custom bouquets, so I can't swap the colors in an arrangement.")).toBeNull();
+    expect(forbiddenOffer("We don't build custom arrangements, but our catalogue has lovely birthday bouquets ready to go.")).toBeNull();
+    expect(forbiddenOffer("We can not do custom work, though the catalogue has close options.")).toBeNull();
+  });
+
+  it("предложение кастома по-прежнему гасится", () => {
+    expect(forbiddenOffer("Yes, we make custom bouquets to order, any colors.")).toBe("custom");
+    expect(forbiddenOffer("Sure, we can do a bespoke arrangement for you.")).toBe("custom");
+  });
+
+  it("отказ и предложение в одном сообщении: гасит предложение", () => {
+    expect(forbiddenOffer("We don't do that normally, but we can make a custom bouquet for you.")).toBe("custom");
+  });
+
+  it("номер телефона гасится всегда, даже рядом с отказом", () => {
+    expect(forbiddenOffer("We don't take orders by phone, but you can call +1 (657) 427-7770.")).toBe("phone-number");
+  });
+});
