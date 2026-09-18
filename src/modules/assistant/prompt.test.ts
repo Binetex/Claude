@@ -210,14 +210,14 @@ describe("подсказка о заказе от незнакомого ном�
     expect(rules).toContain("never invent one");
   });
 
-  it("незнакомому без заказа не устраивают допрос, 5 PM не считается ранним", () => {
+  it("незнакомому без заказа не устраивают допрос, 5 PM подтверждать можно", () => {
     const m = buildMessages({ knowledgeBase: "", order: null, history: [], incomingText: "no order yet" });
     expect(m[0].content).toContain("do NOT ask for an order name");
-    // «Рано» и для незнакомого номера значит то же самое: до полудня и ничего больше.
-    expect(m[0].content).toContain("at or before 12 noon");
+    // «Рано» с 18.09.2026 значит «раньше 16:00» — и для незнакомого номера тоже.
+    expect(m[0].content).toContain("any time BEFORE 4 PM");
     const k = buildMessages({ knowledgeBase: "", order, history: [], incomingText: "hi" });
-    expect(k[0].content).toContain('"as close to 5 PM as possible"');
-    expect(k[0].content).toContain("These are NOT early");
+    expect(k[0].content).toContain('"as close to 6 PM as possible"');
+    expect(k[0].content).toContain("ASKING FOR 4 PM OR LATER");
   });
 
   it("общее правило владельца стоит выше базы знаний и объявлено сильнее её", () => {
@@ -400,5 +400,43 @@ describe("предохранитель не глушит отказ", () => {
 
   it("номер телефона гасится всегда, даже рядом с отказом", () => {
     expect(forbiddenOffer("We don't take orders by phone, but you can call +1 (657) 427-7770.")).toBe("phone-number");
+  });
+});
+
+/**
+ * Граница раннего времени. До 18.09.2026 «рано» значило «до полудня», а всё после 12:00
+ * правила велели ПОДТВЕРЖДАТЬ — из-за этого клиенту ушло «2 PM works». Владелец: чем позже,
+ * тем лучше, подтверждать можно только с 16:00.
+ */
+describe("раннее время не подтверждается", () => {
+  const sys = (o: OrderSnapshot | null) =>
+    buildMessages({ knowledgeBase: "", order: o, history: [], incomingText: "can you deliver at 2 PM?" })[0].content;
+
+  it("граница стоит на 16:00, а не на полудне", () => {
+    expect(sys(order)).toContain("ASKING US FOR A TIME BEFORE 4 PM");
+    expect(sys(order)).toContain("ASKING FOR 4 PM OR LATER");
+    expect(sys(order)).not.toContain("which means at or before 12 noon and nothing else");
+  });
+
+  it("2 PM и 3 PM названы прямо: именно на них модель срывалась", () => {
+    expect(sys(order)).toContain('"2 PM"');
+    expect(sys(order)).toContain('"before 3"');
+  });
+
+  it("запрещено отвечать, что время «works»", () => {
+    expect(sys(order)).toContain('"works"');
+    expect(sys(order)).toContain('set "needs_human": true so the shop decides');
+  });
+
+  it("окно заказа само по себе не даёт права обещать ранний час", () => {
+    expect(sys(order)).toContain("the window is\n     what we aim at, not a time you may promise");
+  });
+
+  it("правило действует и на незнакомый номер", () => {
+    expect(sys(null)).toContain("never say it \"works\"");
+  });
+
+  it("запись «когда мне удобно» не превращается в обещание", () => {
+    expect(sys(order)).toContain("noting it is not promising it");
   });
 });

@@ -146,17 +146,23 @@ const TIMING_RULES = `- DELIVERY TIMING. First decide what the customer is doing
      "ready anytime", "11 am works", "anytime between 11 and 11:45", or any answer to our own
      question about until what time they can receive the bouquet. NEVER argue with this and never
      refuse it. Confirm you noted it, and if there is a delivery window in the order data, name
-     it. Put their words in "ready_time".
+     it. Put their words in "ready_time". But noting it is not promising it: if the hour they
+     name is before 4 PM, do not answer that it "works" or that we will come then, just say you
+     have noted it and follow rule 3.
   2. ASKING US TO DELIVER LATER than the window: "can you deliver after 5 PM?", "please come in
      the evening". Say yes, a later delivery time can be arranged, and name the time they asked
      for.
-  3. ASKING US TO DELIVER EARLY, which means at or before 12 noon and nothing else: "by 9",
-     "in the morning", "around 10", "at 11", "as soon as possible", "now". Never promise it. Say
-     we have a lot of bouquets going out that day so you cannot make it that early, and in the
-     same sentence ask until what time they could receive it if it comes later.
-  4. ASKING FOR A TIME AFTER 12 NOON: 1 PM, 3 PM, "before 3", "as close to 5 PM as possible",
-     "at 6:30". These are NOT early. Never answer them with the "that early" line. Confirm from
-     the delivery window in the order data and say you cannot promise an exact minute.
+  3. ASKING US FOR A TIME BEFORE 4 PM: "by 9", "in the morning", "around 10", "at 11", "1 PM",
+     "2 PM", "before 3", "as soon as possible", "now". NEVER promise, confirm or agree to any of
+     these, and never write that such a time "works" or that we "can do" it. The later in the day
+     a bouquet goes out, the better it survives, and the route is built late: an early hour is
+     not ours to give. Say you cannot lock an exact time that early, ask until what time they
+     could receive it if it comes later, and set "needs_human": true so the shop decides.
+     This holds even when the delivery window in the order data starts earlier: the window is
+     what we aim at, not a time you may promise.
+  4. ASKING FOR 4 PM OR LATER: "after 4", "around 5", "as close to 6 PM as possible", "at 6:30",
+     "in the evening". This you MAY confirm: say a later delivery can be arranged and name the
+     time they asked for. Still say you cannot promise an exact minute.
   Whatever the case, name the delivery day correctly: "today" only if the order data says the
   delivery is today, otherwise "tomorrow" or the day it names.`;
 
@@ -167,9 +173,10 @@ const TIMING_RULES = `- DELIVERY TIMING. First decide what the customer is doing
  */
 const TIMING_RULES_UNKNOWN = `- DELIVERY TIMING. You have no order and no delivery window, so you
   promise nothing about a specific delivery.
-  1. If they ask whether a delivery at or before 12 noon is possible, say we have a lot of
-     bouquets going out that day so we cannot make it that early, and ask until what time they
-     could receive it if it comes later.
+  1. If they ask for any time BEFORE 4 PM, never say it is possible and never say it "works":
+     say you cannot lock an exact time that early, ask until what time they could receive it if
+     it comes later, and set "needs_human": true. From 4 PM onwards a later delivery is fine to
+     discuss in general terms.
   2. For any other time, name the same day cutoff and the delivery windows from the knowledge
      base, and say we cannot promise an exact minute. Never confirm a specific time for a
      specific order: find the order first, or set "needs_human": true.`;
