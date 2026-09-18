@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildMessages, parseReply, looksEnglish, stripDashes, describeDeliveryDay, forbiddenOffer, type OrderSnapshot } from "./prompt";
+import { buildMessages, parseReply, looksEnglish, stripDashes, describeDeliveryDay, forbiddenOffer, confirmsEarlyTime, type OrderSnapshot } from "./prompt";
 
 /**
  * Что уходит в модель и как читается её ответ. Главное здесь — запреты: разбор устроен так,
@@ -437,6 +437,47 @@ describe("раннее время не подтверждается", () => {
   });
 
   it("запись «когда мне удобно» не превращается в обещание", () => {
-    expect(sys(order)).toContain("noting it is not promising it");
+    expect(sys(order)).toContain("RULE 3 WINS over this one");
+    expect(sys(order)).toContain('"2 pm works for me"');
+  });
+
+  it("с 16:00 доступность подтверждается сразу, без передачи человеку", () => {
+    expect(sys(order)).toContain("confirm it plainly and do NOT send it to a person");
+  });
+});
+
+/**
+ * Согласие с ранним часом. Промпт модель обошла: на «2 pm works for me» она ответила
+ * «that fits right at the end of our window» — подтвердила 14:00 через окно заказа.
+ * Проверено на живой модели 18.09.2026.
+ */
+describe("согласие с ранним часом не уходит клиенту", () => {
+  it("боевая фраза ловится", () => {
+    expect(confirmsEarlyTime("Got it, I've noted 2 PM for you. Our window tomorrow is 10 AM to 2 PM, so that fits right at the end of it.")).toBe(true);
+  });
+
+  it("разные формы согласия с ранним временем", () => {
+    expect(confirmsEarlyTime("2 PM works, see you then.")).toBe(true);
+    expect(confirmsEarlyTime("Perfect, 1 pm it is.")).toBe(true);
+    expect(confirmsEarlyTime("Sure, we can do 11 am.")).toBe(true);
+    expect(confirmsEarlyTime("Noon is fine.")).toBe(true);
+  });
+
+  it("с 16:00 и позже согласие законно", () => {
+    expect(confirmsEarlyTime("Yes, 6 PM works for tomorrow.")).toBe(false);
+    expect(confirmsEarlyTime("5 pm is fine, I've noted it.")).toBe(false);
+    expect(confirmsEarlyTime("Sure, an evening delivery is no problem.")).toBe(false);
+  });
+
+  it("назвать окно заказа по-прежнему можно: это не согласие", () => {
+    expect(confirmsEarlyTime("Your delivery is set for tomorrow between 10:00 and 14:00.")).toBe(false);
+    expect(confirmsEarlyTime("Our window tomorrow is 10:00 to 14:00, and I've noted your request.")).toBe(false);
+  });
+
+  it("parseReply гасит такой ответ целиком", () => {
+    const r = parseReply(JSON.stringify({ reply_en: "2 PM works, we'll be there.", intent: "delivery_time", important: false, needs_human: false, ready_time: "2 pm" }));
+    expect(r.replyEn).toBe("");
+    expect(r.needsHuman).toBe(true);
+    expect(r.readyTime).toBe("2 pm");
   });
 });

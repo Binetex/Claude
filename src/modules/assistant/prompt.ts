@@ -146,9 +146,14 @@ const TIMING_RULES = `- DELIVERY TIMING. First decide what the customer is doing
      "ready anytime", "11 am works", "anytime between 11 and 11:45", or any answer to our own
      question about until what time they can receive the bouquet. NEVER argue with this and never
      refuse it. Confirm you noted it, and if there is a delivery window in the order data, name
-     it. Put their words in "ready_time". But noting it is not promising it: if the hour they
-     name is before 4 PM, do not answer that it "works" or that we will come then, just say you
-     have noted it and follow rule 3.
+     it. Put their words in "ready_time". If the hour they name is 4 PM OR LATER ("after 4",
+     "home from 5", "any time after 6"), confirm it plainly and do NOT send it to a person:
+     later is exactly what suits us. If it is BEFORE 4 PM, RULE 3 WINS over this one, whichever
+     way they phrased it: "2 pm works for me" and "I'm free at 1" are still a time before 4 PM.
+     Note it in "ready_time", then say you cannot lock an exact time that early and ask until
+     what time they could receive it. Never answer that it "works", "fits", "is perfect", "is no
+     problem" or "falls inside our window", and never use the delivery window to argue that an
+     early hour is fine.
   2. ASKING US TO DELIVER LATER than the window: "can you deliver after 5 PM?", "please come in
      the evening". Say yes, a later delivery time can be arranged, and name the time they asked
      for.
@@ -390,6 +395,53 @@ const NEGATED = /\b(don'?t|do not|doesn'?t|does not|didn'?t|can'?t|cannot|can no
  * Разбираем ПО ФРАЗАМ, как isCallRequest в policy.ts: в одном сообщении рядом стоят и отказ,
  * и предложение альтернативы, и общий запрет на всё сообщение гасил бы правильные ответы.
  */
+/**
+ * Согласие с ранним часом. Узко: ловим не упоминание времени, а СОГЛАСИЕ с ним — «2 PM works»,
+ * «that fits», «perfect, 1 pm». Назвать существующее окно заказа («your delivery is set for
+ * 10:00 to 14:00») по-прежнему можно, иначе ассистент не смог бы отвечать на «когда привезёте».
+ *
+ * Повод: 18.09.2026 клиент написал «2 pm works for me», и ассистент ответил «that fits right at
+ * the end of our window» — то есть подтвердил 14:00, хотя правило это запрещает. Промпт модель
+ * обошла, переклассифицировав фразу.
+ */
+const AGREEMENT = /\b(works|work for|fits|fine|perfect|great|no problem|sure|absolutely|we'?ll be there|can do|doable|that'?s good)\b/i;
+const TIME_TOKEN = /\b(1[0-2]|[1-9])(?::([0-5]\d))?\s*(am|pm)\b|\b(0?\d|1\d|2[0-3]):([0-5]\d)\b|\bnoon\b|\bmorning\b/i;
+
+/** Час из найденной метки в 24-часовом виде, или null. */
+function hourOf(m: RegExpMatchArray): number | null {
+  if (/noon/i.test(m[0])) return 12;
+  if (/morning/i.test(m[0])) return 10;
+  if (m[3]) {
+    const h = Number(m[1]) % 12;
+    return /pm/i.test(m[3]) ? h + 12 : h;
+  }
+  if (m[4] !== undefined) return Number(m[4]);
+  return null;
+}
+
+/**
+ * Диапазон — это ОКНО заказа, а не обещанный час: «between 10:00 and 14:00», «10 AM to 2 PM».
+ * Вырезаем перед проверкой, иначе законное «Yes, 6 PM works. Your window is 10:00-14:00»
+ * попадало бы под запрет из-за десяти утра в соседней фразе.
+ */
+const WINDOW_RANGE = /\b\d{1,2}(?::\d{2})?\s*(?:am|pm)?\s*(?:to|through|-|–|—|and)\s*\d{1,2}(?::\d{2})?\s*(?:am|pm)?/gi;
+
+/**
+ * Согласие с часом раньше 16:00. Согласие и время часто стоят в РАЗНЫХ фразах («our window is
+ * 10 AM to 2 PM, so that fits»), поэтому смотрим сообщение целиком — но сначала убираем окна,
+ * чтобы назвать окно заказа было по-прежнему можно.
+ */
+export function confirmsEarlyTime(replyEn: string): boolean {
+  const text = replyEn.replace(/[\u2018\u2019\u02BC]/g, "'").replace(WINDOW_RANGE, " ");
+  if (!AGREEMENT.test(text)) return false;
+  const re = new RegExp(TIME_TOKEN.source, "gi");
+  for (const m of text.matchAll(re)) {
+    const h = hourOf(m);
+    if (h !== null && h < 16) return true;
+  }
+  return false;
+}
+
 export function forbiddenOffer(replyEn: string): string | null {
   const text = replyEn.replace(/[\u2018\u2019\u02BC]/g, "'");
   // Телефонный номер не зависит от фразы: своего номера в SMS быть не должно нигде.
@@ -430,6 +482,9 @@ export function parseReply(raw: string): ParsedReply {
 
   // Обещание, которого магазин не выполняет, клиенту не уходит: отдаём человеку целиком.
   if (replyEn && forbiddenOffer(replyEn)) return { replyEn: "", intent, important, needsHuman: true, readyTime, orderHint };
+
+  // Согласие с ранним часом клиенту не уходит: обещать раннее время мы не можем.
+  if (replyEn && confirmsEarlyTime(replyEn)) return { replyEn: "", intent, important, needsHuman: true, readyTime, orderHint };
 
   return { replyEn, intent, important, needsHuman, readyTime, orderHint };
 }
