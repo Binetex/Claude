@@ -212,10 +212,14 @@ describe("подсказка о заказе от незнакомого ном�
     expect(rules).toContain("Say nothing the customer did not bring up");
   });
 
-  it("статус доставки берётся только из данных заказа", () => {
+  // 11.09.2026: «Are you on your way to 9595 Stuart Lane?» → «Yes, your bouquet is with the
+  // courier and on the way». Курьер ещё не выезжал. Запрет проигрывал правилу «ответь на всё».
+  it("статус доставки берётся только из данных заказа, и это правило сильнее прочих", () => {
     const rules = buildMessages({ knowledgeBase: "", order, history: [], incomingText: "where is it?" })[0].content;
     expect(rules).toContain("WHERE THE BOUQUET IS");
-    expect(rules).toContain("never say it is on the way");
+    expect(rules).toContain("BEATS every other rule here");
+    expect(rules).toContain("leave the question about the courier");
+    expect(rules).toContain("every ETA, minute count or distance");
   });
 
   it("ассистент не меняет данные и не обещает, что поменял", () => {
