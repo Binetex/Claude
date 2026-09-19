@@ -198,6 +198,11 @@ describe("подсказка о заказе от незнакомого ном�
       // Тон: человек приехал по нашей же вине, отказ без извинения читается как «сам виноват».
       expect(rules).toContain("WARMLY AND WITH AN APOLOGY");
       expect(rules).toContain("Never answer with a bare refusal");
+      // Новому клиенту — всегда бесплатная доставка взамен; уже заказавшему — никаких
+      // «не приезжайте»; и ни в том, ни в другом случае не обещать звонок.
+      expect(rules).toContain("offer it FREE using the");
+      expect(rules).toContain('never say "please don\'t make the trip"');
+      expect(rules).toContain("NEVER promise a call");
     }
   });
 
