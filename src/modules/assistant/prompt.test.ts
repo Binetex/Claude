@@ -187,6 +187,17 @@ describe("подсказка о заказе от незнакомого ном�
     expect(rules).toContain("Never promise refunds, discounts, dates");
   });
 
+  // 19.09.2026: клиент спросил «вы открыты? вот адрес», ассистент ответил «да, открыты, это наша
+  // студия» — и человек приехал к закрытому складу в Marina del Rey.
+  it("«вы открыты?» — это вопрос про приезд, и он закрыт в обеих инструкциях", () => {
+    for (const rules of [buildMessages({ knowledgeBase: "", order, history: [], incomingText: "are you open?" })[0].content,
+                         buildMessages({ knowledgeBase: "", order: null, history: [], incomingText: "are you open?" })[0].content]) {
+      expect(rules).toContain('"ARE YOU OPEN?" IS A QUESTION ABOUT COMING TO US');
+      expect(rules).toContain("they never mean a door someone can walk through");
+      expect(rules).toContain("Never confirm an address as a place to come");
+    }
+  });
+
   it("ответ обязан покрыть всё сообщение, а не первую его часть", () => {
     const rules = buildMessages({ knowledgeBase: "", order, history: [], incomingText: "hi" })[0].content;
     expect(rules).toContain("ANSWER THE WHOLE MESSAGE");
