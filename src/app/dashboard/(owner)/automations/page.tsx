@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { fmtStoreDateTime } from "@/lib/tz";
 import { prisma } from "@/lib/db";
 import { Card, CardBody } from "@/components/ui/Card";
 import { Button } from "@/components/ui/button";
@@ -217,7 +218,7 @@ export default async function AutomationsPage() {
                     <td className="px-3 py-2 text-right tabular-nums text-slate-700">{s?.failed ?? 0}</td>
                     <td className="px-3 py-2 text-right tabular-nums text-slate-500">{s?.skipped ?? 0}</td>
                     <td className="px-3 py-2 text-right tabular-nums text-slate-700">{successRate(s)}</td>
-                    <td className="px-3 py-2 text-slate-500">{lastRun ? new Date(lastRun).toLocaleString("ru-RU") : "—"}</td>
+                    <td className="px-3 py-2 text-slate-500">{fmtStoreDateTime(lastRun, null)}</td>
                     <td className="px-3 py-2">
                       <AutomationRowActions id={a.id} active={a.active} />
                     </td>

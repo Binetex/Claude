@@ -1,10 +1,10 @@
 import "server-only";
+import { fmtDeliveryDate, fmtStoreDayTime } from "@/lib/tz";
 /**
  * Сборка данных для экрана очереди. Один код на два экрана — очередь оператора и её вкладку у
  * владельца: списки, счётчики и подписи обязаны совпадать, иначе двое смотрят на «одну» очередь
  * и видят разное.
  */
-import { format } from "date-fns";
 import { prisma } from "@/lib/db";
 import { listToday, listWaiting, listToCheck, listConfirmed, listClosed, queueCounts, type QueueCard } from "./queue";
 import { resolveReviewSettings } from "./requests";
@@ -64,6 +64,10 @@ export async function loadQueueScreen(
     await Promise.all(siteIds.map(async (id) => [id, await resolveReviewSettings(prisma, id)] as const))
   );
 
+  // Часы магазина по карточке: очередь смешивает заказы разных магазинов, и время каждого
+  // события обязано читаться по часам того магазина, к которому событие относится.
+  const tzByRequest = new Map(cards.map((c) => [c.id, c.order.site.timezone]));
+
   // Журнал всех карточек — одним запросом. Без него карточка отвечала только «что сейчас»,
   // а «когда кто связывался и что было сделано» оставалось невидимым (жалоба владельца).
   const events = await prisma.reviewRequestEvent.findMany({
@@ -75,7 +79,7 @@ export async function loadQueueScreen(
   for (const e of events) {
     const list = journalByRequest.get(e.requestId) ?? [];
     list.push({
-      at: format(e.createdAt, "dd.MM HH:mm"),
+      at: fmtStoreDayTime(e.createdAt, tzByRequest.get(e.requestId) ?? null),
       label: REVIEW_EVENT_LABELS[e.kind] ?? e.kind,
       by: e.user?.name ?? null,
       detail: e.detailSafe,
@@ -83,7 +87,11 @@ export async function loadQueueScreen(
     journalByRequest.set(e.requestId, list);
   }
 
-  const lastContactByPhone = await loadLastContacts(cards.map((c) => c.order.senderPhone));
+  // Телефон → часы магазина его заказа: очередь смешивает магазины, и «последнее общение»
+  // каждой карточки должно читаться по часам её магазина.
+  const lastContactByPhone = await loadLastContacts(
+    cards.map((c) => ({ phone: c.order.senderPhone, tz: c.order.site.timezone }))
+  );
 
   const now = new Date();
   return {
@@ -116,8 +124,13 @@ export async function loadQueueScreen(
  */
 const LAST_CONTACT_WINDOW_DAYS = 120;
 
-async function loadLastContacts(rawPhones: (string | null)[]): Promise<Map<string, LastContact>> {
-  const phones = [...new Set(rawPhones.map((p) => toE164(p)).filter((p): p is string => !!p))];
+async function loadLastContacts(input: { phone: string | null; tz: string | null }[]): Promise<Map<string, LastContact>> {
+  const tzByPhone = new Map<string, string | null>();
+  for (const i of input) {
+    const e164 = toE164(i.phone);
+    if (e164 && !tzByPhone.has(e164)) tzByPhone.set(e164, i.tz);
+  }
+  const phones = [...tzByPhone.keys()];
   if (phones.length === 0) return new Map();
 
   // Полгода назад «последнее общение» уже ничего не объясняет, а без границы выборка растёт
@@ -139,7 +152,7 @@ async function loadLastContacts(rawPhones: (string | null)[]): Promise<Map<strin
     },
   });
 
-  return new Map(rows.map((r) => [r.externalPhoneNormalized, describeContact(r)]));
+  return new Map(rows.map((r) => [r.externalPhoneNormalized, describeContact(r, tzByPhone.get(r.externalPhoneNormalized) ?? null)]));
 }
 
 type LastContact = CardVM["lastContact"];
@@ -148,7 +161,7 @@ type LastContact = CardVM["lastContact"];
 export function describeContact(r: {
   direction: string; type: string; status: string;
   messageText: string | null; transcript: string | null; summary: string | null; occurredAt: Date;
-}): LastContact {
+}, tz: string | null | undefined): LastContact {
   const inbound = r.direction === "INBOUND";
   const body = (r.messageText || r.transcript || r.summary || "").trim();
   const isCall = r.type === "CALL" || r.type === "VOICEMAIL";
@@ -162,7 +175,7 @@ export function describeContact(r: {
       ? "клиент написал"
       : "мы написали";
   return {
-    at: format(r.occurredAt, "dd.MM HH:mm"),
+    at: fmtStoreDayTime(r.occurredAt, tz),
     who,
     // Последним высказался клиент — значит ход за нами. Из-за отсутствия этой мелочи владелец
     // терял людей: человек отвечал «да, оставлю», и ответ пропадал среди входящих.
@@ -226,7 +239,7 @@ function toVM(
     maxAttempts,
     // У «обещал оставить» срок означает «пора напомнить», и занимается этим система. Показывать
     // там «вернуться» и «просрочено» значит намекать человеку, что он что-то проспал.
-    nextActionLabel: next && operatorTurn(c.status) ? `вернуться ${format(next, "dd.MM")}` : null,
+    nextActionLabel: next && operatorTurn(c.status) ? `вернуться ${fmtStoreDayTime(next, c.order.site.timezone).slice(0, 5)}` : null,
     overdue: !!next && operatorTurn(c.status) && next.getTime() < startOfToday(now).getTime(),
     siteId: c.order.site.id,
     locationId: c.location?.id ?? null,
@@ -243,7 +256,7 @@ function toVM(
     customerName: c.order.senderName,
     customerPhone: c.order.senderPhone,
     items: items || "без позиций",
-    deliveryLabel: format(c.order.deliveryDate, "dd.MM"),
+    deliveryLabel: fmtDeliveryDate(c.order.deliveryDate).slice(0, 5),
     journal,
     lastContact,
     guidance: guidanceFor(

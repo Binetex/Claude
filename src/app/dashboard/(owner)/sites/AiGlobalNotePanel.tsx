@@ -1,5 +1,6 @@
 "use client";
 import { useState, useTransition } from "react";
+import { fmtStoreDateTime } from "@/lib/tz";
 import { Megaphone } from "lucide-react";
 import { toast } from "sonner";
 import { Card, CardBody } from "@/components/ui/Card";
@@ -117,7 +118,7 @@ export function AiGlobalNotePanel({
             )
           )}
           {initial.updatedAt && (
-            <span className="text-[11px] text-slate-400">изменено {new Date(initial.updatedAt).toLocaleString("ru-RU")}</span>
+            <span className="text-[11px] text-slate-400">изменено {fmtStoreDateTime(initial.updatedAt, null)}</span>
           )}
         </div>
       </CardBody>

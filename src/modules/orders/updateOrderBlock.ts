@@ -1,4 +1,3 @@
-import { format } from "date-fns";
 import { prisma } from "@/lib/db";
 import { Prisma } from "@/generated/prisma/client";
 import type { OrderStatus, Role } from "@/generated/prisma/enums";
@@ -6,7 +5,7 @@ import { COURIER_NOTE_MAX } from "@/lib/courierNote";
 import { normalizePhone } from "@/lib/phone";
 import { recomputeDaysForOrder } from "@/modules/finance/orderDayHook";
 import { manualOrderStatuses } from "@/lib/statuses";
-import { parseLocalDayToUtcMidnight } from "@/lib/tz";
+import { localDateStr, parseLocalDayToUtcMidnight } from "@/lib/tz";
 
 /**
  * Общий сервис редактирования ОДНОГО блока заказа с оптимистической блокировкой (OCC) и
@@ -120,7 +119,9 @@ function fieldToString(key: string, value: unknown): string {
   if (value == null) return "";
   if (value instanceof Date) {
     // deliveryDate форматируем как в форме (yyyy-MM-dd), остальные даты — ISO.
-    return key === "deliveryDate" ? format(value, "yyyy-MM-dd") : value.toISOString();
+    // deliveryDate — UTC-полночь местного дня: читаем именно UTC-части, иначе зона
+    // процесса сдвинет день на сутки (date-fns форматировал по зоне сервера).
+    return key === "deliveryDate" ? localDateStr(value, "UTC") : value.toISOString();
   }
   return String(value);
 }

@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { format } from "date-fns";
+import { localDateStr } from "@/lib/tz";
 import { getForCallCenter } from "@/modules/orders/queries";
 import { prisma } from "@/lib/db";
 import { loadOrderCommunicationsCard } from "@/integrations/quo/communicationsService";
@@ -87,7 +87,7 @@ export default async function CallCenterOrderPage({
         <DeliveryDateDialog
           orderId={order.id}
           updatedAt={order.updatedAt}
-          deliveryDate={format(new Date(order.deliveryDate), "yyyy-MM-dd")}
+          deliveryDate={localDateStr(new Date(order.deliveryDate), "UTC")}
           deliveryWindow={order.deliveryWindow}
         />
       }

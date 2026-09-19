@@ -156,3 +156,141 @@ export function localClock(tz: string | null | undefined, at: Date = new Date())
 export function dayDiff(a: string, b: string): number {
   return Math.round((Date.parse(`${b}T00:00:00Z`) - Date.parse(`${a}T00:00:00Z`)) / 86_400_000);
 }
+
+// ─────────────────────────  ПОКАЗ ДАТЫ И ВРЕМЕНИ ЧЕЛОВЕКУ  ─────────────────────────
+//
+// Один набор функций на весь интерфейс, Telegram и печать. Заводится потому, что 29 из 38
+// мест форматирования звали `toLocaleString` БЕЗ таймзоны, а это значит «часы того, кто
+// смотрит»: владелец в Москве видел московское время вызова курьера по заказу в Лос-Анджелесе
+// и не мог понять, успели ли отправить букет вовремя.
+//
+// Главное правило: таймзона тут НЕ необязательный параметр. Её нельзя «забыть» и нельзя
+// передать undefined в надежде на разумное поведение — пустое значение означает магазин без
+// заполненной Site.timezone, и тогда берётся зона бизнеса (Лос-Анджелес), а не зона зрителя.
+
+/** Часы магазина: заполненная Site.timezone или зона бизнеса. Зона зрителя не используется никогда. */
+export function storeTz(tz: string | null | undefined): string {
+  return isValidTimeZone(tz) ? (tz as string) : DEFAULT_STORE_TZ;
+}
+
+/**
+ * Короткое имя зоны в этот момент: «PDT» летом, «PST» зимой.
+ *
+ * Нужно рядом с самим временем: «19.09.2026, 00:08» читается одинаково в любой точке мира, и
+ * человек не может проверить, его это часы или магазина. Четыре буквы снимают вопрос совсем.
+ */
+export function storeTzLabel(tz: string | null | undefined, at: Date = new Date()): string {
+  const zone = storeTz(tz);
+  const part = new Intl.DateTimeFormat("en-US", { timeZone: zone, timeZoneName: "short" })
+    .formatToParts(at)
+    .find((p) => p.type === "timeZoneName");
+  return part?.value ?? zone;
+}
+
+function toDate(d: Date | string | number | null | undefined): Date | null {
+  if (d == null || d === "") return null;
+  const date = d instanceof Date ? d : new Date(d);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+export type StoreFormatOptions = {
+  /** Дописать зону («PDT»). По умолчанию да: без неё время нечем проверить. */
+  withZone?: boolean;
+  /** Чем заменить пустое значение. */
+  dash?: string;
+};
+
+/** Дата и время по часам магазина: «19.09.2026, 00:08 PDT». */
+export function fmtStoreDateTime(
+  d: Date | string | number | null | undefined,
+  tz: string | null | undefined,
+  opts: StoreFormatOptions = {}
+): string {
+  const date = toDate(d);
+  if (!date) return opts.dash ?? "—";
+  const zone = storeTz(tz);
+  const text = new Intl.DateTimeFormat("ru-RU", { timeZone: zone, dateStyle: "short", timeStyle: "short" }).format(date);
+  return opts.withZone === false ? text : `${text} ${storeTzLabel(zone, date)}`;
+}
+
+/** Только время по часам магазина: «00:08». Зона по умолчанию НЕ дописывается: в ленте сообщений
+ *  она повторялась бы в каждой строке, поэтому её показывают один раз в заголовке блока. */
+export function fmtStoreTime(
+  d: Date | string | number | null | undefined,
+  tz: string | null | undefined,
+  opts: StoreFormatOptions = {}
+): string {
+  const date = toDate(d);
+  if (!date) return opts.dash ?? "—";
+  const zone = storeTz(tz);
+  const text = new Intl.DateTimeFormat("ru-RU", { timeZone: zone, hour: "2-digit", minute: "2-digit" }).format(date);
+  return opts.withZone ? `${text} ${storeTzLabel(zone, date)}` : text;
+}
+
+/** Только дата по часам магазина: «19.09.2026». */
+export function fmtStoreDate(
+  d: Date | string | number | null | undefined,
+  tz: string | null | undefined,
+  opts: StoreFormatOptions = {}
+): string {
+  const date = toDate(d);
+  if (!date) return opts.dash ?? "—";
+  return new Intl.DateTimeFormat("ru-RU", { timeZone: storeTz(tz), dateStyle: "short" }).format(date);
+}
+
+/** Дата словами по часам магазина: «19 сентября 2026». */
+export function fmtStoreDateLong(
+  d: Date | string | number | null | undefined,
+  tz: string | null | undefined,
+  opts: StoreFormatOptions = {}
+): string {
+  const date = toDate(d);
+  if (!date) return opts.dash ?? "—";
+  return new Intl.DateTimeFormat("ru-RU", { timeZone: storeTz(tz), day: "numeric", month: "long", year: "numeric" }).format(date);
+}
+
+/**
+ * Форматтер, ПРИВЯЗАННЫЙ к часам магазина, с любым набором полей.
+ *
+ * Для мест, где нужен свой вид («dd.MM HH:mm» в журнале, только месяц в заголовке). Смысл тот
+ * же, что у функций выше: таймзону здесь невозможно не указать, поэтому «забыл timeZone» —
+ * ошибка, которую больше нельзя совершить незаметно.
+ */
+export function storeDateTimeFormat(tz: string | null | undefined, options: Intl.DateTimeFormatOptions, locale = "ru-RU"): Intl.DateTimeFormat {
+  return new Intl.DateTimeFormat(locale, { ...options, timeZone: storeTz(tz) });
+}
+
+/** «19.09 14:08» — компактная отметка для журналов и лент. */
+export function fmtStoreDayTime(
+  d: Date | string | number | null | undefined,
+  tz: string | null | undefined,
+  opts: StoreFormatOptions = {}
+): string {
+  const date = toDate(d);
+  if (!date) return opts.dash ?? "—";
+  const parts = storeDateTimeFormat(tz, { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }).formatToParts(date);
+  const g = (t: string) => parts.find((p) => p.type === t)?.value ?? "";
+  const text = `${g("day")}.${g("month")} ${g("hour")}:${g("minute")}`;
+  return opts.withZone ? `${text} ${storeTzLabel(tz, date)}` : text;
+}
+
+/**
+ * Дата доставки на показ: «19.09.2026».
+ *
+ * ОТДЕЛЬНАЯ функция, и это не дублирование. `Order.deliveryDate` хранится как UTC-полночь
+ * МЕСТНОГО дня, то есть в поле уже лежит нужная календарная дата. Прогнать её через часы
+ * Лос-Анджелеса (UTC−7) значит получить 23:00 предыдущего дня и показать вчерашнее число по
+ * всем заказам сразу. Поэтому здесь зона фиксированная — UTC, и трогать её нельзя.
+ */
+export function fmtDeliveryDate(d: Date | string | null | undefined, opts: StoreFormatOptions = {}): string {
+  const date = toDate(d);
+  if (!date) return opts.dash ?? "—";
+  return new Intl.DateTimeFormat("ru-RU", { timeZone: "UTC", dateStyle: "short" }).format(date);
+}
+
+/** Дата доставки словами: «19 сентября 2026». Та же оговорка про UTC, что и выше. */
+export function fmtDeliveryDateLong(d: Date | string | null | undefined, opts: StoreFormatOptions = {}): string {
+  const date = toDate(d);
+  if (!date) return opts.dash ?? "—";
+  return new Intl.DateTimeFormat("ru-RU", { timeZone: "UTC", day: "numeric", month: "long", year: "numeric" }).format(date);
+}

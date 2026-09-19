@@ -118,7 +118,7 @@ export default async function OtherMessagesPage({ searchParams }: { searchParams
       topic: t.topic as TopicKey,
       topicIsManual: t.topicIsManual,
       lastText: t.lastText,
-      lastAtLabel: fmtDateTime(t.lastAt),
+      lastAtLabel: fmtDateTime(t.lastAt, owner?.timezone ?? null),
       smsCount: t.smsCount,
       callCount: t.callCount,
       waitingForUs: t.waitingForUs,

@@ -4,6 +4,7 @@
  * а из клиентского модуля значение импортировать нельзя (см. CLAUDE.md про client boundary).
  */
 import type { SyncKind, SiteSyncStatus } from "@/generated/prisma/enums";
+import { fmtStoreDateTime } from "@/lib/tz";
 import type { SyncStatusSnapshot } from "@/app/dashboard/(owner)/actions";
 
 export const connStatusMeta: Record<string, { label: string; className: string }> = {
@@ -48,4 +49,4 @@ export function syncSnapshot(syncs: SyncRow[]): SyncStatusSnapshot {
 }
 
 export const dateTime = (d: Date | null | undefined): string =>
-  d ? new Intl.DateTimeFormat("ru-RU", { dateStyle: "short", timeStyle: "short" }).format(d) : "—";
+  fmtStoreDateTime(d, null, { withZone: false });

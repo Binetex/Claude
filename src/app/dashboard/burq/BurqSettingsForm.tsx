@@ -1,5 +1,6 @@
 "use client";
 import { useActionState, useState, useTransition } from "react";
+import { fmtStoreDateTime } from "@/lib/tz";
 import { Card, CardHeader, CardTitle, CardBody } from "@/components/ui/Card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -149,7 +150,7 @@ export function BurqSettingsForm({ settings, webhookUrl }: { settings: BurqSetti
         <CardBody className="space-y-2 text-sm">
           <div className="text-slate-600">
             Статус: <span className="font-medium">{CONNECTION_LABEL[settings.connectionStatus ?? ""] ?? "не проверялось"}</span>
-            {settings.lastConnectionCheckAt && <span className="ml-2 text-xs text-slate-400">({new Date(settings.lastConnectionCheckAt).toLocaleString()})</span>}
+            {settings.lastConnectionCheckAt && <span className="ml-2 text-xs text-slate-400">({fmtStoreDateTime(settings.lastConnectionCheckAt, null)})</span>}
           </div>
           {settings.connectionErrorSafe && <div className="text-xs text-amber-700">{settings.connectionErrorSafe}</div>}
           <Button

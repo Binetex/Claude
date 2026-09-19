@@ -5,11 +5,12 @@
  * Разделитель — чтобы строка ассистента не слиплась с тем, что написали руками.
  * Чистая функция: формат заметки — договорённость с владельцем, и её проверяет тест.
  */
+import { storeDateTimeFormat } from "@/lib/tz";
+
 export const NOTE_SEPARATOR = "———";
 
 export function prependReadyTimeNote(existing: string, readyTime: string, at: Date, tz: string | null): string {
-  const stamp = new Intl.DateTimeFormat("ru-RU", {
-    timeZone: tz || "America/Los_Angeles",
+  const stamp = storeDateTimeFormat(tz, {
     day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit",
   }).format(at);
   const line = `${stamp} · Клиент (SMS): готов принять ${readyTime.trim()}`;

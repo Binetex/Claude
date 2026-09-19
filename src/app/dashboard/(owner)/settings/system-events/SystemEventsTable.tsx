@@ -1,4 +1,5 @@
 import { Badge } from "@/components/ui/Badge";
+import { storeDateTimeFormat } from "@/lib/tz";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/states";
 import type { OutboxRecord, OutboxStatus } from "@/outbox/types";
@@ -13,7 +14,7 @@ const statusMeta: Record<OutboxStatus, { label: string; className: string }> = {
 };
 
 function fmt(d: Date): string {
-  return new Intl.DateTimeFormat("ru-RU", { dateStyle: "short", timeStyle: "medium" }).format(new Date(d));
+  return storeDateTimeFormat(null, { dateStyle: "short", timeStyle: "medium" }).format(new Date(d));
 }
 
 export function SystemEventsTable({ events }: { events: OutboxRecord[] }) {

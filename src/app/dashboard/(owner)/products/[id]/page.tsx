@@ -60,7 +60,7 @@ export default async function ProductDetailPage({
   const product = await prisma.product.findUnique({
     where: { id },
     include: {
-      site: { select: { name: true, shortName: true, colorTag: true, platform: true } },
+      site: { select: { name: true, shortName: true, colorTag: true, platform: true, timezone: true } },
       variants: { orderBy: [{ remoteDeleted: "asc" }, { position: "asc" }, { title: "asc" }] },
       vaseCosts: true,
     },
@@ -239,7 +239,7 @@ export default async function ProductDetailPage({
                   initial={product.floristPrice != null ? toNumber(product.floristPrice) : null}
                 />
               </Field>
-              <Field label="Синхронизация">{product.lastSyncedAt ? fmtDateTime(product.lastSyncedAt) : "—"}</Field>
+              <Field label="Синхронизация">{product.lastSyncedAt ? fmtDateTime(product.lastSyncedAt, product.site.timezone) : "—"}</Field>
             </div>
             {(() => {
               // У Woo adminUrl исторически хранит permalink витрины, отдельной админ-ссылки нет.

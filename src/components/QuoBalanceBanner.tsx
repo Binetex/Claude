@@ -1,6 +1,6 @@
 import "server-only";
+import { fmtStoreDayTime } from "@/lib/tz";
 import Link from "next/link";
-import { format } from "date-fns";
 import { AlertTriangle } from "lucide-react";
 import { prisma } from "@/lib/db";
 import { loadQuoBalanceAlert } from "@/integrations/quo/balanceAlert";
@@ -20,7 +20,7 @@ export async function QuoBalanceBanner() {
   if (!alert) return null;
 
   // Тот же формат, что в журналах дашборда: «07.09 15:37».
-  const since = format(alert.at, "dd.MM HH:mm");
+  const since = fmtStoreDayTime(alert.at, null);
   return (
     <div className="rounded-xl border border-red-300 bg-red-50 px-4 py-3">
       <div className="flex items-start gap-2">

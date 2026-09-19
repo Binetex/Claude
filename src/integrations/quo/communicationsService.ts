@@ -187,7 +187,7 @@ export async function loadPhoneCommunicationsCard(
      */
     providerPhoneNumberId?: string | null;
   }
-): Promise<{ communications: CommunicationCardItem[]; storeHasQuoNumber: boolean; storeTimeZone: string | undefined }> {
+): Promise<{ communications: CommunicationCardItem[]; storeHasQuoNumber: boolean; storeTimeZone: string | null }> {
   const [comms, site] = await Promise.all([
     prisma.orderCommunication.findMany({
       where: {
@@ -208,11 +208,11 @@ export async function loadPhoneCommunicationsCard(
     // лента показывает их как дубли клиенту.
     communications: collapseSendAttempts(comms.map((c) => toCardItem(c, nameById))),
     storeHasQuoNumber: !!(site?.quoPhoneNumberId && site?.quoEnabled),
-    storeTimeZone: site?.timezone ?? undefined,
+    storeTimeZone: site?.timezone ?? null,
   };
 }
 
-export async function loadOrderCommunicationsCard(prisma: PrismaClient, orderId: string): Promise<{ communications: CommunicationCardItem[]; storeHasQuoNumber: boolean; storeTimeZone: string | undefined; unread: { customer: number; recipient: number } }> {
+export async function loadOrderCommunicationsCard(prisma: PrismaClient, orderId: string): Promise<{ communications: CommunicationCardItem[]; storeHasQuoNumber: boolean; storeTimeZone: string | null; unread: { customer: number; recipient: number } }> {
   const unread = await countUnreadBySide(prisma, orderId).catch(() => ({ customer: 0, recipient: 0 }));
   await markOrderCommunicationsRead(prisma, orderId).catch(() => 0);
   const [comms, site] = await Promise.all([
@@ -228,7 +228,7 @@ export async function loadOrderCommunicationsCard(prisma: PrismaClient, orderId:
   return {
     communications: comms.map((c) => toCardItem(c, nameById)),
     storeHasQuoNumber: !!(site?.quoPhoneNumberId && site?.quoEnabled),
-    storeTimeZone: site?.timezone ?? undefined,
+    storeTimeZone: site?.timezone ?? null,
     unread,
   };
 }
@@ -436,7 +436,7 @@ export async function setThreadTopic(
  * дополнительные (модель SiteQuoNumber). У магазина бывает несколько номеров, и входящее на
  * второй не должно оказываться «ничьим».
  */
-export type QuoNumberOwner = { siteId: string; name: string; shortName: string | null; quoPhoneNumber: string | null; isPrimary: boolean };
+export type QuoNumberOwner = { siteId: string; name: string; shortName: string | null; quoPhoneNumber: string | null; timezone: string | null; isPrimary: boolean };
 
 /**
  * Магазин по ОДНОМУ QUO-номеру — одним запросом, без чтения всех магазинов и всех их номеров.
@@ -470,23 +470,23 @@ export async function loadQuoNumberOwners(prisma: PrismaClient): Promise<Map<str
   const [sites, extras] = await Promise.all([
     prisma.site.findMany({
       where: { quoPhoneNumberId: { not: null } },
-      select: { id: true, name: true, shortName: true, quoPhoneNumberId: true, quoPhoneNumber: true },
+      select: { id: true, name: true, shortName: true, quoPhoneNumberId: true, quoPhoneNumber: true, timezone: true },
       orderBy: { name: "asc" },
     }),
     prisma.siteQuoNumber.findMany({
-      select: { quoPhoneNumberId: true, quoPhoneNumber: true, site: { select: { id: true, name: true, shortName: true } } },
+      select: { quoPhoneNumberId: true, quoPhoneNumber: true, site: { select: { id: true, name: true, shortName: true, timezone: true } } },
     }),
   ]);
 
   const byPn = new Map<string, QuoNumberOwner>();
   for (const s of sites) {
     if (!s.quoPhoneNumberId) continue;
-    byPn.set(s.quoPhoneNumberId, { siteId: s.id, name: s.name, shortName: s.shortName, quoPhoneNumber: s.quoPhoneNumber, isPrimary: true });
+    byPn.set(s.quoPhoneNumberId, { siteId: s.id, name: s.name, shortName: s.shortName, quoPhoneNumber: s.quoPhoneNumber, timezone: s.timezone, isPrimary: true });
   }
   for (const e of extras) {
     // Основной номер магазина сильнее: если один и тот же id попал в обе таблицы, побеждает он.
     if (byPn.has(e.quoPhoneNumberId)) continue;
-    byPn.set(e.quoPhoneNumberId, { siteId: e.site.id, name: e.site.name, shortName: e.site.shortName, quoPhoneNumber: e.quoPhoneNumber, isPrimary: false });
+    byPn.set(e.quoPhoneNumberId, { siteId: e.site.id, name: e.site.name, shortName: e.site.shortName, quoPhoneNumber: e.quoPhoneNumber, timezone: e.site.timezone, isPrimary: false });
   }
   return byPn;
 }

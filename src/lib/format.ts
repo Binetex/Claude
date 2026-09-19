@@ -1,13 +1,25 @@
-import { format } from "date-fns";
+import { fmtDeliveryDate, fmtStoreDateTime } from "./tz";
 
+/**
+ * ДАТА ДОСТАВКИ. Зовётся почти исключительно для `Order.deliveryDate`, а он хранится как
+ * UTC-полночь МЕСТНОГО дня: нужная календарная дата уже лежит в поле, и прогонять её через
+ * часы магазина нельзя — получится предыдущий день. Поэтому зона здесь жёстко UTC.
+ *
+ * Раньше тут был date-fns без зоны, то есть зона ПРОЦЕССА. На UTC-проде совпадало случайно;
+ * переезд сервера сдвинул бы дату доставки по всем заказам разом.
+ */
 export function fmtDate(d: Date | string | null | undefined): string {
-  if (!d) return "—";
-  return format(new Date(d), "dd.MM.yyyy");
+  return fmtDeliveryDate(d);
 }
 
-export function fmtDateTime(d: Date | string | null | undefined): string {
-  if (!d) return "—";
-  return format(new Date(d), "dd.MM.yyyy HH:mm");
+/**
+ * МОМЕНТ ВРЕМЕНИ по часам магазина. `tz` обязателен намеренно: именно «забыли таймзону»
+ * приводило к тому, что владелец в Москве видел московское время событий в Лос-Анджелесе.
+ * Магазина нет или у него не заполнена Site.timezone — передавайте null, подставится зона
+ * бизнеса (Лос-Анджелес), но НИКОГДА не зона того, кто смотрит.
+ */
+export function fmtDateTime(d: Date | string | null | undefined, tz: string | null | undefined): string {
+  return fmtStoreDateTime(d, tz, { withZone: false });
 }
 
 /**

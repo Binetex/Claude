@@ -1,4 +1,5 @@
 import { Card, CardHeader, CardTitle, CardBody } from "@/components/ui/Card";
+import { fmtStoreDateTime } from "@/lib/tz";
 import type { RefundSummary } from "@/integrations/airwallex/refund";
 import { AirwallexVerifyButton } from "./AirwallexVerifyButton";
 
@@ -46,7 +47,8 @@ const LABEL: Record<string, string> = {
   UNKNOWN: "Неизвестный статус",
 };
 
-const fmt = (d: Date | string | null) => (d ? new Date(d).toLocaleString("ru-RU", { dateStyle: "short", timeStyle: "short" }) : "—");
+// Таймзона приходит пропом: панель живёт в карточке заказа, а заказ у конкретного магазина.
+const fmt = (d: Date | string | null, tz: string | null | undefined) => fmtStoreDateTime(d, tz, { withZone: false });
 
 function Row({ label, value }: { label: string; value: React.ReactNode }) {
   return (
@@ -70,10 +72,13 @@ export function AirwallexPanel({
   aw,
   refund,
   orderId,
+  storeTimeZone,
 }: {
   aw: AirwallexView;
   refund?: RefundSummary | null;
   orderId: string;
+  /** Часы магазина заказа. Пусто — часы бизнеса, но не часы того, кто смотрит. */
+  storeTimeZone?: string | null;
 }) {
   const norm = aw.normalizedStatus ?? "UNKNOWN";
   return (
@@ -108,8 +113,8 @@ export function AirwallexPanel({
         <Row label="Статус Airwallex" value={aw.rawStatus ?? "—"} />
         <Row label="Последняя попытка" value={aw.attemptStatus ?? "—"} />
         <Row label="В ожидании" value={aw.pendingSinceMinutes != null ? `${aw.pendingSinceMinutes} мин` : "—"} />
-        <Row label="Проверено" value={fmt(aw.lastCheckedAt)} />
-        <Row label="Следующая проверка" value={aw.monitoringActive ? fmt(aw.nextCheckAt) : "—"} />
+        <Row label="Проверено" value={fmt(aw.lastCheckedAt, storeTimeZone)} />
+        <Row label="Следующая проверка" value={aw.monitoringActive ? fmt(aw.nextCheckAt, storeTimeZone) : "—"} />
 
         <AirwallexVerifyButton orderId={orderId} />
 
@@ -123,7 +128,7 @@ export function AirwallexPanel({
                 </span>
               }
             />
-            <Row label="Дата возврата" value={fmt(refund.lastAt)} />
+            <Row label="Дата возврата" value={fmt(refund.lastAt, storeTimeZone)} />
             <Row label="Статус возврата" value={refund.lastStatus} />
           </>
         )}

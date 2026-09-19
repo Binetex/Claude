@@ -13,7 +13,7 @@ import { formatCents } from "@/lib/cents";
 import { ExpenseDialog, DeleteExpenseDialog, type ExpenseActions } from "./FlowerExpenseForms";
 import { NoPurchaseButton } from "./NoPurchaseButton";
 import type { DayStatus, FlowerExpenseRow } from "@/modules/finance/flowerExpenses";
-import { todayStrInTz, DEFAULT_STORE_TZ } from "@/lib/tz";
+import { DEFAULT_STORE_TZ, fmtStoreDateTime, todayStrInTz } from "@/lib/tz";
 
 const statusMeta: Record<DayStatus, { label: string; className: string }> = {
   COUNTED: { label: "Посчитан", className: "border-emerald-200 bg-emerald-50 text-emerald-700" },
@@ -22,7 +22,8 @@ const statusMeta: Record<DayStatus, { label: string; className: string }> = {
   MISSING: { label: "Отсутствует", className: "border-red-200 bg-red-50 text-red-700" },
 };
 
-const dt = (d: Date) => d.toISOString().slice(0, 16).replace("T", " ");
+// Раньше тут был срез ISO — это всегда UTC. Финансовый день считается по часам бизнеса.
+const dt = (d: Date) => fmtStoreDateTime(d, null, { withZone: false });
 
 export function FlowerExpenseTable({
   rows,

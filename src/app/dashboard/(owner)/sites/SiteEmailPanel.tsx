@@ -7,6 +7,7 @@
  * подтверждённом домене: сервер это тоже проверяет, но кнопка не должна обещать невозможное.
  */
 import { useState, useTransition } from "react";
+import { fmtStoreDateTime } from "@/lib/tz";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { listSmsTriggers } from "@/modules/automations/triggers";
@@ -146,7 +147,7 @@ export function SiteEmailPanel({ siteId, initial }: { siteId: string; initial: S
       </p>
       {initial.lastTestAt && !msg && (
         <p className={initial.lastTestStatus === "ok" ? "text-[11px] text-slate-400" : "text-[11px] text-red-600"}>
-          Последний тест {new Date(initial.lastTestAt).toLocaleString("ru-RU")}
+          Последний тест {fmtStoreDateTime(initial.lastTestAt, null)}
           {initial.lastTestStatus === "ok" ? " — успешно" : `: ${initial.lastErrorSafe ?? "ошибка"}`}
         </p>
       )}

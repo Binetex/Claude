@@ -1,5 +1,6 @@
 "use client";
 import { useState, useTransition } from "react";
+import { fmtStoreDateTime } from "@/lib/tz";
 import { useRouter } from "next/navigation";
 import { setKillSwitch } from "./actions";
 
@@ -26,7 +27,7 @@ export function KillSwitchToggle({ disableAll, updatedAt }: { disableAll: boolea
         </div>
         <p className="text-xs text-slate-500">
           Когда включён, ни одно правило не создаёт и не отправляет сообщений (аварийный рубильник).
-          {updatedAt ? ` Изменён: ${new Date(updatedAt).toLocaleString("ru-RU")}.` : ""}
+          {updatedAt ? ` Изменён: ${fmtStoreDateTime(updatedAt, null)}.` : ""}
         </p>
       </div>
       <button

@@ -99,7 +99,7 @@ export default async function ThreadPage({ params }: { params: Promise<{ pn: str
       <div className="text-xs text-slate-500">
         {smsCount > 0 && <>{smsCount} SMS · </>}
         {callCount > 0 && <>{callCount} {pluralRu(callCount, "звонок", "звонка", "звонков")} · </>}
-        первый контакт {fmtDateTime(firstAt)} · последний {fmtDateTime(lastAt)}
+        первый контакт {fmtDateTime(firstAt, storeTimeZone)} · последний {fmtDateTime(lastAt, storeTimeZone)}
         {linkedCount > 0 && <> · ещё {linkedCount} по заказам, они видны в ленте</>}
       </div>
 

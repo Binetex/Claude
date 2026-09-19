@@ -1,5 +1,6 @@
 "use client";
 import { useActionState, useState, useTransition } from "react";
+import { fmtStoreDateTime } from "@/lib/tz";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle, CardBody } from "@/components/ui/Card";
 import { Cpu } from "lucide-react";
@@ -111,7 +112,7 @@ export function AiModelForm({ current, balance }: { current: AiModelFormState; b
             Сейчас работает: <span className="font-medium text-slate-800">{current.effectiveModel ?? "не задана"}</span>
             {current.effectiveBaseUrl ? ` · ${current.effectiveBaseUrl}` : ""}
           </span>
-          {current.checkAt && <span className="text-slate-400">проверка {new Date(current.checkAt).toLocaleString("ru-RU")}</span>}
+          {current.checkAt && <span className="text-slate-400">проверка {fmtStoreDateTime(current.checkAt, null)}</span>}
         </div>
 
         {current.checkErrorSafe && <p className="text-xs text-red-600">⚠ {current.checkErrorSafe}</p>}

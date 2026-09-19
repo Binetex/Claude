@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { fmtStoreDateTime } from "@/lib/tz";
 import { prisma } from "@/lib/db";
 import { Card, CardBody } from "@/components/ui/Card";
 import {
@@ -11,7 +12,7 @@ import { FlowStats } from "../flows/FlowStats";
 
 export const dynamic = "force-dynamic";
 
-const fmt = (d: Date | null | undefined) => (d ? new Date(d).toLocaleString("ru-RU") : "—");
+const fmt = (d: Date | null | undefined) => fmtStoreDateTime(d, null);
 
 const STEP_STATUS_CLASS: Record<string, string> = {
   SENT: "border-emerald-200 bg-emerald-50 text-emerald-700",

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { fmtStoreTime } from "@/lib/tz";
 import { Card } from "@/components/ui/Card";
 import { EmptyState } from "@/components/ui/states";
 import { ZoomableImage } from "@/components/ImageLightbox";
@@ -18,7 +19,7 @@ import { recipientMapsUrl } from "@/components/orders/address";
 export type OrdersTableOrder = {
   id: string;
   orderNumber: string;
-  site: { name: string };
+  site: { name: string; timezone?: string | null };
   orderStatus: OrderStatus;
   paymentFailed?: boolean;
   deliveryDate: Date | string;
@@ -42,7 +43,7 @@ export type OrdersTableOrder = {
 };
 
 /** Компактные индикаторы коммуникаций в списке (непрочитанные/пропущенный/последний контакт/preview). */
-function CommIndicators({ ind }: { ind?: OrderIndicator }) {
+function CommIndicators({ ind, storeTimeZone }: { ind?: OrderIndicator; storeTimeZone?: string | null }) {
   if (!ind || (ind.unreadInbound === 0 && !ind.hasMissedUnread && !ind.lastAt)) return null;
   return (
     <div className="mt-0.5 flex flex-col gap-0.5 text-[10px] leading-tight">
@@ -52,7 +53,7 @@ function CommIndicators({ ind }: { ind?: OrderIndicator }) {
           {ind.hasMissedUnread && <span className="rounded bg-amber-100 px-1 font-medium text-amber-700">✆ пропущенный</span>}
         </div>
       )}
-      {ind.lastAt && <span className="text-slate-400">контакт: {new Date(ind.lastAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>}
+      {ind.lastAt && <span className="text-slate-400">контакт: {fmtStoreTime(ind.lastAt, storeTimeZone)}</span>}
       {ind.preview && <span className="max-w-[160px] truncate text-slate-500">“{ind.preview}”</span>}
     </div>
   );
@@ -120,7 +121,7 @@ function DesktopCard({ o, ind, hideFinance, hideFlorist, hrefBase, backQuery, si
             {formatOrderNumber(o.orderNumber)}
           </Link>
           <span className="text-[10px] text-slate-400">{o.site.name}</span>
-          <CommIndicators ind={ind} />
+          <CommIndicators ind={ind} storeTimeZone={o.site.timezone} />
         </div>
 
         {/* Товар — расширенная область названия, картинка 60×60, имя 13px */}
@@ -200,7 +201,7 @@ function MobileCard({ o, ind, hideFinance, hideFlorist, hrefBase, backQuery }: {
           )}
         </div>
         <span className="text-[10px] text-slate-400">{o.site.name}</span>
-        <CommIndicators ind={ind} />
+        <CommIndicators ind={ind} storeTimeZone={o.site.timezone} />
       </div>
 
       <div className="mt-2">

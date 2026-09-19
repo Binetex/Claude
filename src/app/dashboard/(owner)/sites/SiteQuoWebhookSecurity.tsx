@@ -1,5 +1,6 @@
 "use client";
 import { useState, useTransition } from "react";
+import { fmtStoreDateTime } from "@/lib/tz";
 import { useRouter } from "next/navigation";
 import { Card, CardHeader, CardTitle, CardBody } from "@/components/ui/Card";
 import { Button } from "@/components/ui/button";
@@ -76,7 +77,7 @@ export function SiteQuoWebhookSecurity({ secrets, envCount, cryptoConfigured }: 
             {secrets.map((s) => (
               <li key={s.id} className="flex items-center justify-between gap-2 px-3 py-2">
                 <span className="font-mono text-slate-700">{s.maskedSuffix}</span>
-                <span className="ml-auto text-[11px] text-slate-400">{new Date(s.createdAt).toLocaleString("ru-RU")}</span>
+                <span className="ml-auto text-[11px] text-slate-400">{fmtStoreDateTime(s.createdAt, null)}</span>
                 <Button type="button" size="sm" variant="ghost" className="text-red-600" disabled={pending} onClick={() => remove(s)}>Удалить</Button>
               </li>
             ))}

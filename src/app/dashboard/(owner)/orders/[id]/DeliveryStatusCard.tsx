@@ -1,4 +1,5 @@
 import { Truck } from "lucide-react";
+import { fmtStoreDateTime } from "@/lib/tz";
 import { prisma } from "@/lib/db";
 import { Card, CardHeader, CardTitle, CardBody } from "@/components/ui/Card";
 import { ZoomableImage } from "@/components/ImageLightbox";
@@ -30,7 +31,7 @@ export async function DeliveryStatusCard({
   trackingUrl: string | null;
   bouquetPhotoUrl: string | null;
   deliveryPhotoUrl: string | null;
-  storeTimeZone?: string;
+  storeTimeZone?: string | null;
   /**
    * Точка забора. Слот, а не встроенный блок: карточка живёт на трёх страницах, и решать,
    * можно ли на этой переключать точку, должна страница, а не блок доставки.
@@ -144,8 +145,8 @@ export async function DeliveryStatusCard({
           </div>
         )}
         <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
-          <Info label="Курьер вызван" value={fmtLocalDateTime(courierCalledAt, storeTimeZone)} />
-          <Info label="Доставка завершена" value={fmtLocalDateTime(deliveryCompletedAt, storeTimeZone)} />
+          <Info label="Курьер вызван" value={fmtStoreDateTime(courierCalledAt, storeTimeZone)} />
+          <Info label="Доставка завершена" value={fmtStoreDateTime(deliveryCompletedAt, storeTimeZone)} />
           <Info label="Tracking" value={trackingUrl ? <a href={trackingUrl} className="text-sky-600 underline" target="_blank" rel="noreferrer">Открыть</a> : "—"} />
           {/* Своё превью показываем только там, где фото нельзя заменить: иначе картинка
               дублировала бы ту, что уже стоит рядом с кнопкой загрузки. */}
@@ -163,6 +164,7 @@ export async function DeliveryStatusCard({
         {courierNote}
 
         <BurqDeliveryPanel
+          storeTimeZone={storeTimeZone}
           orderId={orderId}
           orderStatus={orderStatus}
           attempts={deliveryAttempts}
@@ -200,15 +202,6 @@ export async function DeliveryStatusCard({
       </CardBody>
     </Card>
   );
-}
-
-function fmtLocalDateTime(d: Date | string | null | undefined, timeZone?: string): string {
-  if (!d) return "—";
-  try {
-    return new Intl.DateTimeFormat("ru-RU", { dateStyle: "short", timeStyle: "short", ...(timeZone ? { timeZone } : {}) }).format(new Date(d));
-  } catch {
-    return new Date(d).toLocaleString("ru-RU");
-  }
 }
 
 function Info({ label, value }: { label: string; value: React.ReactNode }) {

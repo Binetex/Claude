@@ -1,5 +1,6 @@
 "use client";
 import { useState } from "react";
+import { fmtStoreDateTime, storeTzLabel } from "@/lib/tz";
 import { ZoomableImage } from "@/components/ImageLightbox";
 
 export type TimelineItem = {
@@ -59,13 +60,6 @@ function statusClass(s: string): string {
   return "text-slate-500";
 }
 
-function fmtTime(iso: string, timeZone?: string): string {
-  try {
-    return new Intl.DateTimeFormat("ru-RU", { dateStyle: "short", timeStyle: "short", ...(timeZone ? { timeZone } : {}) }).format(new Date(iso));
-  } catch {
-    return new Date(iso).toLocaleString();
-  }
-}
 
 /** Длинный текст со сворачиванием («Показать полностью»). */
 function CollapsibleText({ text, id, kind }: { text: string; id: string; kind: string }) {
@@ -90,10 +84,16 @@ function CollapsibleText({ text, id, kind }: { text: string; id: string; kind: s
  * звонка — через безопасный <audio> + ссылку. Отсутствие записи/транскрипта — не ошибка.
  * Адаптивно: узкие блоки, break-words, без фиксированной ширины → корректно на 375px.
  */
-export function CommunicationTimeline({ items, storeTimeZone, inboundLabel = "Заказчик" }: { items: TimelineItem[]; storeTimeZone?: string; inboundLabel?: string }) {
+export function CommunicationTimeline({ items, storeTimeZone, inboundLabel = "Заказчик" }: { items: TimelineItem[]; storeTimeZone?: string | null; inboundLabel?: string }) {
   if (items.length === 0) return <div className="text-xs text-slate-400">Коммуникаций пока нет.</div>;
   return (
-    <ul className="space-y-2">
+    <>
+      {/* Часы магазина названы ОДИН раз над лентой: в каждой строке подпись превратилась бы в
+          шум, а без неё владелец из Москвы не понимает, чьё время он читает. */}
+      <div className="mb-1 text-[11px] text-slate-400">
+        Время по часам магазина, {storeTzLabel(storeTimeZone)}
+      </div>
+      <ul className="space-y-2">
       {items.map((c) => (
         <li key={c.id} className="rounded border border-slate-100 bg-slate-50 p-2 text-xs">
           <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
@@ -138,12 +138,13 @@ export function CommunicationTimeline({ items, storeTimeZone, inboundLabel = "З
           )}
 
           <div className="mt-0.5 flex flex-wrap gap-x-2 text-[11px] text-slate-400">
-            <span>{fmtTime(c.occurredAt, storeTimeZone)}</span>
+            <span>{fmtStoreDateTime(c.occurredAt, storeTimeZone, { withZone: false })}</span>
             <span className="break-all">{c.externalPhone}</span>
             {c.direction === "OUTBOUND" && c.sentByName && <span>· отправил: {c.sentByName}</span>}
           </div>
         </li>
       ))}
-    </ul>
+      </ul>
+    </>
   );
 }

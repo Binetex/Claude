@@ -78,7 +78,7 @@ function baseFields(o: OrderListRow) {
   return {
     id: o.id,
     orderNumber: o.orderNumber,
-    site: { name: o.site.name, shortName: o.site.shortName, colorTag: o.site.colorTag, platform: o.site.platform },
+    site: { name: o.site.name, shortName: o.site.shortName, colorTag: o.site.colorTag, platform: o.site.platform, timezone: o.site.timezone },
     source: o.source,
     externalCreatedAt: o.externalCreatedAt,
     deliveryDate: o.deliveryDate,

@@ -1,5 +1,6 @@
 "use client";
 import { useState } from "react";
+import { fmtStoreDateTime } from "@/lib/tz";
 import { MessageSquare } from "lucide-react";
 import { Card, CardHeader, CardTitle, CardBody } from "@/components/ui/Card";
 import { Button } from "@/components/ui/button";
@@ -61,7 +62,7 @@ export function OrderCommunications({
   customerEmail: string | null;
   communications: CommItem[];
   emails: EmailItem[];
-  storeTimeZone?: string;
+  storeTimeZone?: string | null;
   unread?: { customer: number; recipient: number };
   /** «Сюрприз: получателю не пишем» — состояние выключателя на заказе. */
   recipientMuted?: boolean;
@@ -234,7 +235,7 @@ export function OrderCommunications({
             Высота ограничена: длинная переписка иначе растягивает страницу на несколько
             экранов и уводит блок доставки далеко вниз. */}
         <div className="max-h-80 overflow-y-auto border-t border-slate-100 pt-2">
-          {isEmail ? <EmailTimeline items={emails} /> : <CommunicationTimeline items={items} storeTimeZone={storeTimeZone} inboundLabel={active.label} />}
+          {isEmail ? <EmailTimeline items={emails} storeTimeZone={storeTimeZone} /> : <CommunicationTimeline items={items} storeTimeZone={storeTimeZone} inboundLabel={active.label} />}
         </div>
       </CardBody>
     </Card>
@@ -249,7 +250,7 @@ export function OrderCommunications({
  * Текст выводится как есть, в `whitespace-pre-wrap`: письмо клиента — это абзацы и переносы, и
  * схлопывать их в один абзац значит терять смысл. HTML-версии у нас нет by design.
  */
-function EmailTimeline({ items }: { items: EmailItem[] }) {
+function EmailTimeline({ items, storeTimeZone }: { items: EmailItem[]; storeTimeZone?: string | null }) {
   if (items.length === 0) {
     return <p className="py-3 text-center text-xs text-slate-400">Писем по этому заказу пока нет — можно написать первым.</p>;
   }
@@ -275,7 +276,7 @@ function EmailTimeline({ items }: { items: EmailItem[] }) {
           <li key={m.id} className={"rounded-md border p-2 " + (outbound ? "border-sky-100 bg-sky-50/60" : "border-slate-200 bg-white")}>
             <div className="flex flex-wrap items-baseline justify-between gap-2">
               <span className="text-xs font-medium text-slate-700">{outbound ? "🌸 Вы" : m.fromEmail}</span>
-              <span className="text-[11px] text-slate-400">{new Date(m.occurredAt).toLocaleString("ru-RU")}</span>
+              <span className="text-[11px] text-slate-400">{fmtStoreDateTime(m.occurredAt, storeTimeZone, { withZone: false })}</span>
             </div>
             {showSubject && <div className="mt-0.5 text-[11px] text-slate-500">{m.subject}</div>}
             {m.text.trim() ? (

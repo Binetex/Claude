@@ -1,4 +1,5 @@
 import { Bot } from "lucide-react";
+import { fmtStoreDateTime } from "@/lib/tz";
 import { Card, CardHeader, CardTitle, CardBody } from "@/components/ui/Card";
 import { AssistantOrderToggle } from "./AssistantOrderToggle";
 
@@ -54,8 +55,8 @@ function skipLabel(reason: string | null): string {
  * у магазина без ассистента галочка «без ИИ» ничего не выключает.
  */
 export function OrderAssistantCard({
-  orderId, turns, dryRun, enabled, disabledOnOrder,
-}: { orderId: string; turns: AssistantTurn[]; dryRun: boolean; enabled: boolean; disabledOnOrder: boolean }) {
+  orderId, turns, dryRun, enabled, disabledOnOrder, storeTimeZone,
+}: { orderId: string; turns: AssistantTurn[]; dryRun: boolean; enabled: boolean; disabledOnOrder: boolean; storeTimeZone?: string | null }) {
   if (turns.length === 0 && !enabled) return null;
 
   return (
@@ -79,7 +80,7 @@ export function OrderAssistantCard({
         {turns.map((t) => (
           <div key={t.id} className="rounded-lg border border-slate-200 px-3 py-2.5">
             <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-slate-500">
-              <span className="font-mono">{new Date(t.createdAt).toLocaleString("ru-RU")}</span>
+              <span className="font-mono">{fmtStoreDateTime(t.createdAt, storeTimeZone, { withZone: false })}</span>
               {t.intent && <span className="rounded bg-slate-100 px-1.5 py-px">{t.intent}</span>}
               {t.important && <span className="rounded bg-red-50 px-1.5 py-px text-red-700">важное</span>}
               {t.needsHuman && t.status !== "SKIPPED" && <span className="rounded bg-amber-50 px-1.5 py-px text-amber-700">нужен человек</span>}

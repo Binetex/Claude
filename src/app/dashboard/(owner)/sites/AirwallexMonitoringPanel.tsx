@@ -1,5 +1,6 @@
 "use client";
 import { useState, useTransition } from "react";
+import { fmtStoreDateTime } from "@/lib/tz";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { ownerSaveAirwallex, ownerVerifyAirwallex, ownerToggleAirwallexMonitoring, ownerTogglePushPaidStatus } from "./wooActions";
@@ -118,7 +119,7 @@ export function AirwallexMonitoringPanel({ siteId, initial }: { siteId: string; 
 
       <p className="text-[11px] text-slate-400">
         {verified
-          ? `Проверено ${new Date(initial.verifiedAt!).toLocaleString("ru-RU")}. Без галочки «Проставлять оплату в магазине» мониторинг только читает статус платежа и заказы в работу не переводит.`
+          ? `Проверено ${fmtStoreDateTime(initial.verifiedAt, null)}. Без галочки «Проставлять оплату в магазине» мониторинг только читает статус платежа и заказы в работу не переводит.`
           : "Включить мониторинг можно после успешного Verify."}
       </p>
       {initial.errorSafe && !msg && <p className="text-[11px] text-red-600">{initial.errorSafe}</p>}

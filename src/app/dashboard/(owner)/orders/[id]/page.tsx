@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { format } from "date-fns";
+import { localDateStr } from "@/lib/tz";
 import { getForOwner } from "@/modules/orders/queries";
 import { prisma } from "@/lib/db";
 import { Card, CardHeader, CardTitle, CardBody } from "@/components/ui/Card";
@@ -111,7 +111,7 @@ export default async function OwnerOrderPage({
   // не должна ронять карточку заказа (историю читаем из локальной БД, не из QUO).
   let communications: CommItem[] = [];
   let storeHasQuoNumber = false;
-  let storeTimeZone: string | undefined;
+  let storeTimeZone: string | null = null;
   // Переписка по email — своя таблица и своя вкладка; сбой её загрузки не должен ронять карточку.
   const emailPanel = await loadOrderEmailPanel(prisma, id).catch(() => ({ emails: [], customerEmail: null }));
 
@@ -146,7 +146,10 @@ export default async function OwnerOrderPage({
       }))
     );
     storeHasQuoNumber = !!(siteQuo?.quoPhoneNumberId && siteQuo?.quoEnabled);
-    storeTimeZone = siteQuo?.timezone ?? undefined;
+    // НЕ `?? undefined`: пустое значение раньше означало «форматируй по часам того, кто смотрит»,
+    // и владелец из Москвы видел московское время вызова курьера по заказу в Лос-Анджелесе.
+    // Теперь пустое значение отдаётся как есть, а формат сам падает на зону бизнеса (см. lib/tz).
+    storeTimeZone = siteQuo?.timezone ?? null;
   } catch {
     // QUO-таблицы недоступны — блок общения просто не покажет историю.
   }
@@ -220,7 +223,7 @@ export default async function OwnerOrderPage({
         <DeliveryDateDialog
           orderId={order.id}
           updatedAt={order.updatedAt}
-          deliveryDate={format(new Date(order.deliveryDate), "yyyy-MM-dd")}
+          deliveryDate={localDateStr(new Date(order.deliveryDate), "UTC")}
           deliveryWindow={order.deliveryWindow}
         />
       }
@@ -332,7 +335,7 @@ export default async function OwnerOrderPage({
           />
 
           {/* Разборы ассистента: единственное место, где видно его работу во время сухого прогона. */}
-          <OrderAssistantCard orderId={order.id} turns={assistantTurns} dryRun={assistant.dryRun} enabled={assistant.enabled} disabledOnOrder={assistant.disabledOnOrder} />
+          <OrderAssistantCard storeTimeZone={storeTimeZone} orderId={order.id} turns={assistantTurns} dryRun={assistant.dryRun} enabled={assistant.enabled} disabledOnOrder={assistant.disabledOnOrder} />
 
           {/* Доставка целиком: курьер, Burq и точка забора. Раньше владелец имел собственную
               копию этого блока вместе с копией трёх запросов Burq — теперь блок один. */}
@@ -368,7 +371,7 @@ export default async function OwnerOrderPage({
                  отношения не имеют, и в потоке основных карточек только мешали. ── */}
           {order.airwallex && (
             <div className="space-y-2">
-              <AirwallexPanel aw={order.airwallex} refund={refundSummary} orderId={order.id} />
+              <AirwallexPanel storeTimeZone={storeTimeZone} aw={order.airwallex} refund={refundSummary} orderId={order.id} />
               {/* Возврат живёт рядом с платежом, а не среди «быстрых действий»: он необратим
                   и не должен стоять в одном ряду с картой и переназначением флориста.
                   Доступность и суммы модалка спрашивает у Airwallex при открытии. */}
@@ -391,7 +394,7 @@ export default async function OwnerOrderPage({
                       <span className="font-medium break-words text-slate-700">{a.floristName}</span>
                       <span className="ml-2 text-xs text-slate-400">{stateLabel(a.state)} · {a.priceMode === "MANUAL" ? "ручная" : "авто"} {formatMoney(a.floristTotal)}</span>
                     </div>
-                    <span className="ml-auto text-xs whitespace-nowrap text-slate-400">{fmtDateTime(a.assignedAt)}</span>
+                    <span className="ml-auto text-xs whitespace-nowrap text-slate-400">{fmtDateTime(a.assignedAt, storeTimeZone)}</span>
                   </li>
                 ))}
               </ul>

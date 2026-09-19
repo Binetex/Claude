@@ -11,9 +11,11 @@ import "server-only";
  * заказу, а разговор может идти по прошлому заказу того же человека. Отдельного «журнала звонков»
  * заводить не надо — звонки и SMS уже лежат в `OrderCommunication`, их кладёт туда приём QUO.
  */
-import { format } from "date-fns";
 import { prisma } from "@/lib/db";
 import { toE164 } from "@/lib/phone";
+// date-fns форматирует по часам СЕРВЕРА (на проде это UTC) — в журнале отзывов это давало
+// время, которого не было ни у кого. Всё показываемое время идёт по часам магазина.
+import { fmtDeliveryDate, fmtStoreDayTime, fmtStoreDateTime } from "@/lib/tz";
 import { REVIEW_STATUS_LABELS, REVIEW_EVENT_LABELS, reviewStatusText } from "@/lib/reviewStatus";
 import { getOrderItemImages } from "@/modules/orders/images";
 import type { OrderItemView } from "@/components/orders/OrderItemsCard";
@@ -58,7 +60,7 @@ export type RequestDetailVM = {
   linkSentLabel: string | null;
   journal: { at: string; label: string; by: string | null; detail: string | null }[];
   /** Переписка и звонки по номеру заказчика — для общего блока «Общение». */
-  comm: { communications: CommunicationCardItem[]; storeHasQuoNumber: boolean; storeTimeZone: string | undefined };
+  comm: { communications: CommunicationCardItem[]; storeHasQuoNumber: boolean; storeTimeZone: string | null };
   emails: Awaited<ReturnType<typeof loadOrderEmailPanel>>;
   coupon: { code: string; sentAt: string | null; sentCode: string | null };
 };
@@ -86,7 +88,7 @@ export async function loadRequestDetail(
           id: true, orderNumber: true, senderName: true, senderPhone: true, senderEmail: true,
           deliveryDate: true, addressLine: true, apartment: true, city: true, zip: true,
           recipientName: true, recipientPhone: true,
-          site: { select: { id: true, name: true } },
+          site: { select: { id: true, name: true, timezone: true } },
           items: { select: { name: true, quantity: true, image: true, parentImageUrl: true, variantImageUrl: true } },
         },
       },
@@ -115,9 +117,11 @@ export async function loadRequestDetail(
   const [comm, emails] = await Promise.all([
     phoneE164
       ? loadPhoneCommunicationsCard(prisma, { phoneE164, siteId: r.order.site.id })
-      : Promise.resolve({ communications: [], storeHasQuoNumber: false, storeTimeZone: undefined }),
+      : Promise.resolve({ communications: [], storeHasQuoNumber: false, storeTimeZone: null }),
     loadOrderEmailPanel(prisma, r.order.id).catch(() => ({ emails: [], customerEmail: null })),
   ]);
+  // Часы магазина заказа: всё показываемое время идёт по ним, а не по зоне сервера.
+  const tz = r.order.site.timezone;
   const maxAttempts = settings?.maxCallAttempts ?? 2;
   // Тот же набор, что в очереди (`queueView::operatorTurn`): ответ клиента — наш ход, и
   // «просрочено» обязано читаться одинаково в списке и в самой карточке.
@@ -132,7 +136,7 @@ export async function loadRequestDetail(
     callAttempts: r.callAttempts,
     maxAttempts,
     overdue: !!r.nextActionAt && operatorTurn && r.nextActionAt.getTime() < startOfToday().getTime(),
-    nextActionLabel: r.nextActionAt && operatorTurn ? `вернуться ${format(r.nextActionAt, "dd.MM")}` : null,
+    nextActionLabel: r.nextActionAt && operatorTurn ? `вернуться ${fmtStoreDayTime(r.nextActionAt, tz).slice(0, 5)}` : null,
     awaitingUs: awaitingUs(comm.communications),
     order: {
       id: r.order.id,
@@ -148,7 +152,7 @@ export async function loadRequestDetail(
         return { id: `${r.id}-${idx}`, name: i.name, quantity: i.quantity, image: img.primary, variantImage: img.variant };
       }),
       deliveryDate: r.order.deliveryDate.toISOString(),
-      deliveryLabel: format(r.order.deliveryDate, "dd.MM.yyyy"),
+      deliveryLabel: fmtDeliveryDate(r.order.deliveryDate),
       address: [r.order.addressLine, r.order.apartment, r.order.city, r.order.zip].filter(Boolean).join(", ") || null,
       recipientPhone: r.order.recipientPhone,
       recipientName: r.order.recipientName,
@@ -157,10 +161,10 @@ export async function loadRequestDetail(
     location: { id: r.location?.id ?? null, name: r.location?.name ?? null, url: r.reviewUrlSnapshot },
     locations,
     linkSentLabel: r.linkSentAt
-      ? `${format(r.linkSentAt, "dd.MM HH:mm")}${r.linkChannel === "EMAIL" ? " письмом" : r.linkChannel === "SMS" ? " в SMS" : ""}`
+      ? `${fmtStoreDayTime(r.linkSentAt, tz)}${r.linkChannel === "EMAIL" ? " письмом" : r.linkChannel === "SMS" ? " в SMS" : ""}`
       : null,
     journal: events.map((e) => ({
-      at: format(e.createdAt, "dd.MM HH:mm"),
+      at: fmtStoreDayTime(e.createdAt, tz),
       label: REVIEW_EVENT_LABELS[e.kind] ?? e.kind,
       by: e.user?.name ?? null,
       detail: e.detailSafe,
@@ -169,7 +173,7 @@ export async function loadRequestDetail(
     emails,
     coupon: {
       code: reward.couponCode,
-      sentAt: r.couponSentAt ? format(r.couponSentAt, "dd.MM.yyyy HH:mm") : null,
+      sentAt: r.couponSentAt ? fmtStoreDateTime(r.couponSentAt, tz, { withZone: false }) : null,
       sentCode: r.couponCodeSnapshot,
     },
   };

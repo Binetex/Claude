@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { format } from "date-fns";
+import { localDateStr } from "@/lib/tz";
 import { requireFlorist } from "@/lib/rbac";
 import { OrderExpensesSection } from "@/components/finance/OrderExpensesSection";
 import { getForFlorist } from "@/modules/orders/queries";
@@ -81,7 +81,7 @@ export default async function FloristOrderPage({
         <DeliveryDateDialog
           orderId={order.id}
           updatedAt={order.updatedAt}
-          deliveryDate={format(new Date(order.deliveryDate), "yyyy-MM-dd")}
+          deliveryDate={localDateStr(new Date(order.deliveryDate), "UTC")}
           deliveryWindow={order.deliveryWindow}
         />
       }

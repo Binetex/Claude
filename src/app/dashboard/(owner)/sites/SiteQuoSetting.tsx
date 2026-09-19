@@ -1,5 +1,6 @@
 "use client";
 import { useState, useTransition } from "react";
+import { fmtStoreDateTime } from "@/lib/tz";
 import { Button } from "@/components/ui/button";
 import {
   ownerQuoListNumbers,
@@ -74,7 +75,7 @@ export function SiteQuoSetting({ siteId, current }: { siteId: string; current: S
       <div className="grid grid-cols-1 gap-1 text-[11px] text-slate-500 sm:grid-cols-2">
         <div>Номер: <span className="text-slate-800">{current.quoPhoneNumber || "—"}</span></div>
         <div>Phone Number ID: <span className="font-mono text-slate-700">{current.quoPhoneNumberId || "—"}</span></div>
-        <div>Последняя проверка: <span className="text-slate-700">{current.quoLastCheckAt ? new Date(current.quoLastCheckAt).toLocaleString("ru-RU") : "—"}</span></div>
+        <div>Последняя проверка: <span className="text-slate-700">{fmtStoreDateTime(current.quoLastCheckAt, null)}</span></div>
         {current.quoConnectionError && <div className="text-amber-700 sm:col-span-2">⚠ {current.quoConnectionError}</div>}
       </div>
 

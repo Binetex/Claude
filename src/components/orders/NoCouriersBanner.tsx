@@ -1,4 +1,5 @@
 import "server-only";
+import { fmtStoreTime } from "@/lib/tz";
 import Link from "next/link";
 import { AlertTriangle } from "lucide-react";
 import { prisma } from "@/lib/db";
@@ -45,6 +46,8 @@ export async function NoCouriersBanner({
       deliveryDate: true,
       recipientName: true,
       city: true,
+      // Часы магазина: «проверено в 07:14» должно значить 07:14 в Лос-Анджелесе, а не срез UTC.
+      site: { select: { timezone: true } },
       deliveries: {
         where: { isCurrentAttempt: true },
         select: { couriersCheckedAt: true },
@@ -83,7 +86,7 @@ export async function NoCouriersBanner({
                     <span className="text-xs text-amber-700">доставка {fmtDate(o.deliveryDate)}</span>
                     {checked && (
                       <span className="text-xs text-amber-600">
-                        проверено {checked.toISOString().slice(11, 16)}
+                        проверено {fmtStoreTime(checked, o.site.timezone)}
                       </span>
                     )}
                   </Link>

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { fmtStoreDateTime } from "@/lib/tz";
 import { prisma } from "@/lib/db";
 import { Card, CardBody } from "@/components/ui/Card";
 import { buttonVariants } from "@/components/ui/button";
@@ -50,7 +51,7 @@ function buildHref(automationId: string, filter: FilterKey, page: number): strin
   return `/dashboard/automations/${automationId}?${p.toString()}`;
 }
 
-const fmt = (d: Date | null | undefined) => (d ? new Date(d).toLocaleString("ru-RU") : "—");
+const fmt = (d: Date | null | undefined) => fmtStoreDateTime(d, null);
 
 export async function JobsPanel({
   automationId,

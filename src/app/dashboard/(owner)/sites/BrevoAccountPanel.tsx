@@ -1,5 +1,6 @@
 "use client";
 import { useState, useTransition } from "react";
+import { fmtStoreDateTime } from "@/lib/tz";
 import { useRouter } from "next/navigation";
 import { Card, CardHeader, CardTitle, CardBody } from "@/components/ui/Card";
 import { Button } from "@/components/ui/button";
@@ -92,7 +93,7 @@ export function BrevoAccountPanel({ siteId, view }: { siteId: string; view: Brev
         {view.connStatus && (
           <p className={view.connStatus === "CONNECTED" ? "text-[11px] text-slate-400" : "text-[11px] text-red-600"}>
             {view.connStatus === "CONNECTED"
-              ? `Последняя проверка ${view.verifiedAt ? new Date(view.verifiedAt).toLocaleString("ru-RU") : ""} — успешно${view.accountEmail ? ` (аккаунт: ${view.accountEmail})` : ""}.`
+              ? `Последняя проверка ${view.verifiedAt ? fmtStoreDateTime(view.verifiedAt, null) : ""} — успешно${view.accountEmail ? ` (аккаунт: ${view.accountEmail})` : ""}.`
               : `Последняя проверка: ${view.errorSafe ?? "ошибка"}.`}
           </p>
         )}

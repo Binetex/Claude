@@ -1,5 +1,6 @@
 "use client";
 import { useActionState, useState } from "react";
+import { fmtStoreDateTime } from "@/lib/tz";
 import { Button } from "@/components/ui/button";
 import { ZoomableImage } from "@/components/ImageLightbox";
 import { resolveDeliveryAction, createNewDeliveryAttemptAction, refetchPodAction, confirmDeliveryActualCostAction } from "./deliveryActions";
@@ -96,6 +97,7 @@ export function BurqDeliveryPanel({
   attempts,
   actualCost,
   canEditActualCost,
+  storeTimeZone,
 }: {
   orderId: string;
   delivery: DeliveryPanelData;
@@ -104,6 +106,8 @@ export function BurqDeliveryPanel({
   attempts: DeliveryAttempt[];
   actualCost: { amount: number; confirmedAt: string | null; source: string | null };
   canEditActualCost: boolean;
+  /** Часы магазина: всё время здесь про Лос-Анджелес, а не про зону того, кто смотрит. */
+  storeTimeZone?: string | null;
 }) {
   const [state, action, pending] = useActionState(resolveDeliveryAction, null);
   const [retryState, retryAction, retryPending] = useActionState(createNewDeliveryAttemptAction, null);
@@ -117,7 +121,7 @@ export function BurqDeliveryPanel({
     <div className="space-y-3 border-t border-slate-100 pt-3 text-sm">
       <div className="text-xs font-semibold tracking-wide text-slate-400 uppercase">Доставка Burq</div>
 
-      <ActualCostBlock orderId={orderId} actualCost={actualCost} canEdit={canEditActualCost} burq={delivery} />
+      <ActualCostBlock orderId={orderId} actualCost={actualCost} canEdit={canEditActualCost} burq={delivery} storeTimeZone={storeTimeZone} />
 
       {!delivery && (
         <div className="text-slate-500">
@@ -250,9 +254,9 @@ export function BurqDeliveryPanel({
                   <span className={RETRYABLE.has(a.status) ? "text-red-600" : a.status === "DELIVERED" ? "text-emerald-600" : "text-slate-500"}>{STATUS_RU[a.status] ?? a.status}</span>
                 </div>
                 <div className="mt-0.5 text-[11px] text-slate-400">
-                  создана: {new Date(a.createdAt).toLocaleString()}
-                  {a.deliveredAt && ` · доставлена: ${new Date(a.deliveredAt).toLocaleString()}`}
-                  {a.cancelledAt && ` · отменена: ${new Date(a.cancelledAt).toLocaleString()}`}
+                  создана: {fmtStoreDateTime(a.createdAt, storeTimeZone, { withZone: false })}
+                  {a.deliveredAt && ` · доставлена: ${fmtStoreDateTime(a.deliveredAt, storeTimeZone, { withZone: false })}`}
+                  {a.cancelledAt && ` · отменена: ${fmtStoreDateTime(a.cancelledAt, storeTimeZone, { withZone: false })}`}
                 </div>
                 <div className="mt-0.5 text-[11px] break-words text-slate-500">
                   {a.finalCost != null && <span>стоимость: ${a.finalCost.toFixed(2)}{a.currency && a.currency.toUpperCase() !== "USD" ? ` ${a.currency.toUpperCase()}` : ""} · </span>}
@@ -286,11 +290,13 @@ function ActualCostBlock({
   actualCost,
   canEdit,
   burq,
+  storeTimeZone,
 }: {
   orderId: string;
   actualCost: { amount: number; confirmedAt: string | null; source: string | null };
   canEdit: boolean;
   burq: DeliveryPanelData | null;
+  storeTimeZone?: string | null;
 }) {
   const [editing, setEditing] = useState(false);
   const [state, action, pending] = useActionState(confirmDeliveryActualCostAction, null);
@@ -333,7 +339,7 @@ function ActualCostBlock({
       {sourceLabel && (
         <div className="text-[11px] text-slate-400">
           {sourceLabel}
-          {actualCost.source === "BURQ" && burq?.finalCostUpdatedAt && ` · обновлено ${new Date(burq.finalCostUpdatedAt).toLocaleString()}`}
+          {actualCost.source === "BURQ" && burq?.finalCostUpdatedAt && ` · обновлено ${fmtStoreDateTime(burq.finalCostUpdatedAt, storeTimeZone, { withZone: false })}`}
         </div>
       )}
 

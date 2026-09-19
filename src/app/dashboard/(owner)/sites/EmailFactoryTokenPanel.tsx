@@ -1,5 +1,6 @@
 "use client";
 import { useState, useTransition } from "react";
+import { fmtStoreDateTime } from "@/lib/tz";
 import { useRouter } from "next/navigation";
 import { Card, CardHeader, CardTitle, CardBody } from "@/components/ui/Card";
 import { Button } from "@/components/ui/button";
@@ -100,7 +101,7 @@ export function EmailFactoryTokenPanel({ view }: { view: EmailFactoryView }) {
           )}
         </div>
 
-        {view.savedAt && <p className="text-[11px] text-slate-400">Сохранён {new Date(view.savedAt).toLocaleString("ru-RU")}.</p>}
+        {view.savedAt && <p className="text-[11px] text-slate-400">Сохранён {fmtStoreDateTime(view.savedAt, null)}.</p>}
         {msg && <div className={msg.ok ? "text-xs text-emerald-700" : "text-xs text-red-600"}>{msg.text}</div>}
       </CardBody>
     </Card>
