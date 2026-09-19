@@ -195,6 +195,9 @@ describe("подсказка о заказе от незнакомого ном�
       expect(rules).toContain('"ARE YOU OPEN?" IS A QUESTION ABOUT COMING TO US');
       expect(rules).toContain("they never mean a door someone can walk through");
       expect(rules).toContain("Never confirm an address as a place to come");
+      // Тон: человек приехал по нашей же вине, отказ без извинения читается как «сам виноват».
+      expect(rules).toContain("WARMLY AND WITH AN APOLOGY");
+      expect(rules).toContain("Never answer with a bare refusal");
     }
   });
 
