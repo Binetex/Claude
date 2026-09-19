@@ -1,4 +1,5 @@
 import "server-only";
+import { fmtStoreTime } from "@/lib/tz";
 /**
  * Prisma-реализация DraftCreatePort: чтение контекста заказа и транзакционное сохранение
  * Burq draft (Delivery + DeliveryIntent + DeliveryStatusEvent). Оркестрация — в draftHandler.ts.
@@ -182,11 +183,16 @@ export function createPrismaDraftPort(prisma: PrismaClient): DraftCreatePort & C
       });
       if (input.count > 0) return;
 
+      // «проверено в 07:14» читает человек: время обязано быть по часам магазина, а не срезом
+      // ISO (это UTC, и в Лос-Анджелесе оно на 7 часов вперёд).
+      const site = await prisma.order.findUnique({ where: { id: input.orderId }, select: { site: { select: { timezone: true } } } });
+      const checkedLabel = fmtStoreTime(checkedAt, site?.site.timezone ?? null);
+
       await publishTelegramNotification(prisma, {
         type: "delivery.no_couriers",
         orderId: input.orderId,
         occurrenceKey: `${input.orderId}:precheck:${checkedAt.toISOString().slice(0, 10)}`,
-        context: { checkedAt: checkedAt.toISOString().slice(11, 16) },
+        context: { checkedAt: checkedLabel },
       });
       const order = await prisma.order.findUnique({
         where: { id: input.orderId },
@@ -210,12 +216,15 @@ export function createPrismaDraftPort(prisma: PrismaClient): DraftCreatePort & C
       });
       if (input.count > 0) return;
 
+      const attemptSite = await prisma.order.findUnique({ where: { id: input.orderId }, select: { site: { select: { timezone: true } } } });
+      const attemptCheckedLabel = fmtStoreTime(checkedAt, attemptSite?.site.timezone ?? null);
+
       await publishTelegramNotification(prisma, {
         type: "delivery.no_couriers",
         orderId: input.orderId,
         // Попытка в ключе: повторная доставка — это новая проверка и новый повод сказать.
         occurrenceKey: `${input.orderId}:a${input.attemptNumber}`,
-        context: { checkedAt: checkedAt.toISOString().slice(11, 16) },
+        context: { checkedAt: attemptCheckedLabel },
       });
       // Флористу — то же событие его личным ботом: букет остаётся у него до новой попытки.
       // Черновик может создаваться до назначения флориста — тогда сообщать пока некому.

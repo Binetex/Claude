@@ -2,6 +2,7 @@ import "server-only";
 import { fmtStoreTime } from "@/lib/tz";
 import Link from "next/link";
 import { AlertTriangle } from "lucide-react";
+import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
 import { fmtDate } from "@/lib/format";
 
@@ -19,7 +20,35 @@ import { fmtDate } from "@/lib/format";
  * Проверка идёт заранее — как только у заказа появляются флорист и точка забора, — поэтому в
  * тексте прямо сказано, что к моменту доставки курьеры могут появиться. Без этой оговорки
  * баннер читается как приговор и быстро приучает себя игнорировать.
+ *
+ * И по той же причине баннер молчит, как только по заказу создан черновик доставки: человек
+ * уже отреагировал, а дальше состояние описывает сама доставка.
  */
+/**
+ * Условие «по этому заказу курьеров не нашлось» — вынесено отдельно, потому что его легко
+ * сломать молча: оно не про то, что видно на экране, а про то, какой из двух снимков проверки
+ * сейчас описывает правду.
+ *
+ *  · Черновика ещё нет — правду говорит предварительная проверка на заказе.
+ *  · Черновик создан — предварительная проверка устарела: человек уже отреагировал, а состояние
+ *    описывает сама доставка. Иначе заказ висит в баннере вечно, даже когда флорист пересоздал
+ *    черновик и курьер нашёлся.
+ *  · Заказы, проверенные прежним способом (по попытке доставки), остаются видимыми.
+ *
+ * `couriersAvailable = NULL` («не проверяли») не подходит ни под одно условие: молчание
+ * проверки — не повод поднимать тревогу.
+ */
+export function noCouriersWhere(floristId?: string): Prisma.OrderWhereInput {
+  return {
+    ...(floristId ? { currentFloristId: floristId } : {}),
+    orderStatus: { notIn: ["DELIVERED", "CANCELLED"] },
+    OR: [
+      { couriersAvailable: 0, deliveries: { none: { isCurrentAttempt: true } } },
+      { deliveries: { some: { isCurrentAttempt: true, couriersAvailable: 0 } } },
+    ],
+  };
+}
+
 export async function NoCouriersBanner({
   floristId,
   hrefBase,
@@ -30,16 +59,7 @@ export async function NoCouriersBanner({
   hrefBase: string;
 }) {
   const orders = await prisma.order.findMany({
-    where: {
-      ...(floristId ? { currentFloristId: floristId } : {}),
-      orderStatus: { notIn: ["DELIVERED", "CANCELLED"] },
-      // Проверка переехала с Delivery на Order. Старое условие оставлено ради заказов, которые
-      // уже в работе и проверялись прежним способом: без него они молча потеряли бы предупреждение.
-      OR: [
-        { couriersAvailable: 0 },
-        { deliveries: { some: { isCurrentAttempt: true, couriersAvailable: 0 } } },
-      ],
-    },
+    where: noCouriersWhere(floristId),
     select: {
       id: true,
       orderNumber: true,
@@ -95,7 +115,7 @@ export async function NoCouriersBanner({
             })}
           </ul>
           <p className="mt-2 text-xs text-amber-700">
-            Проверка сделана при создании черновика. Ближе к доставке курьеры могут появиться —
+            Проверка сделана при назначении флориста. Ближе к доставке курьеры могут появиться —
             но если заказ срочный, стоит решить заранее.
           </p>
         </div>

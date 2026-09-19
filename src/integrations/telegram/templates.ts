@@ -307,7 +307,7 @@ export function renderOwnerNoCouriers(o: OrderSnapshot, checkedAtLabel: string |
     `<b>${esc(o.orderNumber)}</b> · ${esc(o.siteName)}\n\n` +
     `Что случилось: служба доставки не нашла ни одного курьера на этот адрес` +
     (checkedAtLabel ? ` (проверено в ${esc(checkedAtLabel)})` : "") +
-    `. Проверка была при создании черновика — ближе к доставке курьеры могут появиться.\n\n` +
+    `. Проверка была при назначении флориста, ближе к доставке курьеры могут появиться.\n\n` +
     line("Получатель", o.recipientName) +
     line("Адрес", addressText(o)) +
     line("Доставка", [fmtDate(o.deliveryDate), fmtTimeWindow(o.deliveryWindow)].filter(Boolean).join(", ")) +
