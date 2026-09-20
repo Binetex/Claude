@@ -418,7 +418,10 @@ export function stripDashes(text: string): string {
  * Телефон гасим ЛЮБОЙ: переписка и так идёт по SMS, свой номер клиенту слать незачем, а ответ
  * на просьбу перезвонить («someone will call you back») номера не содержит.
  */
-const CUSTOM_OFFER = /\bcustom\b|\bbespoke\b|\bmade[- ]to[- ]order\b|\bbuilt to order\b/i;
+// «made to order» само по себе НЕ обещание: это описание того, как мы работаем («every bouquet
+// is made to order and goes out with a courier») — формулировка из наших же баз знаний. Ловим
+// только ПРЕДЛОЖЕНИЕ сделать такой букет клиенту.
+const CUSTOM_OFFER = /\bcustom\b|\bbespoke\b|\b(can|could|able to|happy to|glad to|we'?ll|i'?ll)\b[^.?!]{0,40}\b(made|built)[- ]to[- ]order\b/i;
 const PHONE_ORDER = /\b(order|pay|purchase|book)\w*\b[^.?!]{0,40}\b(by|over|via|on) (the )?phone\b|\b(call|phone|ring) (us|the shop)\b[^.?!]{0,30}\b(to|and) (order|place|pay|buy)\b/i;
 const PHONE_NUMBER = /(\+?1[\s.-]?)?\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}/;
 
@@ -445,7 +448,9 @@ const NEGATED = /\b(don'?t|do not|doesn'?t|does not|didn'?t|can'?t|cannot|can no
  * the end of our window» — то есть подтвердил 14:00, хотя правило это запрещает. Промпт модель
  * обошла, переклассифицировав фразу.
  */
-const AGREEMENT = /\b(works|work for|fits|fine|perfect|great|no problem|sure|absolutely|we'?ll be there|can do|doable|that'?s good)\b/i;
+// `sure` без оговорки ловило «I'll make sure your bouquet is packed» — заботу, а не согласие
+// со временем. Отсекаем именно эту связку, остальные значения слова остаются.
+const AGREEMENT = /\b(works|work for|fits|fine|perfect|great|no problem|(?<!\bmake )(?<!\bmakes )(?<!\bmaking )sure|absolutely|we'?ll be there|can do|doable|that'?s good)\b/i;
 const TIME_TOKEN = /\b(1[0-2]|[1-9])(?::([0-5]\d))?\s*(am|pm)\b|\b(0?\d|1\d|2[0-3]):([0-5]\d)\b|\bnoon\b|\bmorning\b/i;
 
 /** Час из найденной метки в 24-часовом виде, или null. */
@@ -472,13 +477,27 @@ const WINDOW_RANGE = /\b\d{1,2}(?::\d{2})?\s*(?:am|pm)?\s*(?:to|through|-|–|�
  * 10 AM to 2 PM, so that fits»), поэтому смотрим сообщение целиком — но сначала убираем окна,
  * чтобы назвать окно заказа было по-прежнему можно.
  */
+/**
+ * Фразы, где ранний час НЕ является обещанием доставки и потому в счёт не идёт:
+ *  - порог приёма заказа: «same day delivery if you order before 12 noon» — это про оформление;
+ *  - отказ: «Monday at 7 AM is too early for us to lock» — ровно то, что ассистент и должен
+ *    говорить, и гасить такой ответ значит оставить клиента вообще без ответа.
+ */
+const ORDER_CUTOFF = /\b(order|place|book|pay)\w*\b[^.?!]{0,25}\b(before|by|until)\b|\bsame[- ]day\b|\bcut[- ]?off\b/i;
+const TOO_EARLY = /\btoo early\b|\bcan'?t (lock|promise|make|guarantee)\b|\bnot (able|possible)\b/i;
+
 export function confirmsEarlyTime(replyEn: string): boolean {
   const text = replyEn.replace(/[\u2018\u2019\u02BC]/g, "'").replace(WINDOW_RANGE, " ");
+  // Согласие ищем во всём тексте (оно часто в соседней фразе с часом), а вот сам час берём
+  // только из фраз, где он действительно про обещанное время доставки.
   if (!AGREEMENT.test(text)) return false;
-  const re = new RegExp(TIME_TOKEN.source, "gi");
-  for (const m of text.matchAll(re)) {
-    const h = hourOf(m);
-    if (h !== null && h < 16) return true;
+  for (const clause of text.split(/[,;.!?]+/)) {
+    if (NEGATED.test(clause) || TOO_EARLY.test(clause) || ORDER_CUTOFF.test(clause)) continue;
+    const re = new RegExp(TIME_TOKEN.source, "gi");
+    for (const m of clause.matchAll(re)) {
+      const h = hourOf(m);
+      if (h !== null && h < 16) return true;
+    }
   }
   return false;
 }

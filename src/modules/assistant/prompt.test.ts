@@ -504,3 +504,58 @@ describe("согласие с ранним часом не уходит клие
     expect(r.readyTime).toBe("2 pm");
   });
 });
+
+/**
+ * Предохранители против обещаний ловили правильные ответы. Все тексты ниже — боевые, из разборов
+ * 19-20.09.2026: каждый был написан моделью верно и каждый мы выбросили целиком, оставив клиента
+ * без ответа вовсе.
+ */
+describe("предохранители не глушат правильные ответы", () => {
+  const passes = (text: string) => parseReply(JSON.stringify({ reply_en: text, intent: "other", important: false, needs_human: false }));
+
+  it("«made to order» — это описание работы, а не обещание кастомного букета", () => {
+    const r = passes(
+      "I'm so sorry about that, our studios are working warehouses with no storefront, every bouquet is made to order and goes out by courier. Order at paradiseflowersart.com and use code LOVE 2026 for free delivery 🌸"
+    );
+    expect(r.replyEn).not.toBe("");
+    expect(r.needsHuman).toBe(false);
+  });
+
+  it("«I'm outside the door» — ответ про склад доходит до клиента", () => {
+    const r = passes(
+      "I'm so sorry, there's no storefront to buzz into. We're a working warehouse studio, so every bouquet is made to order and goes out with a courier."
+    );
+    expect(r.replyEn).not.toBe("");
+  });
+
+  it("«make sure» — это забота, а не согласие с ранним часом", () => {
+    const r = passes("That makes me so happy, thank you 🌸 Sunday evening it is, and I'll make sure your bouquet is packed beautifully for Monday morning.");
+    expect(r.replyEn).not.toBe("");
+  });
+
+  it("порог приёма заказа не считается обещанием времени доставки", () => {
+    const r = passes("Yes, same day delivery works if you order before 12 noon Pacific, and the window closest to before 6 PM is 3 to 7 PM, though we can't promise an exact minute.");
+    expect(r.replyEn).not.toBe("");
+  });
+
+  it("отказ от раннего часа не глушится: это и есть нужный ответ", () => {
+    const r = passes("Sunday evening we can do, inside our 3 to 7 PM or 6 to 9 PM windows. Monday at 7 AM is too early for us to lock, so until what time could you receive it?");
+    expect(r.replyEn).not.toBe("");
+  });
+
+  it("но настоящее согласие с ранним часом по-прежнему не уходит клиенту", () => {
+    const r = passes("Yes, 2 PM works perfectly for your delivery today.");
+    expect(r.replyEn).toBe("");
+    expect(r.needsHuman).toBe(true);
+  });
+
+  it("и настоящее предложение кастомного букета тоже не уходит", () => {
+    const r = passes("We can have one made to order just for you, any shades you like.");
+    expect(r.replyEn).toBe("");
+  });
+
+  it("свой телефон в SMS не уходит ни при каких условиях", () => {
+    const r = passes("Just call us at +1 (657) 427-7770 and we'll sort it out.");
+    expect(r.replyEn).toBe("");
+  });
+});
