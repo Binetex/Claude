@@ -9,6 +9,7 @@ import { sendOrderEmailReplyAction } from "./emailActions";
 import { CommunicationTimeline, type TimelineItem } from "@/components/orders/CommunicationTimeline";
 import { buildCommTabs, commGroupOf, type CommTab } from "@/integrations/quo/communicationsView";
 import { RecipientMuteToggle } from "./RecipientMuteToggle";
+import { MessageTemplatePicker, type TemplateChoice } from "@/components/orders/MessageTemplatePicker";
 
 const SMS_MAX = 1600;
 const EMAIL_MAX = 10_000;
@@ -50,6 +51,7 @@ export function OrderCommunications({
   emails,
   storeTimeZone,
   unread,
+  templates,
   recipientMuted,
   canEditRecipientMute,
   initialSide,
@@ -64,6 +66,8 @@ export function OrderCommunications({
   emails: EmailItem[];
   storeTimeZone?: string | null;
   unread?: { customer: number; recipient: number };
+  /** Заготовки ответов, уже с подставленными данными заказа. */
+  templates?: TemplateChoice[];
   /** «Сюрприз: получателю не пишем» — состояние выключателя на заказе. */
   recipientMuted?: boolean;
   /**
@@ -212,6 +216,8 @@ export function OrderCommunications({
               {isEmail ? emailTarget || "—" : active.phone || "—"}
             </span>
           </div>
+          {/* Заготовки — НАД полем: их выбирают до того, как начали печатать, а не после. */}
+          <MessageTemplatePicker templates={templates ?? []} onPick={(t) => setText(t)} />
           <textarea
             value={text} onChange={(e) => setText(e.target.value)} rows={3}
             placeholder={isEmail ? "Текст письма…" : "Текст сообщения…"} disabled={pending}

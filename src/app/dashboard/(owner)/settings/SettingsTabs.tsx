@@ -18,6 +18,7 @@ const TABS = [
   { href: "/dashboard/settings/users", label: "Пользователи" },
   { href: "/dashboard/settings/telegram", label: "Telegram" },
   { href: "/dashboard/settings/ai", label: "Модель ассистента" },
+  { href: "/dashboard/settings/templates", label: "Заготовки ответов" },
   { href: "/dashboard/settings/print", label: "Настройки печати" },
   { href: "/dashboard/burq", label: "Доставка (Burq)" },
 ] as const;

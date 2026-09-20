@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import { loadTemplatesForOrder } from "@/modules/messaging/templates";
 import { localDateStr } from "@/lib/tz";
 import { getForOwner } from "@/modules/orders/queries";
 import { prisma } from "@/lib/db";
@@ -114,6 +115,8 @@ export default async function OwnerOrderPage({
   let storeTimeZone: string | null = null;
   // Переписка по email — своя таблица и своя вкладка; сбой её загрузки не должен ронять карточку.
   const emailPanel = await loadOrderEmailPanel(prisma, id).catch(() => ({ emails: [], customerEmail: null }));
+  // Заготовки ответов: общие на все магазины, переменные заказа подставлены заранее.
+  const messageTemplates = await loadTemplatesForOrder(prisma, id).catch(() => []);
 
   let commUnread = { customer: 0, recipient: 0 };
   try {
@@ -320,7 +323,7 @@ export default async function OwnerOrderPage({
           />
 
           {/* Общение (SMS/звонки) через QUO */}
-          <OrderCommunications
+          <OrderCommunications templates={messageTemplates}
             orderId={order.id}
             customerPhone={order.senderPhone}
             recipientPhone={order.recipientPhone}

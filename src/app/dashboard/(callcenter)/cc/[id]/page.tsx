@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import { loadTemplatesForOrder } from "@/modules/messaging/templates";
 import { localDateStr } from "@/lib/tz";
 import { getForCallCenter } from "@/modules/orders/queries";
 import { prisma } from "@/lib/db";
@@ -54,6 +55,8 @@ export default async function CallCenterOrderPage({
   if (!order) notFound();
 
   const emailPanel = await loadOrderEmailPanel(prisma, id).catch(() => ({ emails: [], customerEmail: null }));
+  // Заготовки ответов: общие на все магазины, переменные заказа подставлены заранее.
+  const messageTemplates = await loadTemplatesForOrder(prisma, id).catch(() => []);
   const comm = await loadOrderCommunicationsCard(prisma, id).catch(() => ({ communications: [], storeHasQuoNumber: false, storeTimeZone: undefined, unread: { customer: 0, recipient: 0 } }));
 
   return (
@@ -154,7 +157,7 @@ export default async function CallCenterOrderPage({
             collapsible
           />
 
-          <OrderCommunications
+          <OrderCommunications templates={messageTemplates}
             orderId={order.id}
             customerPhone={order.senderPhone}
             recipientPhone={order.recipientPhone}
