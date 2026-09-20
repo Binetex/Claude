@@ -1,5 +1,5 @@
 "use server";
-import { revalidatePath } from "next/cache";
+import { revalidateOrder } from "@/modules/orders/revalidate";
 import { requireUser } from "@/lib/rbac";
 import { prisma } from "@/lib/db";
 import { resolveDeliveryManually, type ManualDecision } from "@/integrations/delivery/burq/manualResolution";
@@ -32,7 +32,7 @@ export async function resolveDeliveryAction(_prev: FormState, formData: FormData
   const res = await resolveDeliveryManually(prisma, { deliveryId, decision, userId: user.id });
   if (res.outcome === "delivery_not_found") return { error: "Доставка не найдена." };
 
-  if (orderId) revalidatePath(`/dashboard/orders/${orderId}`);
+  if (orderId) revalidateOrder(orderId);
   const labels: Record<ManualDecision, string> = {
     mark_delivered: "Отмечено доставленным",
     mark_cancelled: "Отмечено отменённым",
@@ -53,7 +53,7 @@ export async function createNewDeliveryAttemptAction(_prev: FormState, formData:
   if (!orderId) return { error: "Не указан заказ." };
 
   const res = await createRetryDeliveryAttempt(prisma, orderId);
-  revalidatePath(`/dashboard/orders/${orderId}`);
+  revalidateOrder(orderId);
   switch (res.outcome) {
     case "created":
       return { ok: true, message: `Создана новая доставка Burq (попытка #${res.attemptNumber}). Оформите её в Burq.` };
@@ -111,12 +111,11 @@ export async function setOrderPickupLocationAction(_prev: FormState, formData: F
     outcome = await onOrderDeliveryChange(prisma, orderId, "PICKUP_CHANGED");
   } catch (err) {
     console.error(`[burq] pickup change recreate failed for order ${orderId}:`, err instanceof Error ? err.message : String(err));
-    revalidatePath(`/dashboard/orders/${orderId}`);
+    revalidateOrder(orderId);
     return { error: "Точка сохранена, но пересоздать доставку в Burq не удалось. Проверьте панель доставки." };
   }
 
-  revalidatePath(`/dashboard/orders/${orderId}`);
-  revalidatePath(`/dashboard/f/${orderId}`);
+  revalidateOrder(orderId);
 
   if (outcome?.outcome === "flagged_problem") {
     return { error: "Доставка уже оформлена в Burq — точка сохранена, но доставка не пересоздана. Решите вручную." };
@@ -141,7 +140,7 @@ export async function refetchPodAction(_prev: FormState, formData: FormData): Pr
   if (!deliveryId) return { error: "Не указана доставка." };
   try {
     const res = await refetchPodForDelivery(prisma, deliveryId);
-    if (orderId) revalidatePath(`/dashboard/orders/${orderId}`);
+    if (orderId) revalidateOrder(orderId);
     switch (res.outcome) {
       case "updated":
         return { ok: true, message: `Обновлено фото подтверждения: ${res.count}.` };
@@ -192,7 +191,7 @@ export async function linkBurqOrderAction(_prev: LinkFormState, formData: FormDa
     console.error(`[burq] link order ${burqOrderId} to ${orderId} failed:`, err instanceof Error ? err.message : String(err));
     return { error: burqErrorMessage(err) };
   }
-  revalidatePath(`/dashboard/orders/${orderId}`);
+  revalidateOrder(orderId);
   switch (res.outcome) {
     case "linked": {
       const label = STATUS_LABEL[res.status] ?? res.status;
@@ -248,6 +247,6 @@ export async function confirmDeliveryActualCostAction(_prev: FormState, formData
     return { error: message };
   }
 
-  revalidatePath(`/dashboard/orders/${orderId}`);
+  revalidateOrder(orderId);
   return { ok: true, message: amountCents === 0 ? "Отмечено: доставка бесплатная." : "Стоимость доставки сохранена." };
 }

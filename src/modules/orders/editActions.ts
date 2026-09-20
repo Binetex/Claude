@@ -1,5 +1,5 @@
 "use server";
-import { revalidatePath } from "next/cache";
+import { revalidateOrder } from "./revalidate";
 import { requireOrderEditor } from "@/lib/rbac";
 import { prisma } from "@/lib/db";
 import { syncOrderToShopify } from "@/integrations/shopify/pushUpdate";
@@ -52,15 +52,7 @@ async function runPostSave(block: OrderBlock, orderId: string, changed: Record<s
   }
 }
 
-function revalidateOrder(orderId: string) {
-  // Один заказ виден на трёх дашбордах — обновляем все, чтобы не было рассинхрона.
-  revalidatePath(`/dashboard/orders/${orderId}`);
-  revalidatePath("/dashboard/orders");
-  revalidatePath(`/dashboard/cc/${orderId}`);
-  revalidatePath("/dashboard/cc");
-  revalidatePath(`/dashboard/f/${orderId}`);
-  revalidatePath("/dashboard/f");
-}
+// Обновление всех трёх дашбордов — в modules/orders/revalidate.ts.
 
 export async function saveOrderBlock(
   orderId: string,

@@ -157,6 +157,62 @@ function stop(p: { orderId?: string; automationId?: string }, reason: string): v
  * ответил, владелец убрал ссылку либо выключил правило (спрашивавшее или следующее), исчерпан
  * потолок сообщений цепочки на заказ.
  */
+/**
+ * Сообщение получателю НЕ ДОШЛО — запускаем следующее правило цепочки немедленно.
+ *
+ * 20.09.2026, заказ OHARA-1073: у получателя немецкий номер, QUO отказался слать (403), правило
+ * «Апартаменты» упало в FAILED — и на этом всё кончилось. Лесенка «не ответил → переспросить →
+ * сказать заказчику» не тронулась, потому что ожидание ответа ставится ТОЛЬКО после фактической
+ * отправки. Заказчику в итоге написали руками через пять часов.
+ *
+ * Ждать здесь нечего по построению: вопрос человеку не задали, ответа не будет никогда. Поэтому
+ * шаг цепочки публикуется сразу, теми же проверками, что и после молчания, и тем же ключом
+ * случая — если ожидание всё же успели поставить, второго сообщения не появится.
+ */
+export async function escalateUndeliveredToChain(
+  prisma: PrismaClient,
+  input: { orderId: string; automationId: string; jobId: string; reason: string }
+): Promise<void> {
+  const order = await prisma.order.findUnique({
+    where: { id: input.orderId },
+    select: { id: true, siteId: true, orderStatus: true, deliveryStatus: true },
+  });
+  if (!order) return;
+  if (TERMINAL_ORDER_STATUSES.includes(order.orderStatus) || order.deliveryStatus === "DELIVERED") return;
+
+  const sender = await prisma.automation.findUnique({
+    where: { id: input.automationId },
+    select: { active: true, deletedAt: true, noReplyNextAutomationId: true },
+  });
+  if (!sender || sender.deletedAt || !sender.active) return;
+  const nextId = sender.noReplyNextAutomationId;
+  if (!nextId) return; // у правила нет продолжения — эскалировать некуда
+
+  // Тот же потолок, что у обычного шага: он защищает от кольца в настройке.
+  const steps = await prisma.automationJob.findMany({
+    where: { orderId: order.id, occurrenceKey: { startsWith: CHAIN_OCCURRENCE_PREFIX } },
+    distinct: ["occurrenceKey"],
+    select: { occurrenceKey: true },
+  });
+  if (steps.length >= MAX_CHAIN_MESSAGES) return;
+
+  const next = await prisma.automation.findUnique({
+    where: { id: nextId },
+    select: { id: true, active: true, deletedAt: true, sites: { where: { siteId: order.siteId }, select: { siteId: true } } },
+  });
+  if (!next || next.deletedAt || !next.active || next.sites.length === 0) return;
+
+  console.info(`[sms] цепочка ответа: заказ ${order.id}, правило ${input.automationId} — сообщение не дошло (${input.reason}), запускаю следующее правило сразу`);
+  await publishAutomationTrigger(new PrismaOutboxRepository(prisma), {
+    orderId: order.id,
+    siteId: order.siteId,
+    triggerType: CHAINED_TRIGGER,
+    // Ключ ТОТ ЖЕ, что поставило бы ожидание ответа: два пути к одному шагу дают одно сообщение.
+    occurrenceKey: chainOccurrenceKey({ nextAutomationId: next.id, orderId: order.id, senderCase: input.jobId }),
+    automationId: next.id,
+  });
+}
+
 export function buildReplyWaitHandler(prisma: PrismaClient) {
   return async (record: { payload: unknown }): Promise<void> => {
     const p = record.payload as ReplyWaitPayload;

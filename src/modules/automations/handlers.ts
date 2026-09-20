@@ -49,7 +49,7 @@ import { logExecution } from "./executionLog";
 import { startFlowsForTrigger, type FlowForStart } from "./flows/engine";
 import type { ChannelSender } from "@/modules/messaging/channels/types";
 import { SMS_UNAVAILABLE_CODES } from "@/modules/messaging/channels/sms";
-import { scheduleReplyWait } from "./replyWait";
+import { scheduleReplyWait, escalateUndeliveredToChain } from "./replyWait";
 import { isChainOccurrence, shouldWaitForReply } from "./chain";
 import { TERMINAL_ORDER_STATUSES } from "@/lib/statuses";
 import { isP2002 } from "@/lib/prismaErrors";
@@ -573,6 +573,9 @@ export function buildAutomationSendHandler(prisma: PrismaClient, deps: Automatio
     if (result.skip) {
       if (SMS_UNAVAILABLE_CODES.has(result.code)) {
         await sendFallbackEmail(prisma, repo, { job, automation, order, reason: result.code });
+        // Вопрос человеку не задали — ждать ответа не от кого. Если у правила есть продолжение
+        // («получатель молчит → спросить заказчика»), запускаем его сразу, не выжидая паузу.
+        await escalateUndeliveredToChain(prisma, { orderId: order.id, automationId: automation.id, jobId: job.id, reason: result.code }).catch(() => null);
       }
       await skip(result.code);
       return;
@@ -592,6 +595,11 @@ export function buildAutomationSendHandler(prisma: PrismaClient, deps: Automatio
 
     await prisma.automationJob.update({ where: { id: job.id }, data: { status: "FAILED", failedAt: new Date(), attempts: { increment: 1 }, lastErrorSafe: result.code } });
     await logExecution(prisma, { jobId: job.id, automationId: automation.id, orderId: order.id, stage: "failed", detailSafe: result.code });
+
+    // Сообщение получателю окончательно не ушло (чужой номер, отказ провайдера). Лесенка
+    // «получатель молчит → спросить заказчика» раньше не трогалась вовсе: ожидание ответа
+    // ставится только после успешной отправки, и заказчику приходилось писать руками.
+    await escalateUndeliveredToChain(prisma, { orderId: order.id, automationId: automation.id, jobId: job.id, reason: result.code }).catch(() => null);
 
     // Сообщение так и не ушло — будим правило, погашенное дедупом по этому же номеру.
     await reviveDuplicateSibling(prisma, repo, job);
