@@ -4,6 +4,7 @@ import { requireUser } from "@/lib/rbac";
 import { prisma } from "@/lib/db";
 import { resolveDeliveryManually, type ManualDecision } from "@/integrations/delivery/burq/manualResolution";
 import { createRetryDeliveryAttempt } from "@/integrations/delivery/burq/retryService";
+import { recreateDelivery } from "@/integrations/delivery/burq/recreateService";
 import { refetchPodForDelivery } from "@/integrations/delivery/burq/podService";
 import { linkBurqOrder, extractBurqOrderId } from "@/integrations/delivery/burq/linkService";
 import { makeCompletedPublisher } from "@/integrations/delivery/burq/webhookHandler";
@@ -12,6 +13,9 @@ import { fixDeliveryActualCost, FinanceFixError } from "@/modules/finance/fix";
 import { burqErrorMessage } from "@/integrations/delivery/burq/errorMessage";
 
 type FormState = { error?: string; ok?: boolean; message?: string } | null;
+/** У пересоздания есть третий исход: «доставка живая, подтвердите» — отсюда `needsConfirm`. */
+type RecreateFormState = { error?: string; ok?: boolean; message?: string; needsConfirm?: boolean; liveStatus?: string } | null;
+
 type LinkFormState = { error?: string; ok?: boolean; message?: string; needsConfirm?: boolean } | null;
 
 const DECISIONS: ManualDecision[] = ["mark_delivered", "mark_cancelled", "record_refund", "leave_problem"];
@@ -64,6 +68,57 @@ export async function createNewDeliveryAttemptAction(_prev: FormState, formData:
     case "not_retryable":
     default:
       return { error: "Повторная доставка недоступна для этого заказа." };
+  }
+}
+
+/**
+ * Пересоздать доставку Burq. Доступно ЛЮБОМУ аутентифицированному сотруднику (requireUser):
+ * чаще всего это и замечает флорист — курьер не приехал за букетом, а доставка числится живой.
+ *
+ * Два исхода намеренно разные, и второй требует подтверждения (`force`): пока доставка в Burq
+ * жива, DELETE по их API запрещён, поэтому новая встаёт РЯДОМ со старой. Не отменив старую в
+ * кабинете Burq, магазин получит двух курьеров и заплатит дважды.
+ */
+export async function recreateDeliveryAction(_prev: RecreateFormState, formData: FormData): Promise<RecreateFormState> {
+  await requireUser();
+  const orderId = String(formData.get("orderId") ?? "");
+  if (!orderId) return { error: "Не указан заказ." };
+  const force = formData.get("force") === "1";
+
+  let res: Awaited<ReturnType<typeof recreateDelivery>>;
+  try {
+    res = await recreateDelivery(prisma, orderId, { force });
+  } catch (err) {
+    // Burq недоступен или ответил ошибкой: сказать словами, а не «что-то пошло не так».
+    return { error: burqErrorMessage(err) };
+  }
+  revalidateOrder(orderId);
+
+  switch (res.outcome) {
+    case "recreated":
+      return { ok: true, message: "Старая доставка закрыта, создана новая. Оформите её в Burq." };
+    case "recreated_cancel_in_burq":
+      return {
+        ok: true,
+        message: "Новая доставка создана. ОТМЕНИТЕ старую в кабинете Burq — по API живую доставку отменить нельзя, иначе приедут два курьера.",
+      };
+    case "needs_confirmation":
+      return { needsConfirm: true, liveStatus: res.liveStatus };
+    case "waiting":
+      return {
+        error:
+          res.reason === "no_florist" ? "Не назначен флорист — новую доставку создать не из чего."
+          : res.reason === "pickup_invalid" ? "У флориста не настроена точка забора."
+          : "Новую доставку создать не удалось — проверьте флориста и точку забора.",
+      };
+    case "not_possible":
+    default:
+      return {
+        error:
+          res.reason === "no_current_delivery" ? "По этому заказу нет активной доставки Burq — создайте её обычным путём."
+          : res.reason === "order_terminal" ? "Заказ уже закрыт."
+          : "Пересоздать доставку для этого заказа нельзя.",
+      };
   }
 }
 

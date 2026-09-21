@@ -3,7 +3,7 @@ import { useActionState, useState } from "react";
 import { fmtStoreDateTime } from "@/lib/tz";
 import { Button } from "@/components/ui/button";
 import { ZoomableImage } from "@/components/ImageLightbox";
-import { resolveDeliveryAction, createNewDeliveryAttemptAction, refetchPodAction, confirmDeliveryActualCostAction } from "./deliveryActions";
+import { resolveDeliveryAction, createNewDeliveryAttemptAction, refetchPodAction, confirmDeliveryActualCostAction, recreateDeliveryAction } from "./deliveryActions";
 import { BurqLinkForm } from "./BurqLinkForm";
 import { deliveryCostKnown } from "@/lib/financeMissing";
 
@@ -112,6 +112,7 @@ export function BurqDeliveryPanel({
   const [state, action, pending] = useActionState(resolveDeliveryAction, null);
   const [retryState, retryAction, retryPending] = useActionState(createNewDeliveryAttemptAction, null);
   const [podState, podAction, podPending] = useActionState(refetchPodAction, null);
+  const [recreateState, recreateAction, recreatePending] = useActionState(recreateDeliveryAction, null);
   const isProblem = delivery?.status === "PROBLEM";
   const isDelivered = delivery?.status === "DELIVERED";
   const isCancelledAttempt = !!delivery && RETRYABLE.has(delivery.status);
@@ -133,6 +134,20 @@ export function BurqDeliveryPanel({
             </div>
           )}
         </div>
+      )}
+
+      {delivery && !isCancelledAttempt && !TERMINAL_ORDER.has(orderStatus) && (
+        /* Пересоздание ЖИВОЙ доставки. У отменённой своя кнопка ниже, в красном блоке, и двух
+           кнопок об одном рядом быть не должно.
+           Burq отменяет доставки у себя, курьер уезжает не забрав букет, заказ виснет в
+           назначении — и всё это время доставка у нас числится активной, а кнопки нет.
+           Нажимает чаще флорист: он первым видит, что за букетом никто не приехал. */
+        <RecreateBlock
+          orderId={orderId}
+          state={recreateState}
+          action={recreateAction}
+          pending={recreatePending}
+        />
       )}
 
       {delivery && (
@@ -373,6 +388,55 @@ function ActualCostBlock({
 
       {state?.error && <div className="mt-1 text-xs text-red-600">{state.error}</div>}
       {state?.ok && <div className="mt-1 text-xs text-emerald-700">{state.message}</div>}
+    </div>
+  );
+}
+
+/**
+ * Кнопка «Пересоздать доставку» и её подтверждение.
+ *
+ * Подтверждение спрашивается ТОЛЬКО когда доставка в Burq жива: тогда новая встаёт рядом со
+ * старой, и не отменив старую в кабинете Burq магазин платит за двух курьеров. Если черновик
+ * ещё не инициирован или доставка уже мертва — вопроса нет, всё делается одним нажатием.
+ */
+function RecreateBlock({
+  orderId,
+  state,
+  action,
+  pending,
+}: {
+  orderId: string;
+  state: { error?: string; ok?: boolean; message?: string; needsConfirm?: boolean; liveStatus?: string } | null;
+  action: (formData: FormData) => void;
+  pending: boolean;
+}) {
+  return (
+    <div className="rounded-md border border-slate-200 bg-slate-50 p-2.5">
+      {state?.needsConfirm ? (
+        <>
+          <p className="text-xs text-amber-800">
+            Доставка в Burq ещё живая{state.liveStatus ? ` (${STATUS_RU[state.liveStatus] ?? state.liveStatus})` : ""}. Отменить её по API нельзя —
+            новая встанет рядом со старой, и <b>старую придётся отменить в кабинете Burq вручную</b>, иначе приедут два курьера.
+          </p>
+          <form action={action} className="mt-2">
+            <input type="hidden" name="orderId" value={orderId} />
+            <input type="hidden" name="force" value="1" />
+            <Button type="submit" size="sm" variant="destructive" disabled={pending}>
+              {pending ? "Создание…" : "Всё равно создать новую"}
+            </Button>
+          </form>
+        </>
+      ) : (
+        <form action={action} className="flex flex-wrap items-center gap-2">
+          <input type="hidden" name="orderId" value={orderId} />
+          <Button type="submit" size="sm" variant="outline" disabled={pending}>
+            {pending ? "Пересоздаю…" : "Пересоздать доставку"}
+          </Button>
+          <span className="text-[11px] text-slate-500">Курьер не приехал или Burq отменил доставку</span>
+        </form>
+      )}
+      {state?.error && <p className="mt-1.5 text-xs text-red-600">{state.error}</p>}
+      {state?.ok && <p className="mt-1.5 text-xs text-emerald-700">{state.message}</p>}
     </div>
   );
 }
