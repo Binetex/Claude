@@ -26,6 +26,8 @@ export type CurrentUser = {
   id: string;
   name: string;
   email: string;
+  /** Ссылка на фото сотрудника или null — тогда в шапке инициалы. */
+  avatarUrl: string | null;
   role: Role;
   active: boolean;
   floristId: string | null;
@@ -81,6 +83,7 @@ export async function getCurrentUser(): Promise<CurrentUser | null> {
     id: user.id,
     name: user.name,
     email: user.email,
+    avatarUrl: user.avatarUrl,
     role: user.role,
     active: user.active,
     floristId: user.florist?.id ?? null,

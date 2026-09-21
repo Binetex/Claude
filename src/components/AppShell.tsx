@@ -1,5 +1,9 @@
 import Image from "next/image";
+import Link from "next/link";
 import { logoutAction } from "@/app/actions/auth";
+import { Avatar } from "./Avatar";
+import { StoreClock } from "./StoreClock";
+import { fmtStoreTime } from "@/lib/tz";
 import type { CurrentUser } from "@/lib/auth";
 import type { Role } from "@/generated/prisma/enums";
 import { SidebarNav } from "./AppShellNav";
@@ -54,10 +58,19 @@ export function AppShell({
               <Image src="/logo.png" alt="FloreMart" width={940} height={188} priority className="h-6 w-auto" />
             </div>
             <div className="flex flex-1 items-center justify-end gap-3">
-              <div className="text-right leading-tight">
-                <div className="text-sm font-medium text-slate-800">{user.name}</div>
-                <div className="text-[11px] text-slate-400">{roleLabel[user.role]}</div>
-              </div>
+              {/* Время магазина слева от имени и отделено чертой: это не свойство сотрудника,
+                  а общий для всех факт, и слипшись с именем читалось бы как «его» время. */}
+              <StoreClock initial={fmtStoreTime(new Date(), null)} />
+              <div className="hidden h-7 w-px bg-slate-200 sm:block" />
+              {/* Вся плашка — ссылка в профиль: аватарку меняют оттуда, и искать отдельный
+                  пункт меню ради одного поля никто не станет. */}
+              <Link href="/dashboard/profile" className="flex items-center gap-2.5 rounded-lg px-1.5 py-1 hover:bg-slate-100">
+                <div className="text-right leading-tight">
+                  <div className="text-sm font-medium text-slate-800">{user.name}</div>
+                  <div className="text-[11px] text-slate-400">{roleLabel[user.role]}</div>
+                </div>
+                <Avatar name={user.name} src={user.avatarUrl} />
+              </Link>
               <form action={logoutAction}>
                 <Button type="submit" variant="outline" size="sm">Выйти</Button>
               </form>
