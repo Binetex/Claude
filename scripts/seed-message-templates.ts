@@ -20,10 +20,7 @@ import { PrismaPg } from "@prisma/adapter-pg";
  *
  * Безопасно запускать повторно: заготовка с таким же заголовком не трогается, поэтому
  * правки владельца скрипт не затирает.
- *
- * Заготовки про самовывоз здесь НЕТ и быть не может: список общий на все магазины, а ответ
- * разный (Flowerbar Glendale — настоящий магазин с витриной, остальные возят только курьером),
- * поэтому один текст врал бы половине магазинов. Это отвечает ассистент по базе знаний.
+
  */
 
 const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL });
@@ -85,6 +82,10 @@ const TEMPLATES: { title: string; text: string }[] = [
   {
     title: "Цветок не в сезон",
     text: "Unfortunately, no, we don’t have peonies available at any of our locations right now. They’re currently out of season.",
+  },
+  {
+    title: "Самовывоза нет — только доставка",
+    text: "Unfortunately, we don’t offer pickup. We work as a delivery-only floral studio, so we bring every bouquet right to the door. Delivery is on us for your first order — just let us know the address and the day that works for you 🌸",
   },
   {
     title: "Доставим заранее — букет доживёт",

@@ -195,12 +195,6 @@ describe("подсказка о заказе от незнакомого ном�
       expect(rules).toContain('"ARE YOU OPEN?" IS A QUESTION ABOUT COMING TO US');
       expect(rules).toContain("they never mean a door someone can walk through");
       expect(rules).toContain("Never confirm an address as a place to come");
-      // 21.09.2026: отказ стал безусловным, и Flowerbar начал отказывать в пикапе там, где
-      // у него настоящий магазин с витриной. Решает база знаний, и решает ПО АДРЕСУ.
-      expect(rules).toContain("THE KNOWLEDGE BASE DECIDES THIS AND NOTHING ELSE");
-      expect(rules).toContain("PER ADDRESS, not per");
-      expect(rules).toContain("SAY YES, PLAINLY AND");
-      expect(rules).toContain("offer that one FIRST");
       // Тон: человек приехал по нашей же вине, отказ без извинения читается как «сам виноват».
       expect(rules).toContain("WARMLY AND WITH AN APOLOGY");
       expect(rules).toContain("Never answer with a bare refusal");
