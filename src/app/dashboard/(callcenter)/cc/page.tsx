@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { listForCallCenter, countOrders, type OrderFilters } from "@/modules/orders/queries";
+import { listForCallCenter, countOrders, type OrderFilters, isSingleDayView } from "@/modules/orders/queries";
 import { prisma } from "@/lib/db";
 import { OrderFiltersBar } from "@/app/dashboard/(owner)/orders/OrderFiltersBar";
 import { OrdersTable } from "@/app/dashboard/(owner)/orders/OrdersTable";
@@ -76,6 +76,7 @@ export default async function CallCenterOrders({
               hrefBase={BASE_PATH}
               backQuery={listQuery(sp)}
               groupByDay={filters.preset === "all"}
+              queueMode={isSingleDayView(filters) ? "edit" : undefined}
             />
             <OrdersPager page={page} perPage={perPage} total={total} basePath={BASE_PATH} />
           </div>

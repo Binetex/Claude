@@ -142,10 +142,35 @@ async function buildWhere(f: OrderFilters): Promise<Prisma.OrderWhereInput> {
  * Тай-брейк — по дате размещения заказа (externalCreatedAt), новее выше.
  * Явный выбор сортировки в фильтрах имеет приоритет.
  */
+/**
+ * Список показывает ОДИН день доставки — только тогда ручной порядок имеет смысл.
+ *
+ * «Все» и диапазон дат ставить руками нечего: очередь у флориста существует внутри дня, а не
+ * поперёк недели. Сюда же не попадает «Готовые»: там заказы уже сделаны, переставлять нечего.
+ */
+export function isSingleDayView(f: OrderFilters): boolean {
+  if (f.sortBy) return false; // человек выбрал сортировку сам — его выбор сильнее
+  return f.preset === "today" || f.preset === "tomorrow" || f.preset === "yesterday" || !!f.date;
+}
+
+/**
+ * Очередь дня: сначала расставленное руками, потом всё остальное. Тот же порядок использует
+ * действие со стрелками (modules/orders/reorder.ts) — если эти два разойдутся, стрелка будет
+ * менять местами не то, что человек видит на экране.
+ */
+export const DAY_QUEUE_ORDER: Prisma.OrderOrderByWithRelationInput[] = [
+  { sortIndex: { sort: "asc", nulls: "last" } },
+  { externalCreatedAt: "desc" },
+  { id: "desc" },
+];
+
 function buildOrderBy(f: OrderFilters): Prisma.OrderOrderByWithRelationInput[] {
   // Значение приходит из адресной строки, а Prisma принимает строго "asc"/"desc": на любом
   // другом ("DESC" из руками собранной ссылки) запрос падает валидацией, и сотрудник видит
   // не список, а общий экран ошибки.
+  // Один день на экране — показываем его очередью: сверху то, что флористу делать первым.
+  if (isSingleDayView(f)) return DAY_QUEUE_ORDER;
+
   const dir: Prisma.SortOrder = f.sortDir === "desc" ? "desc" : "asc";
   // id в конце — тай-брейк: без него заказы с одинаковой датой могут переставляться между
   // страницами (порядок неустойчив), и один и тот же заказ попадёт на две страницы либо ни на одну.
@@ -153,7 +178,10 @@ function buildOrderBy(f: OrderFilters): Prisma.OrderOrderByWithRelationInput[] {
   if (f.sortBy === "orderStatus") return [{ orderStatus: dir }, { deliveryDate: "desc" }, tail];
   if (f.sortBy === "deliveryDate") return [{ deliveryDate: dir }, { externalCreatedAt: "desc" }, tail];
   if (f.sortBy === "createdAt") return [{ externalCreatedAt: dir }, tail]; // «Дата создания» = дата размещения заказа
-  return [{ deliveryDate: "desc" }, { externalCreatedAt: "desc" }, tail]; // дефолт: ближайшие к доставке сверху
+  // Дефолт: ближайшие к доставке сверху, а ВНУТРИ дня — та же очередь, что владелец расставил
+  // на вкладке «Сегодня». Иначе на «Все» тот же день лежал бы в другом порядке, и непонятно,
+  // какой из двух списков правда.
+  return [{ deliveryDate: "desc" }, { sortIndex: { sort: "asc", nulls: "last" } }, { externalCreatedAt: "desc" }, tail];
 }
 
 /** take/skip только когда задан perPage — иначе выборка полная, как раньше. */

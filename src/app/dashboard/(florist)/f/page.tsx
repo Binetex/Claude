@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { requireFlorist } from "@/lib/rbac";
-import { listForFlorist, countForFlorist, type OrderFilters } from "@/modules/orders/queries";
+import { listForFlorist, countForFlorist, type OrderFilters, isSingleDayView } from "@/modules/orders/queries";
 import { OrderFiltersBar } from "@/app/dashboard/(owner)/orders/OrderFiltersBar";
 import { OrdersTable } from "@/app/dashboard/(owner)/orders/OrdersTable";
 import { listQuery } from "@/lib/backLink";
@@ -113,6 +113,7 @@ export default async function FloristHome({
               sideAmountLabel={fullFinance ? "сумма заказа" : "вам"}
               hideFinance
               hideFlorist
+              queueMode={isSingleDayView(filters) ? "show" : undefined}
               hrefBase={BASE_PATH}
               backQuery={listQuery(sp)}
               groupByDay={filters.preset === "all"}
