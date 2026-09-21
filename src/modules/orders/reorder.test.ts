@@ -1,56 +1,52 @@
 import { describe, it, expect } from "vitest";
 
 /**
- * Перестановка в очереди дня — чистая работа со списком, и ошибиться в ней можно ровно в двух
- * местах: сдвиг индексов после удаления и вставка «до» против «после» соседа. Обе проверяем
- * здесь, без базы; сама moveOrderInDay из этого и состоит.
+ * Раскладка присланного порядка по позициям дня — вся суть saveDayQueue.
+ *
+ * Хитрость одна: при включённом фильтре человек переставляет ТОЛЬКО видимые заказы, а скрытые
+ * обязаны остаться там же, где стояли. Поэтому видимые меняются местами между собственными
+ * позициями в общей последовательности, а не сдвигают всё подряд.
  */
-function move(seq: string[], id: string, direction: "up" | "down", visible: string[]): string[] {
-  const out = [...seq];
-  const from = out.indexOf(id);
-  const vis = visible.filter((v) => out.includes(v));
-  const at = vis.indexOf(id);
-  const neighbour = at === -1 ? undefined : vis[direction === "up" ? at - 1 : at + 1];
-  if (!neighbour) return out;
-  const [moving] = out.splice(from, 1);
-  const target = out.indexOf(neighbour);
-  out.splice(direction === "up" ? target : target + 1, 0, moving!);
+function apply(daySeq: string[], incoming: string[]): string[] {
+  const inDay = new Set(daySeq);
+  const list = incoming.filter((id) => inDay.has(id));
+  const moving = new Set(list);
+  const out = [...daySeq];
+  const slots: number[] = [];
+  out.forEach((id, i) => {
+    if (moving.has(id)) slots.push(i);
+  });
+  slots.forEach((slot, k) => {
+    out[slot] = list[k]!;
+  });
   return out;
 }
 
 const DAY = ["a", "b", "c", "d"];
 
-describe("очередь дня", () => {
-  it("вверх меняет местами с соседом сверху", () => {
-    expect(move(DAY, "c", "up", DAY)).toEqual(["a", "c", "b", "d"]);
+describe("сохранение очереди дня", () => {
+  it("весь день переставлен — порядок ровно такой, как прислали", () => {
+    expect(apply(DAY, ["c", "a", "d", "b"])).toEqual(["c", "a", "d", "b"]);
   });
 
-  it("вниз меняет местами с соседом снизу", () => {
-    expect(move(DAY, "b", "down", DAY)).toEqual(["a", "c", "b", "d"]);
+  it("переезд с последнего места на первое за одно сохранение", () => {
+    expect(apply(DAY, ["d", "a", "b", "c"])).toEqual(["d", "a", "b", "c"]);
   });
 
-  it("с краёв не уезжает", () => {
-    expect(move(DAY, "a", "up", DAY)).toEqual(DAY);
-    expect(move(DAY, "d", "down", DAY)).toEqual(DAY);
+  it("при фильтре скрытые заказы остаются на своих местах", () => {
+    // Видно только a и d (позиции 0 и 3). Меняем их местами: b и c не шевелятся.
+    expect(apply(DAY, ["d", "a"])).toEqual(["d", "b", "c", "a"]);
   });
 
-  it("первый вниз и последний вверх работают", () => {
-    expect(move(DAY, "a", "down", DAY)).toEqual(["b", "a", "c", "d"]);
-    expect(move(DAY, "d", "up", DAY)).toEqual(["a", "b", "d", "c"]);
+  it("заказ, уехавший из дня, пока расставляли, просто игнорируется", () => {
+    expect(apply(DAY, ["c", "a", "ЧУЖОЙ"])).toEqual(["c", "b", "a", "d"]);
   });
 
-  it("при фильтре двигает к ВИДИМОМУ соседу, перепрыгивая скрытые", () => {
-    // На экране видно только a и d (b и c отфильтрованы). «d вверх» обязан встать перед a,
-    // а не поменяться местами с невидимым c: человек двигает то, на что смотрит.
-    expect(move(DAY, "d", "up", ["a", "d"])).toEqual(["d", "a", "b", "c"]);
+  it("пустой список ничего не меняет", () => {
+    expect(apply(DAY, [])).toEqual(DAY);
   });
 
-  it("невидимый заказ не двигается", () => {
-    expect(move(DAY, "b", "up", ["a", "d"])).toEqual(DAY);
-  });
-
-  it("список из одного не ломается", () => {
-    expect(move(["a"], "a", "up", ["a"])).toEqual(["a"]);
-    expect(move(["a"], "a", "down", ["a"])).toEqual(["a"]);
+  it("день из одного заказа не ломается", () => {
+    expect(apply(["a"], ["a"])).toEqual(["a"]);
   });
 });

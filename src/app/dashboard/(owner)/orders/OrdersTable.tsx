@@ -10,7 +10,7 @@ import type { OrderStatus } from "@/generated/prisma/enums";
 import type { OrderIndicator } from "@/integrations/quo/communicationsView";
 import { FloristAvatar } from "@/components/FloristAvatar";
 import { recipientMapsUrl } from "@/components/orders/address";
-import { OrderQueueArrows } from "./OrderQueueArrows";
+import { OrderQueueList } from "./OrderQueueList";
 
 /**
  * Структурный тип строки списка — совместим с OwnerOrder, CallCenterOrder и FloristOrder.
@@ -109,23 +109,12 @@ function orderHref(hrefBase: string, id: string, backQuery?: string): string {
   return backQuery ? `${hrefBase}/${id}?back=${encodeURIComponent(backQuery)}` : `${hrefBase}/${id}`;
 }
 
-/** Место заказа в очереди дня — только когда её вообще можно менять. */
-type QueueSlot = { editable: boolean; visibleIds: string[]; position: "first" | "last" | "middle" | "only"; number: number };
-
-function DesktopCard({ o, ind, hideFinance, hideFlorist, hrefBase, backQuery, sideAmountLabel, queue }: { o: OrdersTableOrder; ind?: OrderIndicator; hideFinance?: boolean; hideFlorist?: boolean; hrefBase: string; backQuery?: string; sideAmountLabel: string; queue?: QueueSlot }) {
+function DesktopCard({ o, ind, hideFinance, hideFlorist, hrefBase, backQuery, sideAmountLabel }: { o: OrdersTableOrder; ind?: OrderIndicator; hideFinance?: boolean; hideFlorist?: boolean; hrefBase: string; backQuery?: string; sideAmountLabel: string }) {
   return (
     // relative + «растянутая» ссылка (after:inset-0) → вся карточка кликабельна и ведёт в заказ;
     // симметричные отступы p-4 (16px слева и справа), чтобы правый блок не съезжал к краю.
     <Card className="relative cursor-pointer p-4 transition-shadow hover:shadow-sm">
       <div className="flex items-start gap-4 text-[12px]">
-        {/* Очередь дня: номер и стрелки. Номер — не украшение: по нему владелец и флорист
-            называют друг другу заказ вслух («третий сделай раньше»). */}
-        {queue && (
-          <div className="flex shrink-0 items-center gap-1.5">
-            <span className="w-4 text-right text-[13px] font-semibold tabular-nums text-slate-400">{queue.number}</span>
-            {queue.editable && <OrderQueueArrows orderId={o.id} visibleIds={queue.visibleIds} position={queue.position} />}
-          </div>
-        )}
         {/* Заказ */}
         <div className="flex w-28 shrink-0 flex-col items-start gap-1">
           <StatusPill status={o.orderStatus} paymentFailed={o.paymentFailed} />
@@ -196,16 +185,9 @@ function DesktopCard({ o, ind, hideFinance, hideFlorist, hrefBase, backQuery, si
   );
 }
 
-function MobileCard({ o, ind, hideFinance, hideFlorist, hrefBase, backQuery, queue }: { o: OrdersTableOrder; ind?: OrderIndicator; hideFinance?: boolean; hideFlorist?: boolean; hrefBase: string; backQuery?: string; queue?: QueueSlot }) {
+function MobileCard({ o, ind, hideFinance, hideFlorist, hrefBase, backQuery }: { o: OrdersTableOrder; ind?: OrderIndicator; hideFinance?: boolean; hideFlorist?: boolean; hrefBase: string; backQuery?: string }) {
   return (
-    <Card className="relative flex gap-2 p-2.5">
-      {queue && (
-        <div className="flex shrink-0 flex-col items-center gap-1 pt-0.5">
-          <span className="text-[13px] font-semibold tabular-nums text-slate-400">{queue.number}</span>
-          {queue.editable && <OrderQueueArrows orderId={o.id} visibleIds={queue.visibleIds} position={queue.position} />}
-        </div>
-      )}
-      <div className="min-w-0 flex-1">
+    <Card className="relative p-2.5">
       <div className="flex flex-col gap-0.5">
         <StatusPill status={o.orderStatus} paymentFailed={o.paymentFailed} className="self-start" />
         <div className="flex items-baseline justify-between gap-2">
@@ -247,7 +229,6 @@ function MobileCard({ o, ind, hideFinance, hideFlorist, hrefBase, backQuery, que
           </div>
         )}
       </div>
-      </div>
     </Card>
   );
 }
@@ -284,26 +265,30 @@ export function OrdersTable({
    */
   queueMode?: "edit" | "show";
 }) {
+  const card = (o: OrdersTableOrder) => ({
+    desktop: <DesktopCard o={o} ind={commIndicators[o.id]} hideFinance={hideFinance} hideFlorist={hideFlorist} hrefBase={hrefBase} backQuery={backQuery} sideAmountLabel={sideAmountLabel} />,
+    mobile: <MobileCard o={o} ind={commIndicators[o.id]} hideFinance={hideFinance} hideFlorist={hideFlorist} hrefBase={hrefBase} backQuery={backQuery} />,
+  });
+
+  // Очередь дня рисуется отдельным клиентским списком: плашки он получает уже собранными на
+  // сервере и только держит порядок, чтобы перестановка была мгновенной. Разбивки по дням
+  // здесь нет и быть не может — очередь существует внутри одного дня.
+  // Пустой день уходит в общий путь ниже: там есть «Заказов не найдено», а пустая очередь
+  // нарисовала бы просто ничего.
+  if (queueMode && orders.length > 0) {
+    return (
+      <OrderQueueList
+        editable={queueMode === "edit"}
+        items={orders.map((o) => ({ id: o.id, ...card(o) }))}
+      />
+    );
+  }
+
   // Разбивка по дням (только визуально, для вкладки «Все»). Сортировка уже сделана в запросе.
   const desktopItems: React.ReactNode[] = [];
   const mobileItems: React.ReactNode[] = [];
-  // Порядок плашек НА ЭКРАНЕ: по нему действие понимает, с кем меняться местами при
-  // включённых фильтрах, когда сосед по дню и сосед по экрану — разные заказы.
-  const visibleIds = queueMode === "edit" ? orders.map((o) => o.id) : [];
   let prevDay: string | null = null;
-  for (const [index, o] of orders.entries()) {
-    const queue = queueMode
-      ? {
-          editable: queueMode === "edit",
-          visibleIds,
-          position:
-            orders.length === 1 ? ("only" as const)
-            : index === 0 ? ("first" as const)
-            : index === orders.length - 1 ? ("last" as const)
-            : ("middle" as const),
-          number: index + 1,
-        }
-      : undefined;
+  for (const o of orders) {
     if (groupByDay) {
       const day = dayKey(o.deliveryDate);
       if (day !== prevDay) {
@@ -312,8 +297,9 @@ export function OrdersTable({
         prevDay = day;
       }
     }
-    desktopItems.push(<DesktopCard key={o.id} o={o} ind={commIndicators[o.id]} hideFinance={hideFinance} hideFlorist={hideFlorist} hrefBase={hrefBase} backQuery={backQuery} sideAmountLabel={sideAmountLabel} queue={queue} />);
-    mobileItems.push(<MobileCard key={o.id} o={o} ind={commIndicators[o.id]} hideFinance={hideFinance} hideFlorist={hideFlorist} hrefBase={hrefBase} backQuery={backQuery} queue={queue} />);
+    const c = card(o);
+    desktopItems.push(<div key={o.id}>{c.desktop}</div>);
+    mobileItems.push(<div key={o.id}>{c.mobile}</div>);
   }
 
   return (

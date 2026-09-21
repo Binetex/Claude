@@ -9,8 +9,11 @@ import "server-only";
  * Очередь ОДНА на день, а не на флориста. Так владелец раскладывает день один раз, а не по
  * разу на каждого исполнителя, и переназначение заказа другому флористу не сбивает порядок.
  *
- * Перестановка переписывает `sortIndex` всем заказам дня, а не двум соседям. У заказов, которых
- * ещё не касались, индекс пуст, и обмен двух значений оставил бы список в прежнем виде.
+ * Сохраняется ЦЕЛИКОМ, а не по одному шагу. Шаговая запись означала бы запрос на каждое
+ * нажатие: переезд заказа с двенадцатого места на первое — одиннадцать кругов до сервера, да
+ * ещё и с гонкой между ними (второй запрос читает порядок раньше, чем ляжет первый, и база
+ * расходится с экраном молча). Полный снимок этого лишён по построению: пришёл список — он и
+ * стал правдой.
  */
 import type { Prisma, PrismaClient } from "@/generated/prisma/client";
 import { DAY_QUEUE_ORDER } from "./queries";
@@ -18,49 +21,51 @@ import { DAY_QUEUE_ORDER } from "./queries";
 export type ReorderResult = { ok?: true; error?: string };
 
 /**
- * Двигает заказ на одну позицию в очереди своего дня.
+ * Записывает порядок дня по списку, который человек видел на экране.
  *
- * `visibleIds` — порядок плашек НА ЭКРАНЕ у того, кто нажал. Он нужен из-за фильтров: когда
- * список сужен магазином или флористом, соседняя плашка на экране может быть не соседней в
- * дне, а стрелка обязана двигать туда, куда смотрит человек. Без этого нажатие «вверх»
- * иногда не меняло бы на экране ничего.
+ * `orderIds` — ВИДИМЫЕ заказы в новом порядке. Скрытые фильтром заказы того же дня остаются
+ * ровно на своих местах: видимые лишь переставляются между собственными позициями в общей
+ * последовательности. Иначе расстановка при включённом фильтре по магазину выбрасывала бы
+ * чужие заказы в конец дня, и владелец ломал бы очередь, не видя чем.
  */
-export async function moveOrderInDay(
-  prisma: PrismaClient,
-  input: { orderId: string; direction: "up" | "down"; visibleIds: string[] }
-): Promise<ReorderResult> {
-  const order = await prisma.order.findUnique({
-    where: { id: input.orderId },
+export async function saveDayQueue(prisma: PrismaClient, orderIds: string[]): Promise<ReorderResult> {
+  if (orderIds.length === 0) return { ok: true };
+
+  const first = await prisma.order.findUnique({
+    where: { id: orderIds[0] },
     select: { deliveryDate: true },
   });
-  if (!order) return { error: "Заказ не найден." };
-  if (!order.deliveryDate) return { error: "У заказа нет даты доставки — его некуда поставить в очередь." };
+  if (!first?.deliveryDate) return { error: "У заказа нет даты доставки — его некуда поставить в очередь." };
 
   const day = await prisma.order.findMany({
-    where: { deliveryDate: order.deliveryDate },
+    where: { deliveryDate: first.deliveryDate },
     orderBy: DAY_QUEUE_ORDER,
     select: { id: true, sortIndex: true },
   });
-
   const seq = day.map((d) => d.id);
-  const from = seq.indexOf(input.orderId);
-  if (from === -1) return { error: "Заказ не найден в своём дне." };
 
-  const visible = input.visibleIds.filter((id) => seq.includes(id));
-  const at = visible.indexOf(input.orderId);
-  const neighbour = at === -1 ? undefined : visible[input.direction === "up" ? at - 1 : at + 1];
-  // Край списка — не ошибка: человек просто упёрся, и говорить ему об этом нечего.
-  if (!neighbour) return { ok: true };
+  // Берём только те присланные id, что и правда в этом дне: список приехал из браузера, а
+  // заказу могли поменять дату, пока владелец расставлял.
+  const inDay = new Set(seq);
+  const incoming = orderIds.filter((id) => inDay.has(id));
+  if (incoming.length === 0) return { ok: true };
 
-  const [moving] = seq.splice(from, 1);
-  const target = seq.indexOf(neighbour);
-  seq.splice(input.direction === "up" ? target : target + 1, 0, moving!);
+  const moving = new Set(incoming);
+  const slots: number[] = [];
+  seq.forEach((id, i) => {
+    if (moving.has(id)) slots.push(i);
+  });
+  // Позиций ровно столько же, сколько переставляемых заказов: раскладываем присланный порядок
+  // по этим позициям, остальные строки не трогаем вовсе.
+  slots.forEach((slot, k) => {
+    seq[slot] = incoming[k]!;
+  });
 
-  // Пишем только тем, у кого позиция реально изменилась: день — это десятки заказов, и
-  // переписывать их все на каждое нажатие незачем.
   const current = new Map(day.map((d) => [d.id, d.sortIndex]));
   const updates: Prisma.PrismaPromise<unknown>[] = [];
   seq.forEach((id, index) => {
+    // Пишем только изменившимся: день — это десятки заказов, и переписывать их все на каждое
+    // сохранение незачем.
     if (current.get(id) !== index) {
       updates.push(prisma.order.update({ where: { id }, data: { sortIndex: index } }));
     }
