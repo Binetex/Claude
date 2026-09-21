@@ -16,6 +16,7 @@ import {
   renderOwnerDeliveryProblem,
   renderCustomerReadyTime,
   renderCustomerCallRequest,
+  renderCustomerEmailReply,
   renderOwnerNoCouriers,
   renderAskReview,
   renderOwnerPaymentProblem,
@@ -292,6 +293,8 @@ function renderFor(type: TelegramNotifyPayload["type"], order: OrderSnapshot, ct
     case "customer.call_request":
     case "customer.call_request_cc":
       return renderCustomerCallRequest(order, ctx.quote ?? null, ctx.phone ?? null, ctx.note ?? null);
+    case "customer.email_reply":
+      return renderCustomerEmailReply(order, ctx.from ?? null, ctx.subject ?? null, ctx.quote ?? null);
   }
 }
 

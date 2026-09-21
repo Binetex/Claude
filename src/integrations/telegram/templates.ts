@@ -232,6 +232,26 @@ export function renderCustomerReadyTime(o: OrderSnapshot, readyTime: string, quo
  * Клиент просит позвонить. Текст один владельцу и оператору: телефон того, кто написал, и его
  * слова — чтобы звонящий знал, о чём разговор, не открывая карточку.
  */
+/**
+ * Клиент ответил на наше письмо.
+ *
+ * Почту, в отличие от SMS, никто не держит открытой: ответ приходит в ящик, до карточки его
+ * довозит опрос раз в пять минут, и без этого сообщения он лежал бы до следующего захода в
+ * заказ. Текст даём целиком, насколько влезает: половина ответов — это адрес, код ворот или
+ * телефон, и ради них открывать карточку не нужно.
+ */
+export function renderCustomerEmailReply(o: OrderSnapshot, from: string | null, subject: string | null, quote: string | null): string {
+  return (
+    `📧 <b>Ответ клиента по почте</b>\n` +
+    `<b>${esc(o.orderNumber)}</b> · ${esc(o.siteName)}\n\n` +
+    line("От", from) +
+    line("Тема", subject) +
+    line("Письмо", quote) +
+    `\n` +
+    line("Доставка", [fmtDate(o.deliveryDate), fmtTimeWindow(o.deliveryWindow)].filter(Boolean).join(", "))
+  ).trimEnd();
+}
+
 export function renderCustomerCallRequest(o: OrderSnapshot, quote: string | null, phone: string | null, note: string | null): string {
   return (
     `📞 <b>${note ? `${esc(note)} · ` : ""}Клиент просит позвонить</b>\n` +

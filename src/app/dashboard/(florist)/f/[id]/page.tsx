@@ -7,7 +7,7 @@ import { getForFlorist } from "@/modules/orders/queries";
 import { prisma } from "@/lib/db";
 import { listActiveHandoffTargets } from "@/modules/florists/service";
 import { loadOrderCommunicationsCard } from "@/integrations/quo/communicationsService";
-import { loadOrderEmailPanel } from "@/integrations/emailFactory/read";
+import { loadOrderEmailPanel, markOrderEmailsRead } from "@/integrations/emailFactory/read";
 import {
   addOrderExpenseAction,
   removeOrderExpenseAction,
@@ -61,7 +61,10 @@ export default async function FloristOrderPage({
   const order = await getForFlorist(id, user.floristId);
   if (!order) notFound();
 
-  const emailPanel = await loadOrderEmailPanel(prisma, id).catch(() => ({ emails: [], customerEmail: null }));
+  const emailPanel = await loadOrderEmailPanel(prisma, id).catch(() => ({ emails: [], unread: 0, customerEmail: null }));
+  // Карточку открыли — ответы клиента по почте считаются увиденными. Панель уже загружена ВЫШЕ,
+  // поэтому её цифра «новых» относится к моменту до пометки: иначе значок был бы всегда пуст.
+  await markOrderEmailsRead(prisma, id).catch(() => 0);
   // Заготовки ответов: общие на все магазины, переменные заказа подставлены заранее.
   const messageTemplates = await loadTemplatesForOrder(prisma, id).catch(() => []);
   const comm = await loadOrderCommunicationsCard(prisma, id).catch(() => ({ communications: [], storeHasQuoNumber: false, storeTimeZone: undefined, unread: { customer: 0, recipient: 0 } }));
@@ -171,6 +174,7 @@ export default async function FloristOrderPage({
             recipientPhone={order.recipientPhone}
             storeHasQuoNumber={comm.storeHasQuoNumber}
             emails={emailPanel.emails}
+            emailUnread={emailPanel.unread}
           customerEmail={emailPanel.customerEmail}
           communications={comm.communications}
             storeTimeZone={comm.storeTimeZone}

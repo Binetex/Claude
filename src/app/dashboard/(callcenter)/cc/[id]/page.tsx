@@ -4,7 +4,7 @@ import { localDateStr } from "@/lib/tz";
 import { getForCallCenter } from "@/modules/orders/queries";
 import { prisma } from "@/lib/db";
 import { loadOrderCommunicationsCard } from "@/integrations/quo/communicationsService";
-import { loadOrderEmailPanel } from "@/integrations/emailFactory/read";
+import { loadOrderEmailPanel, markOrderEmailsRead } from "@/integrations/emailFactory/read";
 import { OrderCommunications } from "@/app/dashboard/(owner)/orders/[id]/OrderCommunications";
 import { ContactEditDialog } from "@/app/dashboard/(owner)/orders/[id]/ContactEditDialog";
 import { CardNoteCard } from "@/app/dashboard/(owner)/orders/[id]/CardNoteCard";
@@ -54,7 +54,10 @@ export default async function CallCenterOrderPage({
   const order = await getForCallCenter(id);
   if (!order) notFound();
 
-  const emailPanel = await loadOrderEmailPanel(prisma, id).catch(() => ({ emails: [], customerEmail: null }));
+  const emailPanel = await loadOrderEmailPanel(prisma, id).catch(() => ({ emails: [], unread: 0, customerEmail: null }));
+  // Карточку открыли — ответы клиента по почте считаются увиденными. Панель уже загружена ВЫШЕ,
+  // поэтому её цифра «новых» относится к моменту до пометки: иначе значок был бы всегда пуст.
+  await markOrderEmailsRead(prisma, id).catch(() => 0);
   // Заготовки ответов: общие на все магазины, переменные заказа подставлены заранее.
   const messageTemplates = await loadTemplatesForOrder(prisma, id).catch(() => []);
   const comm = await loadOrderCommunicationsCard(prisma, id).catch(() => ({ communications: [], storeHasQuoNumber: false, storeTimeZone: undefined, unread: { customer: 0, recipient: 0 } }));
@@ -163,6 +166,7 @@ export default async function CallCenterOrderPage({
             recipientPhone={order.recipientPhone}
             storeHasQuoNumber={comm.storeHasQuoNumber}
             emails={emailPanel.emails}
+            emailUnread={emailPanel.unread}
           customerEmail={emailPanel.customerEmail}
           communications={comm.communications}
             storeTimeZone={comm.storeTimeZone}

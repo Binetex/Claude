@@ -118,7 +118,7 @@ export async function loadRequestDetail(
     phoneE164
       ? loadPhoneCommunicationsCard(prisma, { phoneE164, siteId: r.order.site.id })
       : Promise.resolve({ communications: [], storeHasQuoNumber: false, storeTimeZone: null }),
-    loadOrderEmailPanel(prisma, r.order.id).catch(() => ({ emails: [], customerEmail: null })),
+    loadOrderEmailPanel(prisma, r.order.id).catch(() => ({ emails: [], unread: 0, customerEmail: null })),
   ]);
   // Часы магазина заказа: всё показываемое время идёт по ним, а не по зоне сервера.
   const tz = r.order.site.timezone;

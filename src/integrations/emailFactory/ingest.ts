@@ -16,6 +16,7 @@ import "server-only";
 import type { PrismaClient } from "@/generated/prisma/client";
 import { resolveEmailFactoryToken } from "./token";
 import { listInbound, type EmailFactoryMessage } from "./client";
+import { publishTelegramNotification } from "@/integrations/telegram/events";
 
 /** Нахлёст: пере-спрашиваем чуть раньше курсора. Дубли отсекает уникальный providerMessageId. */
 const OVERLAP_MS = 2 * 60_000;
@@ -119,6 +120,23 @@ async function resolveOrderId(prisma: PrismaClient, m: EmailFactoryMessage): Pro
   return findOrderFor(prisma, m.fromEmail, m.toEmail);
 }
 
+/**
+ * Сколько текста письма уходит в Telegram.
+ *
+ * Цитату прошлой переписки режем: почтовые клиенты подклеивают к ответу всё письмо целиком, и
+ * в уведомлении оно занимало бы экран, пряча те две строки, ради которых клиент и писал.
+ */
+const QUOTE_START = /^\s*(?:>|On .+ wrote:|-{2,}\s*Original Message|_{5,}|From:\s)/m;
+
+export function emailQuoteForTelegram(text: string, limit = 500): string {
+  const cut = text.search(QUOTE_START);
+  const body = (cut > 0 ? text.slice(0, cut) : text).trim();
+  return body.length > limit ? `${body.slice(0, limit).trimEnd()}…` : body;
+}
+
+/** Письма старше этого в Telegram не уводомляют: разбор старого ящика не должен звонить в ночь. */
+const NOTIFY_MAX_AGE_MS = 6 * 3600_000;
+
 export async function ingestInboundEmails(prisma: PrismaClient): Promise<IngestResult> {
   const empty: IngestResult = { fetched: 0, stored: 0, matched: 0, skipped: null };
 
@@ -164,7 +182,22 @@ export async function ingestInboundEmails(prisma: PrismaClient): Promise<IngestR
       },
     });
     stored += 1;
-    if (orderId) matched += 1;
+    if (!orderId) continue;
+    matched += 1;
+
+    // Ответ клиента по почте — владельцу в Telegram. Почту никто не держит открытой, и без
+    // этого сообщения ответ лежал бы до следующего захода в карточку: 21.09.2026 так пролежал
+    // код ворот, присланный за сутки до доставки.
+    //
+    // Только свежие: если курсор опроса когда-нибудь отъедет назад, разбор старого ящика не
+    // должен высыпать пачку уведомлений о давно разобранных письмах.
+    if (Date.now() - m.occurredAt.getTime() > NOTIFY_MAX_AGE_MS) continue;
+    await publishTelegramNotification(prisma, {
+      type: "customer.email_reply",
+      orderId,
+      occurrenceKey: m.id,
+      context: { from: m.fromEmail, subject: m.subject ?? "", quote: emailQuoteForTelegram(m.text) },
+    });
   }
 
   return { fetched: res.data.length, stored, matched, skipped: full ? "page_full" : null };

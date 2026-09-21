@@ -17,6 +17,8 @@ export type CommItem = TimelineItem;
 
 /** Письмо из переписки по заказу. Только plain text — HTML мы не храним и не показываем. */
 export type EmailItem = {
+  /** Ответ клиента, которого ещё не открывали: помечаем в ленте. */
+  isNew?: boolean;
   id: string;
   direction: "INBOUND" | "OUTBOUND";
   status: string;
@@ -49,6 +51,7 @@ export function OrderCommunications({
   customerEmail,
   communications,
   emails,
+  emailUnread = 0,
   storeTimeZone,
   unread,
   templates,
@@ -64,6 +67,8 @@ export function OrderCommunications({
   customerEmail: string | null;
   communications: CommItem[];
   emails: EmailItem[];
+  /** Сколько ответов клиента по почте ещё не открывали — цифра на вкладке «Email». */
+  emailUnread?: number;
   storeTimeZone?: string | null;
   unread?: { customer: number; recipient: number };
   /** Заготовки ответов, уже с подставленными данными заказа. */
@@ -98,7 +103,6 @@ export function OrderCommunications({
   const lastInboundFrom = emails.find((e) => e.direction === "INBOUND")?.fromEmail ?? null;
   const emailTarget = lastInboundFrom ?? customerEmail;
   const canReply = !!emailTarget;
-  const inboundCount = emails.filter((e) => e.direction === "INBOUND").length;
   // Разбор по ФАКТИЧЕСКОМУ номеру сообщения, а не по сохранённой роли: роль ставится один раз
   // при приёме и устаревает, когда телефон заказа исправляют (см. commGroupOf).
   const groupOf = (c: CommItem) => commGroupOf(c, customerPhone, recipientPhone);
@@ -182,16 +186,17 @@ export function OrderCommunications({
             );
           })}
           {/* Почта — отдельная вкладка, а не сторона заказа: адрес есть только у заказчика.
-              Цифра — сколько писем пришло от клиента по этому заказу. */}
+              Цифра — НОВЫЕ ответы клиента, как у телефонных вкладок. Раньше здесь висело общее
+              число входящих за всё время: оно не гасло никогда и поэтому ничего не значило. */}
           <button
             type="button"
             onClick={() => setActiveKey("EMAIL")}
             className={"inline-flex items-center gap-1 rounded-md px-3 py-1 text-xs font-medium " + (isEmail ? "bg-sky-600 text-white" : "bg-slate-100 text-slate-700")}
           >
             Email
-            {inboundCount > 0 && (
+            {emailUnread > 0 && (
               <span className={"inline-flex min-w-[16px] items-center justify-center rounded-full px-1 text-[10px] font-semibold " + (isEmail ? "bg-white text-sky-700" : "bg-red-500 text-white")}>
-                {inboundCount}
+                {emailUnread}
               </span>
             )}
           </button>
@@ -279,9 +284,20 @@ function EmailTimeline({ items, storeTimeZone }: { items: EmailItem[]; storeTime
         const outbound = m.direction === "OUTBOUND";
         const showSubject = showSubjectAt.get(m.id) ?? false;
         return (
-          <li key={m.id} className={"rounded-md border p-2 " + (outbound ? "border-sky-100 bg-sky-50/60" : "border-slate-200 bg-white")}>
+          <li
+            key={m.id}
+            className={
+              "rounded-md border p-2 " +
+              // Новое письмо выделяется рамкой и подложкой, а не одной точкой: оно приходит
+              // в ленту к уже прочитанным, и глазу нужно за что-то зацепиться.
+              (m.isNew ? "border-amber-300 bg-amber-50" : outbound ? "border-sky-100 bg-sky-50/60" : "border-slate-200 bg-white")
+            }
+          >
             <div className="flex flex-wrap items-baseline justify-between gap-2">
-              <span className="text-xs font-medium text-slate-700">{outbound ? "🌸 Вы" : m.fromEmail}</span>
+              <span className="text-xs font-medium text-slate-700">
+                {outbound ? "🌸 Вы" : m.fromEmail}
+                {m.isNew && <span className="ml-1.5 rounded bg-amber-500 px-1 py-px text-[10px] font-semibold text-white">НОВОЕ</span>}
+              </span>
               <span className="text-[11px] text-slate-400">{fmtStoreDateTime(m.occurredAt, storeTimeZone, { withZone: false })}</span>
             </div>
             {showSubject && <div className="mt-0.5 text-[11px] text-slate-500">{m.subject}</div>}

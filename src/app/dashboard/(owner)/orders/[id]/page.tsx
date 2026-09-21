@@ -39,7 +39,7 @@ import {
   updateOrderExpenseAction,
 } from "@/app/dashboard/orderExpenseActions";
 import { markOrderCommunicationsRead, countUnreadBySide, parseAttachments } from "@/integrations/quo/communicationsService";
-import { loadOrderEmailPanel } from "@/integrations/emailFactory/read";
+import { loadOrderEmailPanel, markOrderEmailsRead } from "@/integrations/emailFactory/read";
 import { FloristAvatar } from "@/components/FloristAvatar";
 import { ChargesDialog } from "./ChargesDialog";
 import { MarketingMarkCard } from "./MarketingMarkCard";
@@ -114,7 +114,10 @@ export default async function OwnerOrderPage({
   let storeHasQuoNumber = false;
   let storeTimeZone: string | null = null;
   // Переписка по email — своя таблица и своя вкладка; сбой её загрузки не должен ронять карточку.
-  const emailPanel = await loadOrderEmailPanel(prisma, id).catch(() => ({ emails: [], customerEmail: null }));
+  const emailPanel = await loadOrderEmailPanel(prisma, id).catch(() => ({ emails: [], unread: 0, customerEmail: null }));
+  // Карточку открыли — ответы клиента по почте считаются увиденными. Панель уже загружена ВЫШЕ,
+  // поэтому её цифра «новых» относится к моменту до пометки: иначе значок был бы всегда пуст.
+  await markOrderEmailsRead(prisma, id).catch(() => 0);
   // Заготовки ответов: общие на все магазины, переменные заказа подставлены заранее.
   const messageTemplates = await loadTemplatesForOrder(prisma, id).catch(() => []);
 
@@ -329,6 +332,7 @@ export default async function OwnerOrderPage({
             recipientPhone={order.recipientPhone}
             storeHasQuoNumber={storeHasQuoNumber}
             emails={emailPanel.emails}
+            emailUnread={emailPanel.unread}
           customerEmail={emailPanel.customerEmail}
           communications={communications}
             storeTimeZone={storeTimeZone}

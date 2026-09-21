@@ -31,6 +31,7 @@ export const TELEGRAM_EVENTS = [
   "customer.ready_time_florist",
   "customer.call_request",
   "customer.call_request_cc",
+  "customer.email_reply",
 ] as const;
 
 export type TelegramEventType = (typeof TELEGRAM_EVENTS)[number];
@@ -187,6 +188,15 @@ const REGISTRY: Record<TelegramEventType, TelegramEventDef> = {
   },
   // Клиент просит позвонить. Сразу двоим: владельцу и оператору колл-центра — кто первый
   // свободен, тот и звонит. Каждая просьба — новое сообщение, а не правка прошлого.
+  "customer.email_reply": {
+    type: "customer.email_reply",
+    audience: "OWNER",
+    perFlorist: false,
+    // Ключ — по конкретному письму: второй ответ клиента в том же заказе приходит НОВЫМ
+    // сообщением, а не правит прошлое. Иначе первое уведомление молча подменилось бы вторым.
+    dedupeKey: ({ orderId, occurrence }) => `order:${orderId}:owner.email_reply:${occurrence ?? "-"}`,
+    description: "Клиент ответил на письмо — владельцу, с текстом ответа.",
+  },
   "customer.call_request": {
     type: "customer.call_request",
     fromAssistant: true,

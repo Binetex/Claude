@@ -3056,6 +3056,9 @@ model OrderEmailMessage {
   text      String
 
   occurredAt DateTime
+  /// Когда письмо увидел человек. Пусто у входящего — значок «новое» на вкладке «Email».
+  /// Ставится при открытии карточки, тем же движением, что у SMS (readAt в OrderCommunication).
+  readAt     DateTime?
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
@@ -3070,6 +3073,8 @@ model OrderEmailMessage {
 
   @@index([orderId, occurredAt])
   @@index([direction, occurredAt])
+  // Счётчик «новых писем» на карточке: только входящие без readAt по этому заказу.
+  @@index([orderId, direction, readAt])
 }
 
 enum EmailMessageStatus {
