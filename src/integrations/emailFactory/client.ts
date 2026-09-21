@@ -88,9 +88,27 @@ async function call(token: string, method: string, path: string, body?: unknown)
 }
 
 /** У провайдера адрес приходит то строкой, то списком — приводим к одному виду. */
+/**
+ * Один адрес из поля письма.
+ *
+ * Провайдер отдаёт их ТРЕМЯ видами сразу, и это проверено на живом ответе 21.09.2026:
+ * `from` — объект `{email, name}`, `to` — массив строк, а где-то может прийти и голая строка.
+ * Разбор, знавший только строку и массив строк, возвращал пустоту на КАЖДОМ письме, и весь
+ * входящий поток молча выбрасывался: за всё время в базе не появилось ни одного письма от
+ * клиента, хотя у провайдера они лежали.
+ */
 function oneAddress(v: unknown): string {
   if (typeof v === "string") return v.trim();
-  if (Array.isArray(v) && v.length && typeof v[0] === "string") return String(v[0]).trim();
+  if (v && typeof v === "object" && !Array.isArray(v)) {
+    const email = (v as { email?: unknown }).email;
+    return typeof email === "string" ? email.trim() : "";
+  }
+  if (Array.isArray(v)) {
+    for (const item of v) {
+      const one = oneAddress(item);
+      if (one) return one;
+    }
+  }
   return "";
 }
 
@@ -134,10 +152,22 @@ export async function listInbound(token: string, since: Date, limit = 100): Prom
   return { ok: true, data: list.map(toMessage).filter((m): m is EmailFactoryMessage => m !== null) };
 }
 
+/** Разбор списка писем — для теста на живом ответе провайдера, без сети. */
+export function parseMessagesForTest(list: unknown[]): EmailFactoryMessage[] {
+  return list.map(toMessage).filter((m): m is EmailFactoryMessage => m !== null);
+}
+
 export type SentMessage = { id: string | null; threadId: string | null };
 
+/**
+ * Что провайдер вернул на отправку. Тело приходит и завёрнутым в `data`, и самим письмом —
+ * берём оба вида. Раньше читался только завёрнутый, поэтому у КАЖДОГО отправленного письма
+ * id и тред оставались пустыми: ответить в ту же цепочку было нечем, и клиент получал бы
+ * второе письмо отдельным разговором.
+ */
 function toSent(res: { data: unknown }): SentMessage {
-  const d = (res.data as { data?: { id?: unknown; threadId?: unknown } } | null)?.data;
+  const body = res.data as { data?: unknown } | null;
+  const d = (body?.data ?? body) as { id?: unknown; threadId?: unknown } | null;
   return {
     id: typeof d?.id === "string" ? d.id : null,
     threadId: typeof d?.threadId === "string" ? d.threadId : null,

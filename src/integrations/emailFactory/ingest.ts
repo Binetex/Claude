@@ -15,7 +15,7 @@ import "server-only";
  */
 import type { PrismaClient } from "@/generated/prisma/client";
 import { resolveEmailFactoryToken } from "./token";
-import { listInbound } from "./client";
+import { listInbound, type EmailFactoryMessage } from "./client";
 
 /** Нахлёст: пере-спрашиваем чуть раньше курсора. Дубли отсекает уникальный providerMessageId. */
 const OVERLAP_MS = 2 * 60_000;
@@ -40,6 +40,18 @@ export type IngestResult = { fetched: number; stored: number; matched: number; s
  * Магазин определяется по домену нашего адреса, а не по полному совпадению: у магазина может быть
  * несколько ящиков на своём домене (order@, hello@), и все они его.
  */
+/**
+ * Номер заказа из темы письма: «Re: Заказ JF-1001380» → «JF-1001380».
+ *
+ * Тему первого письма пишем мы сами (`Заказ <номер>`), клиент отвечает с «Re:» и номер несёт
+ * обратно. Это единственный признак, который переживает всё остальное: ответ с другого адреса,
+ * пересланное письмо, новый тред у провайдера.
+ */
+export function orderNumberInSubject(subject: string | null): string | null {
+  const m = /\b([A-Z]{2,12}-\d{3,12})\b/.exec((subject ?? "").toUpperCase());
+  return m?.[1] ?? null;
+}
+
 async function findOrderFor(prisma: PrismaClient, fromEmail: string, toEmail: string): Promise<string | null> {
   const domain = toEmail.split("@")[1]?.toLowerCase();
   if (!domain) return null;
@@ -73,6 +85,40 @@ async function resolveSince(prisma: PrismaClient): Promise<Date> {
   return new Date(latest.occurredAt.getTime() - OVERLAP_MS);
 }
 
+/**
+ * Заказ для входящего письма. Три признака по убыванию надёжности, первый сработавший выигрывает.
+ *
+ * 1. НОМЕР ЗАКАЗА В ТЕМЕ. Владелец пишет клиенту из карточки, тема получается «Заказ JF-1001380»,
+ *    и ответ приходит с «Re:» и тем же номером. Это ровно тот разговор, который он начал, —
+ *    сильнее любой догадки по адресу.
+ * 2. ТРЕД ПРОВАЙДЕРА, если в нём уже есть наше письмо с заказом. Работает, когда тему обрезали
+ *    или переписали, но переписка продолжается в той же цепочке. Провайдер, впрочем, заводит
+ *    ответу СВОЙ тред не всегда тот же (проверено 21.09.2026), поэтому признак второй, а не первый.
+ * 3. Адрес отправителя плюс наш домен → самый свежий заказ этого клиента. Прежнее поведение;
+ *    оно и остаётся для писем, начатых клиентом, а не нами.
+ */
+async function resolveOrderId(prisma: PrismaClient, m: EmailFactoryMessage): Promise<string | null> {
+  const number = orderNumberInSubject(m.subject);
+  if (number) {
+    const byNumber = await prisma.order.findFirst({
+      where: { orderNumber: { equals: number, mode: "insensitive" } },
+      select: { id: true },
+    });
+    if (byNumber) return byNumber.id;
+  }
+
+  if (m.threadId) {
+    const inThread = await prisma.orderEmailMessage.findFirst({
+      where: { threadId: m.threadId, orderId: { not: null } },
+      orderBy: { occurredAt: "desc" },
+      select: { orderId: true },
+    });
+    if (inThread?.orderId) return inThread.orderId;
+  }
+
+  return findOrderFor(prisma, m.fromEmail, m.toEmail);
+}
+
 export async function ingestInboundEmails(prisma: PrismaClient): Promise<IngestResult> {
   const empty: IngestResult = { fetched: 0, stored: 0, matched: 0, skipped: null };
 
@@ -102,7 +148,7 @@ export async function ingestInboundEmails(prisma: PrismaClient): Promise<IngestR
     const exists = await prisma.orderEmailMessage.findUnique({ where: { providerMessageId: m.id }, select: { id: true } });
     if (exists) continue;
 
-    const orderId = await findOrderFor(prisma, m.fromEmail, m.toEmail);
+    const orderId = await resolveOrderId(prisma, m);
     await prisma.orderEmailMessage.create({
       data: {
         orderId,
