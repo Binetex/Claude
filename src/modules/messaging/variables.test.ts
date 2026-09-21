@@ -102,7 +102,9 @@ describe("остальные переменные", () => {
     const v = buildOrderVariables(src());
     expect(v.order_number).toBe("TF-20328");
     expect(v.delivery_address).toBe("1 Main St, 4, Portland");
-    expect(v.delivery_time).toBe("14:00 – 18:00");
+    // Окно приезжает из магазина 24-часовым, а клиенту уходит американским: подписи AM/PM
+    // ставит buildOrderVariables, чтобы их не приходилось вписывать в каждый шаблон.
+    expect(v.delivery_time).toBe("2 PM – 6 PM");
     expect(v.order_total).toBe("$115.00");
     expect(v.store_name).toBe("The Flow");
   });

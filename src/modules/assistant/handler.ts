@@ -32,6 +32,7 @@ import { loadGlobalNote, activeGlobalNoteText } from "./globalNote";
 import { bouquetPageUrl } from "@/lib/bouquetPage";
 import { publishTelegramNotification } from "@/integrations/telegram/events";
 import { todayStrInTz, zonedLocalTimeToUtc, localClock } from "@/lib/tz";
+import { formatDeliveryWindow } from "@/lib/timeWindow";
 
 /**
  * Сколько последних сообщений переписки показываем модели. Двадцать — вся живая переписка по
@@ -759,7 +760,9 @@ function snapshot(order: Record<string, unknown>, storeName: string, partyRole: 
     deliveryStatus: o.orderStatus === "DELIVERED" ? "delivered" : o.orderStatus === "CANCELLED" ? null : o.deliveryStatus ? String(o.deliveryStatus).toLowerCase() : null,
     deliveryDate,
     deliveryDayLabel: describeDeliveryDay(deliveryDate, todayStr),
-    deliveryWindow: o.deliveryWindow ?? null,
+    // Модели окно отдаём уже в американском виде: иначе она пересказывает клиенту «15:00 - 19:00»
+    // либо переводит его сама, а угадывать за неё, какой час она имела в виду, нам нечем.
+    deliveryWindow: formatDeliveryWindow(o.deliveryWindow) || null,
     recipientName: o.recipientName ?? null,
     deliveryAddress: o.deliveryAddress ?? null,
     trackingUrl: o.trackingUrl ?? null,

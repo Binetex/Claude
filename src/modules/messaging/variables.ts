@@ -5,6 +5,8 @@
  */
 import { localDateStr } from "@/lib/tz";
 
+import { formatDeliveryWindow } from "@/lib/timeWindow";
+
 export type SmsVariableDef = { key: string; label: string; example: string };
 
 // Порядок = порядок показа в UI (кнопки вставки).
@@ -16,7 +18,7 @@ export const SMS_VARIABLES: readonly SmsVariableDef[] = [
   { key: "recipient_phone", label: "Телефон получателя", example: "+1..." },
   { key: "delivery_address", label: "Адрес доставки", example: "1 Main St, Apt 4, Portland" },
   { key: "delivery_date", label: "Дата доставки", example: "2026-07-25" },
-  { key: "delivery_time", label: "Окно доставки", example: "14:00 – 18:00" },
+  { key: "delivery_time", label: "Окно доставки", example: "2 PM - 6 PM" },
   { key: "tracking_url", label: "Ссылка трекинга", example: "https://track..." },
   { key: "store_name", label: "Название магазина", example: "Floremart" },
   { key: "store_phone", label: "Телефон магазина", example: "+1..." },
@@ -100,7 +102,9 @@ export function buildOrderVariables(src: OrderVariableSource): Record<string, st
     recipient_phone: s(src.recipientPhone),
     delivery_address: joinAddress(src.addressLine, src.apartment, src.city),
     delivery_date: formatDeliveryDate(src.deliveryDate),
-    delivery_time: s(src.deliveryWindow),
+    // Окно приводится к американскому виду ЗДЕСЬ, а не в каждом шаблоне: в базе оно лежит
+    // как пришло из магазина, и TheFlow с Julie's отдают 24-часовое «15:00 - 19:00».
+    delivery_time: formatDeliveryWindow(src.deliveryWindow),
     tracking_url: s(src.trackingUrl),
     store_name: s(src.storeName),
     store_phone: s(src.storePhone),
