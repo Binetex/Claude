@@ -1,28 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isUberProvider, pickCostCents, centsToDollars, decideCostUpdate } from "./costCapture";
-
-describe("isUberProvider", () => {
-  it("имя uber (регистронезависимо, с пробелами) → true", () => {
-    expect(isUberProvider("uber", null)).toBe(true);
-    expect(isUberProvider("Uber", null)).toBe(true);
-    expect(isUberProvider("  UBER ", null)).toBe(true);
-  });
-  it("другой провайдер → false", () => {
-    expect(isUberProvider("doordash", null)).toBe(false);
-    expect(isUberProvider("roadie", "prov_x")).toBe(false);
-    expect(isUberProvider(null, null)).toBe(false);
-  });
-
-  it("регрессия PAR-1308: стабильный provider.id 'dsp_19g67ldj7ek3j' И имя 'Uber' → true; покоштучный del_ → нет", () => {
-    // Реальные значения: provider={id:'dsp_19g67ldj7ek3j', name:'Uber'} → в наш формат: name+stableId.
-    expect(isUberProvider("Uber", "dsp_19g67ldj7ek3j")).toBe(true); // и по имени, и по id
-    expect(isUberProvider(null, "dsp_19g67ldj7ek3j")).toBe(true); // по стабильному id (без имени)
-    expect(isUberProvider("Uber", null)).toBe(true); // по имени (форма GET, без stable id)
-    // Покоштучный del_ id (это НЕ провайдер) без имени → false; с чужим именем → false
-    expect(isUberProvider(null, "del_FAKE_per_delivery")).toBe(false);
-    expect(isUberProvider("doordash", "del_FAKE_per_delivery")).toBe(false);
-  });
-});
+import { pickCostCents, centsToDollars, decideCostUpdate } from "./costCapture";
 
 describe("pickCostCents — приоритет total_amount_due, fallback fee", () => {
   it("total_amount_due приоритетнее fee", () => {
@@ -64,9 +41,16 @@ describe("decideCostUpdate", () => {
     expect(r).toMatchObject({ apply: true, cents: 1200, dollars: 12 });
   });
 
-  it("другой провайдер → not_uber (стоимость игнорируется)", () => {
-    const r = decideCostUpdate(noPrior, { ...base, provider: "doordash", totalAmountDueCents: 1550, feeCents: null, occurredAt: new Date() });
-    expect(r).toEqual({ apply: false, reason: "not_uber" });
+  /**
+   * 23.09.2026: сумма принималась только у Uber, и два заказа, которые Burq отдал Grubhub
+   * (OHARA-1070, PAR-41355), остались без стоимости. В ответе Burq по ним лежали ровно те же
+   * поля, что у Uber, — мы их просто выбрасывали. Платим мы за любого курьера.
+   */
+  it("сумма берётся у ЛЮБОГО провайдера, не только у Uber", () => {
+    for (const provider of ["grubhub", "doordash", "roadie", null]) {
+      const r = decideCostUpdate(noPrior, { ...base, provider, totalAmountDueCents: 1550, feeCents: null, occurredAt: new Date() });
+      expect(r).toMatchObject({ apply: true, cents: 1550, dollars: 15.5 });
+    }
   });
 
   it("нет суммы → no_valid_amount (старое не обнуляется)", () => {
