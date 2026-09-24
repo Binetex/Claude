@@ -246,14 +246,20 @@ export async function linkBurqOrderAction(_prev: LinkFormState, formData: FormDa
     console.error(`[burq] link order ${burqOrderId} to ${orderId} failed:`, err instanceof Error ? err.message : String(err));
     return { error: burqErrorMessage(err) };
   }
-  revalidateOrder(orderId);
   switch (res.outcome) {
     case "linked": {
+      // Перерисовываем страницы только когда что-то ИЗМЕНИЛОСЬ. На вопросе и на ошибке
+      // перерисовка ничего не меняет на экране, но выглядит как «что-то произошло», и человек
+      // начинает обновлять страницу в поисках результата.
+      revalidateOrder(orderId);
       const label = STATUS_LABEL[res.status] ?? res.status;
-      return { ok: true, message: `Привязано (попытка #${res.attemptNumber}). Статус: ${label}.` };
+      return { ok: true, message: `Привязано (попытка #${res.attemptNumber}). Статус: ${label}. Данные из Burq подтянуты.` };
     }
     case "needs_confirmation":
-      return { needsConfirm: true, message: "У заказа уже есть активная доставка Burq." };
+      return {
+        needsConfirm: true,
+        message: `У заказа уже есть живая доставка Burq (${STATUS_LABEL[res.currentStatus] ?? res.currentStatus}) — за неё, возможно, уже платят.`,
+      };
     case "already_linked_other":
       return { error: "Этот Burq Order уже привязан к другому заказу Floremart." };
     case "burq_not_found":

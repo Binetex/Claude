@@ -12,6 +12,11 @@ import { linkBurqOrderAction } from "./deliveryActions";
  * под клавиатурой, а страница флориста вдобавок не перерисовывалась (действие обновляло только
  * путь владельца). Флорист жаловался трижды. Теперь блок остаётся открытым, пока есть что
  * сказать, кнопка явно показывает работу, а результат — крупной цветной плашкой сверху формы.
+ *
+ * ЛЮБОЙ ответ сервера показывается ОДНОЙ плашкой в ОДНОМ месте — сверху. Вопрос «заменить живую
+ * доставку?» раньше плашки не имел: он менял только кнопку ниже по форме, и на телефоне под
+ * открытой клавиатурой это читалось как «кнопка потухла и ничего не произошло». Человек обновлял
+ * страницу, вопрос пропадал вместе с состоянием формы, и всё начиналось заново (24.09.2026).
  */
 export function BurqLinkForm({ orderId }: { orderId: string }) {
   const [state, action, pending] = useActionState(linkBurqOrderAction, null);
@@ -34,6 +39,11 @@ export function BurqLinkForm({ orderId }: { orderId: string }) {
           {state.error}
         </p>
       )}
+      {needsConfirm && (
+        <p className="mt-2 rounded border border-amber-300 bg-amber-50 px-2 py-1.5 text-sm font-medium text-amber-800">
+          ⚠️ {state?.message} Подтвердите замену кнопкой ниже.
+        </p>
+      )}
       {pending && <p className="mt-2 text-sm text-slate-500">Привязываю, одну секунду…</p>}
       <form action={action} className="mt-2 space-y-2">
         <input type="hidden" name="orderId" value={orderId} />
@@ -50,11 +60,10 @@ export function BurqLinkForm({ orderId }: { orderId: string }) {
         />
         {needsConfirm ? (
           <div className="rounded border border-amber-300 bg-amber-50 p-2">
-            <p className="text-amber-800">{state?.message} Заменить текущую доставку?</p>
-            <div className="mt-1 flex items-center gap-2">
-              <input type="hidden" name="confirm" value="1" />
-              <Button type="submit" size="sm" disabled={pending || !value}>{pending ? "Замена…" : "Заменить"}</Button>
-            </div>
+            <input type="hidden" name="confirm" value="1" />
+            <Button type="submit" variant="destructive" className="w-full sm:w-auto" disabled={pending || !value}>
+              {pending ? "Замена…" : "Заменить живую доставку"}
+            </Button>
           </div>
         ) : (
           <Button type="submit" className="w-full sm:w-auto" disabled={pending || !value}>
