@@ -60,6 +60,23 @@ export async function createPaymentLink(prisma: PrismaClient, input: CreateLinkI
   return { ok: true, url: res.link.url };
 }
 
+/**
+ * Погасить ссылку. Оплаченную гасить нечего — Airwallex её и так закрыл, а кнопка на ней
+ * означала бы, что деньги можно отозвать этим действием. Их отзывает возврат, и только он.
+ */
+export async function deactivatePaymentLink(prisma: PrismaClient, id: string): Promise<{ ok?: true; error?: string }> {
+  if (!id) return { error: "Не указана ссылка." };
+  const account = await resolvePaymentLinksAccount(prisma);
+  if (!account) return { error: "Ключи Airwallex не настроены ни у одного магазина." };
+  const res = await account.client.deactivatePaymentLink(id);
+  if (!res.ok) {
+    if (res.code === "not_found") return { error: "Airwallex не знает такой ссылки." };
+    if (res.code === "unauthorized") return { error: "Airwallex не принял ключи — проверьте их в настройках магазина." };
+    return { error: res.message ?? "Не удалось погасить ссылку." };
+  }
+  return { ok: true };
+}
+
 export async function listPaymentLinks(prisma: PrismaClient): Promise<AirwallexPaymentLink[]> {
   const account = await resolvePaymentLinksAccount(prisma);
   if (!account) return [];

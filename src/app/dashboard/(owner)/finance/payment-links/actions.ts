@@ -9,7 +9,7 @@
 import { revalidatePath } from "next/cache";
 import { requireRole } from "@/lib/rbac";
 import { prisma } from "@/lib/db";
-import { createPaymentLink, type CreateLinkResult } from "@/modules/payments/paymentLinks";
+import { createPaymentLink, deactivatePaymentLink, type CreateLinkResult } from "@/modules/payments/paymentLinks";
 
 export async function createPaymentLinkAction(_prev: CreateLinkResult | null, formData: FormData): Promise<CreateLinkResult> {
   await requireRole("OWNER");
@@ -18,6 +18,14 @@ export async function createPaymentLinkAction(_prev: CreateLinkResult | null, fo
     amount: String(formData.get("amount") ?? ""),
   });
   // Список ссылок читается у Airwallex, поэтому обновляем страницу только когда добавилась новая.
+  if (res.ok) revalidatePath("/dashboard/finance/payment-links");
+  return res;
+}
+
+/** Погасить ссылку — когда ошиблись в сумме или названии. Отправленный счёт иначе не отозвать. */
+export async function deactivatePaymentLinkAction(id: string): Promise<{ ok?: true; error?: string }> {
+  await requireRole("OWNER");
+  const res = await deactivatePaymentLink(prisma, id);
   if (res.ok) revalidatePath("/dashboard/finance/payment-links");
   return res;
 }

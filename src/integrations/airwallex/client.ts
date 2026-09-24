@@ -293,6 +293,26 @@ export class AirwallexClient {
     return { ok: true, link };
   }
 
+  /**
+   * Погасить ссылку: `POST /pa/payment_links/{id}/deactivate` (проверено на живой ссылке
+   * 24.09.2026 — вернул `active: false`). Нужна не для порядка, а потому что ошибиться в сумме
+   * можно на первой же ссылке, а отправленный клиенту счёт на неверную цифру не отозвать иначе.
+   */
+  async deactivatePaymentLink(id: string): Promise<{ ok: true } | { ok: false; code: string; message: string | null }> {
+    const auth = await this.ensureToken();
+    if (!auth.ok) return { ok: false, code: auth.code, message: null };
+    const { status, json, networkError } = await this.fetchJson(`/api/v1/pa/payment_links/${encodeURIComponent(id)}/deactivate`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${this.token}`, "content-type": "application/json" },
+      body: "{}",
+    });
+    if (networkError) return { ok: false, code: `network:${networkError}`, message: null };
+    if (status === 401 || status === 403) return { ok: false, code: "unauthorized", message: null };
+    if (status === 404) return { ok: false, code: "not_found", message: null };
+    if (status !== 200 && status !== 201) return { ok: false, code: `http_${status}`, message: (json as { message?: string } | null)?.message ?? null };
+    return { ok: true };
+  }
+
   /** Последние ссылки — читаем у Airwallex, своей таблицы не заводим: правда там, включая
    *  оплаты и ссылки, созданные мимо нас в их кабинете. */
   async listPaymentLinks(limit = 20): Promise<ListPaymentLinksResult> {

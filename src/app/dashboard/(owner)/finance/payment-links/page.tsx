@@ -16,7 +16,10 @@ export const dynamic = "force-dynamic";
 export default async function PaymentLinksPage() {
   await requireRole("OWNER");
   const account = await resolvePaymentLinksAccount(prisma);
-  const links = account ? await listPaymentLinks(prisma) : [];
+  // В клиентский список отдаём ПРОСТЫЕ поля, а не тип из server-only модуля клиента Airwallex.
+  const links = (account ? await listPaymentLinks(prisma) : []).map((l) => ({
+    id: l.id, url: l.url, title: l.title, amount: l.amount, status: l.status, active: l.active, createdAt: l.createdAt,
+  }));
 
   return (
     <div className="space-y-4">
