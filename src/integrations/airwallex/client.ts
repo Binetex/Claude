@@ -48,6 +48,31 @@ export type ListRefundsResult =
   | { ok: true; refunds: AirwallexRefund[] }
   | { ok: false; retryable: boolean; code: string };
 
+/**
+ * Ссылка на оплату. Поля — с живого ответа Airwallex 24.09.2026 (GET /pa/payment_links).
+ * Налога среди них НЕТ и в запросе создания тоже: Airwallex сумму не пересчитывает, сколько
+ * передали — столько и спишет.
+ */
+export type AirwallexPaymentLink = {
+  id: string;
+  url: string;
+  title: string;
+  amount: number | null;
+  currency: string;
+  status: string;
+  active: boolean;
+  createdAt: string | null;
+  expiresAt: string | null;
+};
+
+export type CreatePaymentLinkResult =
+  | { ok: true; link: AirwallexPaymentLink }
+  | { ok: false; retryable: boolean; code: string; message: string | null };
+
+export type ListPaymentLinksResult =
+  | { ok: true; links: AirwallexPaymentLink[] }
+  | { ok: false; retryable: boolean; code: string };
+
 export type CreateRefundResult =
   | { ok: true; refund: AirwallexRefund }
   | { ok: false; retryable: boolean; code: string; message: string | null };
@@ -62,6 +87,26 @@ function normalizeStatus(raw: string): AirwallexIntentStatus {
   ];
   const up = (raw ?? "").toUpperCase();
   return (known as string[]).includes(up) ? (up as AirwallexIntentStatus) : "UNKNOWN";
+}
+
+/** Строка ответа Airwallex → наша ссылка. Без id и url показывать нечего — такую пропускаем. */
+function toPaymentLink(raw: unknown): AirwallexPaymentLink | null {
+  if (!raw || typeof raw !== "object") return null;
+  const r = raw as Record<string, unknown>;
+  const id = typeof r.id === "string" ? r.id : null;
+  const url = typeof r.url === "string" ? r.url : null;
+  if (!id || !url) return null;
+  return {
+    id,
+    url,
+    title: typeof r.title === "string" ? r.title : "",
+    amount: typeof r.amount === "number" ? r.amount : null,
+    currency: typeof r.currency === "string" ? r.currency : "USD",
+    status: typeof r.status === "string" ? r.status : "UNKNOWN",
+    active: r.active !== false,
+    createdAt: typeof r.created_at === "string" ? r.created_at : null,
+    expiresAt: typeof r.expires_at === "string" ? r.expires_at : null,
+  };
 }
 
 export class AirwallexClient {
@@ -212,6 +257,58 @@ export class AirwallexClient {
    * Получить payment_intent. 401 → одна повторная авторизация; 429 → backoff; 404 → not found.
    * Возвращает нормализованный статус + сырой + статус последней попытки (для «провала»).
    */
+  /**
+   * Ссылка на оплату. Обязательные поля по ответу API: `title` и `reusable`; сумма должна быть
+   * положительной, валюта — из их списка (проверено заведомо неверными запросами 24.09.2026,
+   * ничего при этом не создавая).
+   *
+   * `reusable: false` — одноразовая: оплатили и ссылка закрылась. Так владелец и создавал все
+   * свои 17 ссылок руками; многоразовая для «клиент просит счёт» означала бы, что по одной
+   * ссылке можно заплатить дважды.
+   */
+  async createPaymentLink(input: { title: string; amountMajor: number; currency: string; description?: string | null }): Promise<CreatePaymentLinkResult> {
+    const auth = await this.ensureToken();
+    if (!auth.ok) return { ok: false, retryable: false, code: auth.code, message: null };
+    const { status, json, networkError } = await this.fetchJson("/api/v1/pa/payment_links/create", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${this.token}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        title: input.title,
+        reusable: false,
+        amount: input.amountMajor,
+        currency: input.currency,
+        ...(input.description ? { description: input.description } : {}),
+      }),
+    });
+    if (networkError) return { ok: false, retryable: true, code: `network:${networkError}`, message: null };
+    if (status === 401 || status === 403) return { ok: false, retryable: false, code: "unauthorized", message: null };
+    if (status >= 500) return { ok: false, retryable: true, code: `http_${status}`, message: null };
+    if (status !== 200 && status !== 201) {
+      // Текст валидации Airwallex («'amount' must be positive.») понятнее любой нашей догадки.
+      const msg = (json as { message?: string } | null)?.message ?? null;
+      return { ok: false, retryable: false, code: `http_${status}`, message: msg };
+    }
+    const link = toPaymentLink(json);
+    if (!link) return { ok: false, retryable: false, code: "bad_response", message: null };
+    return { ok: true, link };
+  }
+
+  /** Последние ссылки — читаем у Airwallex, своей таблицы не заводим: правда там, включая
+   *  оплаты и ссылки, созданные мимо нас в их кабинете. */
+  async listPaymentLinks(limit = 20): Promise<ListPaymentLinksResult> {
+    const auth = await this.ensureToken();
+    if (!auth.ok) return { ok: false, retryable: false, code: auth.code };
+    const { status, json, networkError } = await this.fetchJson(`/api/v1/pa/payment_links?page_size=${limit}`, {
+      method: "GET",
+      headers: { Authorization: `Bearer ${this.token}` },
+    });
+    if (networkError) return { ok: false, retryable: true, code: `network:${networkError}` };
+    if (status === 401 || status === 403) return { ok: false, retryable: false, code: "unauthorized" };
+    if (status !== 200) return { ok: false, retryable: status >= 500, code: `http_${status}` };
+    const items = (json as { items?: unknown[] } | null)?.items ?? [];
+    return { ok: true, links: items.map(toPaymentLink).filter((l): l is AirwallexPaymentLink => l !== null) };
+  }
+
   async getPaymentIntent(id: string, attempt = 0): Promise<PaymentIntentResult> {
     const t = await this.ensureToken();
     if (!t.ok) return { ok: false, retryable: t.code.startsWith("network"), code: t.code, reauth: t.code === "unauthorized" };

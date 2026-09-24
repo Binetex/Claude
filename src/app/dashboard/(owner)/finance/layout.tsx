@@ -37,6 +37,9 @@ export default async function FinanceLayout({ children }: { children: React.Reac
       badge: issues.blocking + issues.warning,
       alarming: issues.blocking > 0,
     },
+    // Ссылки на оплату — не отчёт, а инструмент на ходу: клиент попросил счёт, владелец выписал.
+    // Место в «Финансах», а не в «Настройках»: это ежедневная работа, а не разовая настройка.
+    { href: "/dashboard/finance/payment-links", label: "Ссылки на оплату" },
     { href: "/dashboard/finance/settings", label: "Настройки расчёта" },
   ];
 
