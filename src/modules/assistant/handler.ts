@@ -15,7 +15,9 @@ import { parseAttachments } from "@/integrations/quo/communicationsService";
 import { resolveDeepseekConfig } from "@/integrations/deepseek/settings";
 import { createDeepseekClient, type DeepseekClient } from "@/integrations/deepseek/client";
 import { DeepseekError } from "@/integrations/deepseek/errors";
-import { buildMessages, parseReply, describeDeliveryDay, type HistoryLine, type OrderSnapshot } from "./prompt";
+import { buildMessages, parseReply, describeDeliveryDay, earliestAgreeHour, type HistoryLine, type OrderSnapshot } from "./prompt";
+import { morningForOrder, morningForNewOrder } from "@/modules/capacity/load";
+import type { MorningVerdict } from "@/modules/capacity/morning";
 import { matchIntent } from "./intents";
 import { readTemplates, templateApplies, renderAssistantTemplate } from "./templates";
 import { loadCatalog, looksLikeShopping } from "./catalog";
@@ -31,7 +33,7 @@ import { junkReason } from "./junk";
 import { loadGlobalNote, activeGlobalNoteText } from "./globalNote";
 import { bouquetPageUrl } from "@/lib/bouquetPage";
 import { publishTelegramNotification } from "@/integrations/telegram/events";
-import { todayStrInTz, zonedLocalTimeToUtc, localClock } from "@/lib/tz";
+import { todayStrInTz, zonedLocalTimeToUtc, localClock, dayDiff } from "@/lib/tz";
 import { formatDeliveryWindow } from "@/lib/timeWindow";
 
 /**
@@ -226,9 +228,14 @@ export function buildAssistantHandler(prisma: PrismaClient, deps: AssistantDeps 
     // незнакомого номера разговор почти всегда про покупку, поэтому там он идёт сразу.
     const wantsCatalog = !order || looksLikeShopping(text);
     const clock = localClock(site.timezone, now());
+    // Загрузка утра: по заказу — у его флориста на день доставки, незнакомому номеру — на
+    // сегодня и завтра. Сбой расчёта не роняет разбор: без неё правило про время прежнее.
+    const orderMorning = order ? await morningFor(prisma, order, clock.dateStr, now()) : null;
+    const morningOutlook = order ? undefined : await outlookFor(prisma, site.id, clock.dateStr, now());
     const messages = buildMessages({
       knowledgeBase: order ? site.aiKnowledgeBase : site.aiUnknownKnowledgeBase,
-      order: order ? snapshot(order, site.name, incoming.partyRole, clock.dateStr) : null,
+      order: order ? { ...snapshot(order, site.name, incoming.partyRole, clock.dateStr), morning: orderMorning } : null,
+      morningOutlook,
       history: await loadHistory(prisma, order?.id ?? null, phone, incoming.storePhone, incoming, site.timezone, answeredIds),
       now: clock,
       globalNote,
@@ -261,7 +268,8 @@ export function buildAssistantHandler(prisma: PrismaClient, deps: AssistantDeps 
       return;
     }
 
-    let parsed = parseReply(raw);
+    let agreeHour = earliestAgreeHour(order ? [orderMorning] : (morningOutlook ?? []).map((m) => m.verdict));
+    let parsed = parseReply(raw, { earliestAgreeHour: agreeHour });
 
     // Незнакомый номер назвал заказ. Нашли ровно один — привязываем разговор и спрашиваем
     // модель ещё раз, уже с данными заказа: человек ждёт ответа про свой заказ сейчас, а не в
@@ -292,9 +300,11 @@ export function buildAssistantHandler(prisma: PrismaClient, deps: AssistantDeps 
       if (found && foundGate?.ok) {
         await linkConversation(prisma, found.id, phone, incoming.storePhone).catch(() => null);
         linkedOrder = found;
+        const foundMorning = await morningFor(prisma, found, clock.dateStr, now());
+        agreeHour = earliestAgreeHour([foundMorning]);
         const again = buildMessages({
           knowledgeBase: site.aiKnowledgeBase,
-          order: snapshot(found, site.name, incoming.partyRole, clock.dateStr),
+          order: { ...snapshot(found, site.name, incoming.partyRole, clock.dateStr), morning: foundMorning },
           history: await loadHistory(prisma, found.id, phone, incoming.storePhone, incoming, site.timezone, answeredIds),
           now: clock,
           globalNote,
@@ -304,7 +314,7 @@ export function buildAssistantHandler(prisma: PrismaClient, deps: AssistantDeps 
           const res = await client.complete(again);
           raw = res.text;
           latencyMs += res.latencyMs;
-          parsed = parseReply(raw);
+          parsed = parseReply(raw, { earliestAgreeHour: agreeHour });
           messages.splice(0, messages.length, ...again);
         } catch {
           // Не вышло переспросить — остаёмся с ответом «без заказа», он безопасен.
@@ -380,6 +390,38 @@ export function buildAssistantHandler(prisma: PrismaClient, deps: AssistantDeps 
     }
     await finishTurn(prisma, turn.id, action, site.aiDryRun, burst);
   };
+}
+
+/**
+ * Загрузка утра для заказа: только пока доставка впереди (сегодня или позже) и заказ не
+ * доставлен — про прошедший день обещать нечего.
+ */
+async function morningFor(
+  prisma: PrismaClient,
+  order: { id: string; orderStatus: string; deliveryDate: Date | null },
+  todayStr: string,
+  now: Date
+): Promise<MorningVerdict | null> {
+  if (!order.deliveryDate || order.orderStatus === "DELIVERED") return null;
+  if (dayDiff(todayStr, order.deliveryDate.toISOString().slice(0, 10)) < 0) return null;
+  return morningForOrder(prisma, order.id, now).catch(logMorningError);
+}
+
+async function outlookFor(prisma: PrismaClient, siteId: string, todayStr: string, now: Date): Promise<{ day: "today" | "tomorrow"; verdict: MorningVerdict }[]> {
+  const tomorrowStr = new Date(Date.parse(`${todayStr}T00:00:00Z`) + 86_400_000).toISOString().slice(0, 10);
+  const [today, tomorrow] = await Promise.all([
+    morningForNewOrder(prisma, siteId, todayStr, now).catch(logMorningError),
+    morningForNewOrder(prisma, siteId, tomorrowStr, now).catch(logMorningError),
+  ]);
+  const out: { day: "today" | "tomorrow"; verdict: MorningVerdict }[] = [];
+  if (today) out.push({ day: "today", verdict: today });
+  if (tomorrow) out.push({ day: "tomorrow", verdict: tomorrow });
+  return out;
+}
+
+function logMorningError(err: unknown): null {
+  console.error("[assistant] загрузка утра не посчиталась:", err instanceof Error ? err.message : String(err));
+  return null;
 }
 
 function logCallRequestError(err: unknown) {

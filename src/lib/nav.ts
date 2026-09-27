@@ -35,6 +35,9 @@ export async function navFor(user: CurrentUser): Promise<NavItem[]> {
 function ownerNav(): NavItem[] {
   return [
     { href: "/dashboard/orders", label: "Заказы" },
+    // Загрузка утра по флористам и фактическое время доставки: по этим же цифрам ассистент
+    // решает, обещать ли клиенту утро.
+    { href: "/dashboard/schedule", label: "График доставки" },
     // Ведём сразу на «Запросы»: /dashboard/reviews — редирект на них же, и клик по пункту
     // прогонял layout раздела дважды. Подсветка по всему разделу держится на match.
     { href: "/dashboard/reviews/requests", label: "Отзывы", match: ["/dashboard/reviews"] },

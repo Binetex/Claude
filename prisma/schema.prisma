@@ -396,6 +396,9 @@ model Florist {
   /// Отдельные даты недоступности (отпуск, больничный). UTC-полночь БИЗНЕС-дня —
   /// та же конвенция, что у Order.deliveryDate; сравнение идёт день в день, без таймзон.
   daysOff     DateTime[] @default([])
+  /// Сколько работы флорист успевает к 15:00, в баллах: букет до $250 — 1, от $250 — 2
+  /// (см. modules/capacity/morning.ts). По нему ассистент решает, обещать ли утро.
+  morningCapacity Int @default(4)
 
   createdAt DateTime @default(now())
 
@@ -3089,4 +3092,15 @@ enum EmailMessageStatus {
   PENDING // исходящее: строка создана, провайдер ещё не ответил
   SENT
   FAILED
+}
+
+/// Утро (доставка до 15:00) закрыто вручную на дату — для всех флористов и магазинов разом.
+/// Закрытие по загрузке считается на лету и сюда не пишется: здесь только решение человека
+/// («флориста нет», «праздник»). Строка есть — утро закрыто; удалили — открыто.
+model MorningClosure {
+  /// Бизнес-дата «YYYY-MM-DD» — та же, что лежит в Order.deliveryDate.
+  day             String   @id
+  note            String?
+  createdByUserId String?
+  createdAt       DateTime @default(now())
 }

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildMessages, parseReply, looksEnglish, stripDashes, describeDeliveryDay, forbiddenOffer, confirmsEarlyTime, type OrderSnapshot } from "./prompt";
+import { buildMessages, parseReply, looksEnglish, stripDashes, describeDeliveryDay, forbiddenOffer, confirmsEarlyTime, earliestAgreeHour, type OrderSnapshot } from "./prompt";
 
 /**
  * Что уходит в модель и как читается её ответ. Главное здесь — запреты: разбор устроен так,
@@ -557,5 +557,56 @@ describe("предохранители не глушат правильные о
   it("свой телефон в SMS не уходит ни при каких условиях", () => {
     const r = passes("Just call us at +1 (657) 427-7770 and we'll sort it out.");
     expect(r.replyEn).toBe("");
+  });
+});
+
+/**
+ * Загрузка утра (modules/capacity). Решает код по баллам флориста, модель только говорит это
+ * словами. Без данных о загрузке правило прежнее — закреплено тестами выше.
+ */
+describe("загрузка утра", () => {
+  const sys = (o: OrderSnapshot) => buildMessages({ knowledgeBase: "", order: o, history: [], incomingText: "can you bring it by noon?" });
+
+  it("вердикт попадает в данные заказа, а правило времени — по загрузке", () => {
+    const m = sys({ ...order, morning: "FULL" });
+    expect(m[1].content).toContain("Morning delivery (before 3 PM) on the delivery day: FULLY BOOKED");
+    expect(m[0].content).toContain('The order data has a "Morning delivery" line');
+    expect(m[0].content).toContain("offer the 3 PM to 7 PM window instead");
+    expect(m[0].content).not.toContain("ASKING US FOR A TIME BEFORE 4 PM");
+  });
+
+  it("первый в очереди — «около 12–12:30»", () => {
+    const m = sys({ ...order, morning: "FIRST" });
+    expect(m[1].content).toContain("OPEN, first in line");
+    expect(m[0].content).toContain("around 12 to 12:30 PM");
+  });
+
+  it("без загрузки — прежнее правило 16:00", () => {
+    const m = sys(order);
+    expect(m[1].content).not.toContain("Morning delivery");
+    expect(m[0].content).toContain("ASKING US FOR A TIME BEFORE 4 PM");
+  });
+
+  it("незнакомому номеру — прогноз на сегодня и завтра", () => {
+    const m = buildMessages({
+      knowledgeBase: "", order: null, history: [], incomingText: "can you deliver tomorrow morning?",
+      morningOutlook: [{ day: "today", verdict: "FULL" }, { day: "tomorrow", verdict: "AVAILABLE" }],
+    });
+    expect(m[1].content).toContain("today: FULLY BOOKED");
+    expect(m[1].content).toContain("tomorrow: OPEN, but not first in line");
+    expect(m[0].content).toContain("tells you the\n  shop's real workload for today and tomorrow");
+  });
+
+  it("проверка ответа: при свободном утре запрещено только раньше полудня", () => {
+    expect(earliestAgreeHour(["FIRST"])).toBe(12);
+    expect(earliestAgreeHour(["FULL"])).toBe(15);
+    expect(earliestAgreeHour([null])).toBe(16);
+    expect(earliestAgreeHour(["AVAILABLE", "FULL"])).toBe(15);
+    expect(confirmsEarlyTime("Sure, it should arrive around 12 to 12:30 PM.", 12)).toBe(false);
+    expect(confirmsEarlyTime("Sure, 11 am works.", 12)).toBe(true);
+    expect(confirmsEarlyTime("Sure, 1 PM works.", 15)).toBe(true);
+    const ok = parseReply('{"reply_en":"Yes, a morning delivery works, it should arrive around 1 PM.","intent":"delivery_time","important":false,"needs_human":false,"ready_time":null}', { earliestAgreeHour: 12 });
+    expect(ok.replyEn).not.toBe("");
+    expect(ok.needsHuman).toBe(false);
   });
 });
