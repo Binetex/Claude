@@ -32,6 +32,7 @@ import { paymentTriggerFor } from "@/modules/automations/paymentTriggers";
 import { publishTelegramNotification } from "@/integrations/telegram/events";
 import { onWooOrderIngestedForAirwallex } from "@/integrations/airwallex/reconcile";
 import { adoptOrphanCommunicationsForNewOrder } from "@/integrations/quo/adoptOrphans";
+import { parseWindowText } from "@/lib/deliveryWindow";
 
 /**
  * Авто-назначение основного флориста при переходе заказа в CONFIRMED (оплачен / в работу) —
@@ -282,6 +283,9 @@ export async function ingestWooOrder(
       externalUpdatedAt: externalUpdatedAt ?? undefined,
       deliveryDate,
       deliveryWindow: mapped.deliveryWindow ?? normalized.deliveryWindow ?? "",
+      // Окно строго «с — до»: слоты плагина («11:00 - 15:00») разбираются надёжно.
+      windowFrom: parseWindowText(mapped.deliveryWindow ?? normalized.deliveryWindow)?.from ?? null,
+      windowTo: parseWindowText(mapped.deliveryWindow ?? normalized.deliveryWindow)?.to ?? null,
       senderName: mapped.senderName ?? normalized.sender.name,
       senderPhone: normalized.sender.phone ?? "",
       senderEmail: normalized.sender.email,

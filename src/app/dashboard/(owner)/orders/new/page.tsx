@@ -3,6 +3,7 @@ import { requireRole } from "@/lib/rbac";
 import { prisma } from "@/lib/db";
 import { PageHeader } from "@/components/ui/misc";
 import { ManualOrderForm } from "./ManualOrderForm";
+import { loadWindowPresets } from "@/modules/orders/windowPresets";
 
 export const dynamic = "force-dynamic";
 
@@ -22,6 +23,11 @@ export default async function NewOrderPage() {
     }),
   ]);
 
+  // Частые окна каждого магазина — кнопки в выборе времени доставки.
+  const presets = Object.fromEntries(
+    await Promise.all(sites.map(async (s) => [s.id, await loadWindowPresets(prisma, s.id).catch(() => [])] as const))
+  );
+
   return (
     <div className="space-y-4">
       <PageHeader
@@ -35,6 +41,7 @@ export default async function NewOrderPage() {
       />
       <ManualOrderForm
         sites={sites}
+        windowPresets={presets}
         florists={florists.map((f) => ({ id: f.id, name: f.user.name }))}
       />
     </div>

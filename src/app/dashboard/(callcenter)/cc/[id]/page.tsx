@@ -3,6 +3,8 @@ import { loadTemplatesForOrder } from "@/modules/messaging/templates";
 import { localDateStr } from "@/lib/tz";
 import { getForCallCenter } from "@/modules/orders/queries";
 import { prisma } from "@/lib/db";
+import { windowOf } from "@/lib/deliveryWindow";
+import { loadWindowPresets } from "@/modules/orders/windowPresets";
 import { loadOrderCommunicationsCard } from "@/integrations/quo/communicationsService";
 import { loadOrderEmailPanel, markOrderEmailsRead } from "@/integrations/emailFactory/read";
 import { OrderCommunications } from "@/app/dashboard/(owner)/orders/[id]/OrderCommunications";
@@ -53,6 +55,8 @@ export default async function CallCenterOrderPage({
   const backHref = backToList("/dashboard/cc", (await searchParams).back);
   const order = await getForCallCenter(id);
   if (!order) notFound();
+  // Частые окна магазина — кнопки в выборе времени доставки.
+  const windowPresets = await loadWindowPresets(prisma, order.siteId).catch(() => []);
 
   const emailPanel = await loadOrderEmailPanel(prisma, id).catch(() => ({ emails: [], unread: 0, customerEmail: null }));
   // Карточку открыли — ответы клиента по почте считаются увиденными. Панель уже загружена ВЫШЕ,
@@ -94,7 +98,8 @@ export default async function CallCenterOrderPage({
           orderId={order.id}
           updatedAt={order.updatedAt}
           deliveryDate={localDateStr(new Date(order.deliveryDate), "UTC")}
-          deliveryWindow={order.deliveryWindow}
+          window={windowOf(order)}
+          presets={windowPresets}
         />
       }
       belowDelivery={

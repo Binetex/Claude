@@ -12,6 +12,7 @@ import type { OutboxRecord } from "@/outbox/types";
 import { PrismaOutboxRepository } from "@/outbox/prismaRepository";
 import { resolveWooCredentials } from "./credentials";
 import { pushWooDelivery, PI_WINDOW_META } from "./deliveryPush";
+import { windowOf } from "@/lib/deliveryWindow";
 
 export const WOO_DELIVERY_PUSH_EVENT = "woo.delivery.push";
 
@@ -45,7 +46,7 @@ export function buildWooDeliveryPushHandler(prisma: PrismaClient): OutboxHandler
     if (!p?.orderId) return;
     const order = await prisma.order.findUnique({
       where: { id: p.orderId },
-      select: { siteId: true, platform: true, externalId: true, orderNumber: true, deliveryDate: true, deliveryWindow: true },
+      select: { siteId: true, platform: true, externalId: true, orderNumber: true, deliveryDate: true, deliveryWindow: true, windowFrom: true, windowTo: true },
     });
     if (!order || order.platform !== "WOOCOMMERCE" || !order.externalId) return;
 
@@ -56,7 +57,7 @@ export function buildWooDeliveryPushHandler(prisma: PrismaClient): OutboxHandler
 
     const day = order.deliveryDate.toISOString().slice(0, 10);
     const creds = await resolveWooCredentials(order.siteId);
-    const res = await pushWooDelivery(creds, order.externalId, day, order.deliveryWindow);
+    const res = await pushWooDelivery(creds, order.externalId, day, windowOf(order));
     console.info(
       res.slot
         ? `[woo] ${order.orderNumber}: перенос записан в магазин — ${day} ${res.slot}`

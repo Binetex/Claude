@@ -11,6 +11,7 @@
  * Чистая функция — решение и новое окно; побочные эффекты делает handler.
  */
 import { windowIsMorning, wishIsAfternoon } from "@/modules/capacity/morning";
+import { parseWindowText, type WindowRange } from "@/lib/deliveryWindow";
 
 /**
  * Клиент говорит о дне: «tomorrow», «Saturday», «10/3», «another day». Дата — только через
@@ -23,13 +24,12 @@ export function mentionsDay(text: string): boolean {
   return DAY_WORDS.test(text);
 }
 
-export function laterWindowFromWish(currentWindow: string | null, readyTime: string): string | null {
-  if (!windowIsMorning(currentWindow)) return null;
+export function laterWindowFromWish(current: WindowRange | null, readyTime: string): WindowRange | null {
+  if (!windowIsMorning(current)) return null;
   if (mentionsDay(readyTime)) return null;
   if (!wishIsAfternoon(readyTime)) return null;
-  // Окно в карточке — слова клиента, как владелец и сам их пишет («4.30 - 5pm», «after 5pm»).
-  const window = readyTime.replace(/\b(today|tonight)\b/gi, "").replace(/\s+/g, " ").trim();
-  return window || null;
+  // Окно — строго «с — до» по словам клиента: «after 5pm» → 17:00–21:00, «4-5pm» → 16:00–17:00.
+  return parseWindowText(readyTime.replace(/\b(today|tonight)\b/gi, " "));
 }
 
 /** Дальше этого клиенту переносить сами не будем: ошибка модели в дате — не на месяц вперёд. */
@@ -44,26 +44,26 @@ function addDays(day: string, n: number): string {
  * и на следующий день тоже). Возвращает новые день и окно или null, если трогать нечего.
  *
  *  - другой день: только ПОЗЖЕ текущего дня доставки и не дальше MAX_DAYS_AHEAD от сегодня;
- *    окно — слова клиента о времени, если назвал, иначе прежнее;
+ *    окно — время из слов клиента («after 5» → 17:00–21:00), если назвал, иначе прежнее;
  *  - тот же день: как раньше — только с утра на после 15:00 (laterWindowFromWish).
  */
 export function planReschedule(args: {
   todayStr: string;
   currentDay: string;
-  currentWindow: string | null;
+  currentWindow: WindowRange | null;
   readyTime: string | null;
   newDate: string | null;
-}): { day: string; window: string } | null {
-  const window = args.currentWindow ?? "";
+}): { day: string; window: WindowRange | null } | null {
   if (args.newDate) {
     if (args.newDate <= args.currentDay) return null;
     if (args.newDate < args.todayStr || args.newDate > addDays(args.todayStr, MAX_DAYS_AHEAD)) return null;
     const words = (args.readyTime ?? "")
-      .replace(/\b(tomorrow|tmrw|today|tonight|on|next|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/gi, "")
+      .replace(/\b(tomorrow|tmrw|today|tonight|on|next|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/gi, " ")
       .replace(/\s+/g, " ")
       .trim();
-    const named = words && /\d|noon|morning|afternoon|evening/i.test(words) && !/\b(any ?time|all day|whenever)\b/i.test(words);
-    return { day: args.newDate, window: named ? words : window };
+    // «any time» на новый день — окно прежнее; названное время («after 5», «afternoon») — новое.
+    const named = /\b(any ?time|all day|whenever)\b/i.test(words) ? null : parseWindowText(words);
+    return { day: args.newDate, window: named ?? args.currentWindow };
   }
   if (!args.readyTime) return null;
   const later = laterWindowFromWish(args.currentWindow, args.readyTime);

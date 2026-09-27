@@ -1,3 +1,5 @@
+import { parseTimes, hasByWord, parseWindowText, DAY_START_MIN, type WindowRange } from "@/lib/deliveryWindow";
+
 /**
  * Загрузка утра: сколько работы у флориста к 15:00 и можно ли обещать клиенту утро.
  *
@@ -35,64 +37,25 @@ export function isBigOrder(items: OrderItemLike[]): boolean {
   return items.some((it) => it.price >= BIG_BOUQUET_PRICE);
 }
 
-/**
- * Часы, названные в строке, в минутах от полуночи, по порядку.
- *
- * Окна приходят из шести магазинов как есть: «11:00 - 15:00», «11:00 AM - 4:00 PM»,
- * «4.30 - 5pm», «2pm», «Before 3PM», «до 5 вечера». Голое число без am/pm меньше восьми — это
- * день, а не утро: ночью мы не возим, а «4.30 - 5pm» иначе стало бы половиной пятого утра.
- * am/pm, стоящий только у последнего числа («11 - 3pm»), относится и к предыдущим.
- */
-export function parseTimes(raw: string | null | undefined): number[] {
-  const text = (raw ?? "").toLowerCase();
-  const re = /(\d{1,2})(?:[:.](\d{2}))?\s*(a\.?m\.?|p\.?m\.?|noon)?/g;
-  const found: { h: number; m: number; ap: "a" | "p" | null }[] = [];
-  for (const m of text.matchAll(re)) {
-    const h = Number(m[1]);
-    const min = m[2] ? Number(m[2]) : 0;
-    if (h > 23 || min > 59) continue;
-    // Одинокая цифра без минут и без am/pm внутри слова вроде «Apt 4» сюда не попадает:
-    // строка окна содержит только время, а пожелания разбирает wishIsMorning.
-    const ap = m[3]?.startsWith("a") ? "a" : m[3]?.startsWith("p") || m[3] === "noon" ? "p" : null;
-    found.push({ h, m: min, ap });
-  }
-  if (/\bnoon\b/.test(text) && !found.length) return [12 * 60];
-  return found.map(({ h, m, ap }, i) => {
-    let hour = h;
-    // Подпись берём у ближайшего следующего времени с am/pm, если число её не противоречит:
-    // «11 - 3pm» — это 11 утра, а не 11 вечера (одиннадцать больше трёх).
-    const next = found.slice(i + 1).find((f) => f.ap);
-    const suffix = ap ?? (next && h <= 12 ? (h <= next.h || next.h === 12 ? next.ap : "a") : null);
-    if (suffix === "p" && hour < 12) hour += 12;
-    else if (suffix === "a" && hour === 12) hour = 0;
-    else if (!suffix && hour < 8) hour += 12;
-    return hour * 60 + m;
-  });
+// Разбор часов и слов «до/после» — один на систему, в lib/deliveryWindow.ts.
+export { parseTimes, hasByWord } from "@/lib/deliveryWindow";
+
+/** Окно заказа: строгое «с — до», а текст (старый заказ, тест) — разбором. */
+function toRange(w: WindowRange | string | null | undefined): WindowRange | null {
+  if (w == null) return null;
+  return typeof w === "string" ? parseWindowText(w) : w;
 }
 
 /**
- * «К такому-то часу»: before/by/until/till и русское «до». \b в JS знает только латиницу, поэтому
- * «до» ловится своими границами — иначе «до 3» и «до 5 вечера» из окон, которые владелец пишет
- * руками, читались как одиночное время.
- */
-export function hasByWord(text: string | null | undefined): boolean {
-  return /\b(before|by|until|till)\b|(?:^|[^а-яё])до(?=[^а-яё]|$)/i.test(text ?? "");
-}
-
-/**
- * Утренний ли заказ по окну: окно заканчивается к 15:00 («11:00 - 15:00», «09:00 - 15:00»),
- * одиночное время раньше 15:00 («2pm») или «до N» с N не позже 15:00 («Before 3PM»).
+ * Утренний ли заказ по окну: окно заканчивается к 15:00 («11:00 - 15:00», «09:00 - 15:00»,
+ * «2pm» → 13:30–14:30, «Before 3PM» → 11:00–15:00).
  *
  * «11:30 AM - 5:00 PM» утренним НЕ считается: это окно на весь день, и по факту такие заказы
  * уезжали после обеда. Если клиент просил в нём утро, это видно по его пожеланию (wishIsMorning).
  */
-export function windowIsMorning(window: string | null | undefined): boolean {
-  const times = parseTimes(window);
-  if (!times.length) return false;
-  const limit = MORNING_END_HOUR * 60;
-  if (hasByWord(window)) return times[times.length - 1] <= limit;
-  if (times.length === 1) return times[0] < limit;
-  return times[times.length - 1] <= limit;
+export function windowIsMorning(window: WindowRange | string | null | undefined): boolean {
+  const r = toRange(window);
+  return !!r && r.to <= MORNING_END_HOUR * 60;
 }
 
 /**
@@ -136,15 +99,14 @@ export function wishIsAfternoon(wish: string): boolean {
 }
 
 /**
- * Окно «на весь день» («11:30 AM - 5:00 PM», «до 5 вечера», «Before 5PM») или пустое: время
+ * Окно «на весь день» («11:30 AM - 5:00 PM», «до 5 вечера», «Before 5PM») или его нет: время
  * внутри него решает пожелание клиента.
  */
-export function isAllDayWindow(window: string | null | undefined): boolean {
-  const t = parseTimes(window);
-  if (!t.length) return true;
+export function isAllDayWindow(window: WindowRange | string | null | undefined): boolean {
+  const r = toRange(window);
+  if (!r) return true;
   const limit = MORNING_END_HOUR * 60;
-  if (hasByWord(window)) return t[t.length - 1] > limit;
-  return t.length > 1 && t[0] < limit && t[t.length - 1] > limit;
+  return r.from < limit && r.to > limit;
 }
 
 /**
@@ -156,7 +118,7 @@ export function isAllDayWindow(window: string | null | undefined): boolean {
  *    в заказе (assistant/reschedule.ts), так что просьба и окно не расходятся.
  * Только внутри окна «на весь день» решает последнее пожелание клиента.
  */
-export function isMorningOrder(order: { window: string | null; customerNote: string | null }): boolean {
+export function isMorningOrder(order: { window: WindowRange | string | null; customerNote: string | null }): boolean {
   if (windowIsMorning(order.window)) return true;
   if (!isAllDayWindow(order.window)) return false;
   const latest = readyTimeWishes(order.customerNote)[0];
@@ -255,27 +217,22 @@ export const LATE_TOLERANCE_MIN = 20;
  * о времени, если оно есть, иначе окно заказа:
  *  - «by noon», «until 1:40» — от начала окна до названного часа;
  *  - «after 3.30 pm» — с названного часа до конца окна (или три часа, если окно раньше);
- *  - «between 11:30 and 12:30», «4-5pm», «11:00 - 15:00» — как есть;
+ *  - «between 11:30 and 12:30», «4-5pm» — как есть;
  *  - «12 pm», «around 2» — полчаса в обе стороны.
  */
-export function wantedRange(window: string | null, wish: string | null): { from: number; to: number } | null {
-  const useWish = !!wish && (wishIsMorning(wish) || wishIsAfternoon(wish));
-  const source = useWish ? wish! : window ?? "";
-  const times = parseTimes(source.replace(/\b\d{3,}\b/g, " "));
-  if (!times.length) return null;
-  const win = parseTimes(window);
-  const text = source.toLowerCase();
+export function wantedRange(window: WindowRange | string | null, wish: string | null): WindowRange | null {
+  const range = toRange(window);
+  if (!wish || !(wishIsMorning(wish) || wishIsAfternoon(wish))) return range;
+  const times = parseTimes(wish.replace(/\b\d{3,}\b/g, " "));
+  if (!times.length) return range;
+  const text = wish.toLowerCase();
   if (hasByWord(text)) {
     const to = times[times.length - 1];
-    // Начало — открытие окна, если окно задано промежутком; у окна «до N» (и без окна) — 11:00,
-    // иначе «Before 3PM» давало точку 15:00–15:00 вместо 11:00–15:00.
-    const start = useWish && win.length > 1 && !hasByWord(window) ? win[0] : 11 * 60;
-    return { from: Math.min(start, to), to };
+    return { from: Math.min(range?.from ?? DAY_START_MIN, to), to };
   }
   if (/\bafter\b/.test(text)) {
     const from = times[0];
-    const end = win.length > 1 ? win[win.length - 1] : 0;
-    return { from, to: end > from ? end : from + 180 };
+    return { from, to: range && range.to > from ? range.to : from + 180 };
   }
   if (times.length > 1) return { from: times[0], to: times[times.length - 1] };
   return { from: times[0] - 30, to: times[0] + 30 };

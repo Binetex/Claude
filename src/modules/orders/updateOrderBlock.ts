@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/db";
 import { Prisma } from "@/generated/prisma/client";
+import { parseHm, parseWindowText, windowFields } from "@/lib/deliveryWindow";
 import type { OrderStatus, Role } from "@/generated/prisma/enums";
 import { COURIER_NOTE_MAX } from "@/lib/courierNote";
 import { normalizePhone } from "@/lib/phone";
@@ -41,7 +42,7 @@ const BLOCK_SELECT: Record<OrderBlock, Prisma.OrderSelect> = {
   },
   sender: { senderName: true, senderPhone: true, senderEmail: true },
   status: { orderStatus: true },
-  delivery: { deliveryDate: true, deliveryWindow: true },
+  delivery: { deliveryDate: true, deliveryWindow: true, windowFrom: true, windowTo: true },
   cardNote: { cardMessage: true, customerNote: true },
   courierNote: { courierNote: true },
 };
@@ -91,7 +92,18 @@ function buildUpdateData(block: OrderBlock, data: BlockFormData): { data: Prisma
           out.deliveryDate = d;
         }
       }
-      if (has("deliveryWindow")) out.deliveryWindow = str("deliveryWindow");
+      if (has("windowFrom") || has("windowTo")) {
+        // Окно строго «с — до» из выбора времени; текст окна пишет система одним форматом.
+        const from = parseHm(str("windowFrom"));
+        const to = parseHm(str("windowTo"));
+        if (from == null && to == null) Object.assign(out, windowFields(null));
+        else if (from == null || to == null || !(from < to)) return { error: "Время «с» должно быть раньше «до»." };
+        else Object.assign(out, windowFields({ from, to }));
+      } else if (has("deliveryWindow")) {
+        // Старый путь — текстом: разбираем тем же разбором, что и приём заказов.
+        const range = parseWindowText(str("deliveryWindow"));
+        Object.assign(out, range ? windowFields(range) : { deliveryWindow: str("deliveryWindow"), windowFrom: null, windowTo: null });
+      }
       return { data: out };
     }
     case "cardNote": {

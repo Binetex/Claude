@@ -22,6 +22,7 @@ import { deriveShopifyOrderState, reconcileShopifyUpdate, type ShopifyStateSigna
 import { publishTelegramNotification } from "@/integrations/telegram/events";
 import { adoptOrphanCommunicationsForNewOrder } from "@/integrations/quo/adoptOrphans";
 import { displayVariantName } from "@/lib/variantName";
+import { parseWindowText } from "@/lib/deliveryWindow";
 
 /** Планирование доставки, безопасное для импорта: ошибка логируется, но не роняет приём заказа. */
 async function scheduleDeliverySafe(orderId: string): Promise<void> {
@@ -399,6 +400,9 @@ function buildOrderData(
     externalUpdatedAt: payload.updated_at ? new Date(payload.updated_at) : null,
     deliveryDate,
     deliveryWindow,
+    // Окно строго «с — до»: окна магазинов чистые («11:30 AM - 5:00 PM»), разбираются надёжно.
+    windowFrom: parseWindowText(deliveryWindow)?.from ?? null,
+    windowTo: parseWindowText(deliveryWindow)?.to ?? null,
     // Личность заказчика — из customer, телефон по приоритету order.phone → customer.phone →
     // billing. Раньше здесь выигрывал billing и терял телефон заказчика (см. orderFields.ts).
     ...extractSenderIdentity(payload),

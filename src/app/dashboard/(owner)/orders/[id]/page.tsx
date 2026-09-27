@@ -3,6 +3,8 @@ import { loadTemplatesForOrder } from "@/modules/messaging/templates";
 import { localDateStr } from "@/lib/tz";
 import { getForOwner } from "@/modules/orders/queries";
 import { prisma } from "@/lib/db";
+import { windowOf } from "@/lib/deliveryWindow";
+import { loadWindowPresets } from "@/modules/orders/windowPresets";
 import { Card, CardHeader, CardTitle, CardBody } from "@/components/ui/Card";
 import { OrderPageShell } from "@/components/orders/OrderPageShell";
 import { OrderItemsCard } from "@/components/orders/OrderItemsCard";
@@ -73,6 +75,8 @@ export default async function OwnerOrderPage({
   const backHref = backToList("/dashboard/orders", (await searchParams).back);
   const order = await getForOwner(id);
   if (!order) notFound();
+  // Частые окна магазина — кнопки в выборе времени доставки.
+  const windowPresets = await loadWindowPresets(prisma, order.siteId).catch(() => []);
 
   const florists = await prisma.florist.findMany({ include: { user: true }, orderBy: { createdAt: "asc" } });
 
@@ -230,7 +234,8 @@ export default async function OwnerOrderPage({
           orderId={order.id}
           updatedAt={order.updatedAt}
           deliveryDate={localDateStr(new Date(order.deliveryDate), "UTC")}
-          deliveryWindow={order.deliveryWindow}
+          window={windowOf(order)}
+          presets={windowPresets}
         />
       }
       belowDelivery={

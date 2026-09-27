@@ -13,6 +13,7 @@ import type { PrismaClient } from "@/generated/prisma/client";
 import { getAvailableFloristIds } from "@/modules/assignments/service";
 import { isFloristAvailable } from "@/modules/assignments/availability";
 import { formatDeliveryWindow } from "@/lib/timeWindow";
+import { windowOf } from "@/lib/deliveryWindow";
 import { localClock, DEFAULT_STORE_TZ } from "@/lib/tz";
 import { zipDistanceMiles } from "@/modules/reviews/zipGeo";
 import { normalizeZip } from "@/modules/reviews/locationPick";
@@ -89,7 +90,7 @@ function loadDayOrders(prisma: PrismaClient, day: string) {
   return prisma.order.findMany({
     where: { deliveryDate: dayDate(day), orderStatus: { notIn: [...NOT_ORDERS] } },
     select: {
-      id: true, orderNumber: true, deliveryWindow: true, customerNote: true, orderStatus: true,
+      id: true, orderNumber: true, deliveryWindow: true, windowFrom: true, windowTo: true, customerNote: true, orderStatus: true,
       currentFloristId: true, sortIndex: true,
       site: { select: { shortName: true, timezone: true } },
       items: { select: { externalPrice: true, quantity: true } },
@@ -105,16 +106,17 @@ function itemsOf(o: RawOrder) {
 function toScheduleOrder(o: RawOrder): ScheduleOrder {
   const items = itemsOf(o);
   const wish = readyTimeWishes(o.customerNote)[0] ?? null;
-  const morning = isMorningOrder({ window: o.deliveryWindow, customerNote: o.customerNote });
+  const range = windowOf(o);
+  const morning = isMorningOrder({ window: range, customerNote: o.customerNote });
   const deliveredDate = o.deliveries[0]?.deliveredAt ?? null;
   const deliveredAt = deliveredDate ? localClock(o.site.timezone ?? DEFAULT_STORE_TZ, deliveredDate).timeStr : null;
 
   // Опоздание — от ОБЕЩАННОГО окна, а не от просьбы клиента: «буду готова в 12» — не наше
   // обещание (THEFLOW-20857 показывал «+192 мин» при опоздании на 42). Двадцать минут не в счёт.
-  const promised = wantedRange(o.deliveryWindow, null);
+  const promised = range;
   // Просьба клиента имеет смысл внутри окна на весь день или утреннего; явное дневное окно
   // (владелец перенёс) — решение магазина, старая просьба к нему уже не относится.
-  const want = wish && (isAllDayWindow(o.deliveryWindow) || windowIsMorning(o.deliveryWindow)) ? wantedRange(o.deliveryWindow, wish) : null;
+  const want = wish && (isAllDayWindow(range) || windowIsMorning(range)) ? wantedRange(range, wish) : null;
   const [hh, mm] = (deliveredAt ?? "").split(":").map(Number);
   const deliveredMin = deliveredAt ? hh * 60 + mm : null;
   const lateMin = deliveredMin != null && promised ? Math.max(0, deliveredMin - promised.to) : 0;
@@ -219,7 +221,7 @@ export async function morningForOrder(prisma: PrismaClient, orderId: string, now
   const order = await prisma.order.findUnique({
     where: { id: orderId },
     select: {
-      siteId: true, deliveryDate: true, currentFloristId: true, deliveryWindow: true, customerNote: true, zip: true,
+      siteId: true, deliveryDate: true, currentFloristId: true, deliveryWindow: true, windowFrom: true, windowTo: true, customerNote: true, zip: true,
       pickupLocationOverride: { select: { zip: true } },
       items: { select: { externalPrice: true, quantity: true } },
     },
@@ -237,7 +239,7 @@ export async function morningForOrder(prisma: PrismaClient, orderId: string, now
   if (!v) return { verdict: null, leadMin };
   // Заказ УЖЕ утренний (клиент купил окно до 15:00): «утро занято, раньше трёх не выйдет» было
   // бы неправдой про его же окно. Перегрузка значит только «к полудню не обещаем».
-  const committed = isMorningOrder({ window: order.deliveryWindow, customerNote: order.customerNote });
+  const committed = isMorningOrder({ window: windowOf(order), customerNote: order.customerNote });
   const adjusted = forNow(committed && v === "FULL" ? "AVAILABLE" : v, day, now, leadMin);
   // Утренний заказ сегодня, когда к 15:00 уже не успеть: что-либо обещать про время нечестно —
   // ни «13–15», ни «раньше трёх не выйдет». Пусть отвечает человек (прежнее правило).
@@ -266,11 +268,11 @@ async function verdictFor(prisma: PrismaClient, day: string, floristId: string |
         orderStatus: { notIn: [...NOT_ORDERS] },
         ...(exceptOrderId ? { id: { not: exceptOrderId } } : {}),
       },
-      select: { deliveryWindow: true, customerNote: true, items: { select: { externalPrice: true, quantity: true } } },
+      select: { deliveryWindow: true, windowFrom: true, windowTo: true, customerNote: true, items: { select: { externalPrice: true, quantity: true } } },
     }),
   ]);
   const taken = orders
-    .filter((o) => isMorningOrder({ window: o.deliveryWindow, customerNote: o.customerNote }))
+    .filter((o) => isMorningOrder({ window: windowOf(o), customerNote: o.customerNote }))
     .reduce((s, o) => s + orderPoints(o.items.map((i) => ({ price: Number(i.externalPrice), quantity: i.quantity }))), 0);
   return morningVerdict({ taken, own, capacity: florist?.morningCapacity ?? DEFAULT_MORNING_CAPACITY, closed: false });
 }

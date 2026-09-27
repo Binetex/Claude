@@ -12,7 +12,7 @@
  *
  * Чистая часть (слот и даты) — без сети, её проверяет тест.
  */
-import { parseTimes, hasByWord } from "@/modules/capacity/morning";
+import { parseWindowText, type WindowRange } from "@/lib/deliveryWindow";
 import { wooRequest } from "./client";
 import type { WooCredentials } from "./credentials";
 
@@ -30,26 +30,11 @@ const PI_SLOTS = [
   { fromMin: 18 * 60, slot: "18:00 - 21:00", display: "6:00 PM - 9:00 PM" },
 ] as const;
 
-export function piSlotFor(window: string | null | undefined): { slot: string; display: string } | null {
-  const text = (window ?? "").trim();
-  const exact = PI_SLOTS.find((s) => s.slot.replace(/\s/g, "") === text.replace(/\s/g, ""));
-  if (exact) return { slot: exact.slot, display: exact.display };
-  const times = parseTimes(text);
-  let start: number;
-  if (times.length) {
-    // «before 5pm», «до 5 вечера» — окно на весь день до этого часа: слот по первому ЧИСЛУ был
-    // бы вечерним. Такое окно начинается утром.
-    start = hasByWord(text) ? 0 : times[0];
-  } else if (/\bmorning\b|утр/i.test(text)) {
-    start = 0;
-  } else if (/\bafternoon\b|\bday\s?time\b|днём|днем/i.test(text)) {
-    start = 15 * 60;
-  } else if (/\b(evening|night|tonight)\b|вечер/i.test(text)) {
-    start = 18 * 60;
-  } else {
-    return null;
-  }
-  const hit = [...PI_SLOTS].reverse().find((s) => start >= s.fromMin)!;
+export function piSlotFor(window: WindowRange | string | null | undefined): { slot: string; display: string } | null {
+  const range = typeof window === "string" ? parseWindowText(window) : window ?? null;
+  if (!range) return null;
+  // Слот, в котором окно НАЧИНАЕТСЯ: «до 5 вечера» (11:00–17:00) — утренний, «after 5pm» — дневной.
+  const hit = [...PI_SLOTS].reverse().find((s) => range.from >= s.fromMin)!;
   return { slot: hit.slot, display: hit.display };
 }
 
@@ -67,7 +52,7 @@ export function piDates(day: string): { system: string; display: string } {
  * («желательно первым»), не должно оставлять заказ на сайте в прежнем дне — плагин тогда держал
  * бы занятым утро дня, откуда заказ уже уехал. Слот — только если понятно, какой.
  */
-export function piMetaFor(day: string, window: string): { meta: { key: string; value: string }[]; slot: string | null } {
+export function piMetaFor(day: string, window: WindowRange | string | null): { meta: { key: string; value: string }[]; slot: string | null } {
   const dates = piDates(day);
   const slot = piSlotFor(window);
   const meta = [
@@ -80,7 +65,7 @@ export function piMetaFor(day: string, window: string): { meta: { key: string; v
   return { meta, slot: slot?.slot ?? null };
 }
 
-export async function pushWooDelivery(creds: WooCredentials, externalId: string, day: string, window: string): Promise<{ slot: string | null }> {
+export async function pushWooDelivery(creds: WooCredentials, externalId: string, day: string, window: WindowRange | string | null): Promise<{ slot: string | null }> {
   const { meta, slot } = piMetaFor(day, window);
   await wooRequest(creds, `/orders/${encodeURIComponent(externalId)}`, { method: "PUT", body: { meta_data: meta } });
   return { slot };

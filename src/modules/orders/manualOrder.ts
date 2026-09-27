@@ -14,6 +14,7 @@ import "server-only";
  * для заказов не существует вовсе. NULL не совпадёт ни с чем.
  */
 import { Prisma } from "@/generated/prisma/client";
+import { parseWindowText, windowFields } from "@/lib/deliveryWindow";
 import type { FinancialItemType } from "@/generated/prisma/enums";
 import { prisma } from "@/lib/db";
 import { assignAndActivateFlorist } from "@/modules/assignments/service";
@@ -229,7 +230,12 @@ export async function createManualOrder(input: CreateManualOrderInput): Promise<
     externalId: null,
     externalCreatedAt: new Date(),
     deliveryDate,
-    deliveryWindow: input.deliveryWindow.trim(),
+    // Окно строго «с — до»: форма присылает его выбором времени; текст пишет система одним
+    // форматом. Не разобралось (старый клиент формы) — текст как есть, окна нет.
+    ...(() => {
+      const range = parseWindowText(input.deliveryWindow);
+      return range ? windowFields(range) : { deliveryWindow: input.deliveryWindow.trim(), windowFrom: null, windowTo: null };
+    })(),
     recipientName: input.recipientName.trim(),
     recipientPhone: input.recipientPhone.trim(),
     recipientEmail: input.recipientEmail?.trim() || null,

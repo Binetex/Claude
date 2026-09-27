@@ -399,6 +399,9 @@ model Florist {
   /// Сколько работы флорист успевает к 15:00, в баллах: букет до $250 — 1, от $250 — 2
   /// (см. modules/capacity/morning.ts). По нему ассистент решает, обещать ли утро.
   morningCapacity Int @default(4)
+  /// Во сколько флорист начинает собирать, минуты от полуночи (Настя 10:00, Ольга 12:00). Нужно
+  /// для заказов день в день: раньше этого времени букет не начнут. NULL — 10:00.
+  workStartMin Int?
 
   createdAt DateTime @default(now())
 
@@ -1235,7 +1238,11 @@ model Order {
   /// последовательности.
   sortIndex     Int?
   deliveryDate      DateTime
-  deliveryWindow    String // напр. "14:00 – 18:00"
+  deliveryWindow    String // напр. "14:00 – 18:00"; при правке пишется из windowFrom/windowTo
+  /// Окно доставки строго: минуты от полуночи по часам магазина (lib/deliveryWindow.ts).
+  /// NULL — окна нет или старый текст не разобрался: «время не задано», задаёт человек.
+  windowFrom        Int?
+  windowTo          Int?
 
   // Отправитель (billing). Адрес — из Shopify billing_address (двусторонним НЕ является: показываем
   // как есть; при повторной синхронизации не обнуляем). Отдельно от адреса получателя (shipping).

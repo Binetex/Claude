@@ -16,6 +16,8 @@ import { CatalogPicker } from "./CatalogPicker";
 import { ItemDialog } from "./ItemDialog";
 import { emptyCustomItem, lineCustomer, lineFlorist, type DraftItem } from "./itemTypes";
 import { ownerCreateManualOrder } from "./actions";
+import { WindowPicker } from "@/components/orders/WindowPicker";
+import { formatWindowText, type WindowRange } from "@/lib/deliveryWindow";
 
 /**
  * Форма ручного заказа: три блока на одной странице, без мастера и без автосохранения.
@@ -26,9 +28,12 @@ import { ownerCreateManualOrder } from "./actions";
  */
 export function ManualOrderForm({
   sites,
+  windowPresets,
   florists,
 }: {
   sites: { id: string; name: string }[];
+  /** Частые окна каждого магазина: siteId → кнопки в выборе времени. */
+  windowPresets: Record<string, WindowRange[]>;
   florists: { id: string; name: string }[];
 }) {
   const router = useRouter();
@@ -41,7 +46,7 @@ export function ManualOrderForm({
 
   const [siteId, setSiteId] = useState(sites[0]?.id ?? "");
   const [deliveryDate, setDeliveryDate] = useState(() => new Date().toISOString().slice(0, 10));
-  const [deliveryWindow, setDeliveryWindow] = useState("");
+  const [deliveryWindow, setDeliveryWindow] = useState<WindowRange | null>(null);
   const [recipientName, setRecipientName] = useState("");
   const [recipientPhone, setRecipientPhone] = useState("");
   const [addressLine, setAddressLine] = useState("");
@@ -110,7 +115,7 @@ export function ManualOrderForm({
       const res = await ownerCreateManualOrder({
         siteId,
         deliveryDate,
-        deliveryWindow: deliveryWindow.trim() || "—",
+        deliveryWindow: deliveryWindow ? formatWindowText(deliveryWindow) : "—",
         recipientName,
         recipientPhone,
         recipientEmail,
@@ -283,7 +288,7 @@ export function ManualOrderForm({
                 <Input id="f-date" type="date" value={deliveryDate} onChange={(e) => setDeliveryDate(e.target.value)} />
               </Field>
               <Field label="Интервал (необязательно)" htmlFor="f-window">
-                <Input id="f-window" value={deliveryWindow} onChange={(e) => setDeliveryWindow(e.target.value)} placeholder="12:00 – 16:00" />
+                <WindowPicker value={deliveryWindow} onChange={setDeliveryWindow} presets={windowPresets[siteId] ?? []} />
               </Field>
               <Field label="Имя получателя" htmlFor="f-rname">
                 <Input id="f-rname" value={recipientName} onChange={(e) => setRecipientName(e.target.value)} required />

@@ -5,6 +5,8 @@ import { requireFlorist } from "@/lib/rbac";
 import { OrderExpensesSection } from "@/components/finance/OrderExpensesSection";
 import { getForFlorist } from "@/modules/orders/queries";
 import { prisma } from "@/lib/db";
+import { windowOf } from "@/lib/deliveryWindow";
+import { loadWindowPresets } from "@/modules/orders/windowPresets";
 import { listActiveHandoffTargets } from "@/modules/florists/service";
 import { loadOrderCommunicationsCard } from "@/integrations/quo/communicationsService";
 import { loadOrderEmailPanel, markOrderEmailsRead } from "@/integrations/emailFactory/read";
@@ -60,6 +62,8 @@ export default async function FloristOrderPage({
   const user = await requireFlorist();
   const order = await getForFlorist(id, user.floristId);
   if (!order) notFound();
+  // Частые окна магазина — кнопки в выборе времени доставки.
+  const windowPresets = await loadWindowPresets(prisma, order.siteId).catch(() => []);
 
   const emailPanel = await loadOrderEmailPanel(prisma, id).catch(() => ({ emails: [], unread: 0, customerEmail: null }));
   // Карточку открыли — ответы клиента по почте считаются увиденными. Панель уже загружена ВЫШЕ,
@@ -88,7 +92,8 @@ export default async function FloristOrderPage({
           orderId={order.id}
           updatedAt={order.updatedAt}
           deliveryDate={localDateStr(new Date(order.deliveryDate), "UTC")}
-          deliveryWindow={order.deliveryWindow}
+          window={windowOf(order)}
+          presets={windowPresets}
         />
       }
       belowDelivery={

@@ -7,6 +7,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tooltip } from "@/components/ui/tooltip";
 import { useBlockSave, ConflictNotice } from "./orderEditShared";
+import { WindowPicker } from "@/components/orders/WindowPicker";
+import { fmtHm, parseHm, parseWindowText, type WindowRange } from "@/lib/deliveryWindow";
 
 /**
  * Правка даты и интервала доставки прямо из шапки заказа.
@@ -21,23 +23,27 @@ export function DeliveryDateDialog({
   orderId,
   updatedAt,
   deliveryDate,
-  deliveryWindow,
+  window,
+  presets,
 }: {
   orderId: string;
   updatedAt: string;
   deliveryDate: string;
-  deliveryWindow: string;
+  /** Окно строго «с — до»; null — время не задано (старый текст не разобрался). */
+  window: WindowRange | null;
+  /** Частые окна магазина — кнопки в выборе времени. */
+  presets: WindowRange[];
 }) {
   const [open, setOpen] = useState(false);
   const [d, setD] = useState(deliveryDate);
-  const [w, setW] = useState(deliveryWindow);
+  const [w, setW] = useState<WindowRange | null>(window);
   const { pending, conflict, save, acceptCurrentVersion } = useBlockSave(orderId, "delivery", updatedAt);
 
   function submit() {
     // Закрываем только по успеху: при конфликте модалка обязана остаться открытой,
     // иначе ConflictNotice негде показать.
     save(
-      { deliveryDate: d, deliveryWindow: w },
+      { deliveryDate: d, windowFrom: w ? fmtHm(w.from) : "", windowTo: w ? fmtHm(w.to) : "" },
       { successMessage: "Доставка обновлена", onOk: () => setOpen(false) }
     );
   }
@@ -71,7 +77,9 @@ export function DeliveryDateDialog({
           </div>
           <div>
             <Label>Интервал</Label>
-            <Input value={w} onChange={(e) => setW(e.target.value)} className="mt-1" placeholder="12:00 – 16:00" />
+            <div className="mt-1">
+              <WindowPicker value={w} onChange={setW} presets={presets} disabled={pending} />
+            </div>
           </div>
           {conflict && (
             <ConflictNotice
@@ -80,7 +88,10 @@ export function DeliveryDateDialog({
               onRefresh={() =>
                 acceptCurrentVersion((c) => {
                   if ("deliveryDate" in c) setD(c.deliveryDate);
-                  if ("deliveryWindow" in c) setW(c.deliveryWindow);
+                  // Свежее окно: строгие поля, а у старого заказа — разбор текста.
+                  const from = c.windowFrom ? Number(c.windowFrom) : null;
+                  const to = c.windowTo ? Number(c.windowTo) : null;
+                  setW(from != null && to != null && from < to ? { from, to } : parseWindowText(c.deliveryWindow) ?? parseHmRange(c.windowFrom, c.windowTo));
                 })
               }
             />
@@ -97,4 +108,11 @@ export function DeliveryDateDialog({
       </DialogContent>
     </Dialog>
   );
+}
+
+/** Конфликт мог прийти со временем в виде «HH:MM» — тоже понимаем. */
+function parseHmRange(from?: string, to?: string): WindowRange | null {
+  const f = parseHm(from);
+  const t = parseHm(to);
+  return f != null && t != null && f < t ? { from: f, to: t } : null;
 }

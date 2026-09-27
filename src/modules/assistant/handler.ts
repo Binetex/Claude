@@ -31,6 +31,7 @@ import { prependReadyTimeNote, hasReadyTime, mentionsTime } from "./note";
 import { findOrderByHint, linkConversation } from "./link";
 import { junkReason } from "./junk";
 import { planReschedule, mentionsDay } from "./reschedule";
+import { windowOf, windowFields, formatWindowText, type WindowRange } from "@/lib/deliveryWindow";
 import { recomputeDaysForOrder } from "@/modules/finance/orderDayHook";
 import { scheduleDeliveryTodayTrigger } from "@/modules/automations/lifecycle";
 import { onOrderDeliveryChangeSafe } from "@/integrations/delivery/burq/scheduleService";
@@ -921,7 +922,7 @@ async function applyCustomerReschedule(
 ): Promise<void> {
   const o = await prisma.order.findUnique({
     where: { id: orderId },
-    select: { deliveryWindow: true, deliveryDate: true, orderStatus: true, platform: true, customerNote: true },
+    select: { deliveryWindow: true, windowFrom: true, windowTo: true, deliveryDate: true, orderStatus: true, platform: true, customerNote: true },
   });
   if (!o || o.orderStatus === "DELIVERED" || o.orderStatus === "CANCELLED") return;
   if (o.orderStatus === "AWAITING_COURIER" || o.orderStatus === "IN_TRANSIT") return;
@@ -932,18 +933,22 @@ async function applyCustomerReschedule(
 
   const currentDay = o.deliveryDate.toISOString().slice(0, 10);
   if (dayDiff(todayStr, currentDay) < 0) return;
-  const plan = planReschedule({ todayStr, currentDay, currentWindow: o.deliveryWindow, readyTime, newDate });
-  if (!plan || (plan.day === currentDay && plan.window === o.deliveryWindow)) return;
+  const current = windowOf(o);
+  const plan = planReschedule({ todayStr, currentDay, currentWindow: current, readyTime, newDate });
+  const sameWindow = plan?.window && current ? plan.window.from === current.from && plan.window.to === current.to : !plan?.window;
+  if (!plan || (plan.day === currentDay && sameWindow)) return;
 
-  const from = dayLabel(currentDay, o.deliveryWindow);
-  const to = dayLabel(plan.day, plan.window);
+  const text = (w: WindowRange | null) => (w ? formatWindowText(w) : o.deliveryWindow);
+  const from = dayLabel(currentDay, text(current));
+  const to = dayLabel(plan.day, text(plan.window));
   const stamp = storeDateTimeFormat(tz, { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }).format(new Date());
   const line = `${stamp} · ИИ перенёс доставку по просьбе клиента: ${from} → ${to}`;
   const dateChanged = plan.day !== currentDay;
   await prisma.order.update({
     where: { id: orderId },
     data: {
-      deliveryWindow: plan.window,
+      // Окно строго «с — до»; текст окна — одним форматом из него же.
+      ...(plan.window && !sameWindow ? windowFields(plan.window) : {}),
       ...(dateChanged ? { deliveryDate: new Date(`${plan.day}T00:00:00Z`) } : {}),
       customerNote: o.customerNote.trim() ? `${line}\n${o.customerNote}` : line,
     },

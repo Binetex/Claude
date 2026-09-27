@@ -77,7 +77,10 @@ describe("updateOrderBlock — florist меняет дату и статус", (
     const res = await updateOrderBlock({ orderId: "o1", block: "delivery", expectedUpdatedAt: EXPECTED, data: { deliveryDate: "2026-07-22", deliveryWindow: "12-16" }, actor: { userId: "u-f", role: "FLORIST" } });
     expect(res.status).toBe("ok");
     expect(tx.order.updateMany.mock.calls[0][0].data.deliveryDate).toBeInstanceOf(Date);
-    expect(tx.order.updateMany.mock.calls[0][0].data.deliveryWindow).toBe("12-16");
+    // Окно строго «с — до»: текст разобран в числа и записан системой одним форматом.
+    expect(tx.order.updateMany.mock.calls[0][0].data.deliveryWindow).toBe("12:00 - 16:00");
+    expect(tx.order.updateMany.mock.calls[0][0].data.windowFrom).toBe(720);
+    expect(tx.order.updateMany.mock.calls[0][0].data.windowTo).toBe(960);
   });
 });
 
@@ -116,5 +119,18 @@ describe("updateOrderBlock — валидация", () => {
     const res = await updateOrderBlock({ orderId: "nope", block: "status", expectedUpdatedAt: EXPECTED, data: { orderStatus: "READY" }, actor: { userId: "u", role: "OWNER" } });
     expect(res.status).toBe("notfound");
     expect(tx.order.updateMany).not.toHaveBeenCalled();
+  });
+});
+
+describe("updateOrderBlock — окно из выбора времени", () => {
+  it("«с — до» из формы: числа и текст одним форматом; «до» раньше «с» — ошибка", async () => {
+    tx.order.findUnique.mockResolvedValueOnce({ deliveryDate: new Date("2026-07-20T00:00:00.000Z"), deliveryWindow: "11:00 - 15:00", windowFrom: 660, windowTo: 900 }).mockResolvedValueOnce({ deliveryDate: new Date("2026-07-20T00:00:00.000Z"), deliveryWindow: "17:00 - 21:00", windowFrom: 1020, windowTo: 1260, updatedAt: NEW_TS });
+    tx.order.updateMany.mockResolvedValueOnce({ count: 1 });
+    const ok = await updateOrderBlock({ orderId: "o1", block: "delivery", expectedUpdatedAt: EXPECTED, data: { windowFrom: "17:00", windowTo: "21:00" }, actor: { userId: "u-o", role: "OWNER" } });
+    expect(ok.status).toBe("ok");
+    expect(tx.order.updateMany.mock.calls.at(-1)![0].data).toMatchObject({ windowFrom: 1020, windowTo: 1260, deliveryWindow: "17:00 - 21:00" });
+
+    const bad = await updateOrderBlock({ orderId: "o1", block: "delivery", expectedUpdatedAt: EXPECTED, data: { windowFrom: "18:00", windowTo: "17:00" }, actor: { userId: "u-o", role: "OWNER" } });
+    expect(bad.status).toBe("invalid");
   });
 });
