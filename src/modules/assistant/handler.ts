@@ -30,10 +30,14 @@ import { sendAssistantReply, notifyDraft, notifyOwnerText, notifyBotText, escape
 import { prependReadyTimeNote, hasReadyTime, mentionsTime } from "./note";
 import { findOrderByHint, linkConversation } from "./link";
 import { junkReason } from "./junk";
+import { laterWindowFromWish } from "./reschedule";
+import { onOrderDeliveryChangeSafe } from "@/integrations/delivery/burq/scheduleService";
+import { notifyDeliveryChanged } from "@/integrations/notifications/telegram";
+import { publishWooDeliveryPush } from "@/integrations/woocommerce/deliveryPushEvents";
 import { loadGlobalNote, activeGlobalNoteText } from "./globalNote";
 import { bouquetPageUrl } from "@/lib/bouquetPage";
 import { publishTelegramNotification } from "@/integrations/telegram/events";
-import { todayStrInTz, zonedLocalTimeToUtc, localClock, dayDiff } from "@/lib/tz";
+import { todayStrInTz, zonedLocalTimeToUtc, localClock, dayDiff, storeDateTimeFormat } from "@/lib/tz";
 import { formatDeliveryWindow } from "@/lib/timeWindow";
 
 /**
@@ -362,6 +366,11 @@ export function buildAssistantHandler(prisma: PrismaClient, deps: AssistantDeps 
       const forNote = linkedOrder;
       await recordReadyTime(prisma, forNote, incoming.id, parsed.readyTime, text).catch((err) =>
         console.error(`[assistant] заметка о времени по заказу ${forNote.id} не записана:`, err instanceof Error ? err.message : String(err))
+      );
+      // Клиент перенёс с утра на после 15:00 в тот же день — меняем окно в заказе (решение
+      // владельца 27.09.2026), а не только пишем заметку.
+      await applyLaterWindow(prisma, forNote.id, parsed.readyTime, site.timezone, clock.dateStr).catch((err) =>
+        console.error(`[assistant] окно по заказу ${forNote.id} не перенесено:`, err instanceof Error ? err.message : String(err))
       );
     }
 
@@ -825,6 +834,33 @@ function renderPrompt(messages: { role: string; content: string }[]): string {
  * отвечает. Заметка перечитывается перед записью: пока шёл запрос к модели, её могли поправить
  * руками, и затирать чужую правку старой копией нельзя.
  */
+/**
+ * Перенос окна по словам клиента: то же, что делает перенос в карточке — флористу сообщение,
+ * Burq перепланирует забор, заказ Woo получает новый слот (по нему сайт освобождает утро).
+ * В заметке остаётся строка, кто и что поменял: журнала правок от имени ассистента нет.
+ */
+async function applyLaterWindow(prisma: PrismaClient, orderId: string, readyTime: string, tz: string | null, todayStr: string): Promise<void> {
+  const o = await prisma.order.findUnique({
+    where: { id: orderId },
+    select: { deliveryWindow: true, deliveryDate: true, orderStatus: true, platform: true, customerNote: true },
+  });
+  if (!o || o.orderStatus === "DELIVERED" || o.orderStatus === "CANCELLED") return;
+  const day = o.deliveryDate.toISOString().slice(0, 10);
+  if (dayDiff(todayStr, day) < 0) return;
+  const next = laterWindowFromWish(o.deliveryWindow, readyTime);
+  if (!next || next === o.deliveryWindow) return;
+
+  const stamp = storeDateTimeFormat(tz, { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }).format(new Date());
+  const line = `${stamp} · ИИ перенёс окно по просьбе клиента: ${o.deliveryWindow || "—"} → ${next}`;
+  await prisma.order.update({
+    where: { id: orderId },
+    data: { deliveryWindow: next, customerNote: o.customerNote.trim() ? `${line}\n${o.customerNote}` : line },
+  });
+  await onOrderDeliveryChangeSafe(prisma, orderId);
+  await notifyDeliveryChanged(orderId, { fromText: o.deliveryWindow || null, toText: next });
+  if (o.platform === "WOOCOMMERCE") await publishWooDeliveryPush(prisma, orderId, day, next);
+}
+
 async function recordReadyTime(
   prisma: PrismaClient,
   order: { id: string; currentFloristId: string | null; site: { timezone: string | null } },

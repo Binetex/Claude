@@ -98,3 +98,20 @@ describe("adjustForNow — который сейчас час", () => {
     expect(adjustForNow("AVAILABLE", true, 14 * 60)).toBe("FULL");
   });
 });
+
+describe("перенос словами освобождает утро", () => {
+  it("клиент попросил после 15:00 — утро не занято, хотя окно утреннее", () => {
+    for (const w of ["6 PM", "after 5pm", "4-5pm today", "around 7 PM", "after 3.30 pm"]) {
+      expect(isMorningOrder({ window: "11:00 - 15:00", customerNote: `27.09, 09:00 · Клиент (SMS): готов принять ${w}` }), w).toBe(false);
+    }
+  });
+  it("«any time» и «до 6» переносом не считаются", () => {
+    for (const w of ["any time today", "business closes at 6pm", "until 6pm", "anytime is fine"]) {
+      expect(isMorningOrder({ window: "11:00 - 15:00", customerNote: `27.09, 09:00 · Клиент (SMS): готов принять ${w}` }), w).toBe(true);
+    }
+  });
+  it("перенесли обратно на утро — снова утро", () => {
+    const note = "27.09, 10:00 · Клиент (SMS): готов принять by noon\n———\n27.09, 09:00 · Клиент (SMS): готов принять 6 PM";
+    expect(isMorningOrder({ window: "11:00 - 15:00", customerNote: note })).toBe(true);
+  });
+});

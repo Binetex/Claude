@@ -252,3 +252,16 @@ async function verdictFor(prisma: PrismaClient, day: string, floristId: string |
     .reduce((s, o) => s + orderPoints(o.items.map((i) => ({ price: Number(i.externalPrice), quantity: i.quantity }))), 0);
   return morningVerdict({ taken, own, capacity: florist?.morningCapacity ?? DEFAULT_MORNING_CAPACITY, closed: false });
 }
+
+/**
+ * Что ассистент сейчас ответит НОВОМУ клиенту каждого магазина про утро этого дня. Магазин
+ * смотрит на своего первого флориста в приоритете, поэтому у TheFlow и PAR ответ разный — эта
+ * строка избавляет владельца помнить, какой магазин на ком.
+ */
+export async function loadSiteVerdicts(prisma: PrismaClient, day: string, now: Date = new Date()) {
+  const sites = await prisma.site.findMany({ select: { id: true, shortName: true, name: true }, orderBy: { shortName: "asc" } });
+  const rows = await Promise.all(
+    sites.map(async (s) => ({ site: s.shortName || s.name, verdict: await morningForNewOrder(prisma, s.id, day, now) }))
+  );
+  return rows.filter((r): r is { site: string; verdict: MorningVerdict } => r.verdict !== null);
+}

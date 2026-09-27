@@ -28,6 +28,7 @@ import { buildWooStatusPushHandler } from "@/integrations/woocommerce/statusPush
 import { buildWooRefundPushHandler } from "@/integrations/woocommerce/refundPushHandler";
 import { WOO_STATUS_PUSH_EVENT } from "@/integrations/woocommerce/statusPushEvents";
 import { WOO_REFUND_PUSH_EVENT } from "@/integrations/woocommerce/refundPushEvents";
+import { WOO_DELIVERY_PUSH_EVENT, buildWooDeliveryPushHandler } from "@/integrations/woocommerce/deliveryPushEvents";
 import { buildBurqDraftCreateHandler, buildBurqCourierCheckHandler } from "@/integrations/delivery/burq/outboxHandler";
 import { BURQ_DRAFT_CREATE_EVENT } from "@/integrations/delivery/burq/schedule";
 import { BURQ_COURIER_CHECK_EVENT } from "@/integrations/delivery/burq/precheck";
@@ -109,6 +110,8 @@ async function main() {
     // подтверждения оплаты мониторингом Airwallex (под галочкой сайта).
     [WOO_STATUS_PUSH_EVENT]: buildWooStatusPushHandler(prisma),
     [WOO_REFUND_PUSH_EVENT]: buildWooRefundPushHandler(prisma),
+    // Перенос доставки → поля плагина доставки в заказе Woo (по ним сайт закрывает утро).
+    [WOO_DELIVERY_PUSH_EVENT]: buildWooDeliveryPushHandler(prisma),
     // Burq: отложенное автосоздание черновика доставки (draft-first). Реальные вызовы Burq
     // включаются только при BURQ_ENABLED + креды; иначе mock-клиент (sandbox-gate).
     [BURQ_DRAFT_CREATE_EVENT]: buildBurqDraftCreateHandler(prisma, (event, extra) => log(event, extra)),

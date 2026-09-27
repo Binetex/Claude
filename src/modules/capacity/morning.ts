@@ -113,11 +113,25 @@ export function readyTimeWishes(customerNote: string | null | undefined): string
     .filter(Boolean);
 }
 
+/**
+ * Пожелание клиента переносит его на после 15:00: «6 PM», «after 5», «4-5pm». Тогда утро он
+ * не занимает, даже если окно в карточке осталось утренним: клиенты переносят словами в SMS, а
+ * окно руками правят не всегда. «any time», «until 6pm» переносом не считаются.
+ */
+export function wishIsAfternoon(wish: string): boolean {
+  const text = wish.toLowerCase();
+  if (/\b(anytime|any time|all day|whenever)\b/.test(text)) return false;
+  if (/\b(by|before|until|till|closes)\b/.test(text)) return false;
+  const times = parseTimes(text.replace(/\b\d{3,}\b/g, " "));
+  return times.length > 0 && times[0] >= MORNING_END_HOUR * 60;
+}
+
 export function isMorningOrder(order: { window: string | null; customerNote: string | null }): boolean {
-  if (windowIsMorning(order.window)) return true;
   // Смотрим последнее пожелание: клиент мог передумать («around 2pm» → «6 PM»).
-  const wishes = readyTimeWishes(order.customerNote);
-  return wishes.length > 0 && wishIsMorning(wishes[0]);
+  const latest = readyTimeWishes(order.customerNote)[0];
+  if (latest && wishIsAfternoon(latest)) return false;
+  if (windowIsMorning(order.window)) return true;
+  return !!latest && wishIsMorning(latest);
 }
 
 /**

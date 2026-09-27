@@ -5,7 +5,7 @@ import { Card } from "@/components/ui/Card";
 import { PageHeader } from "@/components/ui/misc";
 import { cn } from "@/lib/cn";
 import { todayStrInTz, DEFAULT_STORE_TZ, fmtDeliveryDateLong } from "@/lib/tz";
-import { loadDaySchedule, loadWeekStrip, type FloristDay, type ScheduleOrder } from "@/modules/capacity/load";
+import { loadDaySchedule, loadWeekStrip, loadSiteVerdicts, type FloristDay, type ScheduleOrder } from "@/modules/capacity/load";
 import { VERDICT_LABEL, BIG_BOUQUET_PRICE, type MorningVerdict } from "@/modules/capacity/morning";
 import { MorningClosureToggle, CapacityStepper } from "./ScheduleControls";
 
@@ -25,8 +25,12 @@ export default async function SchedulePage({ searchParams }: { searchParams: Pro
 
   // Полоса: три дня назад (посмотреть, как успели) и неделя вперёд (куда ещё можно обещать).
   const stripDays = Array.from({ length: 10 }, (_, i) => shift(today, i - 3));
-  const [schedule, strip] = await Promise.all([loadDaySchedule(prisma, day), loadWeekStrip(prisma, stripDays)]);
   const isPast = day < today;
+  const [schedule, strip, sites] = await Promise.all([
+    loadDaySchedule(prisma, day),
+    loadWeekStrip(prisma, stripDays),
+    isPast ? Promise.resolve([]) : loadSiteVerdicts(prisma, day),
+  ]);
 
   return (
     <div className="space-y-5">
@@ -87,6 +91,20 @@ export default async function SchedulePage({ searchParams }: { searchParams: Pro
         {!isPast && <MorningClosureToggle day={day} closed={!!schedule.closure} note={schedule.closure?.note ?? null} />}
       </div>
 
+      {sites.length > 0 && (
+        <Card className="p-4">
+          <div className="mb-2 text-sm font-medium text-slate-700">Что ИИ сейчас отвечает клиентам про утро</div>
+          <div className="flex flex-wrap gap-2">
+            {sites.map((s) => (
+              <span key={s.site} className={cn("inline-flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm ring-1", VERDICT_TONE[s.verdict])}>
+                <b className="font-semibold">{s.site}</b>
+                {SITE_VERDICT[s.verdict]}
+              </span>
+            ))}
+          </div>
+        </Card>
+      )}
+
       {schedule.florists.length === 0 && schedule.unassigned.length === 0 ? (
         <Card className="p-6 text-center text-sm text-slate-500">На этот день заказов нет.</Card>
       ) : (
@@ -108,6 +126,13 @@ export default async function SchedulePage({ searchParams }: { searchParams: Pro
     </div>
   );
 }
+
+/** Коротко и без баллов: владелец читает это как светофор. */
+const SITE_VERDICT: Record<MorningVerdict, string> = {
+  FIRST: "утро свободно · к 12:00",
+  AVAILABLE: "утро есть · к 13:00–15:00",
+  FULL: "утро закрыто",
+};
 
 const VERDICT_TONE: Record<MorningVerdict, string> = {
   FIRST: "bg-emerald-50 text-emerald-700 ring-emerald-200",
