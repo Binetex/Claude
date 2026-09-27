@@ -15,9 +15,9 @@ import { parseAttachments } from "@/integrations/quo/communicationsService";
 import { resolveDeepseekConfig } from "@/integrations/deepseek/settings";
 import { createDeepseekClient, type DeepseekClient } from "@/integrations/deepseek/client";
 import { DeepseekError } from "@/integrations/deepseek/errors";
-import { buildMessages, parseReply, describeDeliveryDay, earliestAgreeHour, type HistoryLine, type OrderSnapshot } from "./prompt";
-import { morningForOrder, morningForNewOrder, type OrderMorning } from "@/modules/capacity/load";
-import { earliestToday, availableFromToday, clockLabelEn, AVAILABLE_FROM_MIN, SAME_DAY_LEAD_MIN, type MorningVerdict } from "@/modules/capacity/morning";
+import { buildMessages, parseReply, describeDeliveryDay, agreeFromMin, type HistoryLine, type OrderSnapshot } from "./prompt";
+import { orderEarliest, siteEarliest } from "@/modules/timing/load";
+import { clockLabelEn } from "@/modules/timing/day";
 import { matchIntent } from "./intents";
 import { readTemplates, templateApplies, renderAssistantTemplate } from "./templates";
 import { loadCatalog, looksLikeShopping } from "./catalog";
@@ -235,27 +235,15 @@ export function buildAssistantHandler(prisma: PrismaClient, deps: AssistantDeps 
     // незнакомого номера разговор почти всегда про покупку, поэтому там он идёт сразу.
     const wantsCatalog = !order || looksLikeShopping(text);
     const clock = localClock(site.timezone, now());
-    // Загрузка утра: по заказу — у его флориста на день доставки, незнакомому номеру — на
-    // сегодня и завтра. Сбой расчёта не роняет разбор: без неё правило про время прежнее.
-    // Время на заказ день в день у известного заказа — по его букету и расстоянию от флориста;
-    // у незнакомого номера о заказе ничего не известно — общее.
-    const orderPlan = order ? await morningFor(prisma, order, clock.dateStr, now()) : null;
-    const orderMorning = orderPlan?.verdict ?? null;
-    const leadMin = orderPlan?.leadMin ?? SAME_DAY_LEAD_MIN;
-    const nowMin = minutesOf(clock.timeStr);
-    const morningOutlook = order ? undefined : await outlookFor(prisma, site.id, clock.dateStr, now(), nowMin);
-    const earliest = earliestTodayLabel(nowMin, leadMin);
+    // Самое раннее время доставки — одна цифра из расписания флориста (modules/timing): по заказу
+    // в его день, незнакомому номеру — для нового заказа сегодня и завтра. Сбой расчёта разбор не
+    // роняет: без цифры модель и проверка ответа осторожничают (4 PM).
+    const orderEarliestMin = order ? await earliestFor(prisma, order, clock.dateStr, now()) : undefined;
+    const newEarliest = order ? null : await earliestForNew(prisma, site.id, clock.dateStr, now());
     const messages = buildMessages({
-      earliestToday: earliest,
       knowledgeBase: order ? site.aiKnowledgeBase : site.aiUnknownKnowledgeBase,
-      order: order
-        ? {
-            ...snapshot(order, site.name, incoming.partyRole, clock.dateStr),
-            morning: orderMorning,
-            morningFrom: morningFromLabel(order, orderMorning, clock.dateStr, nowMin, leadMin),
-          }
-        : null,
-      morningOutlook,
+      order: order ? { ...snapshot(order, site.name, incoming.partyRole, clock.dateStr), earliest: labelOf(orderEarliestMin) } : null,
+      earliestNew: newEarliest ? { today: labelOf(newEarliest.today), tomorrow: labelOf(newEarliest.tomorrow) } : undefined,
       history: await loadHistory(prisma, order?.id ?? null, phone, incoming.storePhone, incoming, site.timezone, answeredIds),
       now: clock,
       globalNote,
@@ -288,11 +276,9 @@ export function buildAssistantHandler(prisma: PrismaClient, deps: AssistantDeps 
       return;
     }
 
-    // Доставка сегодня — соглашаться можно не раньше, чем успеваем собрать и довезти.
-    let agreeHour = order
-      ? earliestAgreeHour([orderMorning], isTodayOrder(order, clock.dateStr) ? earliestToday(nowMin, leadMin) : null)
-      : earliestAgreeHour((morningOutlook ?? []).map((m) => m.verdict));
-    let parsed = parseReply(raw, { earliestAgreeHour: agreeHour });
+    // Соглашаться на время можно не раньше, чем успеваем собрать и довезти.
+    let earliestMin = order ? orderEarliestMin : newEarliest?.today;
+    let parsed = parseReply(raw, { agreeFromMin: agreeFromMin(earliestMin) });
 
     // Незнакомый номер назвал заказ. Нашли ровно один — привязываем разговор и спрашиваем
     // модель ещё раз, уже с данными заказа: человек ждёт ответа про свой заказ сейчас, а не в
@@ -323,16 +309,10 @@ export function buildAssistantHandler(prisma: PrismaClient, deps: AssistantDeps 
       if (found && foundGate?.ok) {
         await linkConversation(prisma, found.id, phone, incoming.storePhone).catch(() => null);
         linkedOrder = found;
-        const foundPlan = await morningFor(prisma, found, clock.dateStr, now());
-        agreeHour = earliestAgreeHour([foundPlan.verdict], isTodayOrder(found, clock.dateStr) ? earliestToday(nowMin, foundPlan.leadMin) : null);
+        const foundEarliest = await earliestFor(prisma, found, clock.dateStr, now());
         const again = buildMessages({
-          earliestToday: earliestTodayLabel(nowMin, foundPlan.leadMin),
           knowledgeBase: site.aiKnowledgeBase,
-          order: {
-            ...snapshot(found, site.name, incoming.partyRole, clock.dateStr),
-            morning: foundPlan.verdict,
-            morningFrom: morningFromLabel(found, foundPlan.verdict, clock.dateStr, nowMin, foundPlan.leadMin),
-          },
+          order: { ...snapshot(found, site.name, incoming.partyRole, clock.dateStr), earliest: labelOf(foundEarliest) },
           history: await loadHistory(prisma, found.id, phone, incoming.storePhone, incoming, site.timezone, answeredIds),
           now: clock,
           globalNote,
@@ -342,7 +322,8 @@ export function buildAssistantHandler(prisma: PrismaClient, deps: AssistantDeps 
           const res = await client.complete(again);
           raw = res.text;
           latencyMs += res.latencyMs;
-          parsed = parseReply(raw, { earliestAgreeHour: agreeHour });
+          earliestMin = foundEarliest;
+          parsed = parseReply(raw, { agreeFromMin: agreeFromMin(earliestMin) });
           messages.splice(0, messages.length, ...again);
         } catch {
           // Не вышло переспросить — остаёмся с ответом «без заказа», он безопасен.
@@ -392,18 +373,20 @@ export function buildAssistantHandler(prisma: PrismaClient, deps: AssistantDeps 
         console.error(`[assistant] заметка о времени по заказу ${forNote.id} не записана:`, err instanceof Error ? err.message : String(err))
       );
     }
-    // Клиент сам перенёс доставку позже — на вечер того же дня или на другой день: меняем заказ
-    // (решение владельца 27.09.2026: позже всегда выгоднее), а не только пишем заметку. Дату
-    // принимаем, только если клиент в сообщении и правда говорил о дне: модель может дописать её
-    // сама, а переносить заказ по догадке нельзя.
-    // Переносит только сторона заказа — заказчик или получатель по номеру. Разговор, привязанный
+    // Что ответ пообещал про время, то и становится окном заказа, а другой день — датой (решение
+    // владельца 27.09.2026: позже всегда выгоднее, хоть на следующий день). Дату принимаем, только
+    // если клиент в сообщении и правда говорил о дне, время — только если в сообщении есть время
+    // или число: модель может дописать их сама из истории, а менять заказ по догадке нельзя.
+    // Меняет только сторона заказа — заказчик или получатель по номеру. Разговор, привязанный
     // к заказу по подсказке (незнакомый номер назвал имя или адрес), заказ не двигает: иначе
     // любой, кто знает имя получателя, перенёс бы чужой оплаченный заказ.
     if (parsed.newDeliveryDate && !mentionsDay(body)) parsed = { ...parsed, newDeliveryDate: null };
+    if (!mentionsTime(body) && !/\d/.test(body)) parsed = { ...parsed, confirmedFrom: null, confirmedUntil: null };
     const isParty = !!linkedOrder && pickOrderTarget(phone, incoming.partyRole, linkedOrder) !== null;
-    if (linkedOrder && isParty && !site.aiDryRun && parsed.intent !== "spam" && (parsed.readyTime || parsed.newDeliveryDate)) {
+    const confirmed = { from: parsed.confirmedFrom, until: parsed.confirmedUntil };
+    if (linkedOrder && isParty && !site.aiDryRun && parsed.intent !== "spam" && (confirmed.from != null || confirmed.until != null || parsed.newDeliveryDate)) {
       const target = linkedOrder;
-      await applyCustomerReschedule(prisma, target.id, parsed.readyTime, parsed.newDeliveryDate, site.timezone, clock.dateStr).catch((err) =>
+      await applyCustomerReschedule(prisma, target.id, confirmed, parsed.newDeliveryDate, site.timezone, clock.dateStr).catch((err) =>
         console.error(`[assistant] перенос по заказу ${target.id} не применён:`, err instanceof Error ? err.message : String(err))
       );
     }
@@ -436,69 +419,44 @@ export function buildAssistantHandler(prisma: PrismaClient, deps: AssistantDeps 
 }
 
 /**
- * Загрузка утра для заказа: только пока доставка впереди (сегодня или позже) и заказ не
- * доставлен — про прошедший день обещать нечего.
+ * Самое раннее время доставки заказа в его день (минуты). Только пока доставка впереди (сегодня
+ * или позже) и заказ не доставлен — про прошедший день обещать нечего: undefined, «не знаем».
+ * null — в этот день уже не успеть.
  */
-async function morningFor(
+async function earliestFor(
   prisma: PrismaClient,
   order: { id: string; orderStatus: string; deliveryDate: Date | null },
   todayStr: string,
   now: Date
-): Promise<OrderMorning> {
-  const none: OrderMorning = { verdict: null, leadMin: SAME_DAY_LEAD_MIN };
-  if (!order.deliveryDate || order.orderStatus === "DELIVERED") return none;
-  if (dayDiff(todayStr, order.deliveryDate.toISOString().slice(0, 10)) < 0) return none;
-  return (await morningForOrder(prisma, order.id, now).catch(logMorningError)) ?? none;
+): Promise<number | null | undefined> {
+  if (!order.deliveryDate || order.orderStatus === "DELIVERED") return undefined;
+  if (dayDiff(todayStr, order.deliveryDate.toISOString().slice(0, 10)) < 0) return undefined;
+  return orderEarliest(prisma, order.id, now).catch(logTimingError);
 }
 
-async function outlookFor(
+/** Незнакомый номер: самое раннее время для нового заказа сегодня и завтра. */
+async function earliestForNew(
   prisma: PrismaClient,
   siteId: string,
   todayStr: string,
-  now: Date,
-  nowMin: number
-): Promise<{ day: "today" | "tomorrow"; verdict: MorningVerdict; from?: string | null }[]> {
+  now: Date
+): Promise<{ today: number | null | undefined; tomorrow: number | null | undefined }> {
   const tomorrowStr = new Date(Date.parse(`${todayStr}T00:00:00Z`) + 86_400_000).toISOString().slice(0, 10);
   const [today, tomorrow] = await Promise.all([
-    morningForNewOrder(prisma, siteId, todayStr, now).catch(logMorningError),
-    morningForNewOrder(prisma, siteId, tomorrowStr, now).catch(logMorningError),
+    siteEarliest(prisma, siteId, todayStr, now).catch(logTimingError),
+    siteEarliest(prisma, siteId, tomorrowStr, now).catch(logTimingError),
   ]);
-  const out: { day: "today" | "tomorrow"; verdict: MorningVerdict; from?: string | null }[] = [];
-  if (today) out.push({ day: "today", verdict: today, from: today === "AVAILABLE" ? lateMorningStart(nowMin) : null });
-  if (tomorrow) out.push({ day: "tomorrow", verdict: tomorrow });
-  return out;
+  return { today, tomorrow };
 }
 
-function minutesOf(timeStr: string): number {
-  const [h, m] = timeStr.split(":").map(Number);
-  return h * 60 + m;
+/** Минуты → «2:30 PM» для модели; null и undefined проходят как есть. */
+function labelOf(min: number | null | undefined): string | null | undefined {
+  return min == null ? min : clockLabelEn(min);
 }
 
-function isTodayOrder(order: { deliveryDate: Date | null }, todayStr: string): boolean {
-  return !!order.deliveryDate && order.deliveryDate.toISOString().slice(0, 10) === todayStr;
-}
-
-/** Начало утреннего обещания сегодня, если оно позже обычного 13:00 («2:30 PM»), иначе null. */
-function lateMorningStart(nowMin: number, leadMin: number = SAME_DAY_LEAD_MIN): string | null {
-  const from = availableFromToday(nowMin, leadMin);
-  return from > AVAILABLE_FROM_MIN ? clockLabelEn(from) : null;
-}
-
-function morningFromLabel(order: { deliveryDate: Date | null }, verdict: MorningVerdict | null, todayStr: string, nowMin: number, leadMin: number): string | null {
-  return verdict === "AVAILABLE" && isTodayOrder(order, todayStr) ? lateMorningStart(nowMin, leadMin) : null;
-}
-
-/** «2:30 PM» — самое раннее время сегодня; после 21:00 сегодня не возим вовсе — строки нет. */
-function earliestTodayLabel(nowMin: number, leadMin: number = SAME_DAY_LEAD_MIN): string | null {
-  const e = earliestToday(nowMin, leadMin);
-  // До полудня строка не нужна: раньше 12:00 мы не возим в любом случае (правило в промпте).
-  if (e <= 12 * 60 || e >= 21 * 60) return null;
-  return clockLabelEn(e);
-}
-
-function logMorningError(err: unknown): null {
-  console.error("[assistant] загрузка утра не посчиталась:", err instanceof Error ? err.message : String(err));
-  return null;
+function logTimingError(err: unknown): undefined {
+  console.error("[assistant] самое раннее время не посчиталось:", err instanceof Error ? err.message : String(err));
+  return undefined;
 }
 
 function logCallRequestError(err: unknown) {
@@ -915,7 +873,7 @@ function dayLabel(day: string, window: string): string {
 async function applyCustomerReschedule(
   prisma: PrismaClient,
   orderId: string,
-  readyTime: string | null,
+  confirmed: { from: number | null; until: number | null },
   newDate: string | null,
   tz: string | null,
   todayStr: string
@@ -934,7 +892,7 @@ async function applyCustomerReschedule(
   const currentDay = o.deliveryDate.toISOString().slice(0, 10);
   if (dayDiff(todayStr, currentDay) < 0) return;
   const current = windowOf(o);
-  const plan = planReschedule({ todayStr, currentDay, currentWindow: current, readyTime, newDate });
+  const plan = planReschedule({ todayStr, currentDay, currentWindow: current, confirmed, newDate });
   const sameWindow = plan?.window && current ? plan.window.from === current.from && plan.window.to === current.to : !plan?.window;
   if (!plan || (plan.day === currentDay && sameWindow)) return;
 

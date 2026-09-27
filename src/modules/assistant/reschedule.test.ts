@@ -1,56 +1,52 @@
 import { describe, it, expect } from "vitest";
-import { laterWindowFromWish, planReschedule, mentionsDay } from "./reschedule";
+import { planReschedule, confirmedWindow, mentionsDay } from "./reschedule";
 import { formatWindowText, type WindowRange } from "@/lib/deliveryWindow";
 
-const MORNING: WindowRange = { from: 11 * 60, to: 15 * 60 };
-const w = (r: WindowRange | null) => (r ? formatWindowText(r) : null);
+const h = (hh: number, mm = 0) => hh * 60 + mm;
+const MORNING: WindowRange = { from: h(11), to: h(15) };
+const w = (r: WindowRange | null | undefined) => (r ? formatWindowText(r) : null);
+const none = { from: null, until: null };
 
-describe("laterWindowFromWish — клиент перенёс с утра на после 15:00", () => {
-  it("утреннее окно становится строгим «с — до» по словам клиента", () => {
-    expect(w(laterWindowFromWish(MORNING, "after 5pm"))).toBe("17:00 - 21:00");
-    expect(w(laterWindowFromWish(MORNING, "4-5pm today"))).toBe("16:00 - 17:00");
-    expect(w(laterWindowFromWish({ from: 9 * 60, to: 15 * 60 }, "around 7 PM"))).toBe("18:30 - 19:30");
-    // Время через точку — это время, а не дата.
-    expect(w(laterWindowFromWish(MORNING, "after 3.30 pm"))).toBe("15:30 - 21:00");
+describe("confirmedWindow — окно по тому, что ответ пообещал", () => {
+  it("«после 5» — с 17:00 до 21:00", () => {
+    expect(w(confirmedWindow(MORNING, { from: h(17), until: null }))).toBe("17:00 - 21:00");
   });
-
-  it("не трогает: другой день, раннее время, «any time», окно и так не утреннее", () => {
-    expect(laterWindowFromWish(MORNING, "tomorrow after 5")).toBeNull();
-    expect(laterWindowFromWish(MORNING, "by noon")).toBeNull();
-    expect(laterWindowFromWish(MORNING, "any time today")).toBeNull();
-    expect(laterWindowFromWish(MORNING, "business closes at 6pm")).toBeNull();
-    expect(laterWindowFromWish({ from: 15 * 60, to: 19 * 60 }, "after 6pm")).toBeNull();
-    expect(laterWindowFromWish({ from: 690, to: 17 * 60 }, "after 4")).toBeNull();
-    expect(laterWindowFromWish(null, "after 5pm")).toBeNull();
+  it("«до 1:40» — с прежнего начала окна до 13:40", () => {
+    expect(w(confirmedWindow({ from: h(11), to: h(19) }, { from: null, until: h(13, 40) }))).toBe("11:00 - 13:40");
+  });
+  it("«до 4», а окно начиналось позже — с 11:00; раннее «до 10» — за час до конца", () => {
+    expect(w(confirmedWindow({ from: h(17), to: h(21) }, { from: null, until: h(16) }))).toBe("11:00 - 16:00");
+    expect(w(confirmedWindow(null, { from: null, until: h(10) }))).toBe("09:00 - 10:00");
+  });
+  it("«около 9 утра» заранее — как обещано", () => {
+    expect(w(confirmedWindow(MORNING, { from: h(9), until: h(9, 30) }))).toBe("09:00 - 09:30");
+  });
+  it("ничего не обещано или «с» после 21:00 — окна нет", () => {
+    expect(confirmedWindow(MORNING, none)).toBeNull();
+    expect(confirmedWindow(MORNING, { from: h(21, 30), until: null })).toBeNull();
   });
 });
 
-describe("planReschedule — перенос по словам клиента", () => {
+describe("planReschedule — перенос по обещанному", () => {
   const base = { todayStr: "2026-09-27", currentDay: "2026-09-27", currentWindow: MORNING };
   it("на завтра без времени — окно прежнее", () => {
-    const p = planReschedule({ ...base, readyTime: null, newDate: "2026-09-28" });
+    const p = planReschedule({ ...base, confirmed: none, newDate: "2026-09-28" });
     expect(p?.day).toBe("2026-09-28");
     expect(w(p!.window)).toBe("11:00 - 15:00");
   });
   it("на завтра после 5 — окно 17:00–21:00", () => {
-    expect(w(planReschedule({ ...base, readyTime: "tomorrow after 5pm", newDate: "2026-09-28" })!.window)).toBe("17:00 - 21:00");
-  });
-  it("на завтра днём — слот 15:00–19:00", () => {
-    expect(w(planReschedule({ ...base, readyTime: "tomorrow afternoon", newDate: "2026-09-28" })!.window)).toBe("15:00 - 19:00");
-  });
-  it("«any time» на новый день окно не трогает", () => {
-    expect(w(planReschedule({ ...base, readyTime: "any time tomorrow", newDate: "2026-09-28" })!.window)).toBe("11:00 - 15:00");
+    expect(w(planReschedule({ ...base, confirmed: { from: h(17), until: null }, newDate: "2026-09-28" })!.window)).toBe("17:00 - 21:00");
   });
   it("раньше или тот же день, далёкая дата — не переносим", () => {
-    expect(planReschedule({ ...base, currentDay: "2026-09-29", readyTime: null, newDate: "2026-09-28" })).toBeNull();
-    expect(planReschedule({ ...base, readyTime: null, newDate: "2026-09-27" })).toBeNull();
-    expect(planReschedule({ ...base, readyTime: null, newDate: "2026-12-01" })).toBeNull();
+    expect(planReschedule({ ...base, currentDay: "2026-09-29", confirmed: none, newDate: "2026-09-28" })).toBeNull();
+    expect(planReschedule({ ...base, confirmed: none, newDate: "2026-09-27" })).toBeNull();
+    expect(planReschedule({ ...base, confirmed: none, newDate: "2026-12-01" })).toBeNull();
   });
-  it("тот же день — только с утра на после 15:00", () => {
-    const p = planReschedule({ ...base, readyTime: "after 5pm", newDate: null });
+  it("тот же день — обещанное окно; ничего не обещано — не трогаем", () => {
+    const p = planReschedule({ ...base, confirmed: { from: null, until: h(16) }, newDate: null });
     expect(p?.day).toBe("2026-09-27");
-    expect(w(p!.window)).toBe("17:00 - 21:00");
-    expect(planReschedule({ ...base, readyTime: "by noon", newDate: null })).toBeNull();
+    expect(w(p!.window)).toBe("11:00 - 16:00");
+    expect(planReschedule({ ...base, confirmed: none, newDate: null })).toBeNull();
   });
 });
 

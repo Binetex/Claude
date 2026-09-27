@@ -1,28 +1,22 @@
 import Link from "next/link";
 import { cn } from "@/lib/cn";
-import type { DaySchedule, FloristDay, ScheduleOrder } from "@/modules/capacity/load";
-import { fmtDuration, type MorningVerdict } from "@/modules/capacity/morning";
+import type { DaySchedule, FloristDay, ScheduleOrder } from "@/modules/timing/load";
+import { fmtDuration } from "@/modules/timing/day";
 import { MorningLock } from "./ScheduleControls";
 
 /**
- * Карточка дня — одна на обеих вкладках «Графика доставки». Крупно и по полочкам: день →
- * флористы в две колонки → каждый заказ строкой со шкалой времени «хотел / привезли».
+ * Карточка дня — одна на обеих вкладках «Графика доставки». День → флористы в две колонки →
+ * очередь флориста: кого собирает первым и когда букет будет у клиента по расписанию
+ * (modules/timing), а у доставленных — когда привезли на самом деле.
  */
 
 const WEEKDAY = ["воскресенье", "понедельник", "вторник", "среда", "четверг", "пятница", "суббота"];
 const MONTH = ["января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа", "сентября", "октября", "ноября", "декабря"];
 
-/** Статус — ровно то, что ИИ сейчас обещает клиентам этого флориста про утро. */
-const VERDICT: Record<MorningVerdict, { label: string; cls: string; cell: string }> = {
-  FIRST: { label: "Утро свободно · к 12:00", cls: "bg-emerald-50 text-emerald-700 ring-emerald-200", cell: "bg-emerald-400" },
-  AVAILABLE: { label: "Утро есть · к 13–15", cls: "bg-amber-50 text-amber-700 ring-amber-200", cell: "bg-amber-400" },
-  FULL: { label: "Утро закрыто", cls: "bg-rose-50 text-rose-700 ring-rose-200", cell: "bg-rose-400" },
-};
-
-/** Шкала времени: с 11:00 до 17:00 — утро и запас на опоздания. */
-const AXIS_FROM = 11 * 60;
-const AXIS_TO = 17 * 60;
-const HOURS = [11, 12, 13, 14, 15, 16, 17];
+/** Шкала времени: весь день доставки, с 9:00 до 21:00. */
+const AXIS_FROM = 9 * 60;
+const AXIS_TO = 21 * 60;
+const HOURS = [9, 11, 13, 15, 17, 19, 21];
 
 function hm(min: number): string {
   return `${Math.floor(min / 60)}:${String(min % 60).padStart(2, "0")}`;
@@ -41,19 +35,18 @@ export function DayCard({
   label,
   shopsOf,
   mode,
-  earliest,
 }: {
   schedule: DaySchedule;
   label?: string;
-  /** Только у «Сегодня»: самое раннее время для маленького букета рядом и для большого/далеко. */
-  earliest?: { near: string; far: string } | null;
   shopsOf: (id: string) => string;
-  /** plan — впереди: статус ИИ, клетки, замок; review — прошло: только как успели. */
+  /** plan — впереди: очередь по расписанию, замок утра; review — прошло: как успели. */
   mode: "plan" | "review";
 }) {
-  const florists = mode === "review" ? s.florists.filter((f) => f.morning.length > 0) : s.florists;
-  const lateCount = s.florists.reduce((n, f) => n + f.morning.filter((o) => o.late).length, 0);
-  const total = s.florists.reduce((n, f) => n + f.morning.length, 0);
+  const florists = mode === "review" ? s.florists.filter((f) => f.orders.length > 0) : s.florists;
+  const all = s.florists.flatMap((f) => f.orders);
+  const delivered = all.filter((o) => o.deliveredAt);
+  const lateCount = delivered.filter((o) => o.late).length;
+  const riskCount = all.filter((o) => o.atRisk).length;
 
   return (
     <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
@@ -63,34 +56,34 @@ export function DayCard({
           <span className={cn(label ? "text-base text-slate-500" : "text-xl font-semibold text-slate-900")}>{dayTitle(s.day)}</span>
         </div>
         {mode === "plan" ? (
-          <MorningLock day={s.day} closed={!!s.closure} />
+          <div className="flex items-center gap-3">
+            {riskCount > 0 && <span className="whitespace-nowrap rounded-full bg-rose-50 px-3 py-1 text-sm font-medium text-rose-700">Не успеваем: {riskCount}</span>}
+            <MorningLock day={s.day} closed={!!s.closure} />
+          </div>
         ) : (
-          total > 0 && (
+          delivered.length > 0 && (
             <span className={cn("rounded-full px-3 py-1 text-sm font-medium", lateCount ? "bg-rose-50 text-rose-700" : "bg-emerald-50 text-emerald-700")}>
-              {lateCount ? `Опоздали: ${lateCount} из ${total}` : `Все ${total} вовремя`}
+              {lateCount ? `Опоздали: ${lateCount} из ${delivered.length}` : `Все ${delivered.length} вовремя`}
             </span>
           )
         )}
       </header>
 
-      {earliest && (
-        <div className="mx-6 mt-4 rounded-lg bg-slate-50 px-4 py-2.5 text-sm text-slate-600">
-          Если заказать сейчас: маленький букет рядом с флористом — не раньше <b className="font-medium text-slate-800">{earliest.near}</b>,
-          большой или далеко — не раньше <b className="font-medium text-slate-800">{earliest.far}</b>. ИИ считает по букету и адресу
-          каждого заказа.
+      {mode === "plan" && s.closure && (
+        <div className="mx-6 mt-4 rounded-lg bg-rose-50 px-4 py-2.5 text-sm text-rose-700">Утро закрыто вручную — ИИ и сайт не предлагают доставку раньше 15:00</div>
+      )}
+      {mode === "plan" && s.unassigned.length > 0 && (
+        <div className="mx-6 mt-4 rounded-lg bg-amber-50 px-4 py-2.5 text-sm text-amber-800">
+          Без флориста: {s.unassigned.map((o) => o.orderNumber).join(", ")} — в расписание не входят, пока не назначены
         </div>
       )}
 
-      {mode === "plan" && s.closure && (
-        <div className="mx-6 mt-4 rounded-lg bg-rose-50 px-4 py-2.5 text-sm text-rose-700">Утро закрыто вручную — ИИ и сайт его не предлагают</div>
-      )}
-
       {florists.length === 0 ? (
-        <p className="px-6 py-5 text-sm text-slate-400">Утренних заказов не было</p>
+        <p className="px-6 py-5 text-sm text-slate-400">Заказов не было</p>
       ) : (
         <div className="grid divide-y divide-slate-100 md:grid-cols-2 md:divide-x md:divide-y-0">
           {florists.map((f) => (
-            <FloristPanel key={f.id} f={f} shops={shopsOf(f.id)} closed={!!s.closure} mode={mode} />
+            <FloristPanel key={f.id} f={f} shops={shopsOf(f.id)} mode={mode} />
           ))}
         </div>
       )}
@@ -98,8 +91,15 @@ export function DayCard({
   );
 }
 
-function FloristPanel({ f, shops, closed, mode }: { f: FloristDay; shops: string; closed: boolean; mode: "plan" | "review" }) {
-  if (f.dayOff && mode === "plan") {
+/** Самое раннее для нового клиента — ровно то, что ИИ сейчас называет клиентам этого флориста. */
+function EarliestChip({ min }: { min: number | null }) {
+  if (min == null) return <span className="rounded-full bg-rose-50 px-3 py-1 text-sm font-medium text-rose-700 ring-1 ring-rose-200">Новый заказ уже не успеть</span>;
+  const tone = min <= 13 * 60 ? "bg-emerald-50 text-emerald-700 ring-emerald-200" : min <= 16 * 60 ? "bg-amber-50 text-amber-700 ring-amber-200" : "bg-rose-50 text-rose-700 ring-rose-200";
+  return <span className={cn("whitespace-nowrap rounded-full px-3 py-1 text-sm font-medium ring-1", tone)}>Новый заказ — к {hm(min)}</span>;
+}
+
+function FloristPanel({ f, shops, mode }: { f: FloristDay; shops: string; mode: "plan" | "review" }) {
+  if (f.dayOff && mode === "plan" && f.orders.length === 0) {
     return (
       <div className="px-6 py-5">
         <div className="text-lg font-medium text-slate-400">{f.name}</div>
@@ -107,46 +107,33 @@ function FloristPanel({ f, shops, closed, mode }: { f: FloristDay; shops: string
       </div>
     );
   }
-  const v = VERDICT[closed ? "FULL" : f.verdict];
   return (
     <div className="space-y-4 px-6 py-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <div className="text-lg font-medium text-slate-900">{f.name}</div>
-          {shops && <div className="text-sm text-slate-400">{shops}</div>}
+          <div className="text-sm text-slate-400">
+            {mode === "plan" && `начинает в ${hm(f.workStartMin)}`}
+            {mode === "plan" && shops && " · "}
+            {shops}
+          </div>
+          {mode === "plan" && f.earlyStartMin != null && (
+            <div className="mt-1 text-sm font-medium text-amber-700">Ранний заказ: начать в {hm(f.earlyStartMin)}</div>
+          )}
         </div>
-        {mode === "plan" && <span className={cn("rounded-full px-3 py-1 text-sm font-medium ring-1", v.cls)}>{v.label}</span>}
+        {mode === "plan" && <EarliestChip min={f.newClientEarliest} />}
       </div>
 
-      {mode === "plan" && <Cells used={f.morningPoints} capacity={f.capacity} fill={v.cell} />}
-
-      {f.morning.length > 0 ? (
+      {f.orders.length > 0 ? (
         <div className="space-y-4">
           <Axis />
-          {f.morning.map((o) => (
+          {f.orders.map((o) => (
             <OrderRow key={o.id} o={o} />
           ))}
         </div>
       ) : (
-        <p className="text-sm text-slate-400">Утренних заказов нет</p>
+        <p className="text-sm text-slate-400">Заказов нет</p>
       )}
-    </div>
-  );
-}
-
-/** Клетки утра: клетка — маленький букет, большой занимает две. Сверх лимита — красные. */
-function Cells({ used, capacity, fill }: { used: number; capacity: number; fill: string }) {
-  const total = Math.max(capacity, used);
-  return (
-    <div className="flex items-center gap-3">
-      <div className="flex gap-1.5">
-        {Array.from({ length: total }, (_, i) => (
-          <span key={i} className={cn("h-3.5 w-9 rounded", i < used ? (i >= capacity ? "bg-rose-500" : fill) : "bg-slate-100")} />
-        ))}
-      </div>
-      <span className="text-sm text-slate-500">
-        занято {used} из {capacity}
-      </span>
     </div>
   );
 }
@@ -164,20 +151,23 @@ function Axis() {
 }
 
 function OrderRow({ o }: { o: ScheduleOrder }) {
-  const lateTone = o.late ? "text-rose-600" : "text-emerald-600";
   return (
     <div className="space-y-1.5">
       <div className="flex items-baseline justify-between gap-3">
-        <Link href={`/dashboard/orders/${o.id}`} className="font-medium text-slate-800 hover:underline">
-          {o.orderNumber}
-        </Link>
+        <span className="flex items-baseline gap-2">
+          {o.seq != null && <span className="inline-flex size-5 items-center justify-center rounded-full bg-slate-100 text-xs font-medium text-slate-600">{o.seq}</span>}
+          <Link href={`/dashboard/orders/${o.id}`} className="font-medium text-slate-800 hover:underline">
+            {o.orderNumber}
+          </Link>
+        </span>
         <span className="text-sm text-slate-500">
           {o.big && <span className="mr-2 rounded bg-violet-100 px-1.5 py-0.5 text-xs text-violet-700">большой</span>}
           {o.bouquets}
         </span>
       </div>
 
-      {/* Шкала: светлый отрезок — обещанное окно, тёмный — что просил клиент, точка — когда привезли. */}
+      {/* Шкала: отрезок — обещанное окно, кольцо — когда привезём по расписанию, точка — когда
+          привезли. */}
       <div className="relative h-3 rounded-full bg-slate-100">
         {HOURS.slice(1, -1).map((h) => (
           <span key={h} className="absolute top-0 h-full w-px bg-white" style={{ left: `${pct(h * 60)}%` }} />
@@ -188,10 +178,10 @@ function OrderRow({ o }: { o: ScheduleOrder }) {
             style={{ left: `${pct(o.promised.from)}%`, width: `${Math.max(1.5, pct(o.promised.to) - pct(o.promised.from))}%` }}
           />
         )}
-        {o.want && (
+        {o.plannedAt != null && o.deliveredMin == null && (
           <span
-            className="absolute top-0 h-full rounded-full bg-sky-300"
-            style={{ left: `${pct(o.want.from)}%`, width: `${Math.max(1.5, pct(o.want.to) - pct(o.want.from))}%` }}
+            className={cn("absolute top-1/2 size-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-[3px] bg-white", o.atRisk ? "border-rose-500" : "border-slate-500")}
+            style={{ left: `${pct(o.plannedAt)}%` }}
           />
         )}
         {o.deliveredMin != null && (
@@ -204,19 +194,19 @@ function OrderRow({ o }: { o: ScheduleOrder }) {
 
       <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-sm">
         <span className="text-slate-500">окно {o.promised ? `${hm(o.promised.from)}–${hm(o.promised.to)}` : o.window}</span>
-        {o.want && (
-          <span className={o.wishMissed ? "text-amber-700" : "text-slate-500"}>
-            просил {hm(o.want.from)}–{hm(o.want.to)}
-            {o.wishMissed && " — не успели"}
-          </span>
-        )}
+        {o.wish && <span className="text-slate-500">клиент писал: {o.wish}</span>}
         {o.deliveredAt ? (
           <span className={o.late ? "font-medium text-rose-600" : "text-emerald-600"}>
             привезли {o.deliveredAt}
             {o.late ? ` · опоздали на ${fmtDuration(o.lateMin)}` : o.lateMin > 0 ? ` · на ${fmtDuration(o.lateMin)} позже, нормально` : ""}
           </span>
+        ) : o.plannedAt != null ? (
+          <span className={o.atRisk ? "font-medium text-rose-600" : "text-slate-600"}>
+            по плану к {hm(o.plannedAt)}
+            {o.atRisk && o.promised && ` · не успеваем на ${fmtDuration(o.plannedAt - o.promised.to)}`}
+          </span>
         ) : (
-          <span className="text-slate-400">ещё не доставлен</span>
+          <span className="text-slate-400">{o.status === "DELIVERED" ? "доставлен" : o.status === "IN_TRANSIT" ? "в пути" : "собран, ждёт курьера"}</span>
         )}
       </div>
     </div>

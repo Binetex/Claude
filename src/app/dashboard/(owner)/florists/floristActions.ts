@@ -140,13 +140,13 @@ export async function ownerRemoveFloristDayOff(floristId: string, day: string): 
 }
 
 /**
- * Сколько работы флорист успевает к 15:00, в баллах (букет до $250 — 1, от $250 — 2). По этому
- * числу ассистент решает, обещать ли утро клиентам магазинов, где флорист первый.
+ * Во сколько флорист начинает собирать букеты (минуты от полуночи, по получасу). От этого часа
+ * считается его расписание: «График доставки» и самое раннее время, которое называет ассистент.
  */
-export async function ownerSetFloristMorningCapacity(floristId: string, capacity: number): Promise<{ error?: string }> {
+export async function ownerSetFloristWorkStart(floristId: string, workStartMin: number): Promise<{ error?: string }> {
   await requireRole("OWNER");
-  if (!Number.isInteger(capacity) || capacity < 0 || capacity > 20) return { error: "От 0 до 20." };
-  await prisma.florist.update({ where: { id: floristId }, data: { morningCapacity: capacity } });
+  if (!Number.isInteger(workStartMin) || workStartMin < 6 * 60 || workStartMin > 14 * 60 || workStartMin % 30) return { error: "С 6:00 до 14:00 по получасу." };
+  await prisma.florist.update({ where: { id: floristId }, data: { workStartMin } });
   revalidatePath("/dashboard/florists");
   revalidatePath("/dashboard/schedule");
   return {};

@@ -7,7 +7,7 @@
  */
 
 import { dayDiff } from "@/lib/tz";
-import type { MorningVerdict } from "@/modules/capacity/morning";
+import { parseHm } from "@/lib/deliveryWindow";
 
 export type OrderSnapshot = {
   orderNumber: string;
@@ -27,15 +27,10 @@ export type OrderSnapshot = {
   /** Кто пишет: заказчик или получатель — им можно разное. */
   party: "customer" | "recipient" | "unknown";
   /**
-   * Загрузка утра на день доставки у флориста этого заказа (modules/capacity). Нет — правило
-   * про раннее время прежнее: не обещаем и зовём человека.
+   * Самое раннее время доставки этого заказа в его день («2:30 PM») — из расписания флориста
+   * (modules/timing). null — в этот день уже не успеть; поля нет — судить не по чему, берём 4 PM.
    */
-  morning?: MorningVerdict | null;
-  /**
-   * Доставка СЕГОДНЯ и утро ещё есть, но раньше 13:00 уже не успеть: с какого часа обещать
-   * («2:30 PM»). Без неё модель сказала бы «ориентировочно 13–15».
-   */
-  morningFrom?: string | null;
+  earliest?: string | null;
 };
 
 export type HistoryLine = { direction: "in" | "out"; text: string; at: string };
@@ -51,14 +46,15 @@ export type PromptInput = {
   incomingText: string;
   /** Текущие дата и время по часам магазина: без них модель считает любую доставку сегодняшней. */
   now?: ShopClock;
-  /** Самое раннее время доставки сегодня («2:30 PM»): сборка и дорога занимают время. */
-  earliestToday?: string | null;
   /** Общее правило владельца на все магазины («сегодня выходной») — сильнее баз знаний. */
   globalNote?: string | null;
   /** Живые товары магазина — только когда разговор похож на покупку. */
   catalog?: CatalogLine[];
-  /** Незнакомый номер: загрузка утра на сегодня и завтра у флориста, которому достался бы заказ. */
-  morningOutlook?: { day: "today" | "tomorrow"; verdict: MorningVerdict; from?: string | null }[];
+  /**
+   * Незнакомый номер: самое раннее время для нового заказа сегодня и завтра («2:30 PM»; null — в
+   * этот день уже не успеть). Поля нет — судить не по чему.
+   */
+  earliestNew?: { today?: string | null; tomorrow?: string | null };
 };
 
 export type DeepseekMessage = { role: "system" | "user" | "assistant"; content: string };
@@ -179,121 +175,57 @@ const COMMON_RULES = `- Reply ONLY in English, whatever language the customer wr
   someone else.`;
 
 /**
- * Время доставки — самая частая тема переписки и самое частое место, где ассистент ошибался.
+ * Время доставки — ОДНО правило на всё (владелец, 28.09.2026: «не городить прослойки»).
  *
- * Разбор 9 дней прода (сентябрь 2026): из 14 отказов «так рано не успеем» девять ушли в ответ на
- * сообщения, где клиент НЕ просил раннюю доставку, а называл, когда он дома («буду с 12 до 2:30 и
- * после 4»), отвечал на наш же вопрос («11 утра подходит») или вообще писал про домофон. Поэтому
- * правило начинается не со времени, а с того, ЧТО клиент делает с этим временем.
+ * Раньше здесь стояло четыре набора правил — граница 16:00, «утро по клеткам», отдельные варианты
+ * для незнакомых номеров — и строки вердиктов; каждый добавлялся поверх предыдущего и спорил с
+ * ним. Теперь код считает по расписанию флориста одну цифру: самое раннее время, к которому
+ * успеваем (modules/timing), — а проверка ответа не пропускает согласие раньше неё
+ * (confirmsEarlyTime). Разговор — как ведёт его владелец: назвали только начало — спросить, до
+ * какого времени дома; назвали конец — подтвердить «до него» или спросить, когда вернутся; позже —
+ * можно всегда. Что пообещала, модель отдаёт полями, и заказ меняет код, а не модель.
  */
-const TIMING_RULES = `- DELIVERY TIMING. First decide what the customer is doing with the time they named:
-  1. TELLING US WHEN THEY ARE AVAILABLE: "I'll be home after 4", "we're there from 5 to 8",
-     "ready anytime", "11 am works", "anytime between 11 and 11:45", or any answer to our own
-     question about until what time they can receive the bouquet. NEVER argue with this and never
-     refuse it. Confirm you noted it, and if there is a delivery window in the order data, name
-     it. Put their words in "ready_time". If the hour they name is 4 PM OR LATER ("after 4",
-     "home from 5", "any time after 6"), confirm it plainly and do NOT send it to a person:
-     later is exactly what suits us. If it is BEFORE 4 PM, RULE 3 WINS over this one, whichever
-     way they phrased it: "2 pm works for me" and "I'm free at 1" are still a time before 4 PM.
-     Note it in "ready_time", then say you cannot lock an exact time that early and ask until
-     what time they could receive it. Never answer that it "works", "fits", "is perfect", "is no
-     problem" or "falls inside our window", and never use the delivery window to argue that an
-     early hour is fine.
-  2. ASKING US TO DELIVER LATER than the window: "can you deliver after 5 PM?", "please come in
-     the evening". Say yes, a later delivery time can be arranged, and name the time they asked
-     for.
-  3. ASKING US FOR A TIME BEFORE 4 PM: "by 9", "in the morning", "around 10", "at 11", "1 PM",
-     "2 PM", "before 3", "as soon as possible", "now". NEVER promise, confirm or agree to any of
-     these, and never write that such a time "works" or that we "can do" it. The later in the day
-     a bouquet goes out, the better it survives, and the route is built late: an early hour is
-     not ours to give. Say you cannot lock an exact time that early, ask until what time they
-     could receive it if it comes later, and set "needs_human": true so the shop decides.
-     This holds even when the delivery window in the order data starts earlier: the window is
-     what we aim at, not a time you may promise.
-  4. ASKING FOR 4 PM OR LATER: "after 4", "around 5", "as close to 6 PM as possible", "at 6:30",
-     "in the evening". This you MAY confirm: say a later delivery can be arranged and name the
-     time they asked for. Still say you cannot promise an exact minute.
-  Whatever the case, name the delivery day correctly: "today" only if the order data says the
-  delivery is today, otherwise "tomorrow" or the day it names.`;
+const ASKED_WHEN = `: asked when the
+  bouquet will arrive, answer with the order's delivery window`;
 
-/**
- * То же про время, но для НЕЗНАКОМОГО номера. Отдельный текст, а не общий: у такого разговора
- * нет ни окна доставки, ни заказа, и пункт «скажите да, привезём позже» из общего правила прямо
- * спорил бы со стоящим ниже запретом обещать что-либо по конкретному заказу.
- */
-const TIMING_RULES_UNKNOWN = `- DELIVERY TIMING. You have no order and no delivery window, so you
-  promise nothing about a specific delivery.
-  1. If they ask for any time BEFORE 4 PM, never say it is possible and never say it "works":
-     say you cannot lock an exact time that early, ask until what time they could receive it if
-     it comes later, and set "needs_human": true. From 4 PM onwards a later delivery is fine to
-     discuss in general terms.
-  2. For any other time, name the same day cutoff and the delivery windows from the knowledge
-     base, and say we cannot promise an exact minute. Never confirm a specific time for a
-     specific order: find the order first, or set "needs_human": true.`;
-
-/**
- * Время доставки, когда известна загрузка утра (modules/capacity). Решение «обещать ли утро»
- * принимает код по баллам флориста, модель только говорит его словами. Граница — 15:00: это
- * конец утреннего окна. Раньше полудня не доставляется ничего (неделя прода 20–27.09.2026:
- * первый букет флориста приезжает около 12:00–13:00).
- */
-const MORNING_LINE: Record<MorningVerdict, string> = {
-  FIRST: "OPEN, first in line (deliveries start at 11 AM; this bouquet would most likely arrive around 12 to 12:30 PM)",
-  AVAILABLE: "OPEN, but not first in line (a morning delivery works; expect it roughly between 1 and 3 PM)",
-  FULL: "FULLY BOOKED (nothing more can go out before 3 PM that day; the earliest is the 3 PM to 7 PM window)",
-};
-
-/** Строка вердикта; у «сегодня» с поздним началом — со своим часом вместо «1 PM». */
-function morningLine(verdict: MorningVerdict, from?: string | null): string {
-  if (verdict === "AVAILABLE" && from) {
-    return `OPEN, but not first in line (a morning delivery still works today; expect it roughly between ${from} and 3 PM, not earlier)`;
-  }
-  return MORNING_LINE[verdict];
+function timingRules(hasOrder: boolean): string {
+  const put = (what: string) => (hasOrder ? `; put ${what}` : "");
+  return `- DELIVERY TIME. "Earliest possible delivery" below is worked out by the shop from the
+  florist's queue, the size of the bouquet and the distance: it is a fact, not a guess. A LATER
+  time is always fine for us: the later a bouquet goes out, the better it survives. Never agree
+  to, confirm or offer any time earlier than the earliest possible delivery, never use the
+  order's delivery window to argue that an earlier hour is fine, and never promise an exact
+  minute. The earliest possible delivery is a limit, not an arrival time${hasOrder ? ASKED_WHEN : ""}. Never
+  argue with a customer who tells you when they are home. First see what they are doing with the
+  time they named:
+  1. TODAY, A SINGLE HOUR OR A START with nothing about until when: "I'm ready at 11", "2 pm
+     works for me", "can you come at 1?", "you can come now", "as soon as possible", "I'm home
+     from 10". Say we have a lot of deliveries today and ask until what time they will be home to
+     receive it. Confirm no time yet. (An evening start, "after 5", is point 3.)
+  2. AN END: "I'm home until 4", "I have to leave at 1:40", "by 3 please", or the answer to our
+     question. If that time is at or after the earliest possible delivery, confirm we will
+     deliver by then and name it${put('it in "confirmed_until" as 24-hour HH:MM')}. If it is
+     earlier, say honestly that we cannot make it by then and ask when they will be home again
+     after that; confirm nothing.
+  3. EVENING OR ANY TIME: "after 5", "from 6", "in the evening", "tonight", "any time works".
+     Confirm it: a later delivery is no problem${put('the hour they named in "confirmed_from" (17:00 for "after 5"), none for "any time"')}.
+  4. A DAY THAT IS NOT TODAY, A SINGLE HOUR OR A START: an early or a late hour both work when it
+     is at or after the earliest possible delivery for that day. Confirm "around" that hour or
+     "from" that start${put('the hour in "confirmed_from", and for "around" 30 minutes later in "confirmed_until"')}. If
+     it is earlier, say that is too early for us that day and offer the earliest possible time.
+  If the earliest possible delivery says it is not possible anymore that day, offer the next day.
+  Whatever the case, name the delivery day correctly: "today" only if it really is today.${hasOrder ? "" : `
+  You have no order yet: never confirm a time for an existing order before you have found it.`}`;
 }
 
-const MORNING_ANSWERS = `     · OPEN, first in line: say deliveries start at 11 and the bouquet will most likely arrive
-       around 12 to 12:30 PM, and that you cannot promise the exact minute.
-     · OPEN, but not first in line: say a morning delivery works and name the range the line
-       gives (roughly 1 to 3 PM, or a later start if the line names one). Never promise noon, an
-       exact hour, or anything earlier than that range. If they need it earlier, say you will
-       try but cannot guarantee it, and set "needs_human": true.
-     · FULLY BOOKED: say the morning is fully booked that day, so it cannot arrive before 3 PM,
-       offer the 3 PM to 7 PM window instead and ask whether that works.`;
-
-const TIMING_RULES_CAPACITY = `- DELIVERY TIMING. The order data has a "Morning delivery" line. It is the shop's real workload
-  for the delivery day and it decides every answer about a time before 3 PM. Nothing is ever
-  delivered before 12 PM (noon): never agree to any time before noon, whatever the line says.
-  First decide what the customer is doing with the time they named:
-  1. TELLING US WHEN THEY ARE AVAILABLE: "I'll be home after 4", "ready anytime", "11 am works",
-     or an answer to our question until what time they can receive it. Never argue with it and
-     put their words in "ready_time". If it is 3 PM or later, or any time, confirm you noted it
-     and name the delivery window. If they can only receive it BEFORE 3 PM, answer by rule 2.
-  2. ASKING FOR A TIME BEFORE 3 PM, or only available before 3 PM: "by 11", "at noon", "1 PM",
-     "before 2", "as soon as possible", "I have to leave at 1:40". Answer by the Morning delivery
-     line:
-${MORNING_ANSWERS}
-  3. ASKING FOR 3 PM OR LATER: "after 4", "around 5", "in the evening". Say a later delivery can
-     be arranged and name the time they asked for, without promising an exact minute.
-  Whatever the case, name the delivery day correctly: "today" only if the order data says the
-  delivery is today, otherwise "tomorrow" or the day it names.`;
-
-const TIMING_RULES_UNKNOWN_CAPACITY = `- DELIVERY TIMING. You have no order, but the "Morning delivery" block below tells you the
-  shop's real workload for today and tomorrow. Nothing is ever delivered before 12 PM (noon):
-  never agree to any time before noon. If they ask for a time before 3 PM on one of those days,
-  answer by its line:
-${MORNING_ANSWERS}
-  For any other day, say you cannot promise a time that early and set "needs_human": true.
-  From 3 PM onwards a later delivery is fine to discuss in general terms. Never confirm a
-  specific time for an existing order: find the order first, or set "needs_human": true.`;
-
-const rulesKnownOrder = (timing: string) => `${VOICE}
+const RULES_KNOWN_ORDER = `${VOICE}
 
 HARD RULES (never break them):
 ${COMMON_RULES}
 - DATES: "Now at the shop" below is the current date and time, and the order data names the
   delivery day for you ("today", "tomorrow", "in 3 days"). Use that word as it is given and never
   work the day out yourself. Never say "today" about a delivery that is not today.
-${timing}
+${timingRules(true)}
 - WHERE THE BOUQUET IS. This rule BEATS every other rule here, including the one that tells you
   to answer the whole message: when the two collide, you leave the question about the courier
   unanswered rather than guess. You cannot see the courier. You do not know where the bouquet is,
@@ -310,11 +242,11 @@ ${timing}
   nothing at all about the courier, and set "needs_human": true. A person can look and reply with
   a real time. A guess here makes a customer stand outside waiting for a courier who has not left
   the studio.
-- A later time on the SAME delivery day is not a date change: you may confirm it (see DELIVERY TIMING above).
+- A later time on the SAME delivery day is not a date change: you may confirm it (see DELIVERY TIME above).
 - MOVING TO A LATER DAY. If the customer asks to move the delivery to a LATER day ("can you
   bring it tomorrow instead", "let's do Saturday"), agree: a later delivery always works for us.
-  Confirm the new day by its weekday and date, and if they named a time, confirm it too (a time
-  before 3 PM on that day: say you will aim for it but cannot lock an exact time that early).
+  Confirm the new day by its weekday and date, and if they named a time on it, answer that time by
+  DELIVERY TIME, point 4.
   Put the new date in "new_delivery_date" as YYYY-MM-DD, counted from "Now at the shop", and
   their time words, if any, in "ready_time". Only for a day AFTER the current delivery day.
   Moving the delivery to an EARLIER day, a different address, a refund, a discount or compensation
@@ -337,18 +269,18 @@ delivery, put their own words in "ready_time" (for example "after 5pm", "tomorro
 A time mentioned earlier in the conversation history is already recorded: return null for it.
 
 Answer with JSON only:
-{"reply_en": string, "intent": string, "important": boolean, "needs_human": boolean, "ready_time": string|null, "new_delivery_date": string|null}
-"intent" is a short slug such as "tracking", "delivery_time", "photo", "address_change", "refund", "call_request", "other".`;
+{"reply_en": string, "intent": string, "important": boolean, "needs_human": boolean, "ready_time": string|null, "new_delivery_date": string|null, "confirmed_from": string|null, "confirmed_until": string|null}
+"intent" is a short slug such as "tracking", "delivery_time", "photo", "address_change", "refund", "call_request", "other".
+"confirmed_from" / "confirmed_until" are ONLY what your reply promises about the delivery time
+(24-hour HH:MM), otherwise null.`;
 
-const RULES_KNOWN_ORDER = rulesKnownOrder(TIMING_RULES);
-
-const rulesUnknownNumber = (timing: string) => `${VOICE}
+const RULES_UNKNOWN_NUMBER = `${VOICE}
 This person writes from a phone number that is NOT linked to any order.
 
 HARD RULES (never break them):
 ${COMMON_RULES}
 - "Now at the shop" below is the current date and time; never assume a delivery is today.
-${timing}
+${timingRules(false)}
 - WHICH CONVERSATION IS THIS. If they refer to an EXISTING order ("my order", "my delivery",
   "where are my flowers"), find out which one:
   ask for the name on the order or the delivery address, ONE thing at a time.
@@ -374,8 +306,6 @@ Answer with JSON only:
 {"reply_en": string, "intent": string, "important": boolean, "needs_human": boolean, "ready_time": null, "order_hint": string|null}
 "intent" is a short slug such as "existing_order", "new_order", "hours", "location", "call_request", "spam", "other".`;
 
-const RULES_UNKNOWN_NUMBER = rulesUnknownNumber(TIMING_RULES_UNKNOWN);
-
 /** «today» / «tomorrow» / «in 3 days» / «yesterday» / «5 days ago» — по календарным дням магазина. */
 export function describeDeliveryDay(deliveryDate: string | null, todayStr: string): string | null {
   if (!deliveryDate) return null;
@@ -400,17 +330,20 @@ function orderBlock(o: OrderSnapshot): string {
     o.trackingUrl ? `Tracking link: ${o.trackingUrl}` : "Tracking link: not available yet",
     o.photoUrl ? `Bouquet photo link: ${o.photoUrl}` : "Bouquet photo: not available",
     o.totalFormatted ? `Order total: ${o.totalFormatted}` : null,
-    o.morning ? `Morning delivery (before 3 PM) on the delivery day: ${morningLine(o.morning, o.morningFrom)}` : null,
+    `Earliest possible delivery on the delivery day: ${earliestText(o.earliest)}`,
     `The person writing is the: ${o.party}`,
   ].filter(Boolean);
   return lines.join("\n");
 }
 
+/** Самое раннее время словами для модели; судить не по чему — осторожные 4 PM. */
+function earliestText(v: string | null | undefined): string {
+  if (v === undefined) return "4 PM (estimate)";
+  return v ?? "not possible anymore that day";
+}
+
 export function buildMessages(input: PromptInput): DeepseekMessage[] {
-  const outlook = input.morningOutlook?.length ? input.morningOutlook : null;
-  const rules = input.order
-    ? input.order.morning ? rulesKnownOrder(TIMING_RULES_CAPACITY) : RULES_KNOWN_ORDER
-    : outlook ? rulesUnknownNumber(TIMING_RULES_UNKNOWN_CAPACITY) : RULES_UNKNOWN_NUMBER;
+  const rules = input.order ? RULES_KNOWN_ORDER : RULES_UNKNOWN_NUMBER;
   const knowledge = input.knowledgeBase?.trim()
     ? `Shop knowledge base (authoritative, use it before anything else):\n${input.knowledgeBase.trim()}`
     : "Shop knowledge base: empty.";
@@ -422,12 +355,10 @@ export function buildMessages(input: PromptInput): DeepseekMessage[] {
   }
   parts.push(knowledge);
   if (input.now) parts.push(`Now at the shop: ${input.now.weekday} ${input.now.dateStr}, ${input.now.timeStr} (local time).`);
-  if (input.earliestToday) {
-    parts.push(`Earliest possible delivery TODAY (the bouquet still has to be made and driven over): ${input.earliestToday}. Never promise or agree to any delivery today before this time; offer this time or later instead.`);
-  }
   if (input.order) parts.push(`Order data:\n${orderBlock(input.order)}`);
-  if (!input.order && outlook) {
-    parts.push(`Morning delivery (before 3 PM):\n${outlook.map((m) => `${m.day}: ${morningLine(m.verdict, m.from)}`).join("\n")}`);
+  if (!input.order) {
+    const e = input.earliestNew;
+    parts.push(`Earliest possible delivery for a new order: today ${earliestText(e ? e.today : undefined)}; tomorrow ${earliestText(e ? e.tomorrow : undefined)}.`);
   }
   if (input.catalog?.length) {
     const lines = input.catalog.map((c) => [c.name, c.price, c.url].filter(Boolean).join(" | "));
@@ -455,6 +386,9 @@ export type ParsedReply = {
   orderHint: string | null;
   /** Клиент попросил перенести на более поздний день: новая дата YYYY-MM-DD (проверяет handler). */
   newDeliveryDate: string | null;
+  /** Что ответ обещает про время доставки — «с» и «до», минуты от полуночи (ставит в заказ handler). */
+  confirmedFrom: number | null;
+  confirmedUntil: number | null;
 };
 
 /**
@@ -545,15 +479,15 @@ const NEGATED = /\b(don'?t|do not|doesn'?t|does not|didn'?t|can'?t|cannot|can no
 const AGREEMENT = /\b(works|work for|fits|fine|perfect|great|no problem|(?<!\bmake )(?<!\bmakes )(?<!\bmaking )sure|absolutely|we'?ll be there|can do|doable|that'?s good)\b/i;
 const TIME_TOKEN = /\b(1[0-2]|[1-9])(?::([0-5]\d))?\s*(am|pm)\b|\b(0?\d|1\d|2[0-3]):([0-5]\d)\b|\bnoon\b|\bmorning\b/i;
 
-/** Час из найденной метки в 24-часовом виде, или null. */
-function hourOf(m: RegExpMatchArray): number | null {
-  if (/noon/i.test(m[0])) return 12;
-  if (/morning/i.test(m[0])) return 10;
+/** Время из найденной метки в минутах от полуночи, или null. */
+function minuteOf(m: RegExpMatchArray): number | null {
+  if (/noon/i.test(m[0])) return 12 * 60;
+  if (/morning/i.test(m[0])) return 10 * 60;
   if (m[3]) {
     const h = Number(m[1]) % 12;
-    return /pm/i.test(m[3]) ? h + 12 : h;
+    return (/pm/i.test(m[3]) ? h + 12 : h) * 60 + Number(m[2] ?? 0);
   }
-  if (m[4] !== undefined) return Number(m[4]);
+  if (m[4] !== undefined) return Number(m[4]) * 60 + Number(m[5]);
   return null;
 }
 
@@ -579,11 +513,10 @@ const ORDER_CUTOFF = /\b(order|place|book|pay)\w*\b[^.?!]{0,25}\b(before|by|unti
 const TOO_EARLY = /\btoo early\b|\bcan'?t (lock|promise|make|guarantee)\b|\bnot (able|possible)\b/i;
 
 /**
- * `beforeHour` — с какого часа согласие законно. Без данных о загрузке это 16:00 (правило
- * владельца от 18.09.2026). Когда загрузка утра известна, код уже решил, что можно обещать:
- * при свободном утре запрещено только время раньше полудня, при занятом — раньше 15:00.
+ * `fromMin` — с какой минуты согласие законно: самое раннее время доставки по расписанию
+ * флориста (agreeFromMin). Без расписания — 16:00 (правило владельца от 18.09.2026).
  */
-export function confirmsEarlyTime(replyEn: string, beforeHour = 16): boolean {
+export function confirmsEarlyTime(replyEn: string, fromMin = 16 * 60): boolean {
   const text = replyEn.replace(/[\u2018\u2019\u02BC]/g, "'").replace(WINDOW_RANGE, " ");
   // Согласие ищем во всём тексте (оно часто в соседней фразе с часом), а вот сам час берём
   // только из фраз, где он действительно про обещанное время доставки.
@@ -592,10 +525,10 @@ export function confirmsEarlyTime(replyEn: string, beforeHour = 16): boolean {
     if (NEGATED.test(clause) || TOO_EARLY.test(clause) || ORDER_CUTOFF.test(clause)) continue;
     const re = new RegExp(TIME_TOKEN.source, "gi");
     for (const m of clause.matchAll(re)) {
-      // «Утренняя доставка» при свободном утре — это и есть разрешённый ответ, а не час до полудня.
-      if (beforeHour <= 12 && /morning/i.test(m[0])) continue;
-      const h = hourOf(m);
-      if (h !== null && h < beforeHour) return true;
+      // «Утренняя доставка», когда утро успеваем, — разрешённый ответ, а не час до полудня.
+      if (fromMin <= 12 * 60 && /morning/i.test(m[0])) continue;
+      const t = minuteOf(m);
+      if (t !== null && t < fromMin) return true;
     }
   }
   return false;
@@ -614,25 +547,28 @@ export function forbiddenOffer(replyEn: string): string | null {
 }
 
 /**
- * С какого часа можно соглашаться на время (см. confirmsEarlyTime): по загрузке утра, а если
- * доставка СЕГОДНЯ — ещё и не раньше самого раннего времени, которое успеваем (сборка и дорога).
- * Час округляется вверх: при 14:30 согласие на «2:30 PM» тоже уходит человеку — лучше лишняя
- * проверка, чем обещание, которое не выполнить.
+ * С какой минуты можно соглашаться на время (см. confirmsEarlyTime): самое раннее время доставки
+ * по расписанию; в этот день уже не успеть — ни с какой; судить не по чему — с 16:00.
  */
-export function earliestAgreeHour(verdicts: (MorningVerdict | null | undefined)[], todayEarliestMin: number | null = null): number {
-  const known = verdicts.filter((v): v is MorningVerdict => !!v);
-  const byLoad = !known.length ? 16 : known.includes("FULL") ? 15 : 12;
-  return todayEarliestMin == null ? byLoad : Math.max(byLoad, Math.ceil(todayEarliestMin / 60));
+export function agreeFromMin(earliest: number | null | undefined): number {
+  if (earliest === undefined) return 16 * 60;
+  return earliest ?? 24 * 60;
 }
 
-export function parseReply(raw: string, opts: { earliestAgreeHour?: number } = {}): ParsedReply {
+/** «HH:MM» из ответа модели → минуты в пределах дня доставки, иначе null. */
+function confirmedMin(v: unknown): number | null {
+  const m = typeof v === "string" ? parseHm(v) : null;
+  return m != null && m > 0 && m < 24 * 60 ? m : null;
+}
+
+export function parseReply(raw: string, opts: { agreeFromMin?: number } = {}): ParsedReply {
   let data: Record<string, unknown> = {};
   try {
     // Модель иногда оборачивает JSON в ```json — срезаем обёртку, если она есть.
     const cleaned = raw.trim().replace(/^```(?:json)?/i, "").replace(/```$/, "").trim();
     data = JSON.parse(cleaned) as Record<string, unknown>;
   } catch {
-    return { replyEn: "", intent: "unparsed", important: false, needsHuman: true, readyTime: null, orderHint: null, newDeliveryDate: null };
+    return { replyEn: "", intent: "unparsed", important: false, needsHuman: true, readyTime: null, orderHint: null, newDeliveryDate: null, confirmedFrom: null, confirmedUntil: null };
   }
 
   const intent = typeof data.intent === "string" && data.intent.trim() ? data.intent.trim().slice(0, 40) : "other";
@@ -648,15 +584,23 @@ export function parseReply(raw: string, opts: { earliestAgreeHour?: number } = {
   const orderHint = typeof data.order_hint === "string" && data.order_hint.trim() ? data.order_hint.trim().slice(0, 120) : null;
   const newDeliveryDate = typeof data.new_delivery_date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(data.new_delivery_date.trim()) ? data.new_delivery_date.trim() : null;
 
+  // Обещанное время — только вместе с текстом, который его обещает; «до» раньше «с» — мусор.
+  let confirmedFrom = replyEn ? confirmedMin(data.confirmed_from) : null;
+  let confirmedUntil = replyEn ? confirmedMin(data.confirmed_until) : null;
+  if (confirmedFrom != null && confirmedUntil != null && confirmedUntil <= confirmedFrom) confirmedFrom = confirmedUntil = null;
+  const held = { replyEn: "", intent, important, needsHuman: true, readyTime, orderHint, newDeliveryDate, confirmedFrom: null, confirmedUntil: null };
+
   // Русский текст клиенту не уходит ни при каких условиях: правило владельца, и оно жёстче
   // любой инструкции в промпте — инструкцию модель может проигнорировать, эту проверку нет.
-  if (replyEn && !looksEnglish(replyEn)) return { replyEn: "", intent, important, needsHuman: true, readyTime, orderHint, newDeliveryDate };
+  if (replyEn && !looksEnglish(replyEn)) return held;
 
   // Обещание, которого магазин не выполняет, клиенту не уходит: отдаём человеку целиком.
-  if (replyEn && forbiddenOffer(replyEn)) return { replyEn: "", intent, important, needsHuman: true, readyTime, orderHint, newDeliveryDate };
+  if (replyEn && forbiddenOffer(replyEn)) return held;
 
-  // Согласие с ранним часом клиенту не уходит: обещать раннее время мы не можем.
-  if (replyEn && confirmsEarlyTime(replyEn, opts.earliestAgreeHour ?? 16)) return { replyEn: "", intent, important, needsHuman: true, readyTime, orderHint, newDeliveryDate };
+  // Согласие раньше, чем успеваем, клиенту не уходит — ни словами, ни полем «до».
+  const agreeFrom = opts.agreeFromMin ?? 16 * 60;
+  if (replyEn && confirmsEarlyTime(replyEn, agreeFrom)) return held;
+  if (confirmedUntil != null && confirmedUntil < agreeFrom) return held;
 
-  return { replyEn, intent, important, needsHuman, readyTime, orderHint, newDeliveryDate };
+  return { replyEn, intent, important, needsHuman, readyTime, orderHint, newDeliveryDate, confirmedFrom, confirmedUntil };
 }

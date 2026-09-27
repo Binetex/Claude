@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildMessages, parseReply, looksEnglish, stripDashes, describeDeliveryDay, forbiddenOffer, confirmsEarlyTime, earliestAgreeHour, type OrderSnapshot } from "./prompt";
+import { buildMessages, parseReply, looksEnglish, stripDashes, describeDeliveryDay, forbiddenOffer, confirmsEarlyTime, agreeFromMin, type OrderSnapshot } from "./prompt";
 
 /**
  * Что уходит в модель и как читается её ответ. Главное здесь — запреты: разбор устроен так,
@@ -62,6 +62,8 @@ describe("разбор ответа модели", () => {
       readyTime: null,
       orderHint: null,
       newDeliveryDate: null,
+      confirmedFrom: null,
+      confirmedUntil: null,
     });
   });
 
@@ -174,17 +176,17 @@ describe("подсказка о заказе от незнакомого ном�
 
   // Правила ниже выведены из боевых ошибок сентября 2026: каждое из них ассистент уже нарушил,
   // и нарушение видел клиент. Тест держит формулировку, чтобы её не выкинули при правке промпта.
-  it("названное клиентом окно доступности — не просьба о ранней доставке", () => {
+  it("названное клиентом время — не спор: только начало — спросить, до скольки он дома", () => {
     const rules = buildMessages({ knowledgeBase: "", order, history: [], incomingText: "hi" })[0].content;
-    expect(rules).toContain("TELLING US WHEN THEY ARE AVAILABLE");
-    expect(rules).toContain("NEVER argue with this and never");
+    expect(rules).toContain("Never\n  argue with a customer who tells you when they are home");
+    expect(rules).toContain("ask until what time they will be home to\n     receive it");
   });
 
-  it("незнакомому номеру про время НЕ обещают: там нет ни заказа, ни окна", () => {
+  it("незнакомому номеру время по заказу не подтверждают: заказа ещё нет", () => {
     const rules = buildMessages({ knowledgeBase: "", order: null, history: [], incomingText: "can you deliver after 5pm?" })[0].content;
-    expect(rules).toContain("You have no order and no delivery window");
-    // Правило «скажи да, привезём позже» живёт только там, где окно доставки вообще есть.
-    expect(rules).not.toContain("Say yes, a later delivery time can be arranged");
+    expect(rules).toContain("You have no order yet: never confirm a time for an existing order");
+    // Поля «что обещано» есть только у бота с заказом: без заказа менять нечего.
+    expect(rules).not.toContain("confirmed_until");
     expect(rules).toContain("Never promise refunds, discounts, dates");
   });
 
@@ -234,14 +236,9 @@ describe("подсказка о заказе от незнакомого ном�
     expect(rules).toContain("never invent one");
   });
 
-  it("незнакомому без заказа не устраивают допрос, 5 PM подтверждать можно", () => {
+  it("незнакомому без заказа не устраивают допрос", () => {
     const m = buildMessages({ knowledgeBase: "", order: null, history: [], incomingText: "no order yet" });
     expect(m[0].content).toContain("do NOT ask for an order name");
-    // «Рано» с 18.09.2026 значит «раньше 16:00» — и для незнакомого номера тоже.
-    expect(m[0].content).toContain("any time BEFORE 4 PM");
-    const k = buildMessages({ knowledgeBase: "", order, history: [], incomingText: "hi" });
-    expect(k[0].content).toContain('"as close to 6 PM as possible"');
-    expect(k[0].content).toContain("ASKING FOR 4 PM OR LATER");
   });
 
   it("общее правило владельца стоит выше базы знаний и объявлено сильнее её", () => {
@@ -428,45 +425,88 @@ describe("предохранитель не глушит отказ", () => {
 });
 
 /**
- * Граница раннего времени. До 18.09.2026 «рано» значило «до полудня», а всё после 12:00
- * правила велели ПОДТВЕРЖДАТЬ — из-за этого клиенту ушло «2 PM works». Владелец: чем позже,
- * тем лучше, подтверждать можно только с 16:00.
+ * Время доставки — одно правило (владелец 28.09.2026: «не городить прослойки»). Вместо четырёх
+ * наборов правил — одна цифра «самое раннее время» из расписания флориста и разговор, как его
+ * ведёт владелец: только начало — спросить, до скольки дома; конец — подтвердить или спросить,
+ * когда вернутся; вечер — можно всегда.
  */
-describe("раннее время не подтверждается", () => {
+describe("время доставки: одно правило", () => {
   const sys = (o: OrderSnapshot | null) =>
     buildMessages({ knowledgeBase: "", order: o, history: [], incomingText: "can you deliver at 2 PM?" })[0].content;
 
-  it("граница стоит на 16:00, а не на полудне", () => {
-    expect(sys(order)).toContain("ASKING US FOR A TIME BEFORE 4 PM");
-    expect(sys(order)).toContain("ASKING FOR 4 PM OR LATER");
-    expect(sys(order)).not.toContain("which means at or before 12 noon and nothing else");
+  it("правило одно, старых границ 16:00 и «утра по клеткам» нет", () => {
+    expect(sys(order)).toContain("DELIVERY TIME.");
+    expect(sys(order)).not.toContain("ASKING US FOR A TIME BEFORE 4 PM");
+    expect(sys(order)).not.toContain("Morning delivery");
   });
 
-  it("2 PM и 3 PM названы прямо: именно на них модель срывалась", () => {
-    expect(sys(order)).toContain('"2 PM"');
-    expect(sys(order)).toContain('"before 3"');
+  it("раньше самого раннего — никогда, окно заказа не довод", () => {
+    expect(sys(order)).toContain("Never agree\n  to, confirm or offer any time earlier than the earliest possible delivery");
+    expect(sys(order)).toContain("never use the\n  order's delivery window to argue");
   });
 
-  it("запрещено отвечать, что время «works»", () => {
-    expect(sys(order)).toContain('"works"');
-    expect(sys(order)).toContain('set "needs_human": true so the shop decides');
+  it("четыре случая владельца: начало, конец, вечер, другой день", () => {
+    expect(sys(order)).toContain('"2 pm\n     works for me"');
+    expect(sys(order)).toContain("we have a lot of deliveries today");
+    expect(sys(order)).toContain("confirm we will\n     deliver by then");
+    expect(sys(order)).toContain('(17:00 for "after 5")');
+    expect(sys(order)).toContain("an early or a late hour both work");
   });
 
-  it("окно заказа само по себе не даёт права обещать ранний час", () => {
-    expect(sys(order)).toContain("the window is\n     what we aim at, not a time you may promise");
+  it("что обещано — отдельными полями, их ставит в заказ код", () => {
+    expect(sys(order)).toContain('"confirmed_from": string|null, "confirmed_until": string|null');
+  });
+});
+
+describe("самое раннее время в запросе", () => {
+  const user = (o: Partial<OrderSnapshot>) => buildMessages({ knowledgeBase: "", order: { ...order, ...o }, history: [], incomingText: "by 3?" })[1].content;
+
+  it("по заказу — одной строкой: время, «уже не успеть» или осторожная оценка", () => {
+    expect(user({ earliest: "2:30 PM" })).toContain("Earliest possible delivery on the delivery day: 2:30 PM");
+    expect(user({ earliest: null })).toContain("Earliest possible delivery on the delivery day: not possible anymore that day");
+    expect(user({})).toContain("Earliest possible delivery on the delivery day: 4 PM (estimate)");
   });
 
-  it("правило действует и на незнакомый номер", () => {
-    expect(sys(null)).toContain("never say it \"works\"");
+  it("незнакомому номеру — для нового заказа сегодня и завтра", () => {
+    const m = buildMessages({ knowledgeBase: "", order: null, history: [], incomingText: "today by 3?", earliestNew: { today: "3 PM", tomorrow: "12:30 PM" } });
+    expect(m[1].content).toContain("Earliest possible delivery for a new order: today 3 PM; tomorrow 12:30 PM.");
   });
 
-  it("запись «когда мне удобно» не превращается в обещание", () => {
-    expect(sys(order)).toContain("RULE 3 WINS over this one");
-    expect(sys(order)).toContain('"2 pm works for me"');
+  it("проверка ответа — с той же минуты: не знаем — с 16:00, не успеть — ни с какой", () => {
+    expect(agreeFromMin(14 * 60 + 30)).toBe(14 * 60 + 30);
+    expect(agreeFromMin(undefined)).toBe(16 * 60);
+    expect(agreeFromMin(null)).toBe(24 * 60);
+    expect(confirmsEarlyTime("Sure, 2 PM works.", 14 * 60 + 30)).toBe(true);
+    expect(confirmsEarlyTime("Sure, 2:30 PM works.", 14 * 60 + 30)).toBe(false);
+    expect(confirmsEarlyTime("Perfect, we'll deliver by 3 PM.", 14 * 60 + 30)).toBe(false);
+    // Утро, когда его успеваем, — разрешённый ответ.
+    expect(confirmsEarlyTime("Sure, a morning delivery works.", 11 * 60)).toBe(false);
+  });
+});
+
+describe("обещанное время читается полями", () => {
+  const reply = (extra: Record<string, unknown>, agree?: number) =>
+    parseReply(JSON.stringify({ reply_en: "Perfect, we'll deliver by 4 PM.", intent: "delivery_time", important: false, needs_human: false, ready_time: "until 4", ...extra }), agree == null ? {} : { agreeFromMin: agree });
+
+  it("«до 4» при самом раннем 14:30 — подтверждение уходит, поле читается", () => {
+    const r = reply({ confirmed_until: "16:00" }, 14 * 60 + 30);
+    expect(r.replyEn).not.toBe("");
+    expect(r.confirmedUntil).toBe(16 * 60);
+    expect(r.confirmedFrom).toBeNull();
   });
 
-  it("с 16:00 доступность подтверждается сразу, без передачи человеку", () => {
-    expect(sys(order)).toContain("confirm it plainly and do NOT send it to a person");
+  it("поле «до» раньше самого раннего — ответ человеку, обещание не ставится", () => {
+    const r = reply({ confirmed_until: "13:00" }, 14 * 60 + 30);
+    expect(r.replyEn).toBe("");
+    expect(r.needsHuman).toBe(true);
+    expect(r.confirmedUntil).toBeNull();
+  });
+
+  it("мусор и «до» раньше «с» — полей нет", () => {
+    expect(reply({ confirmed_from: "5pm" }).confirmedFrom).toBeNull();
+    const r = reply({ confirmed_from: "18:00", confirmed_until: "17:00" }, 12 * 60);
+    expect(r.confirmedFrom).toBeNull();
+    expect(r.confirmedUntil).toBeNull();
   });
 });
 
@@ -561,65 +601,6 @@ describe("предохранители не глушат правильные о
   });
 });
 
-/**
- * Загрузка утра (modules/capacity). Решает код по баллам флориста, модель только говорит это
- * словами. Без данных о загрузке правило прежнее — закреплено тестами выше.
- */
-describe("загрузка утра", () => {
-  const sys = (o: OrderSnapshot) => buildMessages({ knowledgeBase: "", order: o, history: [], incomingText: "can you bring it by noon?" });
-
-  it("вердикт попадает в данные заказа, а правило времени — по загрузке", () => {
-    const m = sys({ ...order, morning: "FULL" });
-    expect(m[1].content).toContain("Morning delivery (before 3 PM) on the delivery day: FULLY BOOKED");
-    expect(m[0].content).toContain('The order data has a "Morning delivery" line');
-    expect(m[0].content).toContain("offer the 3 PM to 7 PM window instead");
-    expect(m[0].content).not.toContain("ASKING US FOR A TIME BEFORE 4 PM");
-  });
-
-  it("первый в очереди — «около 12–12:30»", () => {
-    const m = sys({ ...order, morning: "FIRST" });
-    expect(m[1].content).toContain("OPEN, first in line");
-    expect(m[0].content).toContain("around 12 to 12:30 PM");
-  });
-
-  it("без загрузки — прежнее правило 16:00", () => {
-    const m = sys(order);
-    expect(m[1].content).not.toContain("Morning delivery");
-    expect(m[0].content).toContain("ASKING US FOR A TIME BEFORE 4 PM");
-  });
-
-  it("незнакомому номеру — прогноз на сегодня и завтра", () => {
-    const m = buildMessages({
-      knowledgeBase: "", order: null, history: [], incomingText: "can you deliver tomorrow morning?",
-      morningOutlook: [{ day: "today", verdict: "FULL" }, { day: "tomorrow", verdict: "AVAILABLE" }],
-    });
-    expect(m[1].content).toContain("today: FULLY BOOKED");
-    expect(m[1].content).toContain("tomorrow: OPEN, but not first in line");
-    expect(m[0].content).toContain("tells you the\n  shop's real workload for today and tomorrow");
-  });
-
-  it("проверка ответа: при свободном утре запрещено только раньше полудня", () => {
-    expect(earliestAgreeHour(["FIRST"])).toBe(12);
-    expect(earliestAgreeHour(["FULL"])).toBe(15);
-    expect(earliestAgreeHour([null])).toBe(16);
-    expect(earliestAgreeHour(["AVAILABLE", "FULL"])).toBe(15);
-    expect(confirmsEarlyTime("Sure, it should arrive around 12 to 12:30 PM.", 12)).toBe(false);
-    expect(confirmsEarlyTime("Sure, 11 am works.", 12)).toBe(true);
-    expect(confirmsEarlyTime("Sure, 1 PM works.", 15)).toBe(true);
-    const ok = parseReply('{"reply_en":"Yes, a morning delivery works, it should arrive around 1 PM.","intent":"delivery_time","important":false,"needs_human":false,"ready_time":null}', { earliestAgreeHour: 12 });
-    expect(ok.replyEn).not.toBe("");
-    expect(ok.needsHuman).toBe(false);
-  });
-});
-
-describe("день в день: самое раннее время сегодня", () => {
-  it("строка попадает в запрос", () => {
-    const m = buildMessages({ knowledgeBase: "", order, history: [], incomingText: "can you deliver in an hour?", earliestToday: "3:30 PM" });
-    expect(m[1].content).toContain("Earliest possible delivery TODAY");
-    expect(m[1].content).toContain("3:30 PM");
-  });
-});
-
 describe("перенос на более поздний день", () => {
   it("правило есть, новая дата читается, мусор — нет", () => {
     const m = buildMessages({ knowledgeBase: "", order, history: [], incomingText: "can you bring it tomorrow instead?" });
@@ -627,17 +608,5 @@ describe("перенос на более поздний день", () => {
     const ok = parseReply('{"reply_en":"Sure, we will bring it tomorrow, Monday Sep 28.","intent":"delivery_time","important":false,"needs_human":false,"ready_time":null,"new_delivery_date":"2026-09-28"}');
     expect(ok.newDeliveryDate).toBe("2026-09-28");
     expect(parseReply('{"reply_en":"Sure.","intent":"other","important":false,"needs_human":false,"ready_time":null,"new_delivery_date":"tomorrow"}').newDeliveryDate).toBeNull();
-  });
-});
-
-describe("сегодня утро есть, но начинается позже 13:00", () => {
-  it("модель получает свой час вместо «1 PM», проверка не пропускает раньше", () => {
-    const m = buildMessages({ knowledgeBase: "", order: { ...order, morning: "AVAILABLE", morningFrom: "2:30 PM" }, history: [], incomingText: "before 3?" });
-    expect(m[1].content).toContain("between 2:30 PM and 3 PM, not earlier");
-    // 14:30 → согласие раньше 15:00 уходит человеку; без «сегодня» — как раньше, 12.
-    expect(earliestAgreeHour(["AVAILABLE"], 14 * 60 + 30)).toBe(15);
-    expect(earliestAgreeHour(["AVAILABLE"])).toBe(12);
-    expect(earliestAgreeHour([null], 19 * 60 + 30)).toBe(20);
-    expect(confirmsEarlyTime("Sure, it should arrive around 1 PM.", earliestAgreeHour(["AVAILABLE"], 14 * 60 + 30))).toBe(true);
   });
 });
