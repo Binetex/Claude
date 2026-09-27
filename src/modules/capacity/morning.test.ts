@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { wantedRange, adjustForNow, earliestToday, orderPoints, windowIsMorning, wishIsMorning, isMorningOrder, readyTimeWishes, morningVerdict, parseTimes } from "./morning";
+import { fmtDuration, wantedRange, adjustForNow, earliestToday, orderPoints, windowIsMorning, wishIsMorning, isMorningOrder, readyTimeWishes, morningVerdict, parseTimes } from "./morning";
 
 describe("orderPoints — работа по цене букета", () => {
   it("маленький 1, большой 2, добавки не считаются", () => {
@@ -139,5 +139,18 @@ describe("wantedRange — когда клиент хотел", () => {
   });
   it("«any time» — по окну", () => {
     expect(r("11:00 - 15:00", "any time today")).toBe("11:00-15:00");
+  });
+});
+
+describe("явное окно главнее старой просьбы", () => {
+  it("владелец перенёс на вечер — старое «around 2pm» не держит заказ в утре", () => {
+    const note = "23.09, 08:04 · Клиент (SMS): готов принять around 2pm";
+    expect(isMorningOrder({ window: "5 - 5.30 PM", customerNote: note })).toBe(false);
+    expect(isMorningOrder({ window: "11:30 AM - 5:00 PM", customerNote: note })).toBe(true);
+  });
+  it("длительность по-человечески", () => {
+    expect(fmtDuration(42)).toBe("42 мин");
+    expect(fmtDuration(192)).toBe("3 ч 12 мин");
+    expect(fmtDuration(120)).toBe("2 ч");
   });
 });

@@ -858,6 +858,13 @@ async function applyLaterWindow(prisma: PrismaClient, orderId: string, readyTime
     select: { deliveryWindow: true, deliveryDate: true, orderStatus: true, platform: true, customerNote: true },
   });
   if (!o || o.orderStatus === "DELIVERED" || o.orderStatus === "CANCELLED") return;
+  // Курьер уже вызван — окно не трогаем: перепланирование доставки ОТМЕНИЛО бы вызванного
+  // курьера и создало новую. Такой перенос решает человек (он и так получил время клиента).
+  if (o.orderStatus === "AWAITING_COURIER" || o.orderStatus === "IN_TRANSIT") return;
+  const dispatched = await prisma.delivery.count({
+    where: { orderId, isCurrentAttempt: true, status: { notIn: ["DRAFT_PENDING", "DRAFT_CREATED", "CANCELLED", "FAILED"] } },
+  });
+  if (dispatched) return;
   const day = o.deliveryDate.toISOString().slice(0, 10);
   if (dayDiff(todayStr, day) < 0) return;
   const next = laterWindowFromWish(o.deliveryWindow, readyTime);

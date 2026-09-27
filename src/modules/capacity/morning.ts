@@ -126,12 +126,24 @@ export function wishIsAfternoon(wish: string): boolean {
   return times.length > 0 && times[0] >= MORNING_END_HOUR * 60;
 }
 
+/**
+ * Окно «на весь день» («11:30 AM - 5:00 PM») или пустое: время внутри него решает пожелание
+ * клиента. Явное окно («5 - 5:30 PM», «11:00 - 15:00») — это уже решение магазина, и старое
+ * пожелание его не перебивает (PAR-41358: владелец перенёс на 17:00, а «around 2pm» из
+ * переписки держал заказ в утре).
+ */
+export function isAllDayWindow(window: string | null | undefined): boolean {
+  const t = parseTimes(window);
+  if (!t.length) return true;
+  return t.length > 1 && t[0] < MORNING_END_HOUR * 60 && t[t.length - 1] > MORNING_END_HOUR * 60;
+}
+
 export function isMorningOrder(order: { window: string | null; customerNote: string | null }): boolean {
   // Смотрим последнее пожелание: клиент мог передумать («around 2pm» → «6 PM»).
   const latest = readyTimeWishes(order.customerNote)[0];
   if (latest && wishIsAfternoon(latest)) return false;
   if (windowIsMorning(order.window)) return true;
-  return !!latest && wishIsMorning(latest);
+  return !!latest && isAllDayWindow(order.window) && wishIsMorning(latest);
 }
 
 /**
@@ -205,4 +217,12 @@ export function wantedRange(window: string | null, wish: string | null): { from:
   }
   if (times.length > 1) return { from: times[0], to: times[times.length - 1] };
   return { from: times[0] - 30, to: times[0] + 30 };
+}
+
+/** «42 мин», «3 ч 12 мин», «2 ч». */
+export function fmtDuration(min: number): string {
+  const h = Math.floor(min / 60);
+  const m = min % 60;
+  if (!h) return `${m} мин`;
+  return m ? `${h} ч ${m} мин` : `${h} ч`;
 }

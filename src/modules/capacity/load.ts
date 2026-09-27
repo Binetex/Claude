@@ -15,7 +15,7 @@ import { isFloristAvailable } from "@/modules/assignments/availability";
 import { formatDeliveryWindow } from "@/lib/timeWindow";
 import { localClock, DEFAULT_STORE_TZ } from "@/lib/tz";
 import {
-  orderPoints, isBigOrder, isMorningOrder, readyTimeWishes, morningVerdict, adjustForNow, wantedRange, LATE_TOLERANCE_MIN,
+  orderPoints, isBigOrder, isMorningOrder, readyTimeWishes, morningVerdict, adjustForNow, wantedRange, isAllDayWindow, windowIsMorning, LATE_TOLERANCE_MIN,
   DEFAULT_MORNING_CAPACITY, type MorningVerdict,
 } from "./morning";
 
@@ -36,8 +36,12 @@ export type ScheduleOrder = {
   status: string;
   /** Фактическое время доставки по часам LA, «HH:MM». */
   deliveredAt: string | null;
-  /** Когда клиент хотел, минуты от полуночи: по его пожеланию, иначе по окну. */
+  /** Что ОБЕЩАЛИ — окно заказа, минуты от полуночи. От него считается опоздание. */
+  promised: { from: number; to: number } | null;
+  /** Что клиент ПРОСИЛ в переписке (если просил): показываем, но опозданием не считаем. */
   want: { from: number; to: number } | null;
+  /** Просьбу клиента не выполнили больше чем на допуск (при этом окно могли и уложить). */
+  wishMissed: boolean;
   /** Доставлен в минутах от полуночи. */
   deliveredMin: number | null;
   /** На сколько минут позже желаемого (0 — вовремя). */
@@ -103,12 +107,17 @@ function toScheduleOrder(o: RawOrder): ScheduleOrder {
   const deliveredDate = o.deliveries[0]?.deliveredAt ?? null;
   const deliveredAt = deliveredDate ? localClock(o.site.timezone ?? DEFAULT_STORE_TZ, deliveredDate).timeStr : null;
 
-  // Опоздание — от конца того, что клиент хотел; двадцать минут не считаются (решение владельца).
-  const want = wantedRange(o.deliveryWindow, wish);
+  // Опоздание — от ОБЕЩАННОГО окна, а не от просьбы клиента: «буду готова в 12» — не наше
+  // обещание (THEFLOW-20857 показывал «+192 мин» при опоздании на 42). Двадцать минут не в счёт.
+  const promised = wantedRange(o.deliveryWindow, null);
+  // Просьба клиента имеет смысл внутри окна на весь день или утреннего; явное дневное окно
+  // (владелец перенёс) — решение магазина, старая просьба к нему уже не относится.
+  const want = wish && (isAllDayWindow(o.deliveryWindow) || windowIsMorning(o.deliveryWindow)) ? wantedRange(o.deliveryWindow, wish) : null;
   const [hh, mm] = (deliveredAt ?? "").split(":").map(Number);
   const deliveredMin = deliveredAt ? hh * 60 + mm : null;
-  const lateMin = deliveredMin != null && want ? Math.max(0, deliveredMin - want.to) : 0;
+  const lateMin = deliveredMin != null && promised ? Math.max(0, deliveredMin - promised.to) : 0;
   const late = lateMin > LATE_TOLERANCE_MIN;
+  const wishMissed = deliveredMin != null && !!want && deliveredMin - want.to > LATE_TOLERANCE_MIN;
 
   return {
     id: o.id,
@@ -122,7 +131,9 @@ function toScheduleOrder(o: RawOrder): ScheduleOrder {
     morning,
     status: o.orderStatus,
     deliveredAt,
-    want,
+    promised,
+    want: want && promised && want.from === promised.from && want.to === promised.to ? null : want,
+    wishMissed,
     deliveredMin,
     lateMin,
     late,

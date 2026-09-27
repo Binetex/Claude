@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { cn } from "@/lib/cn";
 import type { DaySchedule, FloristDay, ScheduleOrder } from "@/modules/capacity/load";
-import { LATE_TOLERANCE_MIN, type MorningVerdict } from "@/modules/capacity/morning";
+import { fmtDuration, type MorningVerdict } from "@/modules/capacity/morning";
 import { MorningLock } from "./ScheduleControls";
 
 /**
@@ -175,14 +175,20 @@ function OrderRow({ o }: { o: ScheduleOrder }) {
         </span>
       </div>
 
-      {/* Шкала: отрезок — когда хотел клиент, точка — когда привезли. */}
+      {/* Шкала: светлый отрезок — обещанное окно, тёмный — что просил клиент, точка — когда привезли. */}
       <div className="relative h-3 rounded-full bg-slate-100">
         {HOURS.slice(1, -1).map((h) => (
           <span key={h} className="absolute top-0 h-full w-px bg-white" style={{ left: `${pct(h * 60)}%` }} />
         ))}
+        {o.promised && (
+          <span
+            className="absolute top-0 h-full rounded-full bg-sky-100"
+            style={{ left: `${pct(o.promised.from)}%`, width: `${Math.max(1.5, pct(o.promised.to) - pct(o.promised.from))}%` }}
+          />
+        )}
         {o.want && (
           <span
-            className="absolute top-0 h-full rounded-full bg-sky-200"
+            className="absolute top-0 h-full rounded-full bg-sky-300"
             style={{ left: `${pct(o.want.from)}%`, width: `${Math.max(1.5, pct(o.want.to) - pct(o.want.from))}%` }}
           />
         )}
@@ -194,16 +200,18 @@ function OrderRow({ o }: { o: ScheduleOrder }) {
         )}
       </div>
 
-      <div className="flex flex-wrap gap-x-3 text-sm">
-        <span className="text-slate-500">
-          хотел {o.want ? `${hm(o.want.from)}–${hm(o.want.to)}` : o.window}
-          {o.wish && <span className="text-slate-400"> («{o.wish}»)</span>}
-        </span>
+      <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-sm">
+        <span className="text-slate-500">окно {o.promised ? `${hm(o.promised.from)}–${hm(o.promised.to)}` : o.window}</span>
+        {o.want && (
+          <span className={o.wishMissed ? "text-amber-700" : "text-slate-500"}>
+            просил {hm(o.want.from)}–{hm(o.want.to)}
+            {o.wishMissed && " — не успели"}
+          </span>
+        )}
         {o.deliveredAt ? (
-          <span className={lateTone}>
+          <span className={o.late ? "font-medium text-rose-600" : "text-emerald-600"}>
             привезли {o.deliveredAt}
-            {o.lateMin > 0 && ` · +${o.lateMin} мин`}
-            {o.lateMin > 0 && o.lateMin <= LATE_TOLERANCE_MIN && " (нормально)"}
+            {o.late ? ` · опоздали на ${fmtDuration(o.lateMin)}` : o.lateMin > 0 ? ` · на ${fmtDuration(o.lateMin)} позже, нормально` : ""}
           </span>
         ) : (
           <span className="text-slate-400">ещё не доставлен</span>
