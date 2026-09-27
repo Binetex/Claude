@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { fmtDuration, wantedRange, adjustForNow, earliestToday, orderPoints, windowIsMorning, wishIsMorning, isMorningOrder, readyTimeWishes, morningVerdict, parseTimes } from "./morning";
+import { hasByWord, isAllDayWindow, availableFromToday, clockLabelEn, fmtDuration, wantedRange, adjustForNow, earliestToday, orderPoints, windowIsMorning, wishIsMorning, isMorningOrder, readyTimeWishes, morningVerdict, parseTimes } from "./morning";
 
 describe("orderPoints — работа по цене букета", () => {
   it("маленький 1, большой 2, добавки не считаются", () => {
@@ -94,29 +94,55 @@ describe("adjustForNow — день в день нужно время на сб�
     expect(earliestToday(10 * 60)).toBe(12 * 60 + 30);
     expect(adjustForNow("FIRST", true, 10 * 60 + 5)).toBe("AVAILABLE");
   });
-  it("после 12:30 утро сегодня упущено, даже если у флориста пусто", () => {
-    expect(adjustForNow("AVAILABLE", true, 12 * 60 + 30)).toBe("AVAILABLE");
-    expect(adjustForNow("FIRST", true, 12 * 60 + 31)).toBe("FULL");
+  it("с 12:00 утро сегодня упущено, даже если у флориста пусто", () => {
+    // 12:00 + 2,5 ч = 14:30 — ещё успеваем до трёх; 12:01 → 15:00 — уже нет.
+    expect(adjustForNow("AVAILABLE", true, 12 * 60)).toBe("AVAILABLE");
+    expect(adjustForNow("FIRST", true, 12 * 60 + 1)).toBe("FULL");
+  });
+  it("начало утреннего обещания сдвигается за самым ранним временем", () => {
+    expect(availableFromToday(9 * 60)).toBe(13 * 60);
+    expect(availableFromToday(12 * 60)).toBe(14 * 60 + 30);
+    expect(clockLabelEn(14 * 60 + 30)).toBe("2:30 PM");
+    expect(clockLabelEn(13 * 60)).toBe("1 PM");
   });
   it("самое раннее время округляется вверх до получаса", () => {
     expect(earliestToday(13 * 60 + 10)).toBe(16 * 60);
   });
 });
 
-describe("перенос словами освобождает утро", () => {
-  it("клиент попросил после 15:00 — утро не занято, хотя окно утреннее", () => {
+describe("явное окно главнее просьбы из переписки — в обе стороны", () => {
+  const note = (w: string) => `27.09, 09:00 · Клиент (SMS): готов принять ${w}`;
+  it("утреннее окно остаётся утренним, даже если в переписке было «после 5»", () => {
+    // Окно вернули на утро (или его не поменяли) — флорист планирует утро, место занято.
+    // Когда клиент сам переносит на вечер, ассистент меняет окно, и тогда оно уже не утреннее.
     for (const w of ["6 PM", "after 5pm", "4-5pm today", "around 7 PM", "after 3.30 pm"]) {
-      expect(isMorningOrder({ window: "11:00 - 15:00", customerNote: `27.09, 09:00 · Клиент (SMS): готов принять ${w}` }), w).toBe(false);
+      expect(isMorningOrder({ window: "11:00 - 15:00", customerNote: note(w) }), w).toBe(true);
     }
   });
-  it("«any time» и «до 6» переносом не считаются", () => {
-    for (const w of ["any time today", "business closes at 6pm", "until 6pm", "anytime is fine"]) {
-      expect(isMorningOrder({ window: "11:00 - 15:00", customerNote: `27.09, 09:00 · Клиент (SMS): готов принять ${w}` }), w).toBe(true);
-    }
+  it("окно на весь день — решает последняя просьба", () => {
+    expect(isMorningOrder({ window: "11:30 AM - 5:00 PM", customerNote: note("by noon") })).toBe(true);
+    expect(isMorningOrder({ window: "11:30 AM - 5:00 PM", customerNote: note("after 4pm") })).toBe(false);
+    expect(isMorningOrder({ window: "11:30 AM - 5:00 PM", customerNote: note("any time today") })).toBe(false);
   });
   it("перенесли обратно на утро — снова утро", () => {
-    const note = "27.09, 10:00 · Клиент (SMS): готов принять by noon\n———\n27.09, 09:00 · Клиент (SMS): готов принять 6 PM";
-    expect(isMorningOrder({ window: "11:00 - 15:00", customerNote: note })).toBe(true);
+    const n = "27.09, 10:00 · Клиент (SMS): готов принять by noon\n———\n27.09, 09:00 · Клиент (SMS): готов принять 6 PM";
+    expect(isMorningOrder({ window: "11:30 AM - 5:00 PM", customerNote: n })).toBe(true);
+  });
+});
+
+describe("русское «до» в окнах, которые владелец пишет руками", () => {
+  it("«до 3» — утро, «до 5 вечера» — окно на весь день", () => {
+    expect(hasByWord("до 3")).toBe(true);
+    expect(hasByWord("до 5 вечера ")).toBe(true);
+    expect(hasByWord("подождать")).toBe(false);
+    expect(windowIsMorning("до 3")).toBe(true);
+    expect(windowIsMorning("до 5 вечера ")).toBe(false);
+    expect(isAllDayWindow("до 5 вечера ")).toBe(true);
+    expect(isMorningOrder({ window: "до 5 вечера ", customerNote: "27.09, 09:00 · Клиент (SMS): готов принять by noon" })).toBe(true);
+  });
+  it("окно «к N» начинается с 11:00, а не точкой N–N", () => {
+    expect(wantedRange("Before 3PM", null)).toEqual({ from: 660, to: 900 });
+    expect(wantedRange("до 5 вечера", null)).toEqual({ from: 660, to: 1020 });
   });
 });
 
@@ -152,5 +178,23 @@ describe("явное окно главнее старой просьбы", () =>
     expect(fmtDuration(42)).toBe("42 мин");
     expect(fmtDuration(192)).toBe("3 ч 12 мин");
     expect(fmtDuration(120)).toBe("2 ч");
+  });
+});
+
+import { leadMinutes, SAME_DAY_LEAD_MIN } from "./morning";
+
+describe("leadMinutes — сколько нужно на заказ день в день", () => {
+  it("маленький рядом — быстрее, большой далеко — дольше", () => {
+    expect(leadMinutes({ big: false, miles: 2 })).toBe(75 + 30 + 8);
+    expect(leadMinutes({ big: true, miles: 15 })).toBe(105 + 30 + 60);
+    expect(leadMinutes({ big: false, miles: 2 })).toBeLessThan(leadMinutes({ big: true, miles: 2 }));
+    expect(leadMinutes({ big: false, miles: 2 })).toBeLessThan(leadMinutes({ big: false, miles: 15 }));
+  });
+  it("ничего не известно — прежние 2,5 часа", () => {
+    expect(SAME_DAY_LEAD_MIN).toBe(150);
+    expect(leadMinutes({ big: false, miles: null })).toBe(150);
+  });
+  it("дорогу дальше двух часов не растягиваем", () => {
+    expect(leadMinutes({ big: false, miles: 80 })).toBe(75 + 30 + 120);
   });
 });

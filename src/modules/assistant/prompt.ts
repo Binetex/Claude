@@ -31,6 +31,11 @@ export type OrderSnapshot = {
    * про раннее время прежнее: не обещаем и зовём человека.
    */
   morning?: MorningVerdict | null;
+  /**
+   * Доставка СЕГОДНЯ и утро ещё есть, но раньше 13:00 уже не успеть: с какого часа обещать
+   * («2:30 PM»). Без неё модель сказала бы «ориентировочно 13–15».
+   */
+  morningFrom?: string | null;
 };
 
 export type HistoryLine = { direction: "in" | "out"; text: string; at: string };
@@ -53,7 +58,7 @@ export type PromptInput = {
   /** Живые товары магазина — только когда разговор похож на покупку. */
   catalog?: CatalogLine[];
   /** Незнакомый номер: загрузка утра на сегодня и завтра у флориста, которому достался бы заказ. */
-  morningOutlook?: { day: "today" | "tomorrow"; verdict: MorningVerdict }[];
+  morningOutlook?: { day: "today" | "tomorrow"; verdict: MorningVerdict; from?: string | null }[];
 };
 
 export type DeepseekMessage = { role: "system" | "user" | "assistant"; content: string };
@@ -238,11 +243,20 @@ const MORNING_LINE: Record<MorningVerdict, string> = {
   FULL: "FULLY BOOKED (nothing more can go out before 3 PM that day; the earliest is the 3 PM to 7 PM window)",
 };
 
+/** Строка вердикта; у «сегодня» с поздним началом — со своим часом вместо «1 PM». */
+function morningLine(verdict: MorningVerdict, from?: string | null): string {
+  if (verdict === "AVAILABLE" && from) {
+    return `OPEN, but not first in line (a morning delivery still works today; expect it roughly between ${from} and 3 PM, not earlier)`;
+  }
+  return MORNING_LINE[verdict];
+}
+
 const MORNING_ANSWERS = `     · OPEN, first in line: say deliveries start at 11 and the bouquet will most likely arrive
        around 12 to 12:30 PM, and that you cannot promise the exact minute.
-     · OPEN, but not first in line: say a morning delivery works and it should arrive roughly
-       between 1 and 3 PM. Never promise noon or an exact hour. If they need it earlier than
-       that, say you will try but cannot guarantee it, and set "needs_human": true.
+     · OPEN, but not first in line: say a morning delivery works and name the range the line
+       gives (roughly 1 to 3 PM, or a later start if the line names one). Never promise noon, an
+       exact hour, or anything earlier than that range. If they need it earlier, say you will
+       try but cannot guarantee it, and set "needs_human": true.
      · FULLY BOOKED: say the morning is fully booked that day, so it cannot arrive before 3 PM,
        offer the 3 PM to 7 PM window instead and ask whether that works.`;
 
@@ -386,7 +400,7 @@ function orderBlock(o: OrderSnapshot): string {
     o.trackingUrl ? `Tracking link: ${o.trackingUrl}` : "Tracking link: not available yet",
     o.photoUrl ? `Bouquet photo link: ${o.photoUrl}` : "Bouquet photo: not available",
     o.totalFormatted ? `Order total: ${o.totalFormatted}` : null,
-    o.morning ? `Morning delivery (before 3 PM) on the delivery day: ${MORNING_LINE[o.morning]}` : null,
+    o.morning ? `Morning delivery (before 3 PM) on the delivery day: ${morningLine(o.morning, o.morningFrom)}` : null,
     `The person writing is the: ${o.party}`,
   ].filter(Boolean);
   return lines.join("\n");
@@ -413,7 +427,7 @@ export function buildMessages(input: PromptInput): DeepseekMessage[] {
   }
   if (input.order) parts.push(`Order data:\n${orderBlock(input.order)}`);
   if (!input.order && outlook) {
-    parts.push(`Morning delivery (before 3 PM):\n${outlook.map((m) => `${m.day}: ${MORNING_LINE[m.verdict]}`).join("\n")}`);
+    parts.push(`Morning delivery (before 3 PM):\n${outlook.map((m) => `${m.day}: ${morningLine(m.verdict, m.from)}`).join("\n")}`);
   }
   if (input.catalog?.length) {
     const lines = input.catalog.map((c) => [c.name, c.price, c.url].filter(Boolean).join(" | "));
@@ -599,11 +613,16 @@ export function forbiddenOffer(replyEn: string): string | null {
   return null;
 }
 
-/** С какого часа можно соглашаться на время, если известна загрузка утра (см. confirmsEarlyTime). */
-export function earliestAgreeHour(verdicts: (MorningVerdict | null | undefined)[]): number {
+/**
+ * С какого часа можно соглашаться на время (см. confirmsEarlyTime): по загрузке утра, а если
+ * доставка СЕГОДНЯ — ещё и не раньше самого раннего времени, которое успеваем (сборка и дорога).
+ * Час округляется вверх: при 14:30 согласие на «2:30 PM» тоже уходит человеку — лучше лишняя
+ * проверка, чем обещание, которое не выполнить.
+ */
+export function earliestAgreeHour(verdicts: (MorningVerdict | null | undefined)[], todayEarliestMin: number | null = null): number {
   const known = verdicts.filter((v): v is MorningVerdict => !!v);
-  if (!known.length) return 16;
-  return known.includes("FULL") ? 15 : 12;
+  const byLoad = !known.length ? 16 : known.includes("FULL") ? 15 : 12;
+  return todayEarliestMin == null ? byLoad : Math.max(byLoad, Math.ceil(todayEarliestMin / 60));
 }
 
 export function parseReply(raw: string, opts: { earliestAgreeHour?: number } = {}): ParsedReply {

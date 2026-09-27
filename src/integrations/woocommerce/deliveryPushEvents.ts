@@ -18,17 +18,21 @@ export const WOO_DELIVERY_PUSH_EVENT = "woo.delivery.push";
 export type WooDeliveryPushPayload = { orderId: string };
 
 /**
- * Ключ — заказ плюс новые дата и окно: каждый перенос пишется один раз, а повторное сохранение
- * тех же значений второй записи не создаёт.
+ * Ключ — заказ плюс момент его последнего изменения (`updatedAt`): каждый перенос даёт свою
+ * задачу, а двойной вызов по ОДНОЙ правке второй не создаёт. Ключ по «дню + окну» терял
+ * возврат к прежнему значению: туда → обратно → снова туда давало ключ, который уже был, и
+ * магазин оставался на промежуточном дне.
  */
-export async function publishWooDeliveryPush(prisma: PrismaClient, orderId: string, day: string, window: string): Promise<void> {
+export async function publishWooDeliveryPush(prisma: PrismaClient, orderId: string): Promise<void> {
   try {
+    const o = await prisma.order.findUnique({ where: { id: orderId }, select: { updatedAt: true } });
+    if (!o) return;
     await new PrismaOutboxRepository(prisma).enqueue({
       eventType: WOO_DELIVERY_PUSH_EVENT,
       aggregateType: "order",
       aggregateId: orderId,
       payload: { orderId } satisfies WooDeliveryPushPayload,
-      idempotencyKey: `woo:delivery:${orderId}:${day}:${window.replace(/\s+/g, "")}`,
+      idempotencyKey: `woo:delivery:${orderId}:${o.updatedAt.toISOString()}`,
     });
   } catch (err) {
     console.error(`[woo] перенос доставки ${orderId} не поставлен в очередь:`, err instanceof Error ? err.message : String(err));
@@ -53,7 +57,10 @@ export function buildWooDeliveryPushHandler(prisma: PrismaClient): OutboxHandler
     const day = order.deliveryDate.toISOString().slice(0, 10);
     const creds = await resolveWooCredentials(order.siteId);
     const res = await pushWooDelivery(creds, order.externalId, day, order.deliveryWindow);
-    if (res) console.info(`[woo] ${order.orderNumber}: перенос записан в магазин — ${day} ${res.slot}`);
-    else console.info(`[woo] ${order.orderNumber}: окно «${order.deliveryWindow}» не приводится к слоту плагина, в магазин не пишем`);
+    console.info(
+      res.slot
+        ? `[woo] ${order.orderNumber}: перенос записан в магазин — ${day} ${res.slot}`
+        : `[woo] ${order.orderNumber}: в магазин записана дата ${day}; окно «${order.deliveryWindow}» к слоту плагина не приводится, слот не тронут`
+    );
   };
 }

@@ -71,6 +71,15 @@ export function parseTimes(raw: string | null | undefined): number[] {
 }
 
 /**
+ * «К такому-то часу»: before/by/until/till и русское «до». \b в JS знает только латиницу, поэтому
+ * «до» ловится своими границами — иначе «до 3» и «до 5 вечера» из окон, которые владелец пишет
+ * руками, читались как одиночное время.
+ */
+export function hasByWord(text: string | null | undefined): boolean {
+  return /\b(before|by|until|till)\b|(?:^|[^а-яё])до(?=[^а-яё]|$)/i.test(text ?? "");
+}
+
+/**
  * Утренний ли заказ по окну: окно заканчивается к 15:00 («11:00 - 15:00», «09:00 - 15:00»),
  * одиночное время раньше 15:00 («2pm») или «до N» с N не позже 15:00 («Before 3PM»).
  *
@@ -81,7 +90,7 @@ export function windowIsMorning(window: string | null | undefined): boolean {
   const times = parseTimes(window);
   if (!times.length) return false;
   const limit = MORNING_END_HOUR * 60;
-  if (/\b(before|by|until|till)\b|\bдо\b/i.test(window ?? "")) return times[times.length - 1] <= limit;
+  if (hasByWord(window)) return times[times.length - 1] <= limit;
   if (times.length === 1) return times[0] < limit;
   return times[times.length - 1] <= limit;
 }
@@ -127,23 +136,31 @@ export function wishIsAfternoon(wish: string): boolean {
 }
 
 /**
- * Окно «на весь день» («11:30 AM - 5:00 PM») или пустое: время внутри него решает пожелание
- * клиента. Явное окно («5 - 5:30 PM», «11:00 - 15:00») — это уже решение магазина, и старое
- * пожелание его не перебивает (PAR-41358: владелец перенёс на 17:00, а «around 2pm» из
- * переписки держал заказ в утре).
+ * Окно «на весь день» («11:30 AM - 5:00 PM», «до 5 вечера», «Before 5PM») или пустое: время
+ * внутри него решает пожелание клиента.
  */
 export function isAllDayWindow(window: string | null | undefined): boolean {
   const t = parseTimes(window);
   if (!t.length) return true;
-  return t.length > 1 && t[0] < MORNING_END_HOUR * 60 && t[t.length - 1] > MORNING_END_HOUR * 60;
+  const limit = MORNING_END_HOUR * 60;
+  if (hasByWord(window)) return t[t.length - 1] > limit;
+  return t.length > 1 && t[0] < limit && t[t.length - 1] > limit;
 }
 
+/**
+ * Утренний ли заказ. Явное окно — решение магазина, и оно главнее переписки В ОБЕ стороны:
+ *  - «5 - 5:30 PM» не становится утренним из-за старого «around 2pm» (PAR-41358: владелец
+ *    перенёс на 17:00, а просьба из переписки держала заказ в утре);
+ *  - «11:00 - 15:00» не перестаёт быть утренним из-за старого «after 5pm»: если окно вернули на
+ *    утро, флорист планирует утро. Когда клиент сам переносит на вечер, ассистент меняет окно
+ *    в заказе (assistant/reschedule.ts), так что просьба и окно не расходятся.
+ * Только внутри окна «на весь день» решает последнее пожелание клиента.
+ */
 export function isMorningOrder(order: { window: string | null; customerNote: string | null }): boolean {
-  // Смотрим последнее пожелание: клиент мог передумать («around 2pm» → «6 PM»).
-  const latest = readyTimeWishes(order.customerNote)[0];
-  if (latest && wishIsAfternoon(latest)) return false;
   if (windowIsMorning(order.window)) return true;
-  return !!latest && isAllDayWindow(order.window) && wishIsMorning(latest);
+  if (!isAllDayWindow(order.window)) return false;
+  const latest = readyTimeWishes(order.customerNote)[0];
+  return !!latest && wishIsMorning(latest);
 }
 
 /**
@@ -163,16 +180,39 @@ export function morningVerdict(args: { taken: number; own: number; capacity: num
 }
 
 /**
- * Сколько нужно на заказ день в день: собрать букет и довезти. Владелец: «за 1,5 часа точно не
- * успеем». Самое раннее время сегодня — сейчас плюс это, с округлением вверх до получаса.
+ * Сколько нужно на заказ день в день: собрать букет, вызвать курьера и довезти. Зависит от
+ * размера букета и от того, как далеко адрес от флориста (владелец 27.09.2026: «маленький
+ * букет рядом с флористом мы можем быстро сделать»).
+ *
+ * Цифры — стартовые, их подкручивают по вкладке «Как успели».
  */
-export const SAME_DAY_LEAD_MIN = 150;
+/** Сборка маленького букета. */
+export const PREP_SMALL_MIN = 75;
+/** Сборка большого (от $250). */
+export const PREP_BIG_MIN = 105;
+/** Вызвать курьера и дождаться, пока он заберёт букет. */
+export const COURIER_PICKUP_MIN = 30;
+/** Дорога: миля по прямой ≈ 4 минуты по Лос-Анджелесу (дороги не прямые, пробки). */
+export const DRIVE_MIN_PER_MILE = 4;
+/** Адрес или место флориста неизвестны — дорога как «средняя»: 45 минут. */
+export const UNKNOWN_DRIVE_MIN = 45;
+/** Дальше двух часов дороги не считаем: это уже не наш район, решает человек. */
+const MAX_DRIVE_MIN = 120;
+
+export function leadMinutes(args: { big: boolean; miles: number | null }): number {
+  const prep = args.big ? PREP_BIG_MIN : PREP_SMALL_MIN;
+  const drive = args.miles == null ? UNKNOWN_DRIVE_MIN : Math.min(MAX_DRIVE_MIN, Math.round(args.miles * DRIVE_MIN_PER_MILE));
+  return prep + COURIER_PICKUP_MIN + drive;
+}
+
+/** Когда о заказе ничего не известно (новый клиент): маленький букет, «средняя» дорога — 2,5 ч. */
+export const SAME_DAY_LEAD_MIN = leadMinutes({ big: false, miles: null });
 /** «К 12:00–12:30» обещаем, только если успеваем к этому времени. */
 const NOON_PROMISE_BY_MIN = 12 * 60 + 30;
 
 /** Самое раннее время доставки сегодня, минуты от полуночи (кратно 30). */
-export function earliestToday(nowMinutes: number): number {
-  return Math.ceil((nowMinutes + SAME_DAY_LEAD_MIN) / 30) * 30;
+export function earliestToday(nowMinutes: number, leadMin: number = SAME_DAY_LEAD_MIN): number {
+  return Math.ceil((nowMinutes + leadMin) / 30) * 30;
 }
 
 /**
@@ -180,12 +220,31 @@ export function earliestToday(nowMinutes: number): number {
  * пустое утро в 13:00 — это не «привезём к 12–12:30», а упущенное утро, потому что на сборку и
  * дорогу нужно SAME_DAY_LEAD_MIN.
  */
-export function adjustForNow(verdict: MorningVerdict, isToday: boolean, nowMinutes: number): MorningVerdict {
+export function adjustForNow(verdict: MorningVerdict, isToday: boolean, nowMinutes: number, leadMin: number = SAME_DAY_LEAD_MIN): MorningVerdict {
   if (!isToday) return verdict;
-  const earliest = earliestToday(nowMinutes);
-  if (earliest > MORNING_END_HOUR * 60) return "FULL";
+  const earliest = earliestToday(nowMinutes, leadMin);
+  // Раньше 15:00 уже не успеть — утра сегодня нет, даже если у флориста пусто.
+  if (earliest >= MORNING_END_HOUR * 60) return "FULL";
   if (verdict === "FIRST" && earliest > NOON_PROMISE_BY_MIN) return "AVAILABLE";
   return verdict;
+}
+
+/** Обычное обещание «утром, 13:00–15:00» — с этого часа. */
+export const AVAILABLE_FROM_MIN = 13 * 60;
+
+/**
+ * С какого часа сегодня можно обещать «утром, …–15:00»: не раньше 13:00 и не раньше самого
+ * раннего времени. В 12:00 это уже 14:30, и «ориентировочно 13–15» было бы неправдой.
+ */
+export function availableFromToday(nowMinutes: number, leadMin: number = SAME_DAY_LEAD_MIN): number {
+  return Math.max(AVAILABLE_FROM_MIN, earliestToday(nowMinutes, leadMin));
+}
+
+/** «2:30 PM», «1 PM» — время для текста клиенту. */
+export function clockLabelEn(min: number): string {
+  const h = Math.floor(min / 60);
+  const m = min % 60;
+  return `${h % 12 === 0 ? 12 : h % 12}${m ? `:${String(m).padStart(2, "0")}` : ""} ${h < 12 ? "AM" : "PM"}`;
 }
 
 /** Опоздание в пределах этого — не опоздание (решение владельца: «20 минут — ничего страшного»). */
@@ -206,9 +265,12 @@ export function wantedRange(window: string | null, wish: string | null): { from:
   if (!times.length) return null;
   const win = parseTimes(window);
   const text = source.toLowerCase();
-  if (/\b(by|before|until|till)\b|\bдо\s/.test(text)) {
+  if (hasByWord(text)) {
     const to = times[times.length - 1];
-    return { from: Math.min(win[0] ?? 11 * 60, to), to };
+    // Начало — открытие окна, если окно задано промежутком; у окна «до N» (и без окна) — 11:00,
+    // иначе «Before 3PM» давало точку 15:00–15:00 вместо 11:00–15:00.
+    const start = useWish && win.length > 1 && !hasByWord(window) ? win[0] : 11 * 60;
+    return { from: Math.min(start, to), to };
   }
   if (/\bafter\b/.test(text)) {
     const from = times[0];

@@ -14,8 +14,10 @@ import { getAvailableFloristIds } from "@/modules/assignments/service";
 import { isFloristAvailable } from "@/modules/assignments/availability";
 import { formatDeliveryWindow } from "@/lib/timeWindow";
 import { localClock, DEFAULT_STORE_TZ } from "@/lib/tz";
+import { zipDistanceMiles } from "@/modules/reviews/zipGeo";
+import { normalizeZip } from "@/modules/reviews/locationPick";
 import {
-  orderPoints, isBigOrder, isMorningOrder, readyTimeWishes, morningVerdict, adjustForNow, wantedRange, isAllDayWindow, windowIsMorning, LATE_TOLERANCE_MIN,
+  orderPoints, isBigOrder, isMorningOrder, readyTimeWishes, morningVerdict, adjustForNow, wantedRange, isAllDayWindow, windowIsMorning, leadMinutes, LATE_TOLERANCE_MIN, SAME_DAY_LEAD_MIN,
   DEFAULT_MORNING_CAPACITY, type MorningVerdict,
 } from "./morning";
 
@@ -75,10 +77,10 @@ function dayDate(day: string): Date {
 }
 
 /** Поправка вердикта на «который сейчас час», если день — сегодня по часам LA. */
-function forNow(verdict: MorningVerdict, day: string, now: Date): MorningVerdict {
+function forNow(verdict: MorningVerdict, day: string, now: Date, leadMin: number = SAME_DAY_LEAD_MIN): MorningVerdict {
   const clock = localClock(DEFAULT_STORE_TZ, now);
   const [h, m] = clock.timeStr.split(":").map(Number);
-  return adjustForNow(verdict, clock.dateStr === day, h * 60 + m);
+  return adjustForNow(verdict, clock.dateStr === day, h * 60 + m, leadMin);
 }
 
 type RawOrder = Awaited<ReturnType<typeof loadDayOrders>>[number];
@@ -186,32 +188,61 @@ export async function loadDaySchedule(prisma: PrismaClient, day: string, now: Da
   };
 }
 
+export type OrderMorning = {
+  /** Что можно обещать про утро; null — судить не по чему, решает человек. */
+  verdict: MorningVerdict | null;
+  /** Сколько нужно на этот заказ день в день: сборка по размеру букета + курьер + дорога. */
+  leadMin: number;
+};
+
+/**
+ * Откуда повезут: точка забора, назначенная заказу, иначе основная точка его флориста.
+ * Это и есть «где находится флорист» для расчёта дороги.
+ */
+async function originZip(prisma: PrismaClient, overrideZip: string | null, floristId: string | null): Promise<string | null> {
+  if (overrideZip) return normalizeZip(overrideZip) || null;
+  if (!floristId) return null;
+  const loc = await prisma.floristPickupLocation.findFirst({
+    where: { floristId, isActive: true },
+    orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }],
+    select: { zip: true },
+  });
+  return loc ? normalizeZip(loc.zip) || null : null;
+}
+
 /**
  * Утро для КОНКРЕТНОГО заказа: у его флориста, без него самого. Флориста нет — берём того, кому
- * заказ достался бы по приоритету магазина.
+ * заказ достался бы по приоритету магазина. Время на заказ день в день — по его букету и
+ * расстоянию от точки флориста до адреса доставки.
  */
-export async function morningForOrder(prisma: PrismaClient, orderId: string, now: Date = new Date()): Promise<MorningVerdict | null> {
+export async function morningForOrder(prisma: PrismaClient, orderId: string, now: Date = new Date()): Promise<OrderMorning | null> {
   const order = await prisma.order.findUnique({
     where: { id: orderId },
     select: {
-      siteId: true, deliveryDate: true, currentFloristId: true, deliveryWindow: true, customerNote: true,
+      siteId: true, deliveryDate: true, currentFloristId: true, deliveryWindow: true, customerNote: true, zip: true,
+      pickupLocationOverride: { select: { zip: true } },
       items: { select: { externalPrice: true, quantity: true } },
     },
   });
   if (!order) return null;
   const day = order.deliveryDate.toISOString().slice(0, 10);
   const floristId = order.currentFloristId ?? (await getAvailableFloristIds(order.siteId, order.deliveryDate))[0] ?? null;
-  const own = orderPoints(order.items.map((i) => ({ price: Number(i.externalPrice), quantity: i.quantity })));
-  const v = await verdictFor(prisma, day, floristId, own, orderId);
-  if (!v) return null;
+  const items = order.items.map((i) => ({ price: Number(i.externalPrice), quantity: i.quantity }));
+  const from = await originZip(prisma, order.pickupLocationOverride?.zip ?? null, floristId);
+  const to = normalizeZip(order.zip);
+  const miles = from && to ? zipDistanceMiles(from, to) : null;
+  const leadMin = leadMinutes({ big: isBigOrder(items), miles });
+
+  const v = await verdictFor(prisma, day, floristId, orderPoints(items), orderId);
+  if (!v) return { verdict: null, leadMin };
   // Заказ УЖЕ утренний (клиент купил окно до 15:00): «утро занято, раньше трёх не выйдет» было
   // бы неправдой про его же окно. Перегрузка значит только «к полудню не обещаем».
   const committed = isMorningOrder({ window: order.deliveryWindow, customerNote: order.customerNote });
-  const adjusted = forNow(committed && v === "FULL" ? "AVAILABLE" : v, day, now);
-  // Утренний заказ сегодня после 14:00 и ещё не у клиента: что-либо обещать про время уже
-  // нечестно — ни «13–15», ни «раньше трёх не выйдет». Пусть отвечает человек (прежнее правило).
-  if (committed && adjusted === "FULL") return null;
-  return adjusted;
+  const adjusted = forNow(committed && v === "FULL" ? "AVAILABLE" : v, day, now, leadMin);
+  // Утренний заказ сегодня, когда к 15:00 уже не успеть: что-либо обещать про время нечестно —
+  // ни «13–15», ни «раньше трёх не выйдет». Пусть отвечает человек (прежнее правило).
+  if (committed && adjusted === "FULL") return { verdict: null, leadMin };
+  return { verdict: adjusted, leadMin };
 }
 
 /** Утро для НОВОГО клиента магазина на день: флорист по приоритету, букет считаем маленьким. */

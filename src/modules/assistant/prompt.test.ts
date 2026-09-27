@@ -629,3 +629,15 @@ describe("перенос на более поздний день", () => {
     expect(parseReply('{"reply_en":"Sure.","intent":"other","important":false,"needs_human":false,"ready_time":null,"new_delivery_date":"tomorrow"}').newDeliveryDate).toBeNull();
   });
 });
+
+describe("сегодня утро есть, но начинается позже 13:00", () => {
+  it("модель получает свой час вместо «1 PM», проверка не пропускает раньше", () => {
+    const m = buildMessages({ knowledgeBase: "", order: { ...order, morning: "AVAILABLE", morningFrom: "2:30 PM" }, history: [], incomingText: "before 3?" });
+    expect(m[1].content).toContain("between 2:30 PM and 3 PM, not earlier");
+    // 14:30 → согласие раньше 15:00 уходит человеку; без «сегодня» — как раньше, 12.
+    expect(earliestAgreeHour(["AVAILABLE"], 14 * 60 + 30)).toBe(15);
+    expect(earliestAgreeHour(["AVAILABLE"])).toBe(12);
+    expect(earliestAgreeHour([null], 19 * 60 + 30)).toBe(20);
+    expect(confirmsEarlyTime("Sure, it should arrive around 1 PM.", earliestAgreeHour(["AVAILABLE"], 14 * 60 + 30))).toBe(true);
+  });
+});

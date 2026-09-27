@@ -12,7 +12,7 @@
  *
  * Чистая часть (слот и даты) — без сети, её проверяет тест.
  */
-import { parseTimes } from "@/modules/capacity/morning";
+import { parseTimes, hasByWord } from "@/modules/capacity/morning";
 import { wooRequest } from "./client";
 import type { WooCredentials } from "./credentials";
 
@@ -35,10 +35,20 @@ export function piSlotFor(window: string | null | undefined): { slot: string; di
   const exact = PI_SLOTS.find((s) => s.slot.replace(/\s/g, "") === text.replace(/\s/g, ""));
   if (exact) return { slot: exact.slot, display: exact.display };
   const times = parseTimes(text);
-  if (!times.length) return null;
-  // «before 5pm», «до 5 вечера» — окно на весь день до этого часа: слот по первому ЧИСЛУ был бы
-  // вечерним. Такое окно начинается утром.
-  const start = /\b(before|by|until|till)\b|\bдо\s/i.test(text) ? 0 : times[0];
+  let start: number;
+  if (times.length) {
+    // «before 5pm», «до 5 вечера» — окно на весь день до этого часа: слот по первому ЧИСЛУ был
+    // бы вечерним. Такое окно начинается утром.
+    start = hasByWord(text) ? 0 : times[0];
+  } else if (/\bmorning\b|утр/i.test(text)) {
+    start = 0;
+  } else if (/\bafternoon\b|\bday\s?time\b|днём|днем/i.test(text)) {
+    start = 15 * 60;
+  } else if (/\b(evening|night|tonight)\b|вечер/i.test(text)) {
+    start = 18 * 60;
+  } else {
+    return null;
+  }
   const hit = [...PI_SLOTS].reverse().find((s) => start >= s.fromMin)!;
   return { slot: hit.slot, display: hit.display };
 }
@@ -52,20 +62,26 @@ export function piDates(day: string): { system: string; display: string } {
   };
 }
 
-export async function pushWooDelivery(creds: WooCredentials, externalId: string, day: string, window: string): Promise<{ slot: string } | null> {
-  const slot = piSlotFor(window);
-  if (!slot) return null;
+/**
+ * Поля плагина для записи. Дата уходит ВСЕГДА: окно, которое не приводится к слоту
+ * («желательно первым»), не должно оставлять заказ на сайте в прежнем дне — плагин тогда держал
+ * бы занятым утро дня, откуда заказ уже уехал. Слот — только если понятно, какой.
+ */
+export function piMetaFor(day: string, window: string): { meta: { key: string; value: string }[]; slot: string | null } {
   const dates = piDates(day);
-  await wooRequest(creds, `/orders/${encodeURIComponent(externalId)}`, {
-    method: "PUT",
-    body: {
-      meta_data: [
-        { key: "pi_system_delivery_date", value: dates.system },
-        { key: "pi_delivery_date", value: dates.display },
-        { key: "pi_delivery_time", value: slot.slot },
-        { key: "pi_display_delivery_time", value: slot.display },
-      ],
-    },
-  });
-  return { slot: slot.slot };
+  const slot = piSlotFor(window);
+  const meta = [
+    { key: "pi_system_delivery_date", value: dates.system },
+    { key: "pi_delivery_date", value: dates.display },
+  ];
+  if (slot) {
+    meta.push({ key: "pi_delivery_time", value: slot.slot }, { key: "pi_display_delivery_time", value: slot.display });
+  }
+  return { meta, slot: slot?.slot ?? null };
+}
+
+export async function pushWooDelivery(creds: WooCredentials, externalId: string, day: string, window: string): Promise<{ slot: string | null }> {
+  const { meta, slot } = piMetaFor(day, window);
+  await wooRequest(creds, `/orders/${encodeURIComponent(externalId)}`, { method: "PUT", body: { meta_data: meta } });
+  return { slot };
 }

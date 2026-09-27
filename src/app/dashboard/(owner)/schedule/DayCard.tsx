@@ -45,8 +45,8 @@ export function DayCard({
 }: {
   schedule: DaySchedule;
   label?: string;
-  /** Только у «Сегодня»: раньше этого времени заказ уже не собрать и не довезти. */
-  earliest?: string | null;
+  /** Только у «Сегодня»: самое раннее время для маленького букета рядом и для большого/далеко. */
+  earliest?: { near: string; far: string } | null;
   shopsOf: (id: string) => string;
   /** plan — впереди: статус ИИ, клетки, замок; review — прошло: только как успели. */
   mode: "plan" | "review";
@@ -75,7 +75,9 @@ export function DayCard({
 
       {earliest && (
         <div className="mx-6 mt-4 rounded-lg bg-slate-50 px-4 py-2.5 text-sm text-slate-600">
-          Сейчас раньше <b className="font-medium text-slate-800">{earliest}</b> уже не успеть: сборка и дорога — 2,5 часа. ИИ не обещает раньше.
+          Если заказать сейчас: маленький букет рядом с флористом — не раньше <b className="font-medium text-slate-800">{earliest.near}</b>,
+          большой или далеко — не раньше <b className="font-medium text-slate-800">{earliest.far}</b>. ИИ считает по букету и адресу
+          каждого заказа.
         </div>
       )}
 

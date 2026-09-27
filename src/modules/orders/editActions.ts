@@ -39,10 +39,8 @@ async function runPostSave(block: OrderBlock, orderId: string, changed: Record<s
       if ("deliveryDate" in changed || "deliveryWindow" in changed) {
         // Перенос — и в заказ Woo: там по дате и слоту плагин сайта закрывает утро. Обработчик
         // сам решит, есть ли у магазина плагин; остальным магазинам задача — пустой проход.
-        const fresh = await prisma.order.findUnique({ where: { id: orderId }, select: { deliveryDate: true, deliveryWindow: true, platform: true } });
-        if (fresh?.platform === "WOOCOMMERCE") {
-          await publishWooDeliveryPush(prisma, orderId, fresh.deliveryDate.toISOString().slice(0, 10), fresh.deliveryWindow);
-        }
+        const fresh = await prisma.order.findUnique({ where: { id: orderId }, select: { platform: true } });
+        if (fresh?.platform === "WOOCOMMERCE") await publishWooDeliveryPush(prisma, orderId);
         await notifyDeliveryChanged(orderId, {
           fromText: deliveryText(changed.deliveryDate?.from, changed.deliveryWindow?.from),
           toText: deliveryText(changed.deliveryDate?.to, changed.deliveryWindow?.to),

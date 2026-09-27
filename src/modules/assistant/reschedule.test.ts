@@ -41,3 +41,17 @@ describe("planReschedule — перенос по словам клиента", (
     expect(planReschedule({ ...base, readyTime: "by noon", newDate: null })).toBeNull();
   });
 });
+
+import { mentionsDay } from "./reschedule";
+
+describe("время через точку — не дата", () => {
+  const base = { todayStr: "2026-09-27", currentDay: "2026-09-27", currentWindow: "11:00 - 15:00" };
+  it("«after 3.30 pm» переносит окно в тот же день", () => {
+    expect(planReschedule({ ...base, readyTime: "after 3.30 pm", newDate: null })).toEqual({ day: "2026-09-27", window: "after 3.30 pm" });
+  });
+  it("mentionsDay: время через точку — не день, дата через косую — день", () => {
+    expect(mentionsDay("can you come after 4.30?")).toBe(false);
+    expect(mentionsDay("please deliver on 10/3")).toBe(true);
+    expect(mentionsDay("tomorrow works better")).toBe(true);
+  });
+});
