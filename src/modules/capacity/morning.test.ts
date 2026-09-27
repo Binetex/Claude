@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { adjustForNow, orderPoints, windowIsMorning, wishIsMorning, isMorningOrder, readyTimeWishes, morningVerdict, parseTimes } from "./morning";
+import { wantedRange, adjustForNow, earliestToday, orderPoints, windowIsMorning, wishIsMorning, isMorningOrder, readyTimeWishes, morningVerdict, parseTimes } from "./morning";
 
 describe("orderPoints — работа по цене букета", () => {
   it("маленький 1, большой 2, добавки не считаются", () => {
@@ -83,19 +83,23 @@ describe("morningVerdict", () => {
   });
 });
 
-describe("adjustForNow — который сейчас час", () => {
+describe("adjustForNow — день в день нужно время на сборку и дорогу", () => {
   it("не сегодня — вердикт как есть", () => {
     expect(adjustForNow("FIRST", false, 17 * 60)).toBe("FIRST");
   });
-  it("сегодня утром — как есть", () => {
+  it("рано утром — как есть", () => {
     expect(adjustForNow("FIRST", true, 9 * 60)).toBe("FIRST");
   });
-  it("после 11:30 к полудню уже не обещаем", () => {
-    expect(adjustForNow("FIRST", true, 11 * 60 + 45)).toBe("AVAILABLE");
+  it("с 10 утра к полудню уже не успеть", () => {
+    expect(earliestToday(10 * 60)).toBe(12 * 60 + 30);
+    expect(adjustForNow("FIRST", true, 10 * 60 + 5)).toBe("AVAILABLE");
   });
-  it("после 14:00 утро сегодня упущено", () => {
-    expect(adjustForNow("FIRST", true, 16 * 60)).toBe("FULL");
-    expect(adjustForNow("AVAILABLE", true, 14 * 60)).toBe("FULL");
+  it("после 12:30 утро сегодня упущено, даже если у флориста пусто", () => {
+    expect(adjustForNow("AVAILABLE", true, 12 * 60 + 30)).toBe("AVAILABLE");
+    expect(adjustForNow("FIRST", true, 12 * 60 + 31)).toBe("FULL");
+  });
+  it("самое раннее время округляется вверх до получаса", () => {
+    expect(earliestToday(13 * 60 + 10)).toBe(16 * 60);
   });
 });
 
@@ -113,5 +117,27 @@ describe("перенос словами освобождает утро", () => 
   it("перенесли обратно на утро — снова утро", () => {
     const note = "27.09, 10:00 · Клиент (SMS): готов принять by noon\n———\n27.09, 09:00 · Клиент (SMS): готов принять 6 PM";
     expect(isMorningOrder({ window: "11:00 - 15:00", customerNote: note })).toBe(true);
+  });
+});
+
+describe("wantedRange — когда клиент хотел", () => {
+  const h = (x: number) => `${Math.floor(x / 60)}:${String(x % 60).padStart(2, "0")}`;
+  const r = (w: string | null, wish: string | null) => {
+    const v = wantedRange(w, wish);
+    return v && `${h(v.from)}-${h(v.to)}`;
+  };
+  it("по окну, если пожелания нет", () => {
+    expect(r("11:00 - 15:00", null)).toBe("11:00-15:00");
+  });
+  it("по пожеланию клиента", () => {
+    expect(r("11:00 - 15:00", "between 11:30 and 12:30")).toBe("11:30-12:30");
+    expect(r("11:00 - 15:00", "by noon")).toBe("11:00-12:00");
+    expect(r("11:00 - 15:00", "available until about 1:40pm, leaving at 1:40")).toBe("11:00-13:40");
+    expect(r("11:00 - 15:00", "12 pm")).toBe("11:30-12:30");
+    expect(r("11:30 AM - 5:00 PM", "after 3.30 pm")).toBe("15:30-17:00");
+    expect(r("15:00 - 19:00", "4-5pm today")).toBe("16:00-17:00");
+  });
+  it("«any time» — по окну", () => {
+    expect(r("11:00 - 15:00", "any time today")).toBe("11:00-15:00");
   });
 });

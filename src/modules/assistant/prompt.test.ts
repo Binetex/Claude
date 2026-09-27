@@ -610,3 +610,11 @@ describe("загрузка утра", () => {
     expect(ok.needsHuman).toBe(false);
   });
 });
+
+describe("день в день: самое раннее время сегодня", () => {
+  it("строка попадает в запрос", () => {
+    const m = buildMessages({ knowledgeBase: "", order, history: [], incomingText: "can you deliver in an hour?", earliestToday: "3:30 PM" });
+    expect(m[1].content).toContain("Earliest possible delivery TODAY");
+    expect(m[1].content).toContain("3:30 PM");
+  });
+});

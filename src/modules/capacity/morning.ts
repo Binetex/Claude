@@ -150,18 +150,59 @@ export function morningVerdict(args: { taken: number; own: number; capacity: num
   return "AVAILABLE";
 }
 
-/** С этого часа (по часам магазина) «к полудню» сегодня уже не обещаем. */
-export const NOON_PROMISE_UNTIL_MIN = 11 * 60 + 30;
-/** С этого часа утро сегодня закрыто: к 15:00 новый букет уже не успеть собрать и довезти. */
-export const MORNING_CLOSES_AT_MIN = 14 * 60;
+/**
+ * Сколько нужно на заказ день в день: собрать букет и довезти. Владелец: «за 1,5 часа точно не
+ * успеем». Самое раннее время сегодня — сейчас плюс это, с округлением вверх до получаса.
+ */
+export const SAME_DAY_LEAD_MIN = 150;
+/** «К 12:00–12:30» обещаем, только если успеваем к этому времени. */
+const NOON_PROMISE_BY_MIN = 12 * 60 + 30;
+
+/** Самое раннее время доставки сегодня, минуты от полуночи (кратно 30). */
+export function earliestToday(nowMinutes: number): number {
+  return Math.ceil((nowMinutes + SAME_DAY_LEAD_MIN) / 30) * 30;
+}
 
 /**
  * Поправка на текущее время, если доставка СЕГОДНЯ. Загрузка флориста не знает, который час:
- * пустое утро в 16:00 — это не «привезём к 12–12:30», а упущенное утро.
+ * пустое утро в 13:00 — это не «привезём к 12–12:30», а упущенное утро, потому что на сборку и
+ * дорогу нужно SAME_DAY_LEAD_MIN.
  */
 export function adjustForNow(verdict: MorningVerdict, isToday: boolean, nowMinutes: number): MorningVerdict {
   if (!isToday) return verdict;
-  if (nowMinutes >= MORNING_CLOSES_AT_MIN) return "FULL";
-  if (verdict === "FIRST" && nowMinutes >= NOON_PROMISE_UNTIL_MIN) return "AVAILABLE";
+  const earliest = earliestToday(nowMinutes);
+  if (earliest > MORNING_END_HOUR * 60) return "FULL";
+  if (verdict === "FIRST" && earliest > NOON_PROMISE_BY_MIN) return "AVAILABLE";
   return verdict;
+}
+
+/** Опоздание в пределах этого — не опоздание (решение владельца: «20 минут — ничего страшного»). */
+export const LATE_TOLERANCE_MIN = 20;
+
+/**
+ * Когда клиент хотел получить букет, в минутах от полуночи. Источник — его последнее пожелание
+ * о времени, если оно есть, иначе окно заказа:
+ *  - «by noon», «until 1:40» — от начала окна до названного часа;
+ *  - «after 3.30 pm» — с названного часа до конца окна (или три часа, если окно раньше);
+ *  - «between 11:30 and 12:30», «4-5pm», «11:00 - 15:00» — как есть;
+ *  - «12 pm», «around 2» — полчаса в обе стороны.
+ */
+export function wantedRange(window: string | null, wish: string | null): { from: number; to: number } | null {
+  const useWish = !!wish && (wishIsMorning(wish) || wishIsAfternoon(wish));
+  const source = useWish ? wish! : window ?? "";
+  const times = parseTimes(source.replace(/\b\d{3,}\b/g, " "));
+  if (!times.length) return null;
+  const win = parseTimes(window);
+  const text = source.toLowerCase();
+  if (/\b(by|before|until|till)\b|\bдо\s/.test(text)) {
+    const to = times[times.length - 1];
+    return { from: Math.min(win[0] ?? 11 * 60, to), to };
+  }
+  if (/\bafter\b/.test(text)) {
+    const from = times[0];
+    const end = win.length > 1 ? win[win.length - 1] : 0;
+    return { from, to: end > from ? end : from + 180 };
+  }
+  if (times.length > 1) return { from: times[0], to: times[times.length - 1] };
+  return { from: times[0] - 30, to: times[0] + 30 };
 }

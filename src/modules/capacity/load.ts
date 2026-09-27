@@ -15,7 +15,7 @@ import { isFloristAvailable } from "@/modules/assignments/availability";
 import { formatDeliveryWindow } from "@/lib/timeWindow";
 import { localClock, DEFAULT_STORE_TZ } from "@/lib/tz";
 import {
-  orderPoints, isBigOrder, isMorningOrder, readyTimeWishes, wishIsMorning, parseTimes, morningVerdict, adjustForNow,
+  orderPoints, isBigOrder, isMorningOrder, readyTimeWishes, morningVerdict, adjustForNow, wantedRange, LATE_TOLERANCE_MIN,
   DEFAULT_MORNING_CAPACITY, type MorningVerdict,
 } from "./morning";
 
@@ -36,7 +36,13 @@ export type ScheduleOrder = {
   status: string;
   /** Фактическое время доставки по часам LA, «HH:MM». */
   deliveredAt: string | null;
-  /** Доставлен позже окна или обещанного клиенту времени. */
+  /** Когда клиент хотел, минуты от полуночи: по его пожеланию, иначе по окну. */
+  want: { from: number; to: number } | null;
+  /** Доставлен в минутах от полуночи. */
+  deliveredMin: number | null;
+  /** На сколько минут позже желаемого (0 — вовремя). */
+  lateMin: number;
+  /** Опоздали больше чем на LATE_TOLERANCE_MIN. */
   late: boolean;
 };
 
@@ -97,12 +103,12 @@ function toScheduleOrder(o: RawOrder): ScheduleOrder {
   const deliveredDate = o.deliveries[0]?.deliveredAt ?? null;
   const deliveredAt = deliveredDate ? localClock(o.site.timezone ?? DEFAULT_STORE_TZ, deliveredDate).timeStr : null;
 
-  // Опоздание: позже обещанного клиенту утреннего времени, а если его нет — позже конца окна.
-  const deadlineSource = wish && wishIsMorning(wish) ? wish : o.deliveryWindow;
-  const deadlineTimes = parseTimes(deadlineSource);
-  const deadline = deadlineTimes.length ? deadlineTimes[deadlineTimes.length - 1] : null;
+  // Опоздание — от конца того, что клиент хотел; двадцать минут не считаются (решение владельца).
+  const want = wantedRange(o.deliveryWindow, wish);
   const [hh, mm] = (deliveredAt ?? "").split(":").map(Number);
-  const late = deliveredAt != null && deadline != null && hh * 60 + mm > deadline;
+  const deliveredMin = deliveredAt ? hh * 60 + mm : null;
+  const lateMin = deliveredMin != null && want ? Math.max(0, deliveredMin - want.to) : 0;
+  const late = lateMin > LATE_TOLERANCE_MIN;
 
   return {
     id: o.id,
@@ -116,6 +122,9 @@ function toScheduleOrder(o: RawOrder): ScheduleOrder {
     morning,
     status: o.orderStatus,
     deliveredAt,
+    want,
+    deliveredMin,
+    lateMin,
     late,
   };
 }

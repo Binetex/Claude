@@ -17,7 +17,7 @@ import { createDeepseekClient, type DeepseekClient } from "@/integrations/deepse
 import { DeepseekError } from "@/integrations/deepseek/errors";
 import { buildMessages, parseReply, describeDeliveryDay, earliestAgreeHour, type HistoryLine, type OrderSnapshot } from "./prompt";
 import { morningForOrder, morningForNewOrder } from "@/modules/capacity/load";
-import type { MorningVerdict } from "@/modules/capacity/morning";
+import { earliestToday, type MorningVerdict } from "@/modules/capacity/morning";
 import { matchIntent } from "./intents";
 import { readTemplates, templateApplies, renderAssistantTemplate } from "./templates";
 import { loadCatalog, looksLikeShopping } from "./catalog";
@@ -236,7 +236,9 @@ export function buildAssistantHandler(prisma: PrismaClient, deps: AssistantDeps 
     // сегодня и завтра. Сбой расчёта не роняет разбор: без неё правило про время прежнее.
     const orderMorning = order ? await morningFor(prisma, order, clock.dateStr, now()) : null;
     const morningOutlook = order ? undefined : await outlookFor(prisma, site.id, clock.dateStr, now());
+    const earliest = earliestTodayLabel(clock.timeStr);
     const messages = buildMessages({
+      earliestToday: earliest,
       knowledgeBase: order ? site.aiKnowledgeBase : site.aiUnknownKnowledgeBase,
       order: order ? { ...snapshot(order, site.name, incoming.partyRole, clock.dateStr), morning: orderMorning } : null,
       morningOutlook,
@@ -307,6 +309,7 @@ export function buildAssistantHandler(prisma: PrismaClient, deps: AssistantDeps 
         const foundMorning = await morningFor(prisma, found, clock.dateStr, now());
         agreeHour = earliestAgreeHour([foundMorning]);
         const again = buildMessages({
+          earliestToday: earliest,
           knowledgeBase: site.aiKnowledgeBase,
           order: { ...snapshot(found, site.name, incoming.partyRole, clock.dateStr), morning: foundMorning },
           history: await loadHistory(prisma, found.id, phone, incoming.storePhone, incoming, site.timezone, answeredIds),
@@ -426,6 +429,16 @@ async function outlookFor(prisma: PrismaClient, siteId: string, todayStr: string
   if (today) out.push({ day: "today", verdict: today });
   if (tomorrow) out.push({ day: "tomorrow", verdict: tomorrow });
   return out;
+}
+
+/** «2:30 PM» — самое раннее время сегодня; после 21:00 сегодня не возим вовсе — строки нет. */
+function earliestTodayLabel(timeStr: string): string | null {
+  const [h, m] = timeStr.split(":").map(Number);
+  const e = earliestToday(h * 60 + m);
+  // До полудня строка не нужна: раньше 12:00 мы не возим в любом случае (правило в промпте).
+  if (e <= 12 * 60 || e >= 21 * 60) return null;
+  const hh = Math.floor(e / 60), mm = e % 60;
+  return `${hh % 12 === 0 ? 12 : hh % 12}${mm ? `:${String(mm).padStart(2, "0")}` : ""} ${hh < 12 ? "AM" : "PM"}`;
 }
 
 function logMorningError(err: unknown): null {

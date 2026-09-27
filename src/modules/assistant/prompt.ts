@@ -46,6 +46,8 @@ export type PromptInput = {
   incomingText: string;
   /** Текущие дата и время по часам магазина: без них модель считает любую доставку сегодняшней. */
   now?: ShopClock;
+  /** Самое раннее время доставки сегодня («2:30 PM»): сборка и дорога занимают время. */
+  earliestToday?: string | null;
   /** Общее правило владельца на все магазины («сегодня выходной») — сильнее баз знаний. */
   globalNote?: string | null;
   /** Живые товары магазина — только когда разговор похож на покупку. */
@@ -400,6 +402,9 @@ export function buildMessages(input: PromptInput): DeepseekMessage[] {
   }
   parts.push(knowledge);
   if (input.now) parts.push(`Now at the shop: ${input.now.weekday} ${input.now.dateStr}, ${input.now.timeStr} (local time).`);
+  if (input.earliestToday) {
+    parts.push(`Earliest possible delivery TODAY (the bouquet still has to be made and driven over): ${input.earliestToday}. Never promise or agree to any delivery today before this time; offer this time or later instead.`);
+  }
   if (input.order) parts.push(`Order data:\n${orderBlock(input.order)}`);
   if (!input.order && outlook) {
     parts.push(`Morning delivery (before 3 PM):\n${outlook.map((m) => `${m.day}: ${MORNING_LINE[m.verdict]}`).join("\n")}`);
