@@ -138,3 +138,16 @@ export async function ownerRemoveFloristDayOff(floristId: string, day: string): 
   refreshFlorists();
   return { message: "Дата убрана" };
 }
+
+/**
+ * Сколько работы флорист успевает к 15:00, в баллах (букет до $250 — 1, от $250 — 2). По этому
+ * числу ассистент решает, обещать ли утро клиентам магазинов, где флорист первый.
+ */
+export async function ownerSetFloristMorningCapacity(floristId: string, capacity: number): Promise<{ error?: string }> {
+  await requireRole("OWNER");
+  if (!Number.isInteger(capacity) || capacity < 0 || capacity > 20) return { error: "От 0 до 20." };
+  await prisma.florist.update({ where: { id: floristId }, data: { morningCapacity: capacity } });
+  revalidatePath("/dashboard/florists");
+  revalidatePath("/dashboard/schedule");
+  return {};
+}

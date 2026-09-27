@@ -166,35 +166,6 @@ export async function loadDaySchedule(prisma: PrismaClient, day: string, now: Da
   };
 }
 
-/** Сводка по нескольким дням для полосы дат: баллы утра по флористам и закрытие. */
-export async function loadWeekStrip(prisma: PrismaClient, days: string[]) {
-  const [orders, closures, florists] = await Promise.all([
-    prisma.order.findMany({
-      where: { deliveryDate: { in: days.map(dayDate) }, orderStatus: { notIn: [...NOT_ORDERS] } },
-      select: { deliveryDate: true, deliveryWindow: true, customerNote: true, currentFloristId: true, items: { select: { externalPrice: true, quantity: true } } },
-    }),
-    prisma.morningClosure.findMany({ where: { day: { in: days } }, select: { day: true } }),
-    prisma.florist.findMany({ where: { active: true, user: { active: true } }, select: { id: true, morningCapacity: true } }),
-  ]);
-  const closed = new Set(closures.map((c) => c.day));
-  const cap = new Map(florists.map((f) => [f.id, f.morningCapacity]));
-  return days.map((day) => {
-    const byFlorist = new Map<string, number>();
-    let total = 0;
-    for (const o of orders) {
-      if (o.deliveryDate.toISOString().slice(0, 10) !== day) continue;
-      total++;
-      if (!o.currentFloristId || !isMorningOrder({ window: o.deliveryWindow, customerNote: o.customerNote })) continue;
-      const pts = orderPoints(o.items.map((i) => ({ price: Number(i.externalPrice), quantity: i.quantity })));
-      byFlorist.set(o.currentFloristId, (byFlorist.get(o.currentFloristId) ?? 0) + pts);
-    }
-    // День «забит», если утро закрыто или все, у кого есть утренние заказы, упёрлись в лимит.
-    const loads = [...byFlorist.entries()].map(([id, pts]) => ({ pts, cap: cap.get(id) ?? DEFAULT_MORNING_CAPACITY }));
-    const fullest = loads.reduce((m, l) => Math.max(m, l.pts / Math.max(1, l.cap)), 0);
-    return { day, total, closed: closed.has(day), fullest };
-  });
-}
-
 /**
  * Утро для КОНКРЕТНОГО заказа: у его флориста, без него самого. Флориста нет — берём того, кому
  * заказ достался бы по приоритету магазина.
@@ -253,15 +224,3 @@ async function verdictFor(prisma: PrismaClient, day: string, floristId: string |
   return morningVerdict({ taken, own, capacity: florist?.morningCapacity ?? DEFAULT_MORNING_CAPACITY, closed: false });
 }
 
-/**
- * Что ассистент сейчас ответит НОВОМУ клиенту каждого магазина про утро этого дня. Магазин
- * смотрит на своего первого флориста в приоритете, поэтому у TheFlow и PAR ответ разный — эта
- * строка избавляет владельца помнить, какой магазин на ком.
- */
-export async function loadSiteVerdicts(prisma: PrismaClient, day: string, now: Date = new Date()) {
-  const sites = await prisma.site.findMany({ select: { id: true, shortName: true, name: true }, orderBy: { shortName: "asc" } });
-  const rows = await Promise.all(
-    sites.map(async (s) => ({ site: s.shortName || s.name, verdict: await morningForNewOrder(prisma, s.id, day, now) }))
-  );
-  return rows.filter((r): r is { site: string; verdict: MorningVerdict } => r.verdict !== null);
-}

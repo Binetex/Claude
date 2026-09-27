@@ -165,10 +165,3 @@ export function adjustForNow(verdict: MorningVerdict, isToday: boolean, nowMinut
   if (verdict === "FIRST" && nowMinutes >= NOON_PROMISE_UNTIL_MIN) return "AVAILABLE";
   return verdict;
 }
-
-/** Как вердикт звучит для человека в админке — то же, что ассистент скажет клиенту. */
-export const VERDICT_LABEL: Record<MorningVerdict, string> = {
-  FIRST: "к 12:00–12:30",
-  AVAILABLE: "утром, 13:00–15:00",
-  FULL: "утро занято → 15:00–19:00",
-};

@@ -2,6 +2,7 @@ import Link from "next/link";
 import { prisma } from "@/lib/db";
 import { Card } from "@/components/ui/Card";
 import { FinanceVisibilityToggle } from "./FinanceVisibilityToggle";
+import { MorningCapacityEditor } from "./MorningCapacityEditor";
 import { PickupLocationsEditor } from "./PickupLocationsEditor";
 import { AvailabilityEditor } from "./AvailabilityEditor";
 import { ownerSetFloristWeekends, ownerAddFloristDayOff, ownerRemoveFloristDayOff } from "./floristActions";
@@ -42,6 +43,7 @@ export default async function FloristsPage() {
             <div className="mt-1 text-sm text-slate-500">{f.user.email} · {f.user.phone}</div>
             <div className="mt-2 text-sm text-slate-600">Активных заказов: {f._count.currentOrders}</div>
             <FinanceVisibilityToggle floristId={f.id} current={f.financeVisibility} />
+            <MorningCapacityEditor floristId={f.id} capacity={f.morningCapacity} />
             <AvailabilityEditor
               floristId={f.id}
               weekendDays={f.weekendDays}
