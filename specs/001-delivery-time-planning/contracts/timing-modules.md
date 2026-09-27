@@ -1,39 +1,44 @@
-# Contract: модуль `modules/timing`
+# Contract: модуль `modules/timing` и точки ассистента
 
 Чистые функции (без БД и «сейчас» — время передаётся параметром):
 
 ```ts
 // model.ts
 DEFAULT_MODEL: TimeModel
-computeModel(samples: DeliverySample[], firstDispatch: FirstDispatchSample[], florists: { id; workStartMin }[], now: Date): TimeModel
+computeModel({ deliveries, prep, firstDispatch, workStart, since, computedAt }): TimeModel
 driveMin(model, miles: number | null): number
-prepMin(model, floristId: string | null, big: boolean): number
-setupMin(model, floristId: string | null): number
+prepMin(model, floristId: string, big: boolean): number
+setupMin(model, floristId: string): number
 
 // planner.ts
-planDay(args: { start: number; jobs: PlanJob[]; model; floristId; allowEarlierStart: boolean }): Plan
-canFit(args: { plan inputs…; job: PlanJob }): { ok: boolean; eta: number; plan: Plan }
-earliestBy(args: { plan inputs…; job: Omit<PlanJob, "deadline"> }): number   // минимальный срок, при котором влезает
-
-// policy.ts
-decideTime(input: {
-  isToday: boolean; nowMin: number;
-  extracted: ExtractedTime | null;      // из сообщения
-  known: CustomerTime | null;           // что уже знаем
-  window: WindowRange | null;           // обещание
-  canBy: (until: number) => boolean;    // расписание: успеем ли до
-  earliest: number;                     // самое раннее возможное время доставки
-  blocked: string | null;               // причина «только человек» (курьер вызван, не сторона заказа…)
-}): TimeDecision
-agreeFromMin(d: TimeDecision, fallback: number): number
-windowAfter(d: TimeDecision, window: WindowRange | null, known: CustomerTime | null): WindowRange | null
+planDay(jobs: PlanJob[], p: PlanParams): Plan
+canFit(jobs: PlanJob[], job: PlanJob, p: PlanParams): { ok: boolean; etaAt: number | null }
+earliestBy(jobs: PlanJob[], job: Omit<PlanJob, "deadline">, p: PlanParams): number | null
+// PlanParams = { lineStart; courierMin; prepMin(big); earliestLineStart? }  (заранее — не раньше 6:00)
 ```
 
-Серверные (`stats.ts`, `load.ts`):
+Серверные:
 
 ```ts
-loadTimeModel(prisma): Promise<TimeModel>              // кэш 6 ч
-floristDayPlan(prisma, floristId, day, now): Promise<Plan & { florist… }>
-orderTiming(prisma, orderId, now): Promise<{ floristId; plan; earliest; canBy(until) } | null>
-siteOutlook(prisma, siteId, day, now): Promise<{ earliest: number; canBy(until) } | null>
+// stats.ts
+loadTimeModel(prisma, now?): Promise<TimeModel>                       // кэш 6 ч; сбой → DEFAULT_MODEL
+// load.ts
+orderEarliest(prisma, orderId, now?): Promise<number | null | undefined>
+siteEarliest(prisma, siteId, day, now?): Promise<number | null | undefined>
+loadDaySchedule(prisma, day, now?): Promise<DaySchedule>              // очередь, плановое время, риск
+```
+
+Ассистент:
+
+```ts
+// prompt.ts
+OrderSnapshot.earliest?: string | null            // «2:30 PM»; null — не успеть; нет поля — «4 PM (estimate)»
+PromptInput.earliestNew?: { today?; tomorrow? }   // незнакомый номер
+agreeFromMin(earliest: number | null | undefined): number
+parseReply(raw, { agreeFromMin }): ParsedReply    // + confirmedFrom / confirmedUntil (минуты)
+// JSON модели (бот с заказом): { …, "confirmed_from": "HH:MM"|null, "confirmed_until": "HH:MM"|null }
+
+// reschedule.ts
+confirmedWindow(current: WindowRange | null, c: { from; until }): WindowRange | null
+planReschedule({ todayStr, currentDay, currentWindow, confirmed, newDate }): { day; window } | null
 ```
