@@ -10,9 +10,7 @@ export function MorningLock({ day, closed }: { day: string; closed: boolean }) {
   const [pending, start] = useTransition();
   return (
     <button
-      onClick={(e) => {
-        // Кнопка стоит в заголовке раскрывающейся строки — клик не должен её сворачивать.
-        e.preventDefault();
+      onClick={() => {
         start(async () => {
           const res = await setMorningClosure(day, !closed);
           if (res.error) toast.error(res.error);
@@ -23,11 +21,12 @@ export function MorningLock({ day, closed }: { day: string; closed: boolean }) {
       title={closed ? "Открыть утро" : "Закрыть утро на этот день"}
       aria-label={closed ? "Открыть утро" : "Закрыть утро"}
       className={cn(
-        "rounded-md p-1.5 transition-colors disabled:opacity-50",
-        closed ? "text-rose-600 hover:bg-rose-50" : "text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+        "inline-flex shrink-0 items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors disabled:opacity-50",
+        closed ? "border-rose-200 text-rose-700 hover:bg-rose-50" : "border-slate-200 text-slate-600 hover:bg-slate-50"
       )}
     >
-      {closed ? <Lock className="size-4" /> : <LockOpen className="size-4" />}
+      {closed ? <LockOpen className="size-3.5" /> : <Lock className="size-3.5" />}
+      {closed ? "Открыть утро" : "Закрыть утро"}
     </button>
   );
 }
