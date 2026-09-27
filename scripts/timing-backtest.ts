@@ -37,6 +37,8 @@ async function main() {
 
   const today = todayStrInTz(DEFAULT_STORE_TZ);
   const diffs: number[] = [];
+  const readyDiffs: number[] = [];
+  const travelDiffs: number[] = [];
   let total = 0, late = 0, risk = 0, warned = 0, optimistic = 0;
   for (let k = days; k >= 1; k--) {
     const day = new Date(Date.parse(`${today}T00:00:00Z`) - k * 86_400_000).toISOString().slice(0, 10);
@@ -46,9 +48,19 @@ async function main() {
         id: true, zip: true, windowFrom: true, windowTo: true, deliveryWindow: true, currentFloristId: true,
         items: { select: { externalPrice: true } },
         pickupLocationOverride: { select: { zip: true } },
-        deliveries: { where: { deliveredAt: { not: null } }, orderBy: { deliveredAt: "desc" }, take: 1, select: { deliveredAt: true } },
+        deliveries: { where: { deliveredAt: { not: null } }, orderBy: { deliveredAt: "desc" }, take: 1, select: { id: true, deliveredAt: true } },
       },
     });
+    // Когда букет был готов на деле — первый вызов курьера (SCHEDULED): так же считает модель.
+    const called = new Map(
+      (
+        await prisma.deliveryStatusEvent.groupBy({
+          by: ["deliveryId"],
+          where: { deliveryId: { in: orders.flatMap((o) => o.deliveries.map((d) => d.id)) }, normalizedStatus: "SCHEDULED" },
+          _min: { occurredAt: true },
+        })
+      ).map((e) => [e.deliveryId, e._min.occurredAt])
+    );
     const parts: string[] = [];
     for (const f of florists) {
       const mine = orders.filter((o) => o.currentFloristId === f.id && o.deliveries[0]);
@@ -72,7 +84,13 @@ async function main() {
       });
       let dayLate = 0, dayRisk = 0;
       for (const it of plan.items) {
-        const actual = minutesLA(mine.find((o) => o.id === it.id)!.deliveries[0].deliveredAt!);
+        const d = mine.find((o) => o.id === it.id)!.deliveries[0];
+        const actual = minutesLA(d.deliveredAt!);
+        const calledAt = called.get(d.id);
+        if (calledAt) {
+          readyDiffs.push(minutesLA(calledAt) - it.readyAt!);
+          travelDiffs.push(actual - minutesLA(calledAt) - (it.etaAt! - it.readyAt!));
+        }
         const diff = actual - it.etaAt!;
         diffs.push(diff);
         const isLate = actual - it.deadline > LATE_TOLERANCE_MIN;
@@ -94,6 +112,9 @@ async function main() {
     console.log(`Доставок: ${total}. Факт минус план: медиана ${percentile(diffs, 0.5)!.toFixed(0)} мин, у 80% расхождение не больше ${percentile(abs, 0.8)!.toFixed(0)} мин.`);
     console.log(`Приехали позже плана больше чем на ${LATE_TOLERANCE_MIN} мин: ${optimistic} из ${total} (${Math.round((optimistic / total) * 100)}%).`);
     console.log(`Опоздали по окну: ${late}; расписание видело риск: ${risk}; из опоздавших заранее видно: ${warned}.`);
+    const q = (xs: number[]) => [0.2, 0.5, 0.8].map((p) => percentile(xs, p)!.toFixed(0)).join(" / ");
+    console.log(`Готовность (вызов курьера) минус план, 20/50/80%: ${q(readyDiffs)} мин.`);
+    console.log(`Курьер + дорога минус план, 20/50/80%: ${q(travelDiffs)} мин.`);
   }
   await prisma.$disconnect();
 }
