@@ -23,3 +23,41 @@ export function laterWindowFromWish(currentWindow: string | null, readyTime: str
   const window = readyTime.replace(/\b(today|tonight)\b/gi, "").replace(/\s+/g, " ").trim();
   return window || null;
 }
+
+/** Дальше этого клиенту переносить сами не будем: ошибка модели в дате — не на месяц вперёд. */
+export const MAX_DAYS_AHEAD = 30;
+
+function addDays(day: string, n: number): string {
+  return new Date(Date.parse(`${day}T00:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
+}
+
+/**
+ * Что сделать с заказом по словам клиента (решение владельца 27.09.2026: позже — всегда можно,
+ * и на следующий день тоже). Возвращает новые день и окно или null, если трогать нечего.
+ *
+ *  - другой день: только ПОЗЖЕ текущего дня доставки и не дальше MAX_DAYS_AHEAD от сегодня;
+ *    окно — слова клиента о времени, если назвал, иначе прежнее;
+ *  - тот же день: как раньше — только с утра на после 15:00 (laterWindowFromWish).
+ */
+export function planReschedule(args: {
+  todayStr: string;
+  currentDay: string;
+  currentWindow: string | null;
+  readyTime: string | null;
+  newDate: string | null;
+}): { day: string; window: string } | null {
+  const window = args.currentWindow ?? "";
+  if (args.newDate) {
+    if (args.newDate <= args.currentDay) return null;
+    if (args.newDate < args.todayStr || args.newDate > addDays(args.todayStr, MAX_DAYS_AHEAD)) return null;
+    const words = (args.readyTime ?? "")
+      .replace(/\b(tomorrow|tmrw|today|tonight|on|next|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/gi, "")
+      .replace(/\s+/g, " ")
+      .trim();
+    const named = words && /\d|noon|morning|afternoon|evening/i.test(words) && !/\b(any ?time|all day|whenever)\b/i.test(words);
+    return { day: args.newDate, window: named ? words : window };
+  }
+  if (!args.readyTime) return null;
+  const later = laterWindowFromWish(args.currentWindow, args.readyTime);
+  return later ? { day: args.currentDay, window: later } : null;
+}

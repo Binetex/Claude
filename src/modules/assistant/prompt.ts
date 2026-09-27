@@ -297,7 +297,13 @@ ${timing}
   a real time. A guess here makes a customer stand outside waiting for a courier who has not left
   the studio.
 - A later time on the SAME delivery day is not a date change: you may confirm it (see DELIVERY TIMING above).
-  Moving the delivery to ANOTHER DAY, a different address, a refund, a discount or compensation
+- MOVING TO A LATER DAY. If the customer asks to move the delivery to a LATER day ("can you
+  bring it tomorrow instead", "let's do Saturday"), agree: a later delivery always works for us.
+  Confirm the new day by its weekday and date, and if they named a time, confirm it too (a time
+  before 3 PM on that day: say you will aim for it but cannot lock an exact time that early).
+  Put the new date in "new_delivery_date" as YYYY-MM-DD, counted from "Now at the shop", and
+  their time words, if any, in "ready_time". Only for a day AFTER the current delivery day.
+  Moving the delivery to an EARLIER day, a different address, a refund, a discount or compensation
   you never decide yourself. Write the reply you WOULD send if the shop agrees (short and
   concrete, for example "We can move the delivery to Friday between 3 and 7 PM"), and set
   "needs_human": true so a person approves it before it is sent.
@@ -317,7 +323,7 @@ delivery, put their own words in "ready_time" (for example "after 5pm", "tomorro
 A time mentioned earlier in the conversation history is already recorded: return null for it.
 
 Answer with JSON only:
-{"reply_en": string, "intent": string, "important": boolean, "needs_human": boolean, "ready_time": string|null}
+{"reply_en": string, "intent": string, "important": boolean, "needs_human": boolean, "ready_time": string|null, "new_delivery_date": string|null}
 "intent" is a short slug such as "tracking", "delivery_time", "photo", "address_change", "refund", "call_request", "other".`;
 
 const RULES_KNOWN_ORDER = rulesKnownOrder(TIMING_RULES);
@@ -433,6 +439,8 @@ export type ParsedReply = {
   readyTime: string | null;
   /** Незнакомый номер назвал заказ: имя, адрес или номер — как сказал, без догадок модели. */
   orderHint: string | null;
+  /** Клиент попросил перенести на более поздний день: новая дата YYYY-MM-DD (проверяет handler). */
+  newDeliveryDate: string | null;
 };
 
 /**
@@ -605,7 +613,7 @@ export function parseReply(raw: string, opts: { earliestAgreeHour?: number } = {
     const cleaned = raw.trim().replace(/^```(?:json)?/i, "").replace(/```$/, "").trim();
     data = JSON.parse(cleaned) as Record<string, unknown>;
   } catch {
-    return { replyEn: "", intent: "unparsed", important: false, needsHuman: true, readyTime: null, orderHint: null };
+    return { replyEn: "", intent: "unparsed", important: false, needsHuman: true, readyTime: null, orderHint: null, newDeliveryDate: null };
   }
 
   const intent = typeof data.intent === "string" && data.intent.trim() ? data.intent.trim().slice(0, 40) : "other";
@@ -619,16 +627,17 @@ export function parseReply(raw: string, opts: { earliestAgreeHour?: number } = {
   const needsHuman = intent === "spam" ? false : data.needs_human === true || !replyEn;
   const readyTime = typeof data.ready_time === "string" && data.ready_time.trim() ? data.ready_time.trim() : null;
   const orderHint = typeof data.order_hint === "string" && data.order_hint.trim() ? data.order_hint.trim().slice(0, 120) : null;
+  const newDeliveryDate = typeof data.new_delivery_date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(data.new_delivery_date.trim()) ? data.new_delivery_date.trim() : null;
 
   // Русский текст клиенту не уходит ни при каких условиях: правило владельца, и оно жёстче
   // любой инструкции в промпте — инструкцию модель может проигнорировать, эту проверку нет.
-  if (replyEn && !looksEnglish(replyEn)) return { replyEn: "", intent, important, needsHuman: true, readyTime, orderHint };
+  if (replyEn && !looksEnglish(replyEn)) return { replyEn: "", intent, important, needsHuman: true, readyTime, orderHint, newDeliveryDate };
 
   // Обещание, которого магазин не выполняет, клиенту не уходит: отдаём человеку целиком.
-  if (replyEn && forbiddenOffer(replyEn)) return { replyEn: "", intent, important, needsHuman: true, readyTime, orderHint };
+  if (replyEn && forbiddenOffer(replyEn)) return { replyEn: "", intent, important, needsHuman: true, readyTime, orderHint, newDeliveryDate };
 
   // Согласие с ранним часом клиенту не уходит: обещать раннее время мы не можем.
-  if (replyEn && confirmsEarlyTime(replyEn, opts.earliestAgreeHour ?? 16)) return { replyEn: "", intent, important, needsHuman: true, readyTime, orderHint };
+  if (replyEn && confirmsEarlyTime(replyEn, opts.earliestAgreeHour ?? 16)) return { replyEn: "", intent, important, needsHuman: true, readyTime, orderHint, newDeliveryDate };
 
-  return { replyEn, intent, important, needsHuman, readyTime, orderHint };
+  return { replyEn, intent, important, needsHuman, readyTime, orderHint, newDeliveryDate };
 }

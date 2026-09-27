@@ -61,6 +61,7 @@ describe("разбор ответа модели", () => {
       needsHuman: false,
       readyTime: null,
       orderHint: null,
+      newDeliveryDate: null,
     });
   });
 
@@ -616,5 +617,15 @@ describe("день в день: самое раннее время сегодн�
     const m = buildMessages({ knowledgeBase: "", order, history: [], incomingText: "can you deliver in an hour?", earliestToday: "3:30 PM" });
     expect(m[1].content).toContain("Earliest possible delivery TODAY");
     expect(m[1].content).toContain("3:30 PM");
+  });
+});
+
+describe("перенос на более поздний день", () => {
+  it("правило есть, новая дата читается, мусор — нет", () => {
+    const m = buildMessages({ knowledgeBase: "", order, history: [], incomingText: "can you bring it tomorrow instead?" });
+    expect(m[0].content).toContain("MOVING TO A LATER DAY");
+    const ok = parseReply('{"reply_en":"Sure, we will bring it tomorrow, Monday Sep 28.","intent":"delivery_time","important":false,"needs_human":false,"ready_time":null,"new_delivery_date":"2026-09-28"}');
+    expect(ok.newDeliveryDate).toBe("2026-09-28");
+    expect(parseReply('{"reply_en":"Sure.","intent":"other","important":false,"needs_human":false,"ready_time":null,"new_delivery_date":"tomorrow"}').newDeliveryDate).toBeNull();
   });
 });
