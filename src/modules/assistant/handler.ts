@@ -278,7 +278,9 @@ export function buildAssistantHandler(prisma: PrismaClient, deps: AssistantDeps 
 
     // Соглашаться на время можно не раньше, чем успеваем собрать и довезти.
     let earliestMin = order ? orderEarliestMin : newEarliest?.today;
-    let parsed = parseReply(raw, { agreeFromMin: agreeFromMin(earliestMin) });
+    // Незнакомому номеру ответ бывает и про завтра — у завтра свой порог.
+    const tomorrowAgree = newEarliest ? { agreeFromMinTomorrow: agreeFromMin(newEarliest.tomorrow) } : {};
+    let parsed = parseReply(raw, { agreeFromMin: agreeFromMin(earliestMin), ...tomorrowAgree });
 
     // Незнакомый номер назвал заказ. Нашли ровно один — привязываем разговор и спрашиваем
     // модель ещё раз, уже с данными заказа: человек ждёт ответа про свой заказ сейчас, а не в

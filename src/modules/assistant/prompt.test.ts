@@ -114,6 +114,15 @@ describe("подсказка о заказе от незнакомого ном�
     expect(r.orderHint).toBeNull();
   });
 
+  it("короткий живой ответ — английский, даже без служебных слов", () => {
+    for (const t of ["Sure, around 7pm works 🌸", "Got it, the concierge it is 👍", "Sure, after 5 works 🌸", "No problem, we'll bring it on Tuesday 🌸"]) {
+      expect(looksEnglish(t), t).toBe(true);
+    }
+    const r = parseReply(JSON.stringify({ reply_en: "Sure, around 7pm works 🌸", intent: "delivery_time", important: false, needs_human: false, confirmed_from: "19:00", confirmed_until: "19:30" }), { agreeFromMin: 13 * 60 + 30 });
+    expect(r.replyEn).toBe("Sure, around 7pm works 🌸");
+    expect(r.confirmedUntil).toBe(19 * 60 + 30);
+  });
+
   it("не-английский ответ без кириллицы тоже уходит человеку", () => {
     expect(looksEnglish("Your order will arrive between 2 and 4 pm.")).toBe(true);
     expect(looksEnglish("Su pedido llegará entre las 2 y las 4.")).toBe(false);
@@ -207,6 +216,23 @@ describe("подсказка о заказе от незнакомого ном�
       expect(rules).toContain('never say "please don\'t make the trip"');
       expect(rules).toContain("NEVER promise a call");
     }
+  });
+
+  // 28.09.2026 владелец: «текст тупой и нейрослопный». Часть оборотов модель брала из самих
+  // правил («a person from the shop will follow up», «weekday and date», «I'll note that»).
+  it("пишет как человек в SMS: без пересказа, без объявлений темы, без готовых оборотов", () => {
+    for (const rules of [buildMessages({ knowledgeBase: "", order, history: [], incomingText: "hi" })[0].content,
+                         buildMessages({ knowledgeBase: "", order: null, history: [], incomingText: "hi" })[0].content]) {
+      expect(rules).toContain("HOW YOU WRITE");
+      expect(rules).toContain("Never say back what the customer just told you");
+      expect(rules).toContain("Never announce a topic before answering it");
+      expect(rules).toContain('"works perfectly"');
+      expect(rules).not.toContain('"I\'ll note that"');
+    }
+    const k = buildMessages({ knowledgeBase: "", order, history: [], incomingText: "who sent these?" })[0].content;
+    expect(k).not.toContain("say a person from the shop will");
+    expect(k).not.toContain("weekday and date");
+    expect(k).toContain("let me check if I'm allowed to tell you");
   });
 
   it("ответ обязан покрыть всё сообщение, а не первую его часть", () => {
@@ -481,6 +507,21 @@ describe("самое раннее время в запросе", () => {
     expect(confirmsEarlyTime("Perfect, we'll deliver by 3 PM.", 14 * 60 + 30)).toBe(false);
     // Утро, когда его успеваем, — разрешённый ответ.
     expect(confirmsEarlyTime("Sure, a morning delivery works.", 11 * 60)).toBe(false);
+  });
+});
+
+describe("проверка времени в коротких ответах", () => {
+  it("голое «5:30» — вечер, а не утро: согласие не задерживается", () => {
+    expect(confirmsEarlyTime("Perfect, we'll bring it around 5:30 🌸", 13 * 60 + 30)).toBe(false);
+    expect(confirmsEarlyTime("Sure, 11:00 works", 13 * 60 + 30)).toBe(true);
+  });
+
+  it("ответ про завтра проверяется по завтрашнему порогу, про сегодня — по сегодняшнему", () => {
+    const reply = (text: string) => JSON.stringify({ reply_en: text, intent: "new_order", important: false, needs_human: false });
+    const opts = { agreeFromMin: 14 * 60 + 30, agreeFromMinTomorrow: 8 * 60 + 30 };
+    expect(parseReply(reply("Sure, around 1pm tomorrow is fine 🌸"), opts).replyEn).not.toBe("");
+    expect(parseReply(reply("Sure, 1pm today is fine 🌸"), opts).replyEn).toBe("");
+    expect(parseReply(reply("Sure, around 1pm tomorrow is fine 🌸"), { agreeFromMin: 14 * 60 + 30 }).replyEn).toBe("");
   });
 });
 
