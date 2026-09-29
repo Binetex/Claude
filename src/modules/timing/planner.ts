@@ -7,6 +7,9 @@
  * возможное максимальное опоздание на одной линии — ровно вопрос «не сорвать ни одного срока»
  * (research R4).
  *
+ * Главный магазин (TheFlow, владелец 29.09.2026) обязан успеть: если его заказ опаздывает, заказы
+ * других магазинов, стоящие перед ним, уходят за него. Их опоздание не мешает и принять новый заказ.
+ *
  * Плановая доставка = готовность + курьер + дорога, но не раньше начала окна: раньше букет просто
  * подождёт. Риск — доставка позже срока больше чем на допуск (20 минут, решение владельца).
  *
@@ -24,6 +27,8 @@ export type PlanJob = {
   driveMin: number;
   /** Букет уже готов, в пути или доставлен — в очередь сборки не входит. */
   fixed?: boolean;
+  /** Заказ главного магазина: обязан успеть, остальные — в промежутки. */
+  priority?: boolean;
 };
 
 export type PlanItem = PlanJob & {
@@ -60,19 +65,52 @@ function order(jobs: PlanJob[], courierMin: number): PlanJob[] {
     .sort((a, b) => latestReady(a, courierMin) - latestReady(b, courierMin) || a.windowFrom - b.windowFrom || a.id.localeCompare(b.id));
 }
 
+/** Опоздание каждого заказа очереди при сборке подряд с lineStart. */
+function lateness(queue: PlanJob[], lineStart: number, p: PlanParams): number[] {
+  let t = lineStart;
+  return queue.map((j) => {
+    t += p.prepMin(j.big);
+    return Math.max(0, Math.max(t + p.courierMin + j.driveMin, j.windowFrom) - j.deadline);
+  });
+}
+
+/**
+ * Главный магазин вперёд: пока его заказ опаздывает, а перед ним стоит заказ другого магазина, тот
+ * (с самым поздним сроком из стоящих перед ним) уходит сразу за опаздывающий. Каждый перенос
+ * двигает чужой заказ только назад, а опоздание заказов главного магазина от этого не растёт, —
+ * цикл конечен.
+ */
+function priorityFirst(queue: PlanJob[], lineStart: number, p: PlanParams): PlanJob[] {
+  const q = [...queue];
+  for (;;) {
+    const late = lateness(q, lineStart, p);
+    const k = q.findIndex((j, i) => j.priority && late[i] > LATE_TOLERANCE_MIN);
+    if (k < 0) return q;
+    let move = -1;
+    for (let i = 0; i < k; i++) {
+      if (!q[i].priority && (move < 0 || latestReady(q[i], p.courierMin) >= latestReady(q[move], p.courierMin))) move = i;
+    }
+    // Перед ним только заказы главного магазина — переставлять нечего.
+    if (move < 0) return q;
+    const [j] = q.splice(move, 1);
+    q.splice(k, 0, j); // опаздывающий сдвинулся на место k − 1: вставка на k — сразу за ним
+  }
+}
+
 export function planDay(jobs: PlanJob[], p: PlanParams): Plan {
-  const queue = order(jobs, p.courierMin);
+  const byDeadline = order(jobs, p.courierMin);
   let lineStart = p.lineStart;
   if (p.earliestLineStart != null) {
     // Насколько раньше начать, чтобы самый срочный заказ успел: смотрим накопленную сборку.
     let acc = 0;
     let need = lineStart;
-    for (const j of queue) {
+    for (const j of byDeadline) {
       acc += p.prepMin(j.big);
       need = Math.min(need, latestReady(j, p.courierMin) - acc);
     }
     lineStart = Math.max(p.earliestLineStart, Math.min(lineStart, need));
   }
+  const queue = priorityFirst(byDeadline, lineStart, p);
 
   const items: PlanItem[] = [];
   let t = lineStart;
@@ -88,7 +126,8 @@ export function planDay(jobs: PlanJob[], p: PlanParams): Plan {
 
 /**
  * Влезет ли ещё один заказ: вставляем и смотрим, что стало с остальными. «Да» — если новый не в
- * риске и ни один из прежних не ушёл в риск и не стал позже, чем был, сверх допуска.
+ * риске и ни один из прежних заказов ГЛАВНОГО магазина не ушёл в риск и не стал позже, чем был,
+ * сверх допуска. Опоздание других магазинов новый заказ не останавливает (владелец 29.09.2026).
  */
 export function canFit(jobs: PlanJob[], job: PlanJob, p: PlanParams): { ok: boolean; etaAt: number | null } {
   const before = planDay(jobs, p);
@@ -96,7 +135,7 @@ export function canFit(jobs: PlanJob[], job: PlanJob, p: PlanParams): { ok: bool
   const mine = after.items.find((i) => i.id === job.id)!;
   if (mine.risk) return { ok: false, etaAt: mine.etaAt };
   for (const a of after.items) {
-    if (a.id === job.id) continue;
+    if (a.id === job.id || !a.priority) continue;
     const b = before.items.find((i) => i.id === a.id);
     const worse = a.lateMin > LATE_TOLERANCE_MIN && (!b || a.lateMin > b.lateMin);
     if (worse) return { ok: false, etaAt: mine.etaAt };

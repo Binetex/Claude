@@ -16,7 +16,7 @@ import { resolveDeepseekConfig } from "@/integrations/deepseek/settings";
 import { createDeepseekClient, type DeepseekClient } from "@/integrations/deepseek/client";
 import { DeepseekError } from "@/integrations/deepseek/errors";
 import { buildMessages, parseReply, describeDeliveryDay, agreeFromMin, type HistoryLine, type OrderSnapshot } from "./prompt";
-import { orderEarliest, siteEarliest } from "@/modules/timing/load";
+import { orderEarliest, siteEarliest, sameDayNeedsCheck } from "@/modules/timing/load";
 import { clockLabelEn } from "@/modules/timing/day";
 import { matchIntent } from "./intents";
 import { readTemplates, templateApplies, renderAssistantTemplate } from "./templates";
@@ -243,7 +243,7 @@ export function buildAssistantHandler(prisma: PrismaClient, deps: AssistantDeps 
     const messages = buildMessages({
       knowledgeBase: order ? site.aiKnowledgeBase : site.aiUnknownKnowledgeBase,
       order: order ? { ...snapshot(order, site.name, incoming.partyRole, clock.dateStr), earliest: labelOf(orderEarliestMin) } : null,
-      earliestNew: newEarliest ? { today: labelOf(newEarliest.today), tomorrow: labelOf(newEarliest.tomorrow) } : undefined,
+      earliestNew: newEarliest ? { today: labelOf(newEarliest.today), tomorrow: labelOf(newEarliest.tomorrow), todayCheck: newEarliest.todayCheck } : undefined,
       history: await loadHistory(prisma, order?.id ?? null, phone, incoming.storePhone, incoming, site.timezone, answeredIds),
       now: clock,
       globalNote,
@@ -276,8 +276,9 @@ export function buildAssistantHandler(prisma: PrismaClient, deps: AssistantDeps 
       return;
     }
 
-    // Соглашаться на время можно не раньше, чем успеваем собрать и довезти.
-    let earliestMin = order ? orderEarliestMin : newEarliest?.today;
+    // Соглашаться на время можно не раньше, чем успеваем собрать и довезти. Сегодня после 13:00
+    // новому заказу время сам ассистент не подтверждает вовсе: решает человек.
+    let earliestMin = order ? orderEarliestMin : newEarliest?.todayCheck ? null : newEarliest?.today;
     // Незнакомому номеру ответ бывает и про завтра — у завтра свой порог.
     const tomorrowAgree = newEarliest ? { agreeFromMinTomorrow: agreeFromMin(newEarliest.tomorrow) } : {};
     let parsed = parseReply(raw, { agreeFromMin: agreeFromMin(earliestMin), ...tomorrowAgree });
@@ -436,19 +437,22 @@ export async function earliestFor(
   return orderEarliest(prisma, order.id, now).catch(logTimingError);
 }
 
-/** Незнакомый номер: самое раннее время для нового заказа сегодня и завтра. */
+/**
+ * Незнакомый номер: самое раннее время для нового заказа сегодня и завтра. todayCheck — сегодня
+ * после 13:00 (владелец 29.09.2026): цветы уже не закупить, и сегодняшний заказ решает человек.
+ */
 async function earliestForNew(
   prisma: PrismaClient,
   siteId: string,
   todayStr: string,
   now: Date
-): Promise<{ today: number | null | undefined; tomorrow: number | null | undefined }> {
+): Promise<{ today: number | null | undefined; tomorrow: number | null | undefined; todayCheck: boolean }> {
   const tomorrowStr = new Date(Date.parse(`${todayStr}T00:00:00Z`) + 86_400_000).toISOString().slice(0, 10);
   const [today, tomorrow] = await Promise.all([
     siteEarliest(prisma, siteId, todayStr, now).catch(logTimingError),
     siteEarliest(prisma, siteId, tomorrowStr, now).catch(logTimingError),
   ]);
-  return { today, tomorrow };
+  return { today, tomorrow, todayCheck: sameDayNeedsCheck(todayStr, now) };
 }
 
 /** Минуты → «2:30 PM» для модели; null и undefined проходят как есть. */

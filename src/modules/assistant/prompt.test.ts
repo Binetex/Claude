@@ -498,6 +498,12 @@ describe("самое раннее время в запросе", () => {
     expect(m[1].content).toContain("Earliest possible delivery for a new order: today 3 PM; tomorrow 12:30 PM.");
   });
 
+  it("сегодня после 13:00 — не обещать и не отказывать: проверит флорист (владелец 29.09.2026)", () => {
+    const m = buildMessages({ knowledgeBase: "", order: null, history: [], incomingText: "same day today?", earliestNew: { today: "5 PM", tomorrow: "8:30 AM", todayCheck: true } });
+    expect(m[1].content).toContain("Earliest possible delivery for a new order: today only after we check with the florist (it is past 1 PM); tomorrow 8:30 AM.");
+    expect(m[0].content).toContain('say\n  you will check whether we can still make it today, and set "needs_human" to true');
+  });
+
   it("проверка ответа — с той же минуты: не знаем — с 16:00, не успеть — ни с какой", () => {
     expect(agreeFromMin(14 * 60 + 30)).toBe(14 * 60 + 30);
     expect(agreeFromMin(undefined)).toBe(16 * 60);

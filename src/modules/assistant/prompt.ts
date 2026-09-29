@@ -52,9 +52,10 @@ export type PromptInput = {
   catalog?: CatalogLine[];
   /**
    * Незнакомый номер: самое раннее время для нового заказа сегодня и завтра («2:30 PM»; null — в
-   * этот день уже не успеть). Поля нет — судить не по чему.
+   * этот день уже не успеть). Поля нет — судить не по чему. todayCheck — сегодня после 13:00:
+   * цветы уже не закупить, сегодняшний заказ не обещаем и не отклоняем — решает человек.
    */
-  earliestNew?: { today?: string | null; tomorrow?: string | null };
+  earliestNew?: { today?: string | null; tomorrow?: string | null; todayCheck?: boolean };
   /** Откуда пришло и чем уходит ответ: SMS (по умолчанию) или письмо в переписке заказа. */
   channel?: "sms" | "email";
   /** Письмо: имя того, кто пишет, если это заказчик (адрес из заказа). Иначе модель брала имя получателя. */
@@ -263,7 +264,9 @@ function timingRules(hasOrder: boolean): string {
   If the earliest possible delivery says it is not possible anymore that day, offer the next day.
   Whatever the case, name the delivery day correctly: "today" only if it really is today.${hasOrder ? "" : `
   You have no order yet: never confirm a time for an existing order before you have found it,
-  and never ask a new customer until what time they will be home: tell them what is possible.`}`;
+  and never ask a new customer until what time they will be home: tell them what is possible.
+  If today says to check with the florist first, do not promise today and do not refuse it: say
+  you will check whether we can still make it today, and set "needs_human" to true.`}`;
 }
 
 const RULES_KNOWN_ORDER = `${VOICE}
@@ -420,7 +423,8 @@ export function buildMessages(input: PromptInput): DeepseekMessage[] {
   if (input.order) parts.push(`Order data:\n${orderBlock(input.order)}`);
   if (!input.order) {
     const e = input.earliestNew;
-    parts.push(`Earliest possible delivery for a new order: today ${earliestText(e ? e.today : undefined)}; tomorrow ${earliestText(e ? e.tomorrow : undefined)}.`);
+    const today = e?.todayCheck ? "only after we check with the florist (it is past 1 PM)" : earliestText(e ? e.today : undefined);
+    parts.push(`Earliest possible delivery for a new order: today ${today}; tomorrow ${earliestText(e ? e.tomorrow : undefined)}.`);
   }
   if (input.catalog?.length) {
     const lines = input.catalog.map((c) => [c.name, c.price, c.url].filter(Boolean).join(" | "));

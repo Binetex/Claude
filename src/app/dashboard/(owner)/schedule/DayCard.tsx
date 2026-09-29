@@ -1,8 +1,8 @@
 import Link from "next/link";
 import { cn } from "@/lib/cn";
 import type { DaySchedule, FloristDay, ScheduleOrder } from "@/modules/timing/load";
-import { fmtDuration } from "@/modules/timing/day";
-import { MorningLock } from "./ScheduleControls";
+import { fmtDuration, type ClosureLevel } from "@/modules/timing/day";
+import { DayLock } from "./ScheduleControls";
 
 /**
  * Карточка дня — одна на обеих вкладках «Графика доставки». День → флористы в две колонки →
@@ -39,7 +39,7 @@ export function DayCard({
   schedule: DaySchedule;
   label?: string;
   shopsOf: (id: string) => string;
-  /** plan — впереди: очередь по расписанию, замок утра; review — прошло: как успели. */
+  /** plan — впереди: очередь по расписанию, замок дня; review — прошло: как успели. */
   mode: "plan" | "review";
 }) {
   const florists = mode === "review" ? s.florists.filter((f) => f.orders.length > 0) : s.florists;
@@ -58,7 +58,7 @@ export function DayCard({
         {mode === "plan" ? (
           <div className="flex items-center gap-3">
             {riskCount > 0 && <span className="whitespace-nowrap rounded-full bg-rose-50 px-3 py-1 text-sm font-medium text-rose-700">Не успеваем: {riskCount}</span>}
-            <MorningLock day={s.day} closed={!!s.closure} />
+            <DayLock day={s.day} level={s.closure?.level ?? null} />
           </div>
         ) : (
           delivered.length > 0 && (
@@ -70,7 +70,7 @@ export function DayCard({
       </header>
 
       {mode === "plan" && s.closure && (
-        <div className="mx-6 mt-4 rounded-lg bg-rose-50 px-4 py-2.5 text-sm text-rose-700">Утро закрыто вручную — ИИ и сайт не предлагают доставку раньше 15:00</div>
+        <div className="mx-6 mt-4 rounded-lg bg-rose-50 px-4 py-2.5 text-sm text-rose-700">{CLOSURE_NOTE[s.closure.level]}</div>
       )}
       {mode === "plan" && s.unassigned.length > 0 && (
         <div className="mx-6 mt-4 rounded-lg bg-amber-50 px-4 py-2.5 text-sm text-amber-800">
@@ -83,7 +83,7 @@ export function DayCard({
       ) : (
         <div className="grid divide-y divide-slate-100 md:grid-cols-2 md:divide-x md:divide-y-0">
           {florists.map((f) => (
-            <FloristPanel key={f.id} f={f} shops={shopsOf(f.id)} mode={mode} />
+            <FloristPanel key={f.id} f={f} shops={shopsOf(f.id)} mode={mode} sameDayCheck={s.sameDayCheck} />
           ))}
         </div>
       )}
@@ -91,14 +91,23 @@ export function DayCard({
   );
 }
 
-/** Самое раннее для нового клиента — ровно то, что ИИ сейчас называет клиентам этого флориста. */
-function EarliestChip({ min }: { min: number | null }) {
+/** Что значит замок дня — для ИИ и для сайтов. */
+const CLOSURE_NOTE: Record<ClosureLevel, string> = {
+  MORNING: "Утро закрыто вручную — ИИ и сайты не предлагают доставку раньше 15:00",
+  DAY: "Открыт только вечер — ИИ и сайты не предлагают доставку раньше 18:00",
+  FULL: "День закрыт — новых заказов на него ИИ и сайты не берут; принятые возим как обычно",
+};
+
+/** Самое раннее для нового клиента — ровно то, что ИИ сейчас называет клиентам TheFlow. */
+function EarliestChip({ min, check }: { min: number | null; check: boolean }) {
+  // После 13:00 цветы на сегодня уже не закупить: сегодняшний заказ ИИ не обещает — решаете вы.
+  if (check) return <span className="whitespace-nowrap rounded-full bg-amber-50 px-3 py-1 text-sm font-medium text-amber-700 ring-1 ring-amber-200">Новый заказ на сегодня — решаете вы</span>;
   if (min == null) return <span className="rounded-full bg-rose-50 px-3 py-1 text-sm font-medium text-rose-700 ring-1 ring-rose-200">Новый заказ уже не успеть</span>;
   const tone = min <= 13 * 60 ? "bg-emerald-50 text-emerald-700 ring-emerald-200" : min <= 16 * 60 ? "bg-amber-50 text-amber-700 ring-amber-200" : "bg-rose-50 text-rose-700 ring-rose-200";
   return <span className={cn("whitespace-nowrap rounded-full px-3 py-1 text-sm font-medium ring-1", tone)}>Новый заказ — к {hm(min)}</span>;
 }
 
-function FloristPanel({ f, shops, mode }: { f: FloristDay; shops: string; mode: "plan" | "review" }) {
+function FloristPanel({ f, shops, mode, sameDayCheck }: { f: FloristDay; shops: string; mode: "plan" | "review"; sameDayCheck: boolean }) {
   if (f.dayOff && mode === "plan" && f.orders.length === 0) {
     return (
       <div className="px-6 py-5">
@@ -121,7 +130,7 @@ function FloristPanel({ f, shops, mode }: { f: FloristDay; shops: string; mode: 
             <div className="mt-1 text-sm font-medium text-amber-700">Ранний заказ: начать в {hm(f.earlyStartMin)}</div>
           )}
         </div>
-        {mode === "plan" && <EarliestChip min={f.newClientEarliest} />}
+        {mode === "plan" && <EarliestChip min={f.newClientEarliest} check={sameDayCheck} />}
       </div>
 
       {f.orders.length > 0 ? (

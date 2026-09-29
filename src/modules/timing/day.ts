@@ -15,6 +15,57 @@ export const BIG_BOUQUET_PRICE = 250;
 export const MORNING_END_HOUR = 15;
 /** Опоздание в пределах этого — не опоздание (решение владельца: «20 минут — ничего страшного»). */
 export const LATE_TOLERANCE_MIN = 20;
+/** Вечер: с этого часа открыт день под замком «только вечер» и привозим сегодняшний заказ без места. */
+export const EVENING_START_MIN = 18 * 60;
+/**
+ * После этого часа цветы на сегодня уже не закупить (владелец 29.09.2026): новый заказ на сегодня
+ * не обещаем и не отклоняем сами — решает человек. До него сегодня берём всегда.
+ */
+export const SAME_DAY_CUTOFF_MIN = 13 * 60;
+
+/**
+ * Главный магазин (владелец 29.09.2026): «первостепенно доставить заказы TheFlow, остальные сайты —
+ * второстепенно, опоздаем там — ничего страшного». Его заказы в очереди обязаны успеть.
+ */
+const PRIORITY_SHOPS = new Set(["THEFLOW"]);
+
+export function isPriorityShop(shortName: string | null | undefined): boolean {
+  return !!shortName && PRIORITY_SHOPS.has(shortName.toUpperCase());
+}
+
+/**
+ * Замок дня в «Графике доставки»: утро закрыто (с 15:00), только вечер (с 18:00), весь день.
+ * Его видят ИИ и сайты с плагином доставки (`/api/public/morning-closures`).
+ */
+export type ClosureLevel = "MORNING" | "DAY" | "FULL";
+export const CLOSURE_LEVELS: ClosureLevel[] = ["MORNING", "DAY", "FULL"];
+
+/** С какой минуты день открыт под замком; null — закрыт целиком. */
+export const CLOSURE_OPEN_FROM: Record<ClosureLevel, number | null> = {
+  MORNING: MORNING_END_HOUR * 60,
+  DAY: EVENING_START_MIN,
+  FULL: null,
+};
+
+export function asClosureLevel(v: string | null | undefined): ClosureLevel | null {
+  return CLOSURE_LEVELS.includes(v as ClosureLevel) ? (v as ClosureLevel) : null;
+}
+
+/**
+ * Самое раннее время с учётом замка дня. Весь день закрыт — новых заказов нет, а уже принятые
+ * возим как обычно: отказывать им из-за замка значило бы перенести чужую оплаченную доставку.
+ */
+export function withClosure(earliest: number | null, level: ClosureLevel | null, forNewOrder: boolean): number | null {
+  if (earliest == null || !level) return earliest;
+  const from = CLOSURE_OPEN_FROM[level];
+  if (from == null) return forNewOrder ? null : earliest;
+  return Math.max(earliest, from);
+}
+
+/** Новый заказ на сегодня до 13:00 берём всегда: места по графику нет — значит, вечером. */
+export function sameDayFallback(planned: number | null, nowMin: number): number | null {
+  return planned ?? (nowMin < SAME_DAY_CUTOFF_MIN ? EVENING_START_MIN : null);
+}
 
 export type OrderItemLike = { price: number; quantity?: number };
 

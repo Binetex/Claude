@@ -65,19 +65,41 @@ describe("canFit / earliestBy — влезет ли ещё один", () => {
 
   it("не влезает, если из-за него кто-то уходит в риск", () => {
     // Четвёртый к 13:30 встаёт вторым и выталкивает «c» за 15:00.
-    const busy = [job("a", h(13)), job("b", h(14, 30)), job("c", h(15, 5))];
+    const busy = [job("a", h(13), { priority: true }), job("b", h(14, 30), { priority: true }), job("c", h(15, 5), { priority: true })];
     expect(canFit(busy, job("new", h(13, 30)), P).ok).toBe(false);
   });
 
   it("самый ранний срок — по получасу, пока не влезет", () => {
     const e = earliestBy(day, { id: "new", big: false, windowFrom: 0, driveMin: 50 }, P);
     expect(e).not.toBeNull();
-    expect(canFit(day, job("new", e!), P).ok).toBe(true);
-    expect(canFit(day, job("new", e! - 30), P).ok).toBe(false);
+    // Проверяем тем же заказом, что ищет earliestBy: без начала окна (при равных сроках он встаёт раньше).
+    expect(canFit(day, job("new", e!, { windowFrom: 0 }), P).ok).toBe(true);
+    expect(canFit(day, job("new", e! - 30, { windowFrom: 0 }), P).ok).toBe(false);
   });
 
   it("заказ заранее: самый ранний срок может быть и утром", () => {
     const e = earliestBy([], { id: "new", big: false, windowFrom: 0, driveMin: 30 }, { ...P, earliestLineStart: h(6) });
     expect(e).toBeLessThan(h(9));
+  });
+});
+
+describe("главный магазин (TheFlow) обязан успеть, остальные — в промежутки", () => {
+  it("чужой заказ перед опаздывающим заказом TheFlow уходит за него", () => {
+    const plan = planDay([job("other", h(13)), job("flow", h(13, 10), { priority: true })], P);
+    const byId = Object.fromEntries(plan.items.map((i) => [i.id, i]));
+    expect([byId.flow.seq, byId.other.seq]).toEqual([1, 2]);
+    expect(byId.flow.risk).toBe(false);
+  });
+
+  it("пока TheFlow успевает, порядок — по срокам", () => {
+    const plan = planDay([job("other", h(13)), job("flow", h(19), { priority: true })], P);
+    const byId = Object.fromEntries(plan.items.map((i) => [i.id, i]));
+    expect([byId.other.seq, byId.flow.seq]).toEqual([1, 2]);
+  });
+
+  it("опоздание заказа другого магазина новый заказ не останавливает, заказа TheFlow — останавливает", () => {
+    const fresh = job("new", h(13, 20));
+    expect(canFit([job("b", h(13, 45))], fresh, P).ok).toBe(true);
+    expect(canFit([job("b", h(13, 45), { priority: true })], fresh, P).ok).toBe(false);
   });
 });
