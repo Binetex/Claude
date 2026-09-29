@@ -174,7 +174,7 @@ export async function applyDeliveryStatusUpdate(
     }
   }
 
-  // Захват фактической стоимости доставки Uber (Path A). Best-effort: сбой стоимости НЕ ломает
+  // Захват фактической стоимости доставки от любого курьера (Path A). Best-effort: сбой стоимости НЕ ломает
   // статус/delivered — цену подхватит следующий webhook. Отсутствие суммы старое НЕ обнуляет.
   try {
     const costDecision = decideCostUpdate(

@@ -144,7 +144,9 @@ describe("предпросмотр", () => {
   it("считает выбранное и ничего не пишет", async () => {
     const before = await prisma.order.findUnique({ where: { id: withFinal }, select: { deliveryActualCostConfirmedAt: true } });
 
-    const preview = await previewBurqDeliveryConfirmation([withFinal, withQuote]);
+    // Та же «сейчас», что у списка кандидатов: заказы теста — за июль 2026, и с настоящей датой
+    // они выпадали бы из окна детектора (тест падал, как только прошло больше окна).
+    const preview = await previewBurqDeliveryConfirmation([withFinal, withQuote], new Date("2026-07-29T12:00:00.000Z"));
     expect(preview.orders).toBe(2);
     expect(preview.totalCents).toBe(1250 + 999);
     expect(preview.finalCount).toBe(1);

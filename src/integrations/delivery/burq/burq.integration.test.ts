@@ -583,11 +583,13 @@ describe("Uber cost capture (Path A)", () => {
     expect(Number((await prisma.order.findUnique({ where: { id: orderId } }))!.deliveryActualCost)).toBe(15.5);
   });
 
-  it("другой провайдер → стоимость игнорируется (deliveryActualCost не меняется)", async () => {
+  it("другой курьер (DoorDash) → стоимость тоже записывается: платим мы за любого (23fdc2b)", async () => {
     const { orderId, deliveryId } = await makeDraftedOrder();
     await applyDeliveryStatusUpdate(prisma, vi.fn(), { deliveryId, providerEventId: "e1", ...uber({ provider: "doordash" }) });
-    expect(Number((await prisma.order.findUnique({ where: { id: orderId } }))!.deliveryActualCost)).toBe(0);
-    expect((await prisma.delivery.findUnique({ where: { id: deliveryId } }))!.finalCost).toBeNull();
+    expect(Number((await prisma.order.findUnique({ where: { id: orderId } }))!.deliveryActualCost)).toBe(15.5);
+    const del = await prisma.delivery.findUnique({ where: { id: deliveryId } });
+    expect(Number(del!.finalCost)).toBe(15.5);
+    expect(del!.providerName).toBe("doordash");
   });
 
   it("нет суммы → старое значение не обнуляется", async () => {

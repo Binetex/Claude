@@ -442,9 +442,9 @@ export type BulkDeliveryPreview = {
   quoteCount: number;
 };
 
-/** Что будет применено. Ничего не пишет. */
-export async function previewBurqDeliveryConfirmation(orderIds: string[]): Promise<BulkDeliveryPreview> {
-  const all = await listBurqDeliveryCandidates();
+/** Что будет применено. Ничего не пишет. `now` — та же граница окна, что у списка кандидатов. */
+export async function previewBurqDeliveryConfirmation(orderIds: string[], now: Date = new Date()): Promise<BulkDeliveryPreview> {
+  const all = await listBurqDeliveryCandidates(now);
   const chosen = all.filter((c) => orderIds.includes(c.orderId));
   return {
     orders: chosen.length,
