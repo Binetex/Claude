@@ -28,6 +28,7 @@ import {
   buildAuthorizeUrl,
 } from "@/integrations/shopify/oauth";
 import { startProductSyncInBackground } from "@/modules/catalog/sync";
+import { addOrderSurcharge } from "@/modules/orders/surcharge";
 import { startOrderSyncInBackground } from "@/modules/orders/sync";
 import { getAppUrl } from "@/lib/appUrl";
 import { TERMINAL_ORDER_STATUSES } from "@/lib/statuses";
@@ -69,6 +70,23 @@ export async function ownerUpdateManualCharges(
 ): Promise<{ ok?: true; error?: string }> {
   const user = await requireRole("OWNER");
   const res = await updateManualOrderCharges(orderId, charges, { userId: user.id, role: user.role });
+  if (!res.ok) return { error: res.error };
+  revalidatePath(`/dashboard/orders/${orderId}`);
+  revalidatePath("/dashboard/orders");
+  revalidatePath("/dashboard/finance/florists");
+  return { ok: true };
+}
+
+/**
+ * Доплата к заказу — клиент решил доплатить (например, за другой букет). Только владелец: это
+ * деньги заказа и вход дневных финансов. Что изменилось, модуль сам пишет флористу.
+ */
+export async function ownerAddSurcharge(
+  orderId: string,
+  input: { amount: number; note: string; notifyFlorist: boolean }
+): Promise<{ ok?: true; error?: string }> {
+  const user = await requireRole("OWNER");
+  const res = await addOrderSurcharge(orderId, input, { userId: user.id, role: user.role });
   if (!res.ok) return { error: res.error };
   revalidatePath(`/dashboard/orders/${orderId}`);
   revalidatePath("/dashboard/orders");

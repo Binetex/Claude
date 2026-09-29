@@ -44,6 +44,8 @@ import { markOrderCommunicationsRead, countUnreadBySide, parseAttachments } from
 import { loadOrderEmailPanel, markOrderEmailsRead } from "@/integrations/emailFactory/read";
 import { FloristAvatar } from "@/components/FloristAvatar";
 import { ChargesDialog } from "./ChargesDialog";
+import { SurchargeDialog } from "./SurchargeDialog";
+import { orderSurchargeTotal } from "@/modules/orders/surcharge";
 import { MarketingMarkCard } from "./MarketingMarkCard";
 import { BouquetPhotoButton } from "@/components/orders/BouquetPhotoButton";
 import { backToList } from "@/lib/backLink";
@@ -78,6 +80,8 @@ export default async function OwnerOrderPage({
   if (!order) notFound();
   // Частые окна магазина — кнопки в выборе времени доставки.
   const windowPresets = await loadWindowPresets(prisma, order.siteId).catch(() => []);
+  // Сколько из суммы товаров — доплата клиента (журнал правок): раскладка пишет «в т.ч.».
+  const surcharge = await orderSurchargeTotal(order.id).catch(() => 0);
 
   const florists = await prisma.florist.findMany({ include: { user: true }, orderBy: { createdAt: "asc" } });
 
@@ -306,22 +310,26 @@ export default async function OwnerOrderPage({
           {/* Раскладка счёта клиента. Прибыли здесь нет — см. комментарий к странице. */}
           <OrderFinanceBreakdown
             title="Раскладка заказа"
-            finance={order.finance}
+            finance={{ ...order.finance, surcharge }}
             action={
-              // Только у заказов, заведённых руками: у платформенных суммы придут с синхронизацией
-              // и затрут правку.
-              order.source === "MANUAL" ? (
-                <ChargesDialog
-                  orderId={order.id}
-                  itemsTotal={order.finance.itemsTotal}
-                  current={{
-                    tax: order.finance.tax,
-                    tip: order.finance.tip,
-                    discount: order.finance.discount,
-                    deliveryCustomerCost: order.finance.deliveryCustomerCost,
-                  }}
-                />
-              ) : null
+              <div className="flex items-center gap-3">
+                {/* Доплата — у любого заказа: суммы после создания синхронизация не трогает. */}
+                <SurchargeDialog orderId={order.id} customerTotal={order.finance.customerTotal} hasFlorist={!!order.currentFloristId} />
+                {/* Налог, чаевые, доставка и скидка — только у заказов, заведённых руками: у
+                    платформенных они придут с синхронизацией и затрут правку. */}
+                {order.source === "MANUAL" && (
+                  <ChargesDialog
+                    orderId={order.id}
+                    itemsTotal={order.finance.itemsTotal}
+                    current={{
+                      tax: order.finance.tax,
+                      tip: order.finance.tip,
+                      discount: order.finance.discount,
+                      deliveryCustomerCost: order.finance.deliveryCustomerCost,
+                    }}
+                  />
+                )}
+              </div>
             }
           />
 

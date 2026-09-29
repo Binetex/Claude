@@ -275,13 +275,27 @@ export function renderCustomerCallRequest(o: OrderSnapshot, quote: string | null
  * карточке заказа выше, её тем же переносом правят на месте.
  */
 export function renderDeliveryChanged(o: OrderSnapshot, fromText: string | null, toText: string | null): string {
-  const bouquet = [...new Set(o.items.map((i) => i.name.trim()).filter(Boolean))].join(", ");
+  const bouquet = bouquetNames(o);
   return (
     `📅 <b>Перенос ${esc(o.orderNumber)}</b>` +
     (bouquet ? ` (${esc(bouquet)})` : "") +
     (toText?.trim() ? ` Стало: <b>${esc(toText.trim())}</b>` : "") +
     (fromText?.trim() ? `\n(Было: ${esc(fromText.trim())})` : "")
   );
+}
+
+/** Букеты заказа через запятую, без повторов: «Red Roses & Vase, Balloons». */
+function bouquetNames(o: OrderSnapshot): string {
+  return [...new Set(o.items.map((i) => i.name.trim()).filter(Boolean))].join(", ");
+}
+
+/**
+ * Владелец изменил заказ — флористу: номер, букет и что теперь делать иначе, как у переноса —
+ * главное первой строкой. Денег здесь нет: доплату клиента флорист не видит.
+ */
+export function renderFloristNote(o: OrderSnapshot, text: string | null): string {
+  const bouquet = bouquetNames(o);
+  return (`✏️ <b>Изменение ${esc(o.orderNumber)}</b>` + (bouquet ? ` (${esc(bouquet)})` : "") + (text?.trim() ? `\n${esc(text.trim())}` : "")).trimEnd();
 }
 
 /**

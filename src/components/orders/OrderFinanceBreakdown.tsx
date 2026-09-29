@@ -18,6 +18,8 @@ export type OrderFinanceView = {
   discount: number;
   deliveryCustomerCost: number;
   customerTotal: number;
+  /** Сколько из суммы товаров — доплата клиента (владелец 29.09.2026). Только у владельца. */
+  surcharge?: number;
 };
 
 export function OrderFinanceBreakdown({
@@ -45,6 +47,7 @@ export function OrderFinanceBreakdown({
         <div className="grid grid-cols-1 gap-x-6 gap-y-1 text-sm sm:grid-cols-2 md:grid-cols-3">
           <Row label="Сумма товаров" value={finance.itemsTotal} />
           <Row label="Итог заказчика" value={finance.customerTotal} />
+          {!!finance.surcharge && <Row label="в т.ч. доплата" value={finance.surcharge} />}
           <Row label="Налог" value={finance.tax} />
           <Row label="Доставка (заказчик)" value={finance.deliveryCustomerCost} />
           <Row label="Чаевые" value={finance.tip} />

@@ -18,6 +18,7 @@ export const TELEGRAM_EVENTS = [
   "order.created",
   "order.delivery_changed",
   "order.delivery_changed_owner",
+  "order.florist_note",
   "payment.failed",
   "payment.pending_too_long",
   "payment.status_mismatch",
@@ -99,6 +100,14 @@ const REGISTRY: Record<TelegramEventType, TelegramEventDef> = {
     // освежает order.created следом.
     dedupeKey: ({ orderId, occurrence }) => `order:${orderId}:owner.delivery:${occurrence ?? "0"}`,
     description: "Время доставки изменили — владельцу коротким сообщением.",
+  },
+  "order.florist_note": {
+    type: "order.florist_note",
+    audience: "FLORIST",
+    perFlorist: true,
+    // Каждое изменение — НОВОЕ сообщение: флорист должен его увидеть, а не найти правку в старом.
+    dedupeKey: ({ orderId, floristId, occurrence }) => `order:${orderId}:florist:${floristId}:note:${occurrence ?? "-"}`,
+    description: "Владелец изменил заказ (клиент доплатил за другой букет и т.п.) — флористу, что делать иначе.",
   },
   "payment.failed": {
     type: "payment.failed",

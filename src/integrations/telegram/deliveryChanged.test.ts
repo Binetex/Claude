@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { getTelegramEvent } from "./registry";
-import { renderDeliveryChanged, renderOwnerDeliveryChanged } from "./templates";
+import { renderDeliveryChanged, renderOwnerDeliveryChanged, renderFloristNote } from "./templates";
 
 const order = {
   id: "o1",
@@ -102,5 +102,19 @@ describe("перенос доставки — короткое уведомле�
     expect(text).toMatch(/9 Sep.*9AM|9 Sep,/);
     expect(text).not.toContain("undefined");
     expect(text).not.toContain("null");
+  });
+});
+
+describe("изменение заказа — флористу (доплата за другой букет, 29.09.2026)", () => {
+  it("тип в реестре: личным ботом флориста, каждое изменение — новое сообщение", () => {
+    const def = getTelegramEvent("order.florist_note")!;
+    expect(def.audience).toBe("FLORIST");
+    expect(def.perFlorist).toBe(true);
+    expect(def.dedupeKey({ orderId: "o1", floristId: "f1", occurrence: "a" })).not.toBe(def.dedupeKey({ orderId: "o1", floristId: "f1", occurrence: "b" }));
+  });
+
+  it("номер, букет и что делать — без денег", () => {
+    const withBouquet = { ...order, items: [{ name: "Golden Chestnut", variantName: null, quantity: 1, composition: null }] };
+    expect(renderFloristNote(withBouquet, "Вместо него — Red Roses & Vase")).toBe("✏️ <b>Изменение JF-1001374</b> (Golden Chestnut)\nВместо него — Red Roses &amp; Vase");
   });
 });
