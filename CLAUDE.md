@@ -915,8 +915,9 @@ WooCommerce → Settings → Emails → «Refunded order».
   требуют живой БД в `DATABASE_URL`; часть из них дополнительно требует
   `CREDENTIALS_ENCRYPTION_KEY` и креды интеграций, без них они штатно падают.
 - **Почтовый домен в нашем модуле (Email Factory)** на 29.09.2026 выбран у JF
-  (juliesflowers.net), THEFLOW (theflow.la), PLOMBIR (plombirfloral.com); FLWBR, OHARA и PAR
-  владелец подключает. Без домена письма правил там пропускаются (`domain_not_selected`).
+  (juliesflowers.net), THEFLOW (theflow.la), PLOMBIR (plombirfloral.com), FLWBR
+  (flowerbarflorist.com, пишет с admin@) и PAR (paradiseflowersart.com). У OHARA (theohara.com)
+  домена в модуле нет — письма правил там пропускаются (`domain_not_selected`).
 - На `ORDER_DELIVERED` висят **два включённых SMS-правила** (заказчику и получателю, без
   задержки) — то есть две SMS на каждый доставленный заказ. Учитывать перед правками триггера.
 - `Site.name` у JF — «JF», поэтому `site_name` в письмах не используется.
