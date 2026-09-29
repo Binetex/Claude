@@ -425,7 +425,7 @@ export function buildAssistantHandler(prisma: PrismaClient, deps: AssistantDeps 
  * или позже) и заказ не доставлен — про прошедший день обещать нечего: undefined, «не знаем».
  * null — в этот день уже не успеть.
  */
-async function earliestFor(
+export async function earliestFor(
   prisma: PrismaClient,
   order: { id: string; orderStatus: string; deliveryDate: Date | null },
   todayStr: string,
@@ -452,7 +452,7 @@ async function earliestForNew(
 }
 
 /** Минуты → «2:30 PM» для модели; null и undefined проходят как есть. */
-function labelOf(min: number | null | undefined): string | null | undefined {
+export function labelOf(min: number | null | undefined): string | null | undefined {
   return min == null ? min : clockLabelEn(min);
 }
 
@@ -510,7 +510,7 @@ async function notifyCallRequest(
  * оставить его в карточке значит, что клиент не получит ответа вовсе.
  * Сбой показа не должен ронять разбор: черновик уже записан и виден в карточке заказа.
  */
-async function finishTurn(
+export async function finishTurn(
   prisma: PrismaClient,
   turnId: string,
   action: "send" | "draft",
@@ -595,11 +595,10 @@ async function loadDeferred(
       },
     },
   });
-  return takeDeferredQueue(rows).map((r) => ({
-    id: r.communication.id,
-    ...pickText(r.communication),
-    photoUrls: parseAttachments(r.communication.attachmentsJson).map((a) => a.url),
-  }));
+  // Фильтр выше отбирает разборы ПО SMS/звонку, так что входящее у каждой строки есть.
+  return takeDeferredQueue(rows)
+    .flatMap((r) => (r.communication ? [r.communication] : []))
+    .map((c) => ({ id: c.id, ...pickText(c), photoUrls: parseAttachments(c.attachmentsJson).map((a) => a.url) }));
 }
 
 /**
@@ -666,7 +665,7 @@ function pickText(c: { messageText: string | null; transcript: string | null; su
  * DELIVERED именно его; `Order.deliveryStatus` никто не пишет). Своего поля-момента у заказа нет;
  * день доставки — ближайшая правда: «доставлен три дня назад» — это про календарь.
  */
-function deliveredMoment(order: { orderStatus: string; deliveryDate: Date | null; updatedAt: Date } | null): Date | null {
+export function deliveredMoment(order: { orderStatus: string; deliveryDate: Date | null; updatedAt: Date } | null): Date | null {
   if (!order || order.orderStatus !== "DELIVERED") return null;
   return order.deliveryDate ?? order.updatedAt;
 }
@@ -690,7 +689,7 @@ async function lastAutomatedAfter(prisma: PrismaClient, orderId: string, since: 
  * вовсе. Сутки — календарные сутки МАГАЗИНА, а не UTC: полночь UTC в LA это 17:00, и по UTC
  * потолок обнулялся бы посреди рабочего дня.
  */
-async function countReplies(
+export async function countReplies(
   prisma: PrismaClient,
   site: { timezone: string | null },
   orderId: string | null,
@@ -706,7 +705,7 @@ async function countReplies(
   return { repliesToday, repliesTotal };
 }
 
-async function alertNoBalance(prisma: PrismaClient, now: Date): Promise<void> {
+export async function alertNoBalance(prisma: PrismaClient, now: Date): Promise<void> {
   const since = new Date(now.getTime() - NO_BALANCE_ALERT_HOURS * 3_600_000);
   const recent = await prisma.aiTurn.count({ where: { status: "FAILED", skipReason: "model_no_balance", createdAt: { gte: since } } });
   // Текущая строка уже записана — «1» значит, что это первый сбой за сутки.
@@ -827,7 +826,7 @@ async function loadHistory(prisma: PrismaClient, orderId: string | null, phone: 
 
 type OrderWithSite = { orderNumber: string; orderStatus: string; deliveryStatus: string | null; deliveryDate: Date | null; deliveryWindow: string | null; recipientName: string | null; deliveryAddress: string | null; trackingUrl: string | null; bouquetPhotoUrl: string | null; total: unknown };
 
-function snapshot(order: Record<string, unknown>, storeName: string, partyRole: string, todayStr: string): OrderSnapshot {
+export function snapshot(order: Record<string, unknown>, storeName: string, partyRole: string, todayStr: string): OrderSnapshot {
   const o = order as unknown as OrderWithSite;
   const deliveryDate = o.deliveryDate ? o.deliveryDate.toISOString().slice(0, 10) : null;
   return {
@@ -853,7 +852,7 @@ function snapshot(order: Record<string, unknown>, storeName: string, partyRole: 
 }
 
 /** Полный текст запроса для журнала: владелец должен видеть, что именно спрашивали. */
-function renderPrompt(messages: { role: string; content: string }[]): string {
+export function renderPrompt(messages: { role: string; content: string }[]): string {
   return messages.map((m) => `[${m.role}]\n${m.content}`).join("\n\n");
 }
 
@@ -872,7 +871,7 @@ function dayLabel(day: string, window: string): string {
  * Woo получает новые дату и слот. В заметке строка, кто и что поменял: журнала правок от имени
  * ассистента нет. Если курьер уже вызван — не трогаем: перепланирование отменило бы курьера.
  */
-async function applyCustomerReschedule(
+export async function applyCustomerReschedule(
   prisma: PrismaClient,
   orderId: string,
   confirmed: { from: number | null; until: number | null },
@@ -923,7 +922,7 @@ async function applyCustomerReschedule(
   if (o.platform === "WOOCOMMERCE") await publishWooDeliveryPush(prisma, orderId);
 }
 
-async function recordReadyTime(
+export async function recordReadyTime(
   prisma: PrismaClient,
   order: { id: string; currentFloristId: string | null; site: { timezone: string | null } },
   communicationId: string,

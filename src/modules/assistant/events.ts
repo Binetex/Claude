@@ -37,6 +37,23 @@ export async function publishAssistantIncoming(
   });
 }
 
+/** Письмо клиента по заказу — посмотреть, надо ли отвечать (ассистент отвечает и на почту). */
+export const ASSISTANT_EMAIL_EVENT = "assistant.email";
+
+export type AssistantEmailPayload = { emailMessageId: string };
+
+/** Идемпотентно по письму: одно письмо — один разбор. Пауза та же, что у SMS: люди дописывают. */
+export async function publishAssistantEmail(repo: OutboxRepository, emailMessageId: string, from: Date = new Date()): Promise<void> {
+  await repo.enqueue({
+    eventType: ASSISTANT_EMAIL_EVENT,
+    aggregateType: "email",
+    aggregateId: emailMessageId,
+    payload: { emailMessageId } satisfies AssistantEmailPayload,
+    idempotencyKey: `assistant.email:${emailMessageId}`,
+    availableAt: new Date(from.getTime() + ASSISTANT_DELAY_SEC * 1000),
+  });
+}
+
 /** Проверка «владелец так и не ответил» — через 20 минут после показа черновика. */
 export const ASSISTANT_NUDGE_EVENT = "assistant.nudge";
 

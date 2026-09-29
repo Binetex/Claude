@@ -17,6 +17,8 @@ import type { PrismaClient } from "@/generated/prisma/client";
 import { resolveEmailFactoryToken } from "./token";
 import { listInbound, type EmailFactoryMessage } from "./client";
 import { publishTelegramNotification } from "@/integrations/telegram/events";
+import { PrismaOutboxRepository } from "@/outbox/prismaRepository";
+import { publishAssistantEmail } from "@/modules/assistant/events";
 
 /** Нахлёст: пере-спрашиваем чуть раньше курсора. Дубли отсекает уникальный providerMessageId. */
 const OVERLAP_MS = 2 * 60_000;
@@ -128,6 +130,19 @@ async function resolveOrderId(prisma: PrismaClient, m: EmailFactoryMessage): Pro
  */
 const QUOTE_START = /^\s*(?:>|On .+ wrote:|-{2,}\s*Original Message|_{5,}|From:\s)/m;
 
+/** Подписи почтовых приложений — не слова клиента: «Sent from my iPhone», «Get Outlook for iOS». */
+const APP_SIGNATURE = /^\s*(?:sent from my .*|sent from (?:yahoo|mail|outlook|gmail)\b.*|get outlook for .*)\s*$/gim;
+
+/**
+ * Новое в письме клиента — то, на что отвечает ассистент: без цитаты прошлой переписки и без
+ * подписи почтового приложения. Письмо из одной цитаты даёт пустую строку: нового в нём нет.
+ */
+export function emailNewText(text: string): string {
+  const cut = text.search(QUOTE_START);
+  const body = cut >= 0 ? text.slice(0, cut) : text;
+  return body.replace(APP_SIGNATURE, "").trim();
+}
+
 export function emailQuoteForTelegram(text: string, limit = 500): string {
   const cut = text.search(QUOTE_START);
   const body = (cut > 0 ? text.slice(0, cut) : text).trim();
@@ -167,7 +182,7 @@ export async function ingestInboundEmails(prisma: PrismaClient): Promise<IngestR
     if (exists) continue;
 
     const orderId = await resolveOrderId(prisma, m);
-    await prisma.orderEmailMessage.create({
+    const created = await prisma.orderEmailMessage.create({
       data: {
         orderId,
         providerMessageId: m.id,
@@ -180,6 +195,7 @@ export async function ingestInboundEmails(prisma: PrismaClient): Promise<IngestR
         text: m.text,
         occurredAt: m.occurredAt,
       },
+      select: { id: true },
     });
     stored += 1;
     if (!orderId) continue;
@@ -192,6 +208,14 @@ export async function ingestInboundEmails(prisma: PrismaClient): Promise<IngestR
     // Только свежие: если курсор опроса когда-нибудь отъедет назад, разбор старого ящика не
     // должен высыпать пачку уведомлений о давно разобранных письмах.
     if (Date.now() - m.occurredAt.getTime() > NOTIFY_MAX_AGE_MS) continue;
+
+    // Ассистент магазина включён — письмо разбирает он (29.09.2026): ответ клиенту или черновик
+    // людям. Уведомление «клиент ответил» он пришлёт сам, если отвечать не станет.
+    const assistantOn = await prisma.order.findUnique({ where: { id: orderId }, select: { site: { select: { aiMode: true } } } });
+    if (assistantOn && assistantOn.site.aiMode !== "OFF") {
+      await publishAssistantEmail(new PrismaOutboxRepository(prisma), created.id);
+      continue;
+    }
     await publishTelegramNotification(prisma, {
       type: "customer.email_reply",
       orderId,

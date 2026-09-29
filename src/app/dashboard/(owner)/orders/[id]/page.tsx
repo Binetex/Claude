@@ -47,6 +47,7 @@ import { ChargesDialog } from "./ChargesDialog";
 import { MarketingMarkCard } from "./MarketingMarkCard";
 import { BouquetPhotoButton } from "@/components/orders/BouquetPhotoButton";
 import { backToList } from "@/lib/backLink";
+import { emailNewText } from "@/integrations/emailFactory/ingest";
 
 export const dynamic = "force-dynamic";
 
@@ -177,6 +178,7 @@ export default async function OwnerOrderPage({
         replyText: true, skipReason: true, promptText: true, responseText: true, modelName: true,
         latencyMs: true, createdAt: true,
         communication: { select: { messageText: true, transcript: true } },
+        emailMessage: { select: { text: true } },
       },
     })
     .then((rows) =>
@@ -194,7 +196,7 @@ export default async function OwnerOrderPage({
         modelName: t.modelName,
         latencyMs: t.latencyMs,
         createdAt: t.createdAt.toISOString(),
-        incomingText: t.communication.messageText ?? t.communication.transcript ?? null,
+        incomingText: t.communication?.messageText ?? t.communication?.transcript ?? (t.emailMessage ? emailNewText(t.emailMessage.text) : null),
       }))
     )
     .catch(() => []);

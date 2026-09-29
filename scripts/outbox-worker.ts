@@ -38,7 +38,7 @@ import { buildQuoWebhookHandler, QUO_WEBHOOK_EVENT } from "@/integrations/quo/we
 import { buildAutomationTriggerHandler, buildAutomationSendHandler } from "@/modules/automations/handlers";
 import { AUTOMATION_TRIGGER_EVENT, AUTOMATION_SEND_EVENT } from "@/modules/automations/events";
 import { REPLY_WAIT_EVENT, buildReplyWaitHandler } from "@/modules/automations/replyWait";
-import { ASSISTANT_INCOMING_EVENT, buildAssistantHandler } from "@/modules/assistant/handler.registration";
+import { ASSISTANT_INCOMING_EVENT, buildAssistantHandler, ASSISTANT_EMAIL_EVENT, buildAssistantEmailHandler } from "@/modules/assistant/handler.registration";
 import { TELEGRAM_UPDATE_EVENT, buildTelegramUpdateHandler } from "@/modules/assistant/telegramReply";
 import { ASSISTANT_NUDGE_EVENT } from "@/modules/assistant/events";
 import { buildAssistantNudgeHandler } from "@/modules/assistant/deliver";
@@ -138,6 +138,7 @@ async function main() {
     // Ассистент клиентской переписки: разбирает входящее и готовит ответ. Наружу ничего не
     // уходит, пока владелец не включил режим и не снял сухой прогон.
     [ASSISTANT_INCOMING_EVENT]: buildAssistantHandler(prisma),
+    [ASSISTANT_EMAIL_EVENT]: buildAssistantEmailHandler(prisma),
     // Ответы владельца в Telegram: кнопка «Отправить» и свой текст реплаем.
     [TELEGRAM_UPDATE_EVENT]: buildTelegramUpdateHandler(prisma),
     // «Одну минуту» клиенту, если человек не успел подтвердить черновик за 20 минут.

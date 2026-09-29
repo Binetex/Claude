@@ -17,6 +17,8 @@ import { pickRecipient, storeHour } from "./routing";
 import { toE164 } from "@/lib/phone";
 import { parseAttachments } from "@/integrations/quo/communicationsService";
 import { NUDGE_AFTER_MIN, ASSISTANT_NUDGE_ENABLED } from "./events";
+import { sendOrderEmail } from "@/integrations/emailFactory/send";
+import { emailNewText } from "@/integrations/emailFactory/ingest";
 
 /** `detail` — ответ провайдера («402:0201402»), чтобы человеку было что чинить. */
 export type DeliverResult = { ok: true } | { ok: false; code: string; detail?: string };
@@ -74,6 +76,7 @@ export async function sendAssistantReply(prisma: PrismaClient, turnId: string, d
       id: true, status: true, replyText: true, orderId: true, siteId: true,
       site: { select: { aiDryRun: true, aiMode: true } },
       communication: { select: { partyRole: true, externalPhoneNormalized: true } },
+      emailMessageId: true,
       order: { select: { senderPhone: true, recipientPhone: true, aiDisabled: true } },
     },
   });
@@ -88,6 +91,21 @@ export async function sendAssistantReply(prisma: PrismaClient, turnId: string, d
   if (turn.order?.aiDisabled) return { ok: false, code: "order_disabled" };
 
   const text = turn.replyText.trim();
+
+  // Разбор письма — ответ письмом в ту же переписку заказа, нашим почтовым модулем. Защита от
+  // второго письма та же, что у SMS: прошлые попытки по ключу разбора.
+  if (turn.emailMessageId) {
+    if (!turn.orderId) return { ok: false, code: "order_not_found" };
+    const priorEmails = await prisma.orderEmailMessage.findMany({ where: { sendKey: { startsWith: `ai-turn:${turn.id}` } }, select: { status: true } });
+    const emailAttempt = nextSendKey(turn.id, priorEmails);
+    if ("alreadySent" in emailAttempt) return { ok: false, code: "already_sent" };
+    const sent = await sendOrderEmail(prisma, { orderId: turn.orderId, text, sendKey: emailAttempt.key, sentByUserId: decidedByUserId ?? null });
+    if (!sent.ok) return { ok: false, code: sent.code };
+    await prisma.aiTurn.update({ where: { id: turn.id }, data: { status: "SENT", decidedAt: new Date(), decidedByUserId: decidedByUserId ?? null } });
+    return { ok: true };
+  }
+  if (!turn.communication) return { ok: false, code: "no_incoming" };
+
   const incomingPhone = turn.communication.externalPhoneNormalized;
   const target = turn.order ? pickOrderTarget(incomingPhone, turn.communication.partyRole, turn.order) : null;
 
@@ -175,11 +193,13 @@ export async function notifyDraft(
       site: { select: { name: true, timezone: true, aiDryRun: true } },
       order: { select: { orderNumber: true, currentFloristId: true, senderPhone: true, recipientPhone: true, site: { select: { timezone: true } } } },
       communication: { select: { messageText: true, transcript: true, externalPhone: true, externalPhoneNormalized: true, partyRole: true, attachmentsJson: true } },
+      emailMessage: { select: { text: true, fromEmail: true } },
     },
   });
   if (!turn) return false;
+  const comm = turn.communication;
   // Фото клиента человек обязан увидеть: модель его не видит, и решение — по картинке.
-  const photos = burst?.photoUrls ?? parseAttachments(turn.communication.attachmentsJson).map((a) => a.url);
+  const photos = burst?.photoUrls ?? (comm ? parseAttachments(comm.attachmentsJson).map((a) => a.url) : []);
 
   // Незнакомый номер идёт только владельцу: флориста у разговора без заказа нет. Сухой прогон —
   // тоже только владельцу: проверяет ассистента он, а флористу пробные черновики с пометкой
@@ -205,17 +225,19 @@ export async function notifyDraft(
   // Обещаем «one moment» только пока напоминание включено: строчка в черновике — это то, чему
   // человек верит, решая не отвечать прямо сейчас.
   const nudgeNote = ASSISTANT_NUDGE_ENABLED ? ` Без решения через ${NUDGE_AFTER_MIN} мин клиенту уйдёт «one moment».` : "";
-  const incoming = escapeHtml(clip(burst?.text ?? turn.communication.messageText ?? turn.communication.transcript ?? "", 400));
+  const incoming = escapeHtml(clip(burst?.text ?? comm?.messageText ?? comm?.transcript ?? (turn.emailMessage ? emailNewText(turn.emailMessage.text) : ""), 400));
   const draft = turn.replyText?.trim();
   const head = `${turn.site.aiDryRun ? "🧪 Сухой прогон · " : ""}${turn.important ? "❗ Важное сообщение от клиента" : "Сообщение от клиента"}`;
   // Кто именно написал: у заказа два разговора, и человек должен видеть, кому он отвечает.
-  const side = turn.order
-    ? pickOrderTarget(turn.communication.externalPhoneNormalized, turn.communication.partyRole, turn.order)
+  const side = turn.order && comm
+    ? pickOrderTarget(comm.externalPhoneNormalized, comm.partyRole, turn.order)
     : null;
   const sideLabel = side === "RECIPIENT" ? "получатель" : side === "CUSTOMER" ? "заказчик" : "другой номер";
-  const where = turn.order
-    ? `заказ ${escapeHtml(turn.order.orderNumber)} · ${sideLabel} ${escapeHtml(turn.communication.externalPhone)}`
-    : `незнакомый номер ${escapeHtml(turn.communication.externalPhone)} · ${escapeHtml(turn.site.name)}`;
+  const where = turn.emailMessage
+    ? `заказ ${escapeHtml(turn.order?.orderNumber ?? "")} · письмо от ${escapeHtml(turn.emailMessage.fromEmail)}`
+    : turn.order
+      ? `заказ ${escapeHtml(turn.order.orderNumber)} · ${sideLabel} ${escapeHtml(comm?.externalPhone ?? "")}`
+      : `незнакомый номер ${escapeHtml(comm?.externalPhone ?? "")} · ${escapeHtml(turn.site.name)}`;
   const lines = [
     `<b>${head}</b> · ${where}`,
     "",
@@ -320,6 +342,8 @@ export function buildAssistantNudgeHandler(prisma: PrismaClient, deps: { now?: (
     if (!turn || turn.status !== "DRAFT" || turn.site.aiDryRun || turn.site.aiMode === "OFF" || turn.order?.aiDisabled) return;
     // Доставлен или отменён — по статусу заказа (Order.deliveryStatus никто не пишет).
     if (turn.order?.orderStatus === "DELIVERED" || turn.order?.orderStatus === "CANCELLED") return;
+    // «Одну минуту» — это SMS тому, кто написал SMS; у разбора письма его нет.
+    if (!turn.communication) return;
 
     // Человек уже написал этому номеру после ВХОДЯЩЕГО — руками, из карточки или из QUO.
     // Именно после входящего, а не после разбора: между ними минута паузы, и ответ, данный

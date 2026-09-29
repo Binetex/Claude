@@ -1509,8 +1509,12 @@ model AiTurn {
   orderId String?
   order   Order?  @relation(fields: [orderId], references: [id], onDelete: Cascade)
   /// Входящее сообщение, на которое отвечаем. Уникален: одно входящее — один разбор.
-  communicationId String             @unique
-  communication   OrderCommunication @relation("AiTurnIncoming", fields: [communicationId], references: [id], onDelete: Cascade)
+  /// Входящее SMS или звонок, на которое отвечает разбор. У разбора письма — пусто (см. emailMessageId).
+  communicationId String?             @unique
+  communication   OrderCommunication? @relation("AiTurnIncoming", fields: [communicationId], references: [id], onDelete: Cascade)
+  /// Входящее письмо, на которое отвечает разбор (ассистент отвечает и на почту, с 29.09.2026).
+  emailMessageId  String?             @unique
+  emailMessage    OrderEmailMessage?  @relation("AiTurnEmail", fields: [emailMessageId], references: [id], onDelete: Cascade)
 
   status AiTurnStatus @default(DRAFT)
   /// Откуда взялся ответ: "template" | "model" | "none".
@@ -3087,6 +3091,9 @@ model OrderEmailMessage {
   sendKey      String? @unique
   sentByUserId String?
   errorSafe    String?
+
+  /// Разбор ассистента, ответивший на это письмо (у входящих).
+  aiTurn AiTurn? @relation("AiTurnEmail")
 
   @@index([orderId, occurredAt])
   @@index([direction, occurredAt])

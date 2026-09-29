@@ -55,6 +55,10 @@ export type PromptInput = {
    * этот день уже не успеть). Поля нет — судить не по чему.
    */
   earliestNew?: { today?: string | null; tomorrow?: string | null };
+  /** Откуда пришло и чем уходит ответ: SMS (по умолчанию) или письмо в переписке заказа. */
+  channel?: "sms" | "email";
+  /** Письмо: имя того, кто пишет, если это заказчик (адрес из заказа). Иначе модель брала имя получателя. */
+  writerName?: string | null;
 };
 
 export type DeepseekMessage = { role: "system" | "user" | "assistant"; content: string };
@@ -88,7 +92,7 @@ HOW YOU WRITE. You text from your phone between bouquets; this is not an email:
   When it is answered, stop: "Got it, 402 👍" is a whole reply, never add a sentence to fill it.
 - Never say back what the customer just told you. "Got it, 402 👍" is enough, never "I've noted
   that the courier should press 402 when he arrives". Repeat a detail only if it is a code or a
-  number, and then only the detail itself.
+  number (never a phone number), and then only the detail itself.
 - Never describe your own process: no "I've noted", "I've kept", "I'll make sure the courier has
   it", "so we can plan around that".
 - Never repeat the delivery window, the address or the date unless they asked or it just
@@ -407,6 +411,12 @@ export function buildMessages(input: PromptInput): DeepseekMessage[] {
   }
   parts.push(knowledge);
   if (input.now) parts.push(`Now at the shop: ${input.now.weekday} ${input.now.dateStr}, ${input.now.timeStr} (local time).`);
+  if (input.channel === "email") {
+    const who = input.writerName?.trim()
+      ? `The email is from ${input.writerName.trim()}, who placed the order: start with "Hi <their first name>,".`
+      : `You don't know the writer's name: start with "Hi,", never with the recipient's name.`;
+    parts.push(`This customer wrote an EMAIL, and your reply goes out as an email in the same thread. ${who} Then the same short, human reply as a text. No subject line and no signature.`);
+  }
   if (input.order) parts.push(`Order data:\n${orderBlock(input.order)}`);
   if (!input.order) {
     const e = input.earliestNew;

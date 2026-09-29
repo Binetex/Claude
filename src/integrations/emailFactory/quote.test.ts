@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { emailQuoteForTelegram } from "./ingest";
+import { emailQuoteForTelegram, emailNewText } from "./ingest";
 
 /**
  * Письма взяты с прода 21.09.2026. Почтовые клиенты подклеивают к ответу всё прошлое письмо,
@@ -40,5 +40,18 @@ describe("текст письма для Telegram", () => {
     // cut === 0: резать нечего, иначе в Telegram ушло бы пустое уведомление.
     const out = emailQuoteForTelegram("> only quoted text here");
     expect(out).toBe("> only quoted text here");
+  });
+});
+
+describe("новый текст письма для ассистента", () => {
+  it("без цитаты и без подписи почтового приложения", () => {
+    // THEFLOW-20861, 28.09.2026 — ответ клиента из Outlook на наше письмо.
+    const text = "Im Jorge Batarse my phone nombre is +52 8712647484\n\nGet Outlook for iOS<https://aka.ms/o0ukef>\n________________________________\nFrom: The Flow <client@theflow.la>\nSent: Monday";
+    expect(emailNewText(text)).toBe("Im Jorge Batarse my phone nombre is +52 8712647484");
+    expect(emailNewText("Sounds good!\n\nSent from my iPhone")).toBe("Sounds good!");
+  });
+
+  it("письмо из одной цитаты — нового нет", () => {
+    expect(emailNewText("> only quoted text here")).toBe("");
   });
 });
