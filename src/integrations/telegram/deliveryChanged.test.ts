@@ -44,11 +44,23 @@ describe("перенос доставки — уведомление флори�
 
   it("в тексте видно и «было», и «стало» — иначе непонятно, что изменилось", () => {
     const text = renderDeliveryChanged(order, "10.09.2026 9AM – 3PM", "09.09.2026 9AM – 3PM");
-    expect(text).toContain("Перенос доставки");
-    expect(text).toContain("JF-1001374");
+    expect(text).toContain("Перенос JF-1001374");
     expect(text).toContain("10.09.2026");
     expect(text).toContain("09.09.2026");
-    expect(text).toContain("Ris Anderson");
+  });
+
+  it("номер, букет и новое время — одной первой строкой, прежнее время — ниже (решение владельца)", () => {
+    const withBouquet = { ...order, items: [{ name: "Red Roses & Vase", variantName: "Large", quantity: 1, composition: null }] };
+    const text = renderDeliveryChanged(withBouquet, "6PM – 9PM", "6PM – 7PM");
+    expect(text).toBe("📅 <b>Перенос JF-1001374</b> (Red Roses &amp; Vase) Стало: <b>6PM – 7PM</b>\n(Было: 6PM – 9PM)");
+    // Получатель и адрес — в карточке заказа выше, её правят тем же переносом.
+    expect(text).not.toContain("Ris Anderson");
+  });
+
+  it("несколько букетов — через запятую, одинаковые не повторяются", () => {
+    const item = (name: string) => ({ name, variantName: null, quantity: 1, composition: null });
+    const text = renderDeliveryChanged({ ...order, items: [item("Red Roses"), item("Balloons"), item("Red Roses")] }, null, "6PM – 7PM");
+    expect(text.split("\n")[0]).toContain("(Red Roses, Balloons) Стало:");
   });
 
   it("если прежнее значение неизвестно, сообщение всё равно осмысленно", () => {

@@ -269,18 +269,19 @@ export function renderCustomerCallRequest(o: OrderSnapshot, quote: string | null
 /**
  * Перенос доставки. Главное здесь — «было → стало»: флорист уже прочитал прежнюю дату и
  * планировал день по ней, поэтому одной новой даты мало, нужно показать, что именно изменилось.
+ *
+ * Всё главное — ПЕРВОЙ строкой (решение владельца 29.09.2026): номер, букет и новое время видно
+ * сразу, прямо в уведомлении; прежнее время — строкой ниже. Получателя и адреса здесь нет: они в
+ * карточке заказа выше, её тем же переносом правят на месте.
  */
 export function renderDeliveryChanged(o: OrderSnapshot, fromText: string | null, toText: string | null): string {
+  const bouquet = [...new Set(o.items.map((i) => i.name.trim()).filter(Boolean))].join(", ");
   return (
-    `📅 <b>Перенос доставки</b>\n` +
-    `<b>${esc(o.orderNumber)}</b> · ${esc(o.siteName)}\n\n` +
-    line("Было", fromText) +
-    line("Стало", toText) +
-    `\n` +
-    line("Получатель", o.recipientName) +
-    line("Адрес", addressText(o)) +
-    `\nПроверьте, успеваете ли к новому сроку.`
-  ).trimEnd();
+    `📅 <b>Перенос ${esc(o.orderNumber)}</b>` +
+    (bouquet ? ` (${esc(bouquet)})` : "") +
+    (toText?.trim() ? ` Стало: <b>${esc(toText.trim())}</b>` : "") +
+    (fromText?.trim() ? `\n(Было: ${esc(fromText.trim())})` : "")
+  );
 }
 
 /**
