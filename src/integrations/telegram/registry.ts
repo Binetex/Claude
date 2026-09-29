@@ -19,6 +19,7 @@ export const TELEGRAM_EVENTS = [
   "order.delivery_changed",
   "order.delivery_changed_owner",
   "order.florist_note",
+  "order.item_replaced",
   "payment.failed",
   "payment.pending_too_long",
   "payment.status_mismatch",
@@ -108,6 +109,15 @@ const REGISTRY: Record<TelegramEventType, TelegramEventDef> = {
     // Каждое изменение — НОВОЕ сообщение: флорист должен его увидеть, а не найти правку в старом.
     dedupeKey: ({ orderId, floristId, occurrence }) => `order:${orderId}:florist:${floristId}:note:${occurrence ?? "-"}`,
     description: "Владелец изменил заказ (клиент доплатил за другой букет и т.п.) — флористу, что делать иначе.",
+  },
+  "order.item_replaced": {
+    type: "order.item_replaced",
+    audience: "FLORIST",
+    perFlorist: true,
+    // Новая карточка на каждую замену: старую не правим — фото у сообщения Telegram не меняется,
+    // и под прежним фото оказалась бы подпись нового букета.
+    dedupeKey: ({ orderId, floristId, occurrence }) => `order:${orderId}:florist:${floristId}:replaced:${occurrence ?? "-"}`,
+    description: "Букет в заказе заменили на другой — флористу новой карточкой с новым фото.",
   },
   "payment.failed": {
     type: "payment.failed",

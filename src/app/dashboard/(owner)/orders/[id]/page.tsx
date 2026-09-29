@@ -45,6 +45,7 @@ import { loadOrderEmailPanel, markOrderEmailsRead } from "@/integrations/emailFa
 import { FloristAvatar } from "@/components/FloristAvatar";
 import { ChargesDialog } from "./ChargesDialog";
 import { SurchargeDialog } from "./SurchargeDialog";
+import { ReplaceItemDialog } from "./ReplaceItemDialog";
 import { orderSurchargeTotal } from "@/modules/orders/surcharge";
 import { MarketingMarkCard } from "./MarketingMarkCard";
 import { BouquetPhotoButton } from "@/components/orders/BouquetPhotoButton";
@@ -262,9 +263,22 @@ export default async function OwnerOrderPage({
                 { value: it.externalPrice, label: "заказчику" },
                 { value: it.floristItemPrice, label: "флористу", missing: it.floristPriceMissing },
               ],
-              // Кнопка обновления состава тянет его ИЗ КАТАЛОГА — у позиции ручного
-              // заказа «своим текстом» каталога нет, и жать там нечего.
-              action: it.productId ? <UpdateCompositionButton itemId={it.id} /> : undefined,
+              action: (
+                <div className="flex items-center gap-3">
+                  {/* Кнопка обновления состава тянет его ИЗ КАТАЛОГА — у позиции ручного
+                      заказа «своим текстом» каталога нет, и жать там нечего. */}
+                  {it.productId && <UpdateCompositionButton itemId={it.id} />}
+                  {/* Замена букета на другой из каталога — у любой позиции (владелец 30.09.2026). */}
+                  <ReplaceItemDialog
+                    orderId={order.id}
+                    itemId={it.id}
+                    site={{ id: order.siteId, name: order.site.name }}
+                    current={{ label: it.variantName ? `${it.name}, ${it.variantName}` : it.name, unitPrice: it.externalPrice, quantity: it.quantity }}
+                    customerTotal={order.finance.customerTotal}
+                    florist={order.currentFloristId ? { manualPrice: order.priceMode === "MANUAL" } : null}
+                  />
+                </div>
+              ),
             }))}
           />
 

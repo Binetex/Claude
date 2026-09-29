@@ -1,5 +1,5 @@
 "use client";
-import { useMemo, useState, useTransition } from "react";
+import { useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { ChevronDown, ChevronUp, Package, Pencil, Plus, Trash2, Truck, UserRound } from "lucide-react";
@@ -12,7 +12,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { Separator } from "@/components/ui/misc";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { formatMoney } from "@/lib/money";
-import { CatalogPicker } from "./CatalogPicker";
+import { CatalogPicker } from "@/components/orders/CatalogPicker";
+import type { CatalogHit } from "@/modules/catalog/searchActions";
 import { ItemDialog } from "./ItemDialog";
 import { emptyCustomItem, lineCustomer, lineFlorist, type DraftItem } from "./itemTypes";
 import { ownerCreateManualOrder } from "./actions";
@@ -90,6 +91,28 @@ export function ManualOrderForm({
 
   function upsert(item: DraftItem) {
     setItems((list) => (list.some((i) => i.key === item.key) ? list.map((i) => (i.key === item.key ? item : i)) : [...list, item]));
+  }
+
+  // Счётчик вместо Date.now(): ключ строки нужен только для React, а вызов часов
+  // в теле компонента правило чистоты (react-hooks/purity) справедливо запрещает.
+  const seq = useRef(0);
+  /** Строка каталога → позиция формы. */
+  function addFromCatalog(h: CatalogHit) {
+    upsert({
+      key: `cat-${h.variantId ?? h.productId}-${(seq.current += 1)}`,
+      kind: "catalog",
+      productId: h.productId,
+      variantId: h.variantId,
+      name: h.productName,
+      variantName: h.variantName,
+      image: h.image,
+      quantity: 1,
+      customerPrice: h.customerPrice,
+      floristPrice: h.floristPrice,
+      composition: h.composition,
+      financialType: null,
+      purchaseCostCents: null,
+    });
   }
 
   /**
@@ -416,7 +439,7 @@ export function ManualOrderForm({
 
       {/* Пикер каталога живёт РЯДОМ с меню, а не внутри него: вложенный поповер
           закрывался вместе с родительским и не успевал открыться. */}
-      <CatalogPicker sites={sites} open={catalogOpen} onOpenChange={setCatalogOpen} onPick={upsert} />
+      <CatalogPicker sites={sites} open={catalogOpen} onOpenChange={setCatalogOpen} onPick={addFromCatalog} />
 
       {editing && (
         <ItemDialog

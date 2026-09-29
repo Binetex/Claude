@@ -121,6 +121,22 @@ export async function applyAutoPriceSnapshot(
 }
 
 /**
+ * Снимок цены флориста для ОДНОЙ позиции — после замены букета в заказе. Остальные позиции не
+ * трогаем: их снимок сделан при назначении, и прайс, поменявшийся с тех пор, их не касается.
+ * Возвращает новую цену строки (за единицу × количество).
+ */
+export async function snapshotItemFloristPrice(
+  tx: Prisma.TransactionClient,
+  itemId: string,
+  floristId: string
+): Promise<Prisma.Decimal> {
+  const item = await tx.orderItem.findUniqueOrThrow({ where: { id: itemId }, select: PRICING_SELECT });
+  const line = isTipItem(item) ? ZERO : ((await resolveUnitPrices(tx, [item], floristId)).get(item.id) ?? ZERO).mul(item.quantity);
+  await tx.orderItem.update({ where: { id: itemId }, data: { floristItemPrice: line } });
+  return line;
+}
+
+/**
  * Обнуляет цену флориста у служебных позиций (чаевые). Нужен там, где сумма задаётся
  * владельцем вручную и снимок позиций не пересчитывается: без этого поправка «на лету»
  * вычла бы чаевые из уже очищенной от них суммы.

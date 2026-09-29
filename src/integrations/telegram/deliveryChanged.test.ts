@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { getTelegramEvent } from "./registry";
-import { renderDeliveryChanged, renderOwnerDeliveryChanged, renderFloristNote } from "./templates";
+import { renderDeliveryChanged, renderOwnerDeliveryChanged, renderFloristNote, renderFloristMessage, buttonsFor } from "./templates";
 
 const order = {
   id: "o1",
@@ -116,5 +116,26 @@ describe("изменение заказа — флористу (доплата �
   it("номер, букет и что делать — без денег", () => {
     const withBouquet = { ...order, items: [{ name: "Golden Chestnut", variantName: null, quantity: 1, composition: null }] };
     expect(renderFloristNote(withBouquet, "Вместо него — Red Roses & Vase")).toBe("✏️ <b>Изменение JF-1001374</b> (Golden Chestnut)\nВместо него — Red Roses &amp; Vase");
+  });
+});
+
+describe("букет заменён — флористу новой карточкой (30.09.2026)", () => {
+  it("тип в реестре: личным ботом флориста, каждая замена — новое сообщение", () => {
+    const def = getTelegramEvent("order.item_replaced")!;
+    expect(def.audience).toBe("FLORIST");
+    expect(def.dedupeKey({ orderId: "o1", floristId: "f1", occurrence: "a" })).not.toBe(def.dedupeKey({ orderId: "o1", floristId: "f1", occurrence: "b" }));
+  });
+
+  it("та же карточка, что при назначении, с заголовком «Букет заменён» и тем, что было", () => {
+    const text = renderFloristMessage({ ...order, items: [{ name: "Red Roses & Vase", variantName: "Large", quantity: 1, composition: null }] }, { replacedFrom: "Golden Chestnut, Small" });
+    expect(text.split("\n")[0]).toBe("🔁 <b>Букет заменён</b> · <b>JF-1001374</b> · JF");
+    expect(text.split("\n")[1]).toBe("Было: Golden Chestnut, Small");
+    expect(text).toContain("Red Roses &amp; Vase");
+  });
+
+  it("у флористских сообщений кнопка открывает карточку ФЛОРИСТА, а не кабинет владельца", () => {
+    for (const type of ["order.item_replaced", "order.delivery_changed", "order.florist_note"] as const) {
+      expect(buttonsFor(type, order)[0].url).toContain("/dashboard/f/o1");
+    }
   });
 });

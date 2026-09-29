@@ -106,11 +106,16 @@ function deliveryHead(o: OrderSnapshot): string {
  * Основное сообщение флористу. Идёт подписью под фото букета (если оно есть). Открытку не
  * показываем; адрес и время доставки выделены.
  */
-export function renderFloristMessage(o: OrderSnapshot, opts: { reassigned?: boolean; floristName?: string | null } = {}): string {
-  const head = opts.reassigned ? "🔄 <b>Заказ передан</b>" : "🌸 <b>Новый заказ</b>";
+export function renderFloristMessage(
+  o: OrderSnapshot,
+  opts: { reassigned?: boolean; floristName?: string | null; replacedFrom?: string | null } = {}
+): string {
+  // Букет заменили — та же карточка, что при назначении, только с тем, что было раньше.
+  const head = opts.replacedFrom ? "🔁 <b>Букет заменён</b>" : opts.reassigned ? "🔄 <b>Заказ передан</b>" : "🌸 <b>Новый заказ</b>";
   const who = opts.floristName ? ` → ${esc(opts.floristName)}` : "";
+  const was = opts.replacedFrom ? `\nБыло: ${esc(opts.replacedFrom)}` : "";
   const body =
-    `${head}${who} · <b>${esc(o.orderNumber)}</b> · ${esc(o.siteName)}\n\n` +
+    `${head}${who} · <b>${esc(o.orderNumber)}</b> · ${esc(o.siteName)}${was}\n\n` +
     deliveryHead(o) +
     itemsBlock(o) +
     line("📝 Инструкции", o.deliveryInstructions);
@@ -378,9 +383,13 @@ export function renderAskReview(o: OrderSnapshot): string {
 export function buttonsFor(type: TelegramEventType, o: OrderSnapshot): TelegramButton[] {
   // Оператор открывает СВОЮ карточку заказа: в кабинет владельца у него нет доступа.
   if (type === "order.ask_review" || type === "customer.call_request_cc") return [{ text: "Open Order", url: callCenterOrderUrl(o.id) }];
+  // Флористу — ЕГО карточка заказа: в кабинет владельца у него нет доступа.
   const forFlorist =
     type === "order.assigned" ||
     type === "order.handed_over" ||
+    type === "order.item_replaced" ||
+    type === "order.delivery_changed" ||
+    type === "order.florist_note" ||
     type === "delivery.problem_florist" ||
     type === "delivery.no_couriers_florist" ||
     type === "customer.ready_time_florist";

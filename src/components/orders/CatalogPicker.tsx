@@ -1,12 +1,11 @@
 "use client";
-import { useEffect, useRef, useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { Search } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { formatMoney } from "@/lib/money";
-import { ownerSearchCatalog, type CatalogHit } from "./actions";
-import type { DraftItem } from "./itemTypes";
+import { ownerSearchCatalog, type CatalogHit } from "@/modules/catalog/searchActions";
 
 /**
  * Выбор товара из каталога — Dialog + Input + список, без сторонних библиотек.
@@ -19,25 +18,28 @@ import type { DraftItem } from "./itemTypes";
  * Список — это ВАРИАНТЫ, а не товары: в заказ кладётся конкретный вариант, от него зависят
  * цена, состав и финансовый тип. Поиск идёт на сервере (каталог в несколько сотен позиций
  * незачем гонять в браузер) и с задержкой, чтобы не дёргать его на каждую букву.
+ *
+ * Общий для ручного заказа и замены букета в заказе: отдаёт выбранную строку каталога как есть,
+ * а во что её превратить, решает форма. `siteId` — искать только в каталоге этого магазина.
  */
 export function CatalogPicker({
   sites,
+  siteId: fixedSiteId,
   open,
   onOpenChange,
   onPick,
 }: {
   sites: { id: string; name: string }[];
+  siteId?: string;
   open: boolean;
   onOpenChange: (v: boolean) => void;
-  onPick: (item: DraftItem) => void;
+  onPick: (hit: CatalogHit) => void;
 }) {
   const [query, setQuery] = useState("");
-  const [siteId, setSiteId] = useState<string>("");
+  const [chosenSiteId, setSiteId] = useState<string>("");
+  const siteId = fixedSiteId ?? chosenSiteId;
   const [hits, setHits] = useState<CatalogHit[]>([]);
   const [pending, start] = useTransition();
-  // Счётчик вместо Date.now(): ключ строки нужен только для React, а вызов часов
-  // в теле компонента правило чистоты (react-hooks/purity) справедливо запрещает.
-  const seq = useRef(0);
 
   // Задержка 250 мс: без неё каждый символ уходил бы в отдельный запрос.
   useEffect(() => {
@@ -51,21 +53,7 @@ export function CatalogPicker({
   }, [query, siteId, open]);
 
   function pick(h: CatalogHit) {
-    onPick({
-      key: `cat-${h.variantId ?? h.productId}-${(seq.current += 1)}`,
-      kind: "catalog",
-      productId: h.productId,
-      variantId: h.variantId,
-      name: h.productName,
-      variantName: h.variantName,
-      image: h.image,
-      quantity: 1,
-      customerPrice: h.customerPrice,
-      floristPrice: h.floristPrice,
-      composition: h.composition,
-      financialType: null,
-      purchaseCostCents: null,
-    });
+    onPick(h);
     onOpenChange(false);
     setQuery("");
   }
@@ -88,7 +76,7 @@ export function CatalogPicker({
               aria-label="Поиск по каталогу"
             />
           </div>
-          {sites.length > 1 && (
+          {!fixedSiteId && sites.length > 1 && (
             <Select value={siteId} onChange={(e) => setSiteId(e.target.value)} aria-label="Магазин">
               <option value="">Все магазины</option>
               {sites.map((s) => (

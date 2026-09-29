@@ -116,10 +116,11 @@ export function buildTelegramNotifyHandler(prisma: PrismaClient): OutboxHandler 
     const buttons = buttonsFor(p.type, order);
     // Фото — только у сообщений флористу. Одно фото прикрепляется к самой карточке,
     // несколько уходят альбомом отдельным сообщением ПЕРЕД ней (см. sendAlbumOnce).
-    // Фото букета флористу — только там, где он его собирает: назначение и передача заказа.
+    // Фото букета флористу — только там, где он его собирает: назначение, передача заказа и
+    // замена букета (новый букет флорист должен увидеть).
     // «Клиент назвал время» или «проблема доставки» с альбомом на пять фото — это два-три
     // сообщения вместо одного, и по одному заказу за минуту приходило по десять.
-    const withPhotos = def.audience === "FLORIST" && (p.type === "order.assigned" || p.type === "order.handed_over");
+    const withPhotos = def.audience === "FLORIST" && (p.type === "order.assigned" || p.type === "order.handed_over" || p.type === "order.item_replaced");
     const wantPhoto = withPhotos && !!order.imageUrl;
     const wantAlbum = withPhotos && order.albumUrls.length > 0;
     const sender = new TelegramSender(bot.token);
@@ -273,6 +274,8 @@ function renderFor(type: TelegramNotifyPayload["type"], order: OrderSnapshot, ct
       return renderOwnerDeliveryChanged(order);
     case "order.florist_note":
       return renderFloristNote(order, ctx.text ?? null);
+    case "order.item_replaced":
+      return renderFloristMessage(order, { replacedFrom: ctx.replacedFrom ?? "—" });
     case "payment.failed":
       return renderOwnerPaymentProblem(order, ctx.safeReason ?? ctx.attemptStatus ?? "платёж отклонён");
     case "payment.pending_too_long":
