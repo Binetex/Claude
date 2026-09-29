@@ -461,7 +461,7 @@ function logTimingError(err: unknown): undefined {
   return undefined;
 }
 
-function logCallRequestError(err: unknown) {
+export function logCallRequestError(err: unknown) {
   console.error("[assistant] сигнал «клиент просит позвонить» не ушёл:", err instanceof Error ? err.message : String(err));
 }
 
@@ -471,7 +471,7 @@ function logCallRequestError(err: unknown) {
  * Telegram (durable, с карточкой заказа); незнакомому номеру карточки нет, поэтому прямой
  * текст в те же два бота. В сухом прогоне оператора не трогаем: проверяет владелец.
  */
-async function notifyCallRequest(
+export async function notifyCallRequest(
   prisma: PrismaClient,
   order: { id: string } | null,
   site: { name: string; aiDryRun: boolean },
@@ -509,6 +509,9 @@ async function notifyCallRequest(
  * Не смогли отправить сами (номер не в заказе, QUO отказал) — черновик идёт человеку: молча
  * оставить его в карточке значит, что клиент не получит ответа вовсе.
  * Сбой показа не должен ронять разбор: черновик уже записан и виден в карточке заказа.
+ *
+ * Возвращает, дошёл ли разбор хоть до кого-то: ушёл клиенту или показан человеку. Письму это
+ * нужно — не дошедшее до людей оно отдаёт им обычным уведомлением, иначе лежало бы в карточке.
  */
 export async function finishTurn(
   prisma: PrismaClient,
@@ -517,30 +520,32 @@ export async function finishTurn(
   dryRun: boolean,
   /** Очередь сообщений, на которую отвечаем, — её показываем человеку вместо одной реплики. */
   burst: { text: string; photoUrls: string[] } | null = null
-): Promise<void> {
+): Promise<boolean> {
+  let shown = false;
   try {
     if (action === "send") {
       const res = await sendAssistantReply(prisma, turnId);
-      if (res.ok) return;
+      if (res.ok) return true;
       console.warn(`[assistant] автоответ ${turnId} не ушёл (${res.code}) — черновик человеку`);
     }
-    const shown = await notifyDraft(prisma, turnId, new Date(), burst);
+    shown = await notifyDraft(prisma, turnId, new Date(), burst);
     // Напоминание ставим, только если черновик реально дошёл до человека: иначе «одну минуту»
     // уйдёт клиенту по разбору, которого никто не видел.
     if (shown && !dryRun) await scheduleAssistantNudge(new PrismaOutboxRepository(prisma), turnId, new Date());
   } catch (err) {
     console.error(`[assistant] показ черновика ${turnId} не удался:`, err instanceof Error ? err.message : String(err));
   }
+  return shown;
 }
 
 /** Насколько назад собираем очередь сообщений: дальше это уже отдельный разговор. */
-const BURST_WINDOW_MIN = 15;
+export const BURST_WINDOW_MIN = 15;
 
 /**
  * Сколько сообщений очереди забираем максимум. Что не влезло — не потеряно: модель всё равно
  * видит эти сообщения в истории переписки, просто отвечаем мы не на них.
  */
-const BURST_MAX = 10;
+export const BURST_MAX = 10;
 
 /**
  * Очередь сообщений, отложенных В ПОЛЬЗУ разбираемого: идём от свежих к старым, пока сообщения

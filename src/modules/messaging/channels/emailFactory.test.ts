@@ -14,11 +14,17 @@ const ctx = {
 describe("письмо правила через наш почтовый модуль", () => {
   beforeEach(() => sendOrderEmail.mockReset());
 
-  it("уходит текстом правила, без отправителя-человека, со своим ключом повтора", async () => {
+  it("уходит заказчику текстом правила, без отправителя-человека, со своим ключом повтора", async () => {
     sendOrderEmail.mockResolvedValue({ ok: true, messageId: "m1" });
     const r = await createEmailFactoryChannelSender({} as never).send(ctx);
     expect(r).toEqual({ ok: true, providerMessageId: "m1" });
-    expect(sendOrderEmail).toHaveBeenCalledWith({}, { orderId: "o1", text: "Hi Jorge!", sendKey: "auto:j1:a0", sentByUserId: null });
+    // Адрес — тот, что выбрал движок, а не «последний, кто писал по заказу».
+    expect(sendOrderEmail).toHaveBeenCalledWith({}, { orderId: "o1", text: "Hi Jorge!", sendKey: "auto:j1:a0", sentByUserId: null, toEmail: "a@b.c" });
+  });
+
+  it("без адреса заказчика — пропуск, а писать некому", async () => {
+    expect(await createEmailFactoryChannelSender({} as never).send({ ...ctx, emailNormalized: null })).toEqual({ ok: false, code: "no_customer_email", retryable: false, skip: true });
+    expect(sendOrderEmail).not.toHaveBeenCalled();
   });
 
   it("магазин без почтового домена или заказ без почты — пропуск, а не сбой", async () => {

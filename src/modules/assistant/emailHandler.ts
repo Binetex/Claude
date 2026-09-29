@@ -2,24 +2,25 @@ import "server-only";
 /**
  * Ассистент отвечает и на письма клиента (владелец 29.09.2026: «на емейлы тоже сделать, чтобы ИИ
  * отвечал»). Разбор тот же, что у SMS — правила, проверка ответа, режим магазина, черновик в
- * Telegram, перенос по словам клиента, — другие только вход и выход: письмо из переписки заказа и
- * ответ письмом в тот же тред через наш почтовый модуль (`deliver.ts::sendAssistantReply`).
+ * Telegram, перенос по словам клиента, просьба позвонить, очередь дописанных вдогонку сообщений, —
+ * другие только вход и выход: письмо из переписки заказа и ответ письмом на него же через наш
+ * почтовый модуль (`deliver.ts::sendAssistantReply`).
  *
- * Только письма, привязанные к заказу. Телефонного здесь нет: звонков, фото и очереди SMS у письма
- * не бывает. Письмо, на которое ассистент НЕ ответил (выключен, лимиты, «спасибо», сбой модели),
- * уходит людям обычным уведомлением «клиент ответил на письмо» — почту никто не держит открытой.
+ * Только письма, привязанные к заказу. Фото у письма ассистент не разбирает. Письмо, на которое он
+ * НЕ ответил (выключен, лимиты, «спасибо», автоответ робота, сбой модели) или чей черновик не дошёл
+ * до людей, уходит им обычным уведомлением «клиент ответил на письмо» — почту никто не держит
+ * открытой.
  */
 import type { PrismaClient } from "@/generated/prisma/client";
 import { resolveDeepseekConfig } from "@/integrations/deepseek/settings";
 import { createDeepseekClient, type DeepseekClient } from "@/integrations/deepseek/client";
 import { DeepseekError } from "@/integrations/deepseek/errors";
-import { emailNewText, emailQuoteForTelegram } from "@/integrations/emailFactory/ingest";
+import { emailNewText, emailQuoteForTelegram, isAutoReply } from "@/integrations/emailFactory/ingest";
 import { publishTelegramNotification } from "@/integrations/telegram/events";
 import { SMS_ORDER_INCLUDE } from "@/modules/messaging/orderSource";
 import { localClock } from "@/lib/tz";
 import { buildMessages, parseReply, agreeFromMin, type HistoryLine } from "./prompt";
-import { shouldConsider, decideDelivery, type AssistantMode } from "./policy";
-import { junkReason } from "./junk";
+import { shouldConsider, decideDelivery, isCallRequest, isSmallTalk, type AssistantMode } from "./policy";
 import { loadCatalog, looksLikeShopping } from "./catalog";
 import { loadGlobalNote, activeGlobalNoteText } from "./globalNote";
 import { mentionsTime } from "./note";
@@ -27,11 +28,14 @@ import { mentionsDay } from "./reschedule";
 import type { AssistantEmailPayload } from "./events";
 import {
   snapshot, deliveredMoment, countReplies, renderPrompt, earliestFor, labelOf, finishTurn,
-  recordReadyTime, applyCustomerReschedule, alertNoBalance,
+  recordReadyTime, applyCustomerReschedule, alertNoBalance, notifyCallRequest, logCallRequestError,
+  takeDeferredQueue, BURST_WINDOW_MIN, BURST_MAX,
 } from "./handler";
 
 /** Сколько писем переписки показываем модели: живой переписки по заказу больше не бывает. */
 const HISTORY_LIMIT = 12;
+
+type InboundEmail = { id: string; orderId: string; fromEmail: string; occurredAt: Date };
 
 export function buildAssistantEmailHandler(prisma: PrismaClient, deps: { client?: DeepseekClient | null; now?: () => Date } = {}) {
   const now = deps.now ?? (() => new Date());
@@ -51,6 +55,12 @@ export function buildAssistantEmailHandler(prisma: PrismaClient, deps: { client?
     const order = await prisma.order.findUnique({ where: { id: email.orderId }, include: SMS_ORDER_INCLUDE });
     if (!order) return;
     const site = order.site;
+    const inbound: InboundEmail = { id: email.id, orderId: order.id, fromEmail: email.fromEmail, occurredAt: email.occurredAt };
+
+    // Человек дописал письма вдогонку: они отложились в пользу этого, и отвечаем на все разом —
+    // как на очередь SMS. Человек в Telegram тоже видит все, а не одно последнее.
+    const deferred = await loadDeferredEmails(prisma, inbound);
+    const text = [...deferred, email].map((m) => emailNewText(m.text)).filter(Boolean).join("\n");
 
     // Ответа не будет — людям уходит то же уведомление, что и без ассистента.
     const tellPeople = () =>
@@ -58,7 +68,7 @@ export function buildAssistantEmailHandler(prisma: PrismaClient, deps: { client?
         type: "customer.email_reply",
         orderId: order.id,
         occurrenceKey: email.providerMessageId ?? email.id,
-        context: { from: email.fromEmail, subject: email.subject ?? "", quote: emailQuoteForTelegram(email.text) },
+        context: { from: email.fromEmail, subject: email.subject ?? "", quote: emailQuoteForTelegram(deferred.length ? text : email.text) },
       }).catch(() => null);
     const skip = async (reason: string, notify = true) => {
       await prisma.aiTurn.create({
@@ -67,8 +77,25 @@ export function buildAssistantEmailHandler(prisma: PrismaClient, deps: { client?
       if (notify) await tellPeople();
     };
 
-    const text = emailNewText(email.text);
+    // Роботам (автоответ «в отпуске», отбойник, no-reply) и нашим же ящикам не отвечаем: они
+    // ответят снова, и переписка пойдёт по кругу до потолка ответов. Людям — как обычное письмо.
+    if (isAutoReply(email) || (await fromOwnMailbox(prisma, email.fromEmail))) return skip("auto_reply");
     if (!text) return skip("empty_text");
+
+    // Заказчик — если пишет с адреса из заказа. Переносить заказ может только он.
+    const isCustomer = !!order.senderEmail && order.senderEmail.trim().toLowerCase() === email.fromEmail.trim().toLowerCase();
+
+    // Просьба позвонить — людям сразу, как у SMS: владельцу и колл-центру, до потолков и модели.
+    const callPeople = () =>
+      notifyCallRequest(prisma, order, site, {
+        id: email.id,
+        // Позвонить можно заказчику: его номер в заказе. Номера незнакомого автора письма мы не знаем.
+        externalPhone: isCustomer ? order.senderPhone ?? "" : "",
+        // Разговор для «один сигнал на два часа» — адрес письма.
+        externalPhoneNormalized: email.fromEmail.trim().toLowerCase(),
+      }, text, now()).catch(logCallRequestError);
+    const callRequested = isCallRequest(text);
+    if (callRequested && site.aiMode !== "OFF" && !order.aiDisabled) await callPeople();
 
     const gate = shouldConsider({
       mode: site.aiMode as AssistantMode,
@@ -83,21 +110,14 @@ export function buildAssistantEmailHandler(prisma: PrismaClient, deps: { client?
     });
     if (!gate.ok) return skip(gate.reason);
 
-    // Рассылки и автоответы почтовых роботов — без ответа и без уведомления.
-    const junk = junkReason(text, true);
-    if (junk) return skip(junk, false);
-
-    // Клиент дописал ещё письмо, пока шла пауза: отвечаем на последнее, оно видит это в переписке.
-    const newer = await prisma.orderEmailMessage.count({ where: { orderId: order.id, direction: "INBOUND", occurredAt: { gt: email.occurredAt } } });
-    if (newer) return skip("superseded", false);
+    // Клиент дописал ещё письмо, пока шла пауза: разбирать будет последнее, оно заберёт это.
+    if (await hasNewerEmail(prisma, inbound)) return skip("superseded", false);
 
     const cfg = await resolveDeepseekConfig(prisma);
     const client = deps.client ?? (cfg ? createDeepseekClient(cfg) : null);
     if (!client) return skip("model_not_configured");
 
     const clock = localClock(site.timezone, now());
-    // Заказчик — если пишет с адреса из заказа. Переносить заказ может только он.
-    const isCustomer = !!order.senderEmail && order.senderEmail.trim().toLowerCase() === email.fromEmail.trim().toLowerCase();
     const earliestMin = await earliestFor(prisma, order, clock.dateStr, now());
     const globalNote = activeGlobalNoteText(await loadGlobalNote(prisma), now(), site.timezone);
     const messages = buildMessages({
@@ -105,7 +125,7 @@ export function buildAssistantEmailHandler(prisma: PrismaClient, deps: { client?
       writerName: isCustomer ? order.senderName : null,
       knowledgeBase: site.aiKnowledgeBase,
       order: { ...snapshot(order, site.name, isCustomer ? "CUSTOMER" : "UNKNOWN", clock.dateStr), earliest: labelOf(earliestMin) },
-      history: await loadEmailHistory(prisma, order.id, email.id, site.timezone),
+      history: await loadEmailHistory(prisma, order.id, [...deferred.map((d) => d.id), email.id], site.timezone),
       now: clock,
       globalNote,
       incomingText: text,
@@ -135,13 +155,10 @@ export function buildAssistantEmailHandler(prisma: PrismaClient, deps: { client?
       await prisma.aiTurn.create({
         data: { siteId: site.id, orderId: order.id, emailMessageId: email.id, status: "SKIPPED", source: "model", intent: "spam", skipReason: "spam", promptText: renderPrompt(messages), responseText: raw, modelName, latencyMs },
       });
+      // Письмо уже привязано к заказу — ошибка модели не должна его спрятать: людям как обычно.
+      await tellPeople();
       return;
     }
-
-    // «Позвоните мне» из письма — всегда через человека: звонок делают люди, и черновик им это покажет.
-    const action = parsed.intent === "call_request"
-      ? "draft"
-      : decideDelivery({ mode: site.aiMode as AssistantMode, dryRun: site.aiDryRun, hasReply: !!parsed.replyEn, needsHuman: parsed.needsHuman, important: parsed.important });
 
     // Время из письма — в заметку заказа и людям; перенос дня и окна — как у SMS, только от заказчика.
     // Всё это — лишь когда в САМОМ письме есть время, день или число: модель может взять их из истории.
@@ -154,11 +171,19 @@ export function buildAssistantEmailHandler(prisma: PrismaClient, deps: { client?
     if (parsed.newDeliveryDate && !mentionsDay(text)) parsed = { ...parsed, newDeliveryDate: null };
     if (!mentionsTime(text) && !/\d/.test(text)) parsed = { ...parsed, confirmedFrom: null, confirmedUntil: null };
     const confirmed = { from: parsed.confirmedFrom, until: parsed.confirmedUntil };
-    if (isCustomer && !site.aiDryRun && (confirmed.from != null || confirmed.until != null || parsed.newDeliveryDate)) {
+    const wantsChange = confirmed.from != null || confirmed.until != null || !!parsed.newDeliveryDate;
+    if (isCustomer && !site.aiDryRun && wantsChange) {
       await applyCustomerReschedule(prisma, order.id, confirmed, parsed.newDeliveryDate, site.timezone, clock.dateStr).catch((err) =>
         console.error(`[assistant] перенос по заказу ${order.id} (письмо) не применён:`, err instanceof Error ? err.message : String(err))
       );
     }
+
+    // Перенос просит не заказчик (муж получателя, сама получательница со своего адреса): заказ по
+    // его словам не двигаем — иначе любой, кто знает номер заказа, двигал бы чужой оплаченный
+    // заказ. Значит, и «привезём завтра» сами не обещаем: ответ — черновиком, решает человек.
+    const action = !isCustomer && wantsChange
+      ? "draft"
+      : decideDelivery({ mode: site.aiMode as AssistantMode, dryRun: site.aiDryRun, hasReply: !!parsed.replyEn, needsHuman: parsed.needsHuman, important: parsed.important });
 
     const turn = await prisma.aiTurn.create({
       data: {
@@ -170,14 +195,71 @@ export function buildAssistantEmailHandler(prisma: PrismaClient, deps: { client?
       },
       select: { id: true },
     });
-    await finishTurn(prisma, turn.id, action, site.aiDryRun);
+    // Модель разглядела просьбу позвонить там, где слова её не выдали, — добавка к сигналу выше.
+    if (!callRequested && parsed.intent === "call_request") await callPeople();
+    const reached = await finishTurn(prisma, turn.id, action, site.aiDryRun, deferred.length ? { text, photoUrls: [] } : null);
+    // Ни клиенту, ни человеку разбор не дошёл (уведомления ассистента выключены, Telegram молчит):
+    // письмо не должно остаться только в карточке.
+    if (!reached) await tellPeople();
   };
 }
 
-/** Переписка заказа по почте — от старых к новым, без цитат: модель видит разговор, а не простыни. */
-async function loadEmailHistory(prisma: PrismaClient, orderId: string, exceptId: string, tz: string | null): Promise<HistoryLine[]> {
+/**
+ * Письма этого же человека по заказу, отложенные В ПОЛЬЗУ разбираемого (`superseded`): граница
+ * очереди — уже записанные решения, как у SMS (`handler.ts::takeDeferredQueue`).
+ */
+async function loadDeferredEmails(prisma: PrismaClient, email: InboundEmail): Promise<{ id: string; text: string }[]> {
+  const since = new Date(email.occurredAt.getTime() - BURST_WINDOW_MIN * 60_000);
+  const rows = await prisma.aiTurn.findMany({
+    where: {
+      emailMessage: {
+        orderId: email.orderId,
+        fromEmail: { equals: email.fromEmail, mode: "insensitive" },
+        occurredAt: { gte: since, lt: email.occurredAt },
+      },
+    },
+    orderBy: { emailMessage: { occurredAt: "desc" } },
+    take: BURST_MAX,
+    select: { status: true, skipReason: true, emailMessage: { select: { id: true, text: true } } },
+  });
+  return takeDeferredQueue(rows).flatMap((r) => (r.emailMessage ? [r.emailMessage] : []));
+}
+
+/**
+ * Есть ли от этого же человека письмо ПОЗЖЕ разбираемого, на которое стоит отвечать. «Спасибо»,
+ * пустое письмо и автоответ не считаются: иначе они отменили бы ответ на сам вопрос, и клиент
+ * не получил бы ничего. Письмо другого человека — его отдельный разговор со своим ответом.
+ */
+async function hasNewerEmail(prisma: PrismaClient, email: InboundEmail): Promise<boolean> {
   const rows = await prisma.orderEmailMessage.findMany({
-    where: { orderId, id: { not: exceptId }, status: { not: "FAILED" } },
+    where: {
+      orderId: email.orderId,
+      direction: "INBOUND",
+      id: { not: email.id },
+      occurredAt: { gt: email.occurredAt },
+      fromEmail: { equals: email.fromEmail, mode: "insensitive" },
+    },
+    select: { fromEmail: true, subject: true, text: true },
+    orderBy: { occurredAt: "asc" },
+    take: 5,
+  });
+  return rows.some((r) => {
+    const t = emailNewText(r.text);
+    return !!t && !isSmallTalk(t) && !isAutoReply(r);
+  });
+}
+
+/** Письмо с нашего же магазинного ящика (пересылка, проверка): отвечать самим себе — это круг. */
+async function fromOwnMailbox(prisma: PrismaClient, fromEmail: string): Promise<boolean> {
+  const domain = fromEmail.split("@")[1]?.trim().toLowerCase();
+  if (!domain) return false;
+  return (await prisma.site.count({ where: { emailFactoryDomain: { equals: domain, mode: "insensitive" } } })) > 0;
+}
+
+/** Переписка заказа по почте — от старых к новым, без цитат: модель видит разговор, а не простыни. */
+async function loadEmailHistory(prisma: PrismaClient, orderId: string, exceptIds: string[], tz: string | null): Promise<HistoryLine[]> {
+  const rows = await prisma.orderEmailMessage.findMany({
+    where: { orderId, id: { notIn: exceptIds }, status: { not: "FAILED" } },
     orderBy: { occurredAt: "desc" },
     take: HISTORY_LIMIT,
     select: { direction: true, text: true, occurredAt: true },

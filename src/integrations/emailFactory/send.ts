@@ -40,7 +40,20 @@ function firstSubject(orderNumber: string): string {
 
 export async function sendOrderEmail(
   prisma: PrismaClient,
-  input: { orderId: string; text: string; sendKey: string; sentByUserId: string | null }
+  input: {
+    orderId: string;
+    text: string;
+    sendKey: string;
+    sentByUserId: string | null;
+    /**
+     * Ответ на КОНКРЕТНОЕ входящее письмо (ответ ассистента): в его тред и его автору. Пока
+     * черновик ждал человека, по заказу мог написать кто-то другой, и «последняя переписка»
+     * увела бы ответ не тому.
+     */
+    inReplyToId?: string;
+    /** Писать только на этот адрес (письмо правила — заказчику), а не последнему собеседнику. */
+    toEmail?: string;
+  }
 ): Promise<SendReplyResult> {
   const text = input.text.trim();
   if (!text) return { ok: false, code: "empty_text" };
@@ -53,15 +66,24 @@ export async function sendOrderEmail(
   });
   if (!order) return { ok: false, code: "order_not_found" };
 
-  // Переписка уже идёт — отвечаем в её тред, чтобы письмо легло в ту же цепочку у клиента.
+  // Переписка уже идёт — отвечаем в её тред, чтобы письмо легло в ту же цепочку у клиента. С
+  // заданным адресом — только в переписку с этим адресом.
   const lastInbound = await prisma.orderEmailMessage.findFirst({
-    where: { orderId: input.orderId, direction: "INBOUND", threadId: { not: null } },
+    where: input.inReplyToId
+      ? { id: input.inReplyToId, orderId: input.orderId, direction: "INBOUND" }
+      : {
+          orderId: input.orderId,
+          direction: "INBOUND",
+          threadId: { not: null },
+          ...(input.toEmail ? { fromEmail: { equals: input.toEmail, mode: "insensitive" as const } } : {}),
+        },
     orderBy: { occurredAt: "desc" },
     select: { threadId: true, fromEmail: true, toEmail: true, subject: true },
   });
+  if (input.inReplyToId && !lastInbound) return { ok: false, code: "email_not_found" };
 
-  // Кому пишем: собеседнику из переписки, а если её нет — заказчику из заказа.
-  const toEmail = lastInbound?.fromEmail ?? order.senderEmail ?? "";
+  // Кому пишем: заданному адресу; иначе собеседнику из переписки, а если её нет — заказчику.
+  const toEmail = input.toEmail ?? lastInbound?.fromEmail ?? order.senderEmail ?? "";
   if (!toEmail.includes("@")) return { ok: false, code: "no_customer_email" };
 
   const token = await resolveEmailFactoryToken(prisma);

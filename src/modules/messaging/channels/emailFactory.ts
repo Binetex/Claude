@@ -5,7 +5,9 @@ import "server-only";
  * писать через модуль, который у нас есть»). Письмо — тот же текст, что и SMS правила, простым
  * текстом, с адреса магазина; оно ложится в переписку заказа, и ответ клиента приходит туда же.
  *
- * Кому писать, решает сам модуль: в идущую переписку заказа, а если её нет — заказчику из заказа.
+ * Пишем заказчику — по адресу, который выбрал движок (`emailAudience.ts`): в его переписку по
+ * заказу, а если её нет — новым письмом. Не «последнему, кто писал по заказу»: текст правила
+ * написан заказчику, и другому человеку он уйти не должен.
  * Цепочки (Flows) остаются на Brevo со своими шаблонами (`email.ts`): это маркетинг, другая история.
  */
 import type { PrismaClient } from "@/generated/prisma/client";
@@ -27,7 +29,10 @@ export function createEmailFactoryChannelSender(prisma: PrismaClient): ChannelSe
   return {
     channel: "EMAIL",
     async send(ctx: ChannelSendContext): Promise<ChannelSendResult> {
-      const res = await sendOrderEmail(prisma, { orderId: ctx.orderId, text: ctx.text, sendKey: `auto:${ctx.idempotencyKey}`, sentByUserId: null });
+      if (!ctx.emailNormalized) return { ok: false, code: "no_customer_email", retryable: false, skip: true };
+      const res = await sendOrderEmail(prisma, {
+        orderId: ctx.orderId, text: ctx.text, sendKey: `auto:${ctx.idempotencyKey}`, sentByUserId: null, toEmail: ctx.emailNormalized,
+      });
       if (res.ok) return { ok: true, providerMessageId: res.messageId };
       return { ok: false, code: res.code, retryable: !!res.retryable, skip: SKIP_CODES.has(res.code) };
     },

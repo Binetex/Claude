@@ -133,6 +133,24 @@ describe("привязка к заказу", () => {
     expect(row.orderId).not.toBe(plombir);
   });
 
+  it("номер заказа из темы ищется только в магазине, на чей адрес пришло письмо", async () => {
+    // Номер чужого магазина в теме увёл бы письмо в его заказ, и ассистент ответил бы от его имени.
+    await makeSite("theflow.la", "tf");
+    const plombir = await makeOrder(`owner-${suffix}@example.com`, new Date("2026-08-01"), "plombirfloral.com", "pl");
+    const number = `PLT-${String(Date.now()).slice(-8)}`;
+    await prisma.order.update({ where: { id: plombir }, data: { orderNumber: number } });
+    const from = `writer-${suffix}@example.com`;
+
+    fetchMock.mockResolvedValueOnce(reply([
+      msg("m8", from, new Date(), { subject: `Re: Order ${number}` }), // to = client@theflow.la
+      msg("m9", from, new Date(), { subject: `Re: Order ${number}`, to: "client@plombirfloral.com" }),
+    ]));
+    await ingestInboundEmails(prisma);
+
+    expect((await prisma.orderEmailMessage.findUniqueOrThrow({ where: { providerMessageId: "m8" } })).orderId).toBeNull();
+    expect((await prisma.orderEmailMessage.findUniqueOrThrow({ where: { providerMessageId: "m9" } })).orderId).toBe(plombir);
+  });
+
   it("адрес получателя не принадлежит ни одному магазину → письмо без заказа", async () => {
     const email = `nomatch-${suffix}@example.com`;
     await makeOrder(email, new Date("2026-08-01"));

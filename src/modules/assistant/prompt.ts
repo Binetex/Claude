@@ -415,7 +415,7 @@ export function buildMessages(input: PromptInput): DeepseekMessage[] {
     const who = input.writerName?.trim()
       ? `The email is from ${input.writerName.trim()}, who placed the order: start with "Hi <their first name>,".`
       : `You don't know the writer's name: start with "Hi,", never with the recipient's name.`;
-    parts.push(`This customer wrote an EMAIL, and your reply goes out as an email in the same thread. ${who} Then the same short, human reply as a text. No subject line and no signature.`);
+    parts.push(`This message came as an EMAIL, and your reply goes out as an email in the same thread. ${who} Then the same short, human reply as a text. No subject line and no signature.`);
   }
   if (input.order) parts.push(`Order data:\n${orderBlock(input.order)}`);
   if (!input.order) {

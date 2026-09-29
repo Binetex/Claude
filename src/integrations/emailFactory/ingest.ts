@@ -56,26 +56,31 @@ export function orderNumberInSubject(subject: string | null): string | null {
 }
 
 async function findOrderFor(prisma: PrismaClient, fromEmail: string, toEmail: string): Promise<string | null> {
-  const domain = toEmail.split("@")[1]?.toLowerCase();
-  if (!domain) return null;
-
-  const sites = await prisma.site.findMany({
-    where: { emailFactoryDomain: { equals: domain, mode: "insensitive" } },
-    select: { id: true },
-  });
+  const siteIds = await siteIdsForAddress(prisma, toEmail);
   // Домен не закреплён ни за одним магазином — привязывать не к чему. Письмо всё равно сохранится
   // непривязанным: оно нужно как курсор опроса.
-  if (sites.length === 0) return null;
+  if (siteIds.length === 0) return null;
 
   const order = await prisma.order.findFirst({
     where: {
       senderEmail: { equals: fromEmail, mode: "insensitive" },
-      siteId: { in: sites.map((s) => s.id) },
+      siteId: { in: siteIds },
     },
     orderBy: [{ externalCreatedAt: "desc" }, { createdAt: "desc" }],
     select: { id: true },
   });
   return order?.id ?? null;
+}
+
+/** Магазины, за которыми закреплён домен нашего адреса. Пусто — адрес не магазинный. */
+async function siteIdsForAddress(prisma: PrismaClient, address: string): Promise<string[]> {
+  const domain = address.split("@")[1]?.toLowerCase();
+  if (!domain) return [];
+  const sites = await prisma.site.findMany({
+    where: { emailFactoryDomain: { equals: domain, mode: "insensitive" } },
+    select: { id: true },
+  });
+  return sites.map((s) => s.id);
 }
 
 async function resolveSince(prisma: PrismaClient): Promise<Date> {
@@ -93,7 +98,9 @@ async function resolveSince(prisma: PrismaClient): Promise<Date> {
  *
  * 1. НОМЕР ЗАКАЗА В ТЕМЕ. Владелец пишет клиенту из карточки, тема получается «Заказ JF-1001380»,
  *    и ответ приходит с «Re:» и тем же номером. Это ровно тот разговор, который он начал, —
- *    сильнее любой догадки по адресу.
+ *    сильнее любой догадки по адресу. Номер ищем только среди заказов магазина, на чей адрес
+ *    пришло письмо: мы пишем про заказ с домена его магазина, и ответ приходит туда же. Чужой
+ *    номер в теме увёл бы письмо в заказ другого магазина, и ассистент ответил бы от его имени.
  * 2. ТРЕД ПРОВАЙДЕРА, если в нём уже есть наше письмо с заказом. Работает, когда тему обрезали
  *    или переписали, но переписка продолжается в той же цепочке. Провайдер, впрочем, заводит
  *    ответу СВОЙ тред не всегда тот же (проверено 21.09.2026), поэтому признак второй, а не первый.
@@ -103,8 +110,10 @@ async function resolveSince(prisma: PrismaClient): Promise<Date> {
 async function resolveOrderId(prisma: PrismaClient, m: EmailFactoryMessage): Promise<string | null> {
   const number = orderNumberInSubject(m.subject);
   if (number) {
+    // Адрес не магазинный (домен ни за кем не закреплён) — ищем по номеру везде, как раньше.
+    const siteIds = await siteIdsForAddress(prisma, m.toEmail);
     const byNumber = await prisma.order.findFirst({
-      where: { orderNumber: { equals: number, mode: "insensitive" } },
+      where: { orderNumber: { equals: number, mode: "insensitive" }, ...(siteIds.length ? { siteId: { in: siteIds } } : {}) },
       select: { id: true },
     });
     if (byNumber) return byNumber.id;
@@ -127,8 +136,12 @@ async function resolveOrderId(prisma: PrismaClient, m: EmailFactoryMessage): Pro
  *
  * Цитату прошлой переписки режем: почтовые клиенты подклеивают к ответу всё письмо целиком, и
  * в уведомлении оно занимало бы экран, пряча те две строки, ради которых клиент и писал.
+ *
+ * Шапку «On … wrote:» Gmail переносит на вторую строку, когда имя с адресом длинные (на проде
+ * так у двух писем из девяти с шапкой). Хвост «On Mon, Sep 28, 2026 at 5:12 PM …» без переноса
+ * оставался бы словами клиента — с чужими днём и временем внутри.
  */
-const QUOTE_START = /^\s*(?:>|On .+ wrote:|-{2,}\s*Original Message|_{5,}|From:\s)/m;
+const QUOTE_START = /^\s*(?:>|On .+ wrote:|On [^\n]+\n[^\n]*wrote:|-{2,}\s*Original Message|_{5,}|From:\s)/m;
 
 /** Подписи почтовых приложений — не слова клиента: «Sent from my iPhone», «Get Outlook for iOS». */
 const APP_SIGNATURE = /^\s*(?:sent from my .*|sent from (?:yahoo|mail|outlook|gmail)\b.*|get outlook for .*)\s*$/gim;
@@ -141,6 +154,19 @@ export function emailNewText(text: string): string {
   const cut = text.search(QUOTE_START);
   const body = cut >= 0 ? text.slice(0, cut) : text;
   return body.replace(APP_SIGNATURE, "").trim();
+}
+
+/**
+ * Письма почтовых роботов: автоответ «я в отпуске», отбойник о недоставке, адреса no-reply.
+ * Отвечать им нельзя — автоответчик ответит снова, и переписка пойдёт по кругу до потолка ответов.
+ * Заголовков вроде Auto-Submitted провайдер не отдаёт, поэтому узнаём по адресу, теме и тексту.
+ */
+const ROBOT_SENDER = /^(?:mailer-daemon|postmaster|no-?reply|do-?not-?reply)@/i;
+const AUTO_SUBJECT = /^\s*(?:automatic reply|auto[- ]?reply|auto[- ]?response|out of (?:the )?office|undeliverable|undelivered mail|delivery status notification|mail delivery (?:failed|failure|subsystem)|returned mail)\b/i;
+const AUTO_TEXT = /\b(?:i am|i'm|i’m) (?:currently )?(?:out of|away from) (?:the |my )?office\b|\bthis is an (?:automated|automatic) (?:reply|response|message)\b/i;
+
+export function isAutoReply(m: { fromEmail: string; subject: string | null; text: string }): boolean {
+  return ROBOT_SENDER.test(m.fromEmail.trim()) || AUTO_SUBJECT.test(m.subject ?? "") || AUTO_TEXT.test(emailNewText(m.text));
 }
 
 export function emailQuoteForTelegram(text: string, limit = 500): string {
@@ -167,10 +193,13 @@ export async function ingestInboundEmails(prisma: PrismaClient): Promise<IngestR
   // но НЕ даём курсору уехать: иначе непопавшие письма не запросятся уже никогда. Курсор — это
   // время сохранённого письма, поэтому просто не сохраняем самое свежее из страницы: следующий
   // проход начнётся раньше него и добёрёт хвост.
+  //
+  // Сохраняем от старых к новым всегда: ассистент разбирает письма в порядке постановки в очередь,
+  // и более раннее письмо клиента должно встать туда первым — тогда следующее заберёт его в свой
+  // ответ (`emailHandler.ts`), а не окажется разобрано раньше него.
   const full = res.data.length >= PAGE_LIMIT;
-  const batch = full
-    ? [...res.data].sort((a, b) => a.occurredAt.getTime() - b.occurredAt.getTime()).slice(0, -1)
-    : res.data;
+  const sorted = [...res.data].sort((a, b) => a.occurredAt.getTime() - b.occurredAt.getTime());
+  const batch = full ? sorted.slice(0, -1) : sorted;
 
   let stored = 0;
   let matched = 0;

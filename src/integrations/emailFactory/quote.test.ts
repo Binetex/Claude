@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { emailQuoteForTelegram, emailNewText } from "./ingest";
+import { emailQuoteForTelegram, emailNewText, isAutoReply } from "./ingest";
 
 /**
  * Письма взяты с прода 21.09.2026. Почтовые клиенты подклеивают к ответу всё прошлое письмо,
@@ -53,5 +53,32 @@ describe("новый текст письма для ассистента", () =>
 
   it("письмо из одной цитаты — нового нет", () => {
     expect(emailNewText("> only quoted text here")).toBe("");
+  });
+
+  it("шапку Gmail, перенесённую на вторую строку, тоже режет", () => {
+    // Длинные имя с адресом Gmail переносит, и «wrote:» уезжает вниз. Без этого «спасибо» с
+    // хвостом «On Mon, Sep 28, 2026 at 5:12 PM …» не считалось вежливостью, а «5:12 PM» из
+    // шапки сходило за время, которое назвал клиент.
+    const text = [
+      "Thank you!", "",
+      "On Mon, Sep 28, 2026 at 5:12 PM The Flow Los Angeles <client@theflow.la>", "wrote:", "",
+      "> Hi Jorge, your flowers were delivered.",
+    ].join("\n");
+    expect(emailNewText(text)).toBe("Thank you!");
+  });
+});
+
+describe("письма почтовых роботов", () => {
+  it("автоответ узнаётся по теме, по тексту и по адресу", () => {
+    expect(isAutoReply({ fromEmail: "anna@example.com", subject: "Automatic reply: Re: Order JF-1001380", text: "Thanks for your email." })).toBe(true);
+    expect(isAutoReply({ fromEmail: "anna@example.com", subject: "Re: Order JF-1001380", text: "I am currently out of the office until Monday." })).toBe(true);
+    expect(isAutoReply({ fromEmail: "MAILER-DAEMON@mx.example.com", subject: "Undeliverable: Order JF-1001380", text: "Delivery has failed." })).toBe(true);
+    expect(isAutoReply({ fromEmail: "noreply@shop.example", subject: "Your receipt", text: "Paid." })).toBe(true);
+  });
+
+  it("живое письмо — не автоответ, даже с автоответом в цитате ниже", () => {
+    expect(isAutoReply({ fromEmail: "anna@example.com", subject: "Re: Order JF-1001380", text: "Can you deliver after 5?" })).toBe(false);
+    const quoted = "Please bring it to my office after 5.\n\nOn Mon, Sep 28, 2026 at 5:12 PM JF <client@jf.example> wrote:\n> This is an automated message.";
+    expect(isAutoReply({ fromEmail: "anna@example.com", subject: "Re: Order JF-1001380", text: quoted })).toBe(false);
   });
 });

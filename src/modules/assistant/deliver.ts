@@ -92,14 +92,16 @@ export async function sendAssistantReply(prisma: PrismaClient, turnId: string, d
 
   const text = turn.replyText.trim();
 
-  // Разбор письма — ответ письмом в ту же переписку заказа, нашим почтовым модулем. Защита от
-  // второго письма та же, что у SMS: прошлые попытки по ключу разбора.
+  // Разбор письма — ответ письмом на ТО САМОЕ письмо, в его тред и его автору, нашим почтовым
+  // модулем. Защита от второго письма та же, что у SMS: прошлые попытки по ключу разбора.
   if (turn.emailMessageId) {
     if (!turn.orderId) return { ok: false, code: "order_not_found" };
     const priorEmails = await prisma.orderEmailMessage.findMany({ where: { sendKey: { startsWith: `ai-turn:${turn.id}` } }, select: { status: true } });
     const emailAttempt = nextSendKey(turn.id, priorEmails);
     if ("alreadySent" in emailAttempt) return { ok: false, code: "already_sent" };
-    const sent = await sendOrderEmail(prisma, { orderId: turn.orderId, text, sendKey: emailAttempt.key, sentByUserId: decidedByUserId ?? null });
+    const sent = await sendOrderEmail(prisma, {
+      orderId: turn.orderId, text, sendKey: emailAttempt.key, sentByUserId: decidedByUserId ?? null, inReplyToId: turn.emailMessageId,
+    });
     if (!sent.ok) return { ok: false, code: sent.code };
     await prisma.aiTurn.update({ where: { id: turn.id }, data: { status: "SENT", decidedAt: new Date(), decidedByUserId: decidedByUserId ?? null } });
     return { ok: true };
