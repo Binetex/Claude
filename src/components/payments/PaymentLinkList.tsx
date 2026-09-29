@@ -1,7 +1,7 @@
 "use client";
 import { useState, useTransition } from "react";
 import { Card, CardBody } from "@/components/ui/Card";
-import { deactivatePaymentLinkAction } from "./actions";
+import { deactivatePaymentLinkAction } from "@/modules/payments/paymentLinkActions";
 import { fmtStoreDateTime } from "@/lib/tz";
 
 /** Форма ссылки — повторена здесь, чтобы клиентский список не тянул server-only модуль клиента. */

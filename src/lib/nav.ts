@@ -72,6 +72,8 @@ function callCenterNav(): NavItem[] {
     { href: "/dashboard/cc/reviews", label: "Отзывы" },
     // Разбирать входящие от новых людей — работа колл-центра, а не владельца.
     { href: "/dashboard/communications", label: "Другие сообщения" },
+    // Счёт клиенту, который решил доплатить, выставляет сам оператор (владелец 29.09.2026).
+    { href: "/dashboard/cc/payment-links", label: "Ссылки на оплату" },
   ];
 }
 

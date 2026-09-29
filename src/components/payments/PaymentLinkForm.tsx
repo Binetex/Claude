@@ -7,7 +7,7 @@ import { useActionState, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardBody } from "@/components/ui/Card";
-import { createPaymentLinkAction } from "./actions";
+import { createPaymentLinkAction } from "@/modules/payments/paymentLinkActions";
 
 export function PaymentLinkForm({ accountName }: { accountName: string }) {
   const [state, action, pending] = useActionState(createPaymentLinkAction, null);
