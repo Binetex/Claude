@@ -15,7 +15,6 @@ import { buildAutomationPreview } from "@/modules/automations/preview";
 import { buildTestMessage, sendTestSmsViaClient } from "@/modules/automations/testSend";
 import { setAutomationsGloballyDisabled } from "@/modules/automations/settings";
 import type { SmsConditions } from "@/modules/automations/conditions";
-import { resolveSiteEmailConfig, resolveEmailTemplateForAutomation } from "@/integrations/email/settings";
 
 const AUDIENCES = new Set(["CUSTOMER", "RECIPIENT", "BOTH"]);
 const DELAY_UNITS = new Set(["IMMEDIATE", "MINUTE", "HOUR", "DAY", "WEEK", "MONTH"]);
@@ -292,25 +291,6 @@ export async function previewAutomation(orderId: string, template: string, audie
   };
 }
 
-export type SiteEmailTemplateStatus =
-  | { ready: true; templateId: number; source: "automation" | "site" }
-  | { ready: false; reason: string };
-
-/**
- * Готов ли выбранный магазин слать Email для ЭТОГО события С УЧЁТОМ возможного override
- * шаблона у самого правила (Stage 2.1) — форма показывает статус вместо дублирования настроек
- * отправителя/домена (они на /dashboard/sites) И вместо дублирования логики резолва шаблона
- * (resolveEmailTemplateForAutomation — тот же код, что реально используется при отправке).
- */
-export async function checkSiteEmailTemplate(siteId: string, triggerType: string, ruleTemplateId: number | null = null): Promise<SiteEmailTemplateStatus> {
-  await requireRole("OWNER");
-  if (!siteId || !isSupportedTrigger(triggerType)) return { ready: false, reason: "site_or_trigger_missing" };
-  const cfg = await resolveSiteEmailConfig(prisma, siteId);
-  if (!cfg.ok) return { ready: false, reason: cfg.skip };
-  const tpl = await resolveEmailTemplateForAutomation(prisma, { siteId, triggerType, automationTemplateId: ruleTemplateId });
-  if (!tpl.ok) return { ready: false, reason: tpl.skip };
-  return { ready: true, templateId: tpl.templateId, source: tpl.source };
-}
 
 /**
  * Тестовая отправка. НЕ создаёт AutomationJob, НЕ пишет OrderCommunication и НЕ меняет заказ.

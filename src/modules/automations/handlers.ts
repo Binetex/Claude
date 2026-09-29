@@ -507,15 +507,14 @@ export function buildAutomationSendHandler(prisma: PrismaClient, deps: Automatio
       if (!vars[key]) return skip(`missing_required_variable:${key}`);
     }
 
-    let text = "";
-    if (job.channel === "SMS") {
-      const referenced = new Set(extractVariables(automation.template));
-      if (referenced.has("review_url") && !vars["review_url"]) return skip("missing_required_variable:review_url");
-      const render = renderTemplate(automation.template, vars);
-      if (!render.text) return skip("empty_render");
-      text = render.text;
-      await logExecution(prisma, { jobId: job.id, automationId: automation.id, orderId: order.id, stage: "rendered" });
-    }
+    // Текст правила — и для SMS, и для письма: письмо уходит тем же текстом через наш почтовый
+    // модуль (решение владельца 29.09.2026), своих шаблонов у писем правил нет.
+    const referenced = new Set(extractVariables(automation.template));
+    if (referenced.has("review_url") && !vars["review_url"]) return skip("missing_required_variable:review_url");
+    const render = renderTemplate(automation.template, vars);
+    if (!render.text) return skip("empty_render");
+    const text = render.text;
+    await logExecution(prisma, { jobId: job.id, automationId: automation.id, orderId: order.id, stage: "rendered" });
 
     // Отправка через канал. Идемпотентность send-ключа — per-attempt (job.attempts): в пределах
     // одной попытки повтор не шлёт второй раз; реальный retry после сбоя увеличивает attempts →
@@ -542,7 +541,7 @@ export function buildAutomationSendHandler(prisma: PrismaClient, deps: Automatio
           sentAt: new Date(),
           communicationId: result.communicationId ?? null,
           providerMessageId: result.providerMessageId ?? null,
-          renderedTextSnapshot: job.channel === "SMS" ? text : null, // снимок в момент фактической отправки
+          renderedTextSnapshot: text, // снимок в момент фактической отправки
           lastErrorSafe: null,
         },
       });

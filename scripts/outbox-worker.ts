@@ -53,6 +53,7 @@ import { AIRWALLEX_VERIFY_EVENT } from "@/integrations/airwallex/events";
 import { dispatchAirwallexChecks } from "@/integrations/airwallex/dispatcher";
 import { createSmsChannelSender } from "@/modules/messaging/channels/sms";
 import { createEmailChannelSender } from "@/modules/messaging/channels/email";
+import { createEmailFactoryChannelSender } from "@/modules/messaging/channels/emailFactory";
 import { getQuoConfig } from "@/integrations/quo/config";
 import { createQuoClient } from "@/integrations/quo/client";
 import { reconcileBurqSchedules } from "@/integrations/delivery/burq/recovery";
@@ -81,15 +82,15 @@ async function main() {
     .register(providers.TELEGRAM)
     .register(providers.PUSH);
 
-  // Каналы автоматизаций — ОДИН реестр на одиночные правила и на цепочки: «как отправить»
-  // не должно разъезжаться между ними.
-  const automationChannels = {
-    SMS: createSmsChannelSender(() => {
-      const cfg = getQuoConfig();
-      return cfg && featureFlags.quo ? createQuoClient({ ...cfg, maxRetries: 0 }) : null;
-    }),
-    EMAIL: createEmailChannelSender(prisma),
-  };
+  // Каналы автоматизаций. SMS у правил и цепочек один. Письмо — разное: у правил это тот же текст
+  // через наш почтовый модуль (решение владельца 29.09.2026), у цепочек (Flows) — шаблоны Brevo,
+  // это маркетинг со своей вёрсткой.
+  const smsChannel = createSmsChannelSender(() => {
+    const cfg = getQuoConfig();
+    return cfg && featureFlags.quo ? createQuoClient({ ...cfg, maxRetries: 0 }) : null;
+  });
+  const automationChannels = { SMS: smsChannel, EMAIL: createEmailFactoryChannelSender(prisma) };
+  const flowChannels = { SMS: smsChannel, EMAIL: createEmailChannelSender(prisma) };
 
   const handlers: Record<string, OutboxHandler> = {
     "order.delivery.completed": buildDeliveryCompletedHandler({
@@ -129,7 +130,7 @@ async function main() {
     // автоматизаций уходит в DEAD_LETTER с «no handler», и авто-SMS молча не отправляются.
     [AUTOMATION_TRIGGER_EVENT]: buildAutomationTriggerHandler(prisma),
     [AUTOMATION_SEND_EVENT]: buildAutomationSendHandler(prisma, { channels: automationChannels }),
-    [FLOW_STEP_EVENT]: buildFlowStepHandler(prisma, { channels: automationChannels }),
+    [FLOW_STEP_EVENT]: buildFlowStepHandler(prisma, { channels: flowChannels }),
     // Ожидание ответа: срок вышел — если человек молчит, запускается следующее правило цепочки
     // (какое именно — указано в самом правиле; см. modules/automations/replyWait.ts).
     // Отправкой занимаются обычные правила, здесь только проверка тишины и публикация триггера.

@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 
 export default async function NewAutomationPage() {
   const [sites, recentOrders, otherAutomations] = await Promise.all([
-    prisma.site.findMany({ select: { id: true, name: true, quoEnabled: true }, orderBy: { name: "asc" } }),
+    prisma.site.findMany({ select: { id: true, name: true, quoEnabled: true, emailFactoryDomain: true }, orderBy: { name: "asc" } }),
     prisma.order.findMany({ select: { id: true, orderNumber: true, siteId: true }, orderBy: { createdAt: "desc" }, take: 50 }),
     // Кандидаты на «если не ответят» — все живые правила: цепочка не ограничена типом события.
     // Магазины и состояние нужны прямо в подписи: одноимённых правил у разных магазинов много.

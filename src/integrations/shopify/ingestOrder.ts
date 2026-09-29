@@ -23,6 +23,7 @@ import { publishTelegramNotification } from "@/integrations/telegram/events";
 import { adoptOrphanCommunicationsForNewOrder } from "@/integrations/quo/adoptOrphans";
 import { displayVariantName } from "@/lib/variantName";
 import { parseWindowText } from "@/lib/deliveryWindow";
+import { withCountryCode } from "@/lib/phoneCountry";
 
 /** Планирование доставки, безопасное для импорта: ошибка логируется, но не роняет приём заказа. */
 async function scheduleDeliverySafe(orderId: string): Promise<void> {
@@ -144,7 +145,7 @@ function extractAddressAndCardMessage(payload: ShopifyOrder) {
   const note = payload.note ?? "";
   return {
     recipientName: fullName(payload.shipping_address) || "—",
-    recipientPhone: normalizePhone(payload.shipping_address?.phone),
+    recipientPhone: normalizePhone(withCountryCode(payload.shipping_address?.phone, payload.shipping_address?.country_code)),
     addressLine: payload.shipping_address?.address1 ?? "",
     apartment: payload.shipping_address?.address2 ?? null,
     city: payload.shipping_address?.city ?? "",

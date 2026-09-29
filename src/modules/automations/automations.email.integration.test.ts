@@ -615,3 +615,36 @@ describe("Stage 2.1 — Template ID на уровне правила (override)"
     expect(body.templateId).toBe(861); // override правила, не 960
   });
 });
+
+// 29.09.2026: письма правил уходят через наш почтовый модуль ТЕМ ЖЕ текстом, что и SMS (своих
+// шаблонов у них нет). Канал получает готовый текст правила — проверяем именно это.
+describe("22. Письмо правила — тем же текстом, что SMS", () => {
+  it("при провале SMS в канал письма уходит отрендеренный текст правила", async () => {
+    const sent: { text: string; recipientType: string }[] = [];
+    const handler = buildAutomationSendHandler(prisma, {
+      channels: {
+        SMS: createSmsChannelSender(() => fakeQuoClient),
+        EMAIL: { channel: "EMAIL", send: async (ctx) => { sent.push({ text: ctx.text, recipientType: ctx.recipientType }); return { ok: true }; } },
+      },
+    });
+    const site = await makeSite(22);
+    const auto = await makeAutomation(site.id, { smsEnabled: true, emailFallbackEnabled: true, template: "Hi {{sender_name}}, we got your order" });
+    const order = await makeOrder(site.id);
+    await fireTrigger(order);
+    const smsJob = (await jobsFor(auto.id, order.id)).find((j) => j.channel === "SMS")!;
+
+    sendOk = false;
+    await handler(rec({ jobId: smsJob.id, orderId: order.id }, 8, 8)); // финальный провал SMS
+    sendOk = true;
+
+    const emailJob = (await jobsFor(auto.id, order.id)).find((j) => j.channel === "EMAIL")!;
+    await handler(rec({ jobId: emailJob.id, orderId: order.id }));
+
+    expect(sent).toHaveLength(1);
+    expect(sent[0].text).toMatch(/^Hi .+, we got your order$/);
+    expect(sent[0].recipientType).toBe("CUSTOMER");
+    const after = await prisma.automationJob.findUnique({ where: { id: emailJob.id } });
+    expect(after?.status).toBe("SENT");
+    expect(after?.renderedTextSnapshot).toBe(sent[0].text);
+  });
+});

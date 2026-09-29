@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useMemo, useRef, useState } from "react";
 
-export type SiteOption = { id: string; name: string; quoEnabled: boolean };
+export type SiteOption = { id: string; name: string; quoEnabled: boolean; emailFactoryDomain?: string | null };
 
 /** Подпись выбора: «Все магазины (10)» / перечисление имён / «Магазины не выбраны». */
 export function siteSelectionLabel(sites: SiteOption[], selected: string[]): string {

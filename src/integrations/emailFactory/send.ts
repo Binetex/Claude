@@ -26,11 +26,16 @@ export const EMAIL_REPLY_MAX_LENGTH = 10_000;
 
 export type SendReplyResult =
   | { ok: true; messageId: string; duplicate?: true }
-  | { ok: false; code: string; messageId?: string };
+  // retryable — сбой временный (сеть, 5xx): письмо стоит повторить. Нужен автоматической отправке.
+  | { ok: false; code: string; messageId?: string; retryable?: boolean };
 
-/** Тема первого письма. Номер заказа — единственное, что клиент точно узнает в списке писем. */
+/**
+ * Тема первого письма — по-английски: её видит клиент (с клиентом только английский). Номер
+ * заказа — единственное, что он точно узнает в списке писем; по нему же входящий ответ находит
+ * заказ (`ingest.ts::orderNumberInSubject`), слово перед номером роли не играет.
+ */
 function firstSubject(orderNumber: string): string {
-  return `Заказ ${orderNumber}`;
+  return `Order ${orderNumber}`;
 }
 
 export async function sendOrderEmail(
@@ -104,7 +109,7 @@ export async function sendOrderEmail(
     const domain = await resolveSendingDomain(token, order.site?.emailFactoryDomain ?? null);
     if (!domain.ok) {
       await prisma.orderEmailMessage.update({ where: { id: pendingId }, data: { status: "FAILED", errorSafe: domain.code } });
-      return { ok: false, code: domain.code, messageId: pendingId };
+      return { ok: false, code: domain.code, messageId: pendingId, retryable: domain.retryable };
     }
     res = await sendNewMessage(token, { to: toEmail, subject, text, domain: domain.domain });
     // Теперь домен известен — дописываем адрес отправителя, иначе у первого письма он навсегда
@@ -116,7 +121,7 @@ export async function sendOrderEmail(
     // Текст провайдера кладём рядом с кодом: он и объясняет, чего не хватило.
     const safe = [res.code, res.detail].filter(Boolean).join(": ").slice(0, 250);
     await prisma.orderEmailMessage.update({ where: { id: pendingId }, data: { status: "FAILED", errorSafe: safe } });
-    return { ok: false, code: res.code, messageId: pendingId };
+    return { ok: false, code: res.code, messageId: pendingId, retryable: res.retryable };
   }
 
   await prisma.orderEmailMessage.update({
@@ -145,9 +150,9 @@ export async function sendOrderEmail(
 async function resolveSendingDomain(
   token: string,
   siteDomain: string | null
-): Promise<{ ok: true; domain: string; email: string } | { ok: false; code: string }> {
+): Promise<{ ok: true; domain: string; email: string } | { ok: false; code: string; retryable?: boolean }> {
   const res = await listDomains(token);
-  if (!res.ok) return { ok: false, code: res.code };
+  if (!res.ok) return { ok: false, code: res.code, retryable: res.retryable };
   const ready = res.data.filter((d) => d.status.toUpperCase() === "READY");
   if (ready.length === 0) return { ok: false, code: "no_sending_domain" };
 

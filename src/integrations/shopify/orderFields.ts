@@ -4,6 +4,7 @@
  * инструкции доставки = GraphQL deliveryMethod (native Local Delivery). См. orderFields.test.ts.
  */
 import { normalizePhone, toE164 } from "@/lib/phone";
+import { withCountryCode } from "@/lib/phoneCountry";
 
 export type ShopifyBillingAddress =
   | {
@@ -54,7 +55,7 @@ export type SenderIdentitySource = {
   /** Телефон уровня ЗАКАЗА — тот, что клиент указал на оформлении. */
   phone?: string | null;
   customer?: { first_name?: string; last_name?: string; phone?: string } | null;
-  billing_address?: { name?: string; first_name?: string; last_name?: string; phone?: string } | null;
+  billing_address?: { name?: string; first_name?: string; last_name?: string; phone?: string; country_code?: string | null } | null;
   /** Нужен, чтобы не записать заказчику тот же номер, что уже у получателя. */
   shipping_address?: { phone?: string } | null;
 };
@@ -102,7 +103,8 @@ export function extractSenderIdentity(payload: SenderIdentitySource): { senderNa
   // если все совпали — значит номер в заказе действительно один на двоих.
   const chosen = candidates.find((c) => recipient == null || toE164(c) !== recipient) ?? candidates[0];
 
-  return { senderName, senderPhone: normalizePhone(chosen) };
+  // Номер без «+» у иностранного заказчика — с кодом его страны (THEFLOW-20861, 29.09.2026).
+  return { senderName, senderPhone: normalizePhone(withCountryCode(chosen, billing?.country_code)) };
 }
 
 /** Есть ли у отправителя адрес (для UI: показывать адрес или «не указан»). */

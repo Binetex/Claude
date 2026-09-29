@@ -7,6 +7,7 @@ import type {
 } from "@/integrations/normalized";
 import { featureFlags } from "@/lib/featureFlags";
 import { mapWooStatus, type WooOrderStatus } from "./statusMap";
+import { withCountryCode } from "@/lib/phoneCountry";
 
 /**
  * Skeleton-адаптер заказов WooCommerce. `parseWebhook` — реальный маппинг Woo REST-формы
@@ -122,13 +123,14 @@ export function parseWooOrder(order: WooOrder): NormalizedOrder {
     sender: {
       externalId: null,
       name: fullName(order.billing) || "—",
-      phone: order.billing?.phone?.trim() || null,
+      // Номер без «+» у иностранного заказчика — с кодом его страны (THEFLOW-20861, 29.09.2026).
+      phone: withCountryCode(order.billing?.phone, order.billing?.country) || null,
       email: order.billing?.email?.trim() || null,
     },
     recipient: {
       externalId: null,
       name: fullName(order.shipping) || fullName(order.billing) || "—",
-      phone: order.shipping?.phone?.trim() || null,
+      phone: withCountryCode(order.shipping?.phone, order.shipping?.country) || null,
       email: null,
     },
     shippingAddress: toAddress(order.shipping) ?? toAddress(order.billing),

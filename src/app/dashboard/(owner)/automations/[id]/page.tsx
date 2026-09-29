@@ -58,7 +58,7 @@ export default async function EditAutomationPage({
 /** Справочники формы грузим только на вкладке настройки — на статистике они не нужны. */
 async function SettingsTab({ automation }: { automation: AutomationWithSites }) {
   const [sites, recentOrders, otherAutomations] = await Promise.all([
-    prisma.site.findMany({ select: { id: true, name: true, quoEnabled: true }, orderBy: { name: "asc" } }),
+    prisma.site.findMany({ select: { id: true, name: true, quoEnabled: true, emailFactoryDomain: true }, orderBy: { name: "asc" } }),
     prisma.order.findMany({ select: { id: true, orderNumber: true, siteId: true }, orderBy: { createdAt: "desc" }, take: 50 }),
     // Кандидаты на «если не ответят» — живые правила, кроме самого себя: правило, запускающее
     // само себя, писало бы человеку по кругу (сервер это тоже отвергает). Плюс ТЕКУЩАЯ ссылка,
