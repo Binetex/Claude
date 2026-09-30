@@ -81,6 +81,45 @@ function order(jobs: PlanJob[], courierMin: number): PlanJob[] {
     );
 }
 
+/** Опоздание каждого заказа очереди при сборке подряд с lineStart. */
+function lateness(queue: PlanJob[], lineStart: number, p: PlanParams): number[] {
+  let t = lineStart;
+  return queue.map((j) => {
+    t += p.prepMin(j.big);
+    return Math.max(0, Math.max(t + p.courierMin + j.driveMin, j.windowFrom) - j.deadline);
+  });
+}
+
+/**
+ * TheFlow отпихивает остальных, когда иначе опоздает (владелец 30.09.2026: «если TheFlow, а мешают
+ * заказы типа Paradise, — отпихивать Paradise и при необходимости ставить вперёд TheFlow»). Нужно
+ * это вечерним заказам TheFlow: в очереди они после дневных заказов всех магазинов, и если тех
+ * много, вечерний опоздал бы. Для каждого опаздывающего заказа TheFlow заказ другого магазина,
+ * стоящий перед ним (с самым поздним сроком), уходит сразу за него — пока тот не успевает или
+ * чужих перед ним не осталось. Перенос двигает чужой заказ только назад и заказы TheFlow ни на
+ * минуту не задерживает; число «чужой перед TheFlow» с каждым шагом падает — цикл конечен.
+ */
+function rescuePriority(queue: PlanJob[], lineStart: number, p: PlanParams): PlanJob[] {
+  const q = [...queue];
+  for (;;) {
+    const late = lateness(q, lineStart, p);
+    let moved = false;
+    for (let k = 0; k < q.length && !moved; k++) {
+      if (!q[k].priority || late[k] <= LATE_TOLERANCE_MIN) continue;
+      let move = -1;
+      for (let i = 0; i < k; i++) {
+        if (!q[i].priority && (move < 0 || latestReady(q[i], p.courierMin) >= latestReady(q[move], p.courierMin))) move = i;
+      }
+      // Перед ним только заказы TheFlow — этот не спасти перестановкой, смотрим следующий.
+      if (move < 0) continue;
+      const [j] = q.splice(move, 1);
+      q.splice(k, 0, j); // опаздывающий сдвинулся на место k − 1: вставка на k — сразу за ним
+      moved = true;
+    }
+    if (!moved) return q;
+  }
+}
+
 export function planDay(jobs: PlanJob[], p: PlanParams): Plan {
   const byDeadline = order(jobs, p.courierMin);
   let lineStart = p.lineStart;
@@ -94,8 +133,8 @@ export function planDay(jobs: PlanJob[], p: PlanParams): Plan {
     }
     lineStart = Math.max(p.earliestLineStart, Math.min(lineStart, need));
   }
-  // TheFlow уже впереди (`order`): переставлять по опозданию больше нечего.
-  const queue = byDeadline;
+  // Порядок частей дня (`order`), и опаздывающий TheFlow отпихивает остальных вперёд себя.
+  const queue = rescuePriority(byDeadline, lineStart, p);
 
   const items: PlanItem[] = [];
   let t = lineStart;

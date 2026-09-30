@@ -232,6 +232,21 @@ const COMMON_RULES = `- Reply ONLY in English, whatever language the customer wr
 const ASKED_WHEN = `: asked when the
   bouquet will arrive, answer with the order's delivery window`;
 
+/**
+ * Окно заказа — обещание, и держим именно его (владелец 30.09.2026: «оформили 3–7, а хотят до 4 —
+ * не критично, если доставим в 5–6; это в угоду новым заказам»). Раньше или уже окна — пожелание:
+ * не обещаем, чтобы не нарушить обещание нового, и окно в заказе не ужимается (`laterOnly`).
+ */
+const WINDOW_IS_PROMISE = `
+  0. THE ORDER'S DELIVERY WINDOW IS OUR PROMISE, and we keep it: the customer chose it when
+     ordering. A time they name INSIDE the window or before its end ("by 4" for a 3-7 PM window,
+     "can you come at 12?" for 11 AM-3 PM) is only a wish: never promise it and never name a
+     narrower time. Say we deliver within their window and will try to come as early as we can;
+     put nothing in "confirmed_from" or "confirmed_until". If they will not be home for part of
+     the window, ask where we can leave the bouquet. Only a time that needs the delivery LATER
+     than the window allows (they are not home until after it starts, or only after it ends) or
+     another day is a change: see the points below.`;
+
 function timingRules(hasOrder: boolean): string {
   const put = (what: string) => (hasOrder ? `; put ${what}` : "");
   return `- DELIVERY TIME. "Earliest possible delivery" below is worked out by the shop from the
@@ -242,7 +257,7 @@ function timingRules(hasOrder: boolean): string {
   minute. The earliest possible delivery is a limit, not an arrival time${hasOrder ? ASKED_WHEN : ""}: name
   it only when they ask what the earliest is. Never
   argue with a customer who tells you when they are home. First see what they are doing with the
-  time they named:
+  time they named:${hasOrder ? WINDOW_IS_PROMISE : ""}
   1. TODAY, A SINGLE HOUR OR A START with nothing about until when: "I'm ready at 11", "2 pm
      works for me", "can you come at 1?", "I'm home from 10". If it is at or after the earliest
      possible delivery, confirm we will come around then${put('the hour in "confirmed_from" and one hour later in "confirmed_until"')};

@@ -39,6 +39,19 @@ export function confirmedWindow(current: WindowRange | null, c: Confirmed): Wind
   return r && isValidRange(r) ? r : null;
 }
 
+/**
+ * Окно заказа по словам клиента может стать только ПОЗЖЕ: начаться позже (его нет дома до этого
+ * часа) или кончиться позже. Раньше или уже, чем согласовано при заказе, — пожелание, а не новое
+ * окно (владелец 30.09.2026: «оформили 3–7, а хотят до 4 — не критично, если доставим в 5–6: при
+ * оформлении согласились с окном; это в угоду новым заказам»). Ужатое окно держало бы флориста и
+ * не пускало новые заказы.
+ */
+export function laterOnly(current: WindowRange | null, next: WindowRange | null): WindowRange | null {
+  if (!next || !current) return next;
+  const r = { from: Math.max(current.from, next.from), to: Math.max(current.to, next.to) };
+  return isValidRange(r) ? r : null;
+}
+
 /** Дальше этого клиенту переносить сами не будем: ошибка модели в дате — не на месяц вперёд. */
 export const MAX_DAYS_AHEAD = 30;
 
@@ -59,7 +72,7 @@ export function planReschedule(args: {
   confirmed: Confirmed;
   newDate: string | null;
 }): { day: string; window: WindowRange | null } | null {
-  const window = confirmedWindow(args.currentWindow, args.confirmed);
+  const window = laterOnly(args.currentWindow, confirmedWindow(args.currentWindow, args.confirmed));
   if (args.newDate) {
     if (args.newDate <= args.currentDay) return null;
     if (args.newDate < args.todayStr || args.newDate > addDays(args.todayStr, MAX_DAYS_AHEAD)) return null;

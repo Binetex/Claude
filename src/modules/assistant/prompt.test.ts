@@ -193,6 +193,14 @@ describe("подсказка о заказе от незнакомого ном�
     expect(rules).toContain("never say we are busy or have a lot of deliveries and never refuse");
   });
 
+  it("окно заказа — обещание: раньше или уже окна — пожелание, не обещаем (владелец 30.09.2026)", () => {
+    const withOrder = buildMessages({ knowledgeBase: "", order, history: [], incomingText: "by 4 please" })[0].content;
+    expect(withOrder).toContain("THE ORDER'S DELIVERY WINDOW IS OUR PROMISE");
+    expect(withOrder).toContain("is only a wish: never promise it");
+    const noOrder = buildMessages({ knowledgeBase: "", order: null, history: [], incomingText: "by 4 please" })[0].content;
+    expect(noOrder).not.toContain("THE ORDER'S DELIVERY WINDOW IS OUR PROMISE");
+  });
+
   it("незнакомому номеру время по заказу не подтверждают: заказа ещё нет", () => {
     const rules = buildMessages({ knowledgeBase: "", order: null, history: [], incomingText: "can you deliver after 5pm?" })[0].content;
     expect(rules).toContain("You have no order yet: never confirm a time for an existing order");

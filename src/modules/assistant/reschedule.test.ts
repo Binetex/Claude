@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { planReschedule, confirmedWindow, mentionsDay } from "./reschedule";
+import { planReschedule, confirmedWindow, mentionsDay, laterOnly } from "./reschedule";
 import { formatWindowText, type WindowRange } from "@/lib/deliveryWindow";
 
 const h = (hh: number, mm = 0) => hh * 60 + mm;
@@ -47,6 +47,28 @@ describe("planReschedule — перенос по обещанному", () => {
     expect(p?.day).toBe("2026-09-27");
     expect(w(p!.window)).toBe("11:00 - 16:00");
     expect(planReschedule({ ...base, confirmed: none, newDate: null })).toBeNull();
+  });
+});
+
+describe("окно по словам клиента — только позже (владелец 30.09.2026: «это в угоду новым заказам»)", () => {
+  const DAY: WindowRange = { from: h(15), to: h(19) };
+  const base = { todayStr: "2026-09-30", currentDay: "2026-09-30", currentWindow: DAY, newDate: null };
+  it("«до 4» при окне 3–7 — пожелание: окно не ужимаем", () => {
+    expect(w(planReschedule({ ...base, confirmed: { from: null, until: h(16) } })!.window)).toBe("15:00 - 19:00");
+  });
+  it("«около 4» при окне 3–7 — только начало позже, конец прежний", () => {
+    expect(w(planReschedule({ ...base, confirmed: { from: h(16), until: h(17) } })!.window)).toBe("16:00 - 19:00");
+  });
+  it("«после 8» — позже целиком", () => {
+    expect(w(planReschedule({ ...base, confirmed: { from: h(20), until: null } })!.window)).toBe("20:00 - 21:00");
+  });
+  it("«завтра с 10 до 12» при окне 11–17 — день новый, окно согласованное", () => {
+    const p = planReschedule({ todayStr: "2026-09-29", currentDay: "2026-09-29", currentWindow: { from: h(11), to: h(17) }, confirmed: { from: h(10), until: h(12) }, newDate: "2026-09-30" });
+    expect(p?.day).toBe("2026-09-30");
+    expect(w(p!.window)).toBe("11:00 - 17:00");
+  });
+  it("окна не было — берём названное", () => {
+    expect(w(laterOnly(null, { from: h(10), to: h(12) }))).toBe("10:00 - 12:00");
   });
 });
 

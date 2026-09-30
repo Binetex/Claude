@@ -102,6 +102,23 @@ describe("главный магазин (TheFlow) — всегда первым,
     expect([byId["flow-early"].seq, byId["flow-late"].seq, byId.other.seq]).toEqual([1, 2, 3]);
   });
 
+  it("вечерний TheFlow, которому иначе не успеть, отпихивает дневные заказы других магазинов", () => {
+    // Восемь дневных Paradise до вечернего TheFlow: собранный последним, он приехал бы к 19:39 при сроке 19:00.
+    const pars = Array.from({ length: 8 }, (_, i) => job(`par-${i}`, h(21), { windowFrom: h(11) }));
+    const flow = job("flow-evening", h(19), { priority: true, windowFrom: h(18) });
+    const plan = planDay([...pars, flow], P);
+    const f = plan.items.find((i) => i.id === "flow-evening")!;
+    expect(f.risk).toBe(false);
+    // Отпихнул ровно столько, сколько нужно: часть Paradise осталась впереди.
+    expect(f.seq).toBeGreaterThan(1);
+  });
+
+  it("новый заказ TheFlow Paradise не блокирует: самое раннее — как будто их нет", () => {
+    const pars = Array.from({ length: 6 }, (_, i) => job(`par-${i}`, h(15 + (i % 3))));
+    const fresh = { id: "new", big: false, windowFrom: 0, driveMin: 50, priority: true };
+    expect(earliestBy(pars, fresh, P)).toBe(earliestBy([], fresh, P));
+  });
+
   it("вечерний TheFlow (окно с 17:00) — после дневных заказов других магазинов, но первым среди вечерних", () => {
     const plan = planDay(
       [
