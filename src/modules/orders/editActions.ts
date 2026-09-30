@@ -26,7 +26,7 @@ export type SaveOrderBlockResult =
 
 // Побочные эффекты после успешного сохранения блока (как в owner-actions).
 // Внешние вызовы не должны «ронять» уже закоммиченное сохранение — оборачиваем безопасно.
-async function runPostSave(block: OrderBlock, orderId: string, changed: Record<string, OrderBlockChange> = {}) {
+async function runPostSave(block: OrderBlock, orderId: string, changed: Record<string, OrderBlockChange> = {}, by: string | null = null) {
   try {
     if (block === "contacts") {
       await syncOrderToShopify(orderId);
@@ -44,6 +44,7 @@ async function runPostSave(block: OrderBlock, orderId: string, changed: Record<s
         await notifyDeliveryChanged(orderId, {
           fromText: deliveryText(changed.deliveryDate?.from, changed.deliveryWindow?.from),
           toText: deliveryText(changed.deliveryDate?.to, changed.deliveryWindow?.to),
+          by,
         });
       }
     } else if (block === "cardNote") {
@@ -84,7 +85,7 @@ export async function saveOrderBlock(
   });
 
   if (res.status === "ok") {
-    await runPostSave(block, orderId, res.changed);
+    await runPostSave(block, orderId, res.changed, user.name);
     revalidateOrder(orderId);
     return { status: "ok", updatedAt: res.updatedAt };
   }

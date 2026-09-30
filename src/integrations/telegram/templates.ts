@@ -325,12 +325,18 @@ export function renderFloristNote(o: OrderSnapshot, text: string | null): string
  * Время берём из САМОГО заказа, а не из диффа правки: если поменяли одно окно, не трогая
  * дату, дифф содержит только окно, и «14:00 – 18:00» без дня читается двусмысленно.
  */
-export function renderOwnerDeliveryChanged(o: OrderSnapshot): string {
+/**
+ * Перенос доставки — владельцу. Кто перенёс, написано прямо: «Клиент изменил» стояло на любом
+ * переносе, и перенос, который сделал ИИ по своей догадке, читался как желание клиента
+ * (THEFLOW-20876, владелец 30.09.2026).
+ */
+export function renderOwnerDeliveryChanged(o: OrderSnapshot, by: string | null = null, fromText: string | null = null): string {
   const when = [fmtDate(o.deliveryDate), fmtTimeWindow(o.deliveryWindow)].filter(Boolean).join(", ");
   return (
-    `📅 <b>Клиент изменил время доставки</b>\n` +
-    `<b>${esc(o.orderNumber)}</b>\n` +
-    line("Новое время", when || null)
+    `📅 <b>Перенос доставки</b> · <b>${esc(o.orderNumber)}</b>\n` +
+    line("Кто перенёс", by) +
+    line("Новое время", when || null) +
+    line("Было", fromText)
   ).trimEnd();
 }
 

@@ -30,17 +30,12 @@ import { sendAssistantReply, notifyDraft, notifyOwnerText, notifyBotText, escape
 import { prependReadyTimeNote, hasReadyTime, mentionsTime } from "./note";
 import { findOrderByHint, linkConversation } from "./link";
 import { junkReason } from "./junk";
-import { planReschedule, mentionsDay } from "./reschedule";
-import { windowOf, windowFields, formatWindowText, type WindowRange } from "@/lib/deliveryWindow";
-import { recomputeDaysForOrder } from "@/modules/finance/orderDayHook";
-import { scheduleDeliveryTodayTrigger } from "@/modules/automations/lifecycle";
-import { onOrderDeliveryChangeSafe } from "@/integrations/delivery/burq/scheduleService";
-import { notifyDeliveryChanged } from "@/integrations/notifications/telegram";
-import { publishWooDeliveryPush } from "@/integrations/woocommerce/deliveryPushEvents";
+import { BURST_WINDOW_MIN, BURST_MAX, takeDeferredQueue } from "./burst";
+import { DAY_END_MIN, DAY_START_MIN, parseHm } from "@/lib/deliveryWindow";
 import { loadGlobalNote, activeGlobalNoteText } from "./globalNote";
 import { bouquetPageUrl } from "@/lib/bouquetPage";
 import { publishTelegramNotification } from "@/integrations/telegram/events";
-import { todayStrInTz, zonedLocalTimeToUtc, localClock, dayDiff, storeDateTimeFormat } from "@/lib/tz";
+import { todayStrInTz, zonedLocalTimeToUtc, localClock, dayDiff } from "@/lib/tz";
 import { formatDeliveryWindow } from "@/lib/timeWindow";
 
 /**
@@ -376,23 +371,9 @@ export function buildAssistantHandler(prisma: PrismaClient, deps: AssistantDeps 
         console.error(`[assistant] заметка о времени по заказу ${forNote.id} не записана:`, err instanceof Error ? err.message : String(err))
       );
     }
-    // Что ответ пообещал про время, то и становится окном заказа, а другой день — датой (решение
-    // владельца 27.09.2026: позже всегда выгоднее, хоть на следующий день). Дату принимаем, только
-    // если клиент в сообщении и правда говорил о дне, время — только если в сообщении есть время
-    // или число: модель может дописать их сама из истории, а менять заказ по догадке нельзя.
-    // Меняет только сторона заказа — заказчик или получатель по номеру. Разговор, привязанный
-    // к заказу по подсказке (незнакомый номер назвал имя или адрес), заказ не двигает: иначе
-    // любой, кто знает имя получателя, перенёс бы чужой оплаченный заказ.
-    if (parsed.newDeliveryDate && !mentionsDay(body)) parsed = { ...parsed, newDeliveryDate: null };
-    if (!mentionsTime(body) && !/\d/.test(body)) parsed = { ...parsed, confirmedFrom: null, confirmedUntil: null };
-    const isParty = !!linkedOrder && pickOrderTarget(phone, incoming.partyRole, linkedOrder) !== null;
-    const confirmed = { from: parsed.confirmedFrom, until: parsed.confirmedUntil };
-    if (linkedOrder && isParty && !site.aiDryRun && parsed.intent !== "spam" && (confirmed.from != null || confirmed.until != null || parsed.newDeliveryDate)) {
-      const target = linkedOrder;
-      await applyCustomerReschedule(prisma, target.id, confirmed, parsed.newDeliveryDate, site.timezone, clock.dateStr).catch((err) =>
-        console.error(`[assistant] перенос по заказу ${target.id} не применён:`, err instanceof Error ? err.message : String(err))
-      );
-    }
+    // Перенос дня и окна заказа по обещанию ответа — НЕ здесь, а когда ответ уйдёт клиенту
+    // (`promisedChange.ts`, из `deliver.ts::sendAssistantReply`): черновик, который ждёт человека,
+    // заказ не двигает (владелец 30.09.2026, FLWBR-91180 и THEFLOW-20876).
 
     const turn = await prisma.aiTurn.create({
       data: {
@@ -422,19 +403,43 @@ export function buildAssistantHandler(prisma: PrismaClient, deps: AssistantDeps 
 }
 
 /**
- * Самое раннее время доставки заказа в его день (минуты). Только пока доставка впереди (сегодня
- * или позже) и заказ не доставлен — про прошедший день обещать нечего: undefined, «не знаем».
- * null — в этот день уже не успеть.
+ * Опоздать на пару часов не страшно, отказать клиенту — страшно (владелец 30.09.2026, после
+ * FLWBR-91180: по согласованному окну 10–12 ИИ писал «сегодня не успеем», потому что расчёт с
+ * запасом на каждом шаге давал первый букет дня Насти только к 13:35).
+ */
+export const AI_LATE_OK_MIN = 120;
+
+/**
+ * Самое раннее время для УЖЕ ПРИНЯТОГО заказа, каким его видит ИИ: расчёт графика минус запас на
+ * опоздание, но не позже начала окна самого заказа (согласованное окно ИИ не отменяет и «не
+ * успеем» про него клиенту не пишет) и не раньше «сейчас» в день доставки. null — только когда
+ * день уже кончился: принятый заказ на другой день ИИ сам не уводит.
+ */
+export function relaxedEarliest(planned: number | null, windowFrom: number | null, nowMin: number | null): number | null {
+  const promised = windowFrom ?? DAY_START_MIN;
+  const base = planned == null ? promised : Math.min(planned - AI_LATE_OK_MIN, promised);
+  const e = nowMin == null ? base : Math.max(base, Math.ceil(nowMin / 30) * 30);
+  return e > DAY_END_MIN ? null : e;
+}
+
+/**
+ * Самое раннее время доставки заказа в его день (минуты), как его видит ИИ (`relaxedEarliest`).
+ * Только пока доставка впереди (сегодня или позже) и заказ не доставлен — про прошедший день
+ * обещать нечего: undefined, «не знаем». null — в этот день уже не успеть.
  */
 export async function earliestFor(
   prisma: PrismaClient,
-  order: { id: string; orderStatus: string; deliveryDate: Date | null },
+  order: { id: string; orderStatus: string; deliveryDate: Date | null; windowFrom?: number | null; site?: { timezone: string | null } | null },
   todayStr: string,
   now: Date
 ): Promise<number | null | undefined> {
   if (!order.deliveryDate || order.orderStatus === "DELIVERED") return undefined;
-  if (dayDiff(todayStr, order.deliveryDate.toISOString().slice(0, 10)) < 0) return undefined;
-  return orderEarliest(prisma, order.id, now).catch(logTimingError);
+  const day = order.deliveryDate.toISOString().slice(0, 10);
+  if (dayDiff(todayStr, day) < 0) return undefined;
+  const planned = await orderEarliest(prisma, order.id, now).catch(logTimingError);
+  if (planned === undefined) return undefined;
+  const nowMin = day === todayStr ? parseHm(localClock(order.site?.timezone ?? null, now).timeStr) : null;
+  return relaxedEarliest(planned, order.windowFrom ?? null, nowMin);
 }
 
 /**
@@ -542,31 +547,8 @@ export async function finishTurn(
   return shown;
 }
 
-/** Насколько назад собираем очередь сообщений: дальше это уже отдельный разговор. */
-export const BURST_WINDOW_MIN = 15;
-
-/**
- * Сколько сообщений очереди забираем максимум. Что не влезло — не потеряно: модель всё равно
- * видит эти сообщения в истории переписки, просто отвечаем мы не на них.
- */
-export const BURST_MAX = 10;
-
-/**
- * Очередь сообщений, отложенных В ПОЛЬЗУ разбираемого: идём от свежих к старым, пока сообщения
- * откладывались, и останавливаемся на первом УЖЕ РАЗОБРАННОМ. Ниже него очередь закрыта ответом,
- * и отвечать на те же слова второй раз нельзя: строка `superseded` остаётся в журнале навсегда,
- * поэтому «всё отложенное за 15 минут» через пять минут притащило бы разобранное заново.
- *
- * Вход — от свежих к старым, выход — в том порядке, в котором человек писал.
- */
-export function takeDeferredQueue<T extends { status: string; skipReason: string | null }>(newestFirst: T[]): T[] {
-  const queue: T[] = [];
-  for (const r of newestFirst) {
-    if (!(r.status === "SKIPPED" && r.skipReason === "superseded")) break;
-    queue.push(r);
-  }
-  return queue.reverse();
-}
+// Очередь сообщений «в несколько приёмов» — общая с разбором писем и с переносом по отправке.
+export { BURST_WINDOW_MIN, BURST_MAX, takeDeferredQueue };
 
 /**
  * Сообщения, которые в этом разговоре отложились В ПОЛЬЗУ разбираемого: каждое из них честно
@@ -870,67 +852,6 @@ export function renderPrompt(messages: { role: string; content: string }[]): str
  * отвечает. Заметка перечитывается перед записью: пока шёл запрос к модели, её могли поправить
  * руками, и затирать чужую правку старой копией нельзя.
  */
-function dayLabel(day: string, window: string): string {
-  return `${day.slice(8, 10)}.${day.slice(5, 7)} ${window || ""}`.trim();
-}
-
-/**
- * Перенос по словам клиента — то же, что перенос в карточке: флористу сообщение, Burq
- * перепланирует, «доставка сегодня» — на новый день, финансы пересчитываются за ОБА дня, заказ
- * Woo получает новые дату и слот. В заметке строка, кто и что поменял: журнала правок от имени
- * ассистента нет. Если курьер уже вызван — не трогаем: перепланирование отменило бы курьера.
- */
-export async function applyCustomerReschedule(
-  prisma: PrismaClient,
-  orderId: string,
-  confirmed: { from: number | null; until: number | null },
-  newDate: string | null,
-  tz: string | null,
-  todayStr: string
-): Promise<void> {
-  const o = await prisma.order.findUnique({
-    where: { id: orderId },
-    select: { deliveryWindow: true, windowFrom: true, windowTo: true, deliveryDate: true, orderStatus: true, platform: true, customerNote: true },
-  });
-  if (!o || o.orderStatus === "DELIVERED" || o.orderStatus === "CANCELLED") return;
-  if (o.orderStatus === "AWAITING_COURIER" || o.orderStatus === "IN_TRANSIT") return;
-  const dispatched = await prisma.delivery.count({
-    where: { orderId, isCurrentAttempt: true, status: { notIn: ["DRAFT_PENDING", "DRAFT_CREATED", "CANCELLED", "FAILED"] } },
-  });
-  if (dispatched) return;
-
-  const currentDay = o.deliveryDate.toISOString().slice(0, 10);
-  if (dayDiff(todayStr, currentDay) < 0) return;
-  const current = windowOf(o);
-  const plan = planReschedule({ todayStr, currentDay, currentWindow: current, confirmed, newDate });
-  const sameWindow = plan?.window && current ? plan.window.from === current.from && plan.window.to === current.to : !plan?.window;
-  if (!plan || (plan.day === currentDay && sameWindow)) return;
-
-  const text = (w: WindowRange | null) => (w ? formatWindowText(w) : o.deliveryWindow);
-  const from = dayLabel(currentDay, text(current));
-  const to = dayLabel(plan.day, text(plan.window));
-  const stamp = storeDateTimeFormat(tz, { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }).format(new Date());
-  const line = `${stamp} · ИИ перенёс доставку по просьбе клиента: ${from} → ${to}`;
-  const dateChanged = plan.day !== currentDay;
-  await prisma.order.update({
-    where: { id: orderId },
-    data: {
-      // Окно строго «с — до»; текст окна — одним форматом из него же.
-      ...(plan.window && !sameWindow ? windowFields(plan.window) : {}),
-      ...(dateChanged ? { deliveryDate: new Date(`${plan.day}T00:00:00Z`) } : {}),
-      customerNote: o.customerNote.trim() ? `${line}\n${o.customerNote}` : line,
-    },
-  });
-  if (dateChanged) {
-    // Заказ переехал между днями: пересчитать надо оба (как при переносе в карточке).
-    await recomputeDaysForOrder(prisma, orderId, [o.deliveryDate, new Date(`${plan.day}T00:00:00Z`)]);
-    await scheduleDeliveryTodayTrigger(prisma, orderId);
-  }
-  await onOrderDeliveryChangeSafe(prisma, orderId);
-  await notifyDeliveryChanged(orderId, { fromText: from, toText: to });
-  if (o.platform === "WOOCOMMERCE") await publishWooDeliveryPush(prisma, orderId);
-}
-
 export async function recordReadyTime(
   prisma: PrismaClient,
   order: { id: string; currentFloristId: string | null; site: { timezone: string | null } },

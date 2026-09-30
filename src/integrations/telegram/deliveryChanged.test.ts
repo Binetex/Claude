@@ -85,15 +85,18 @@ describe("перенос доставки — короткое уведомле�
       .not.toBe(def.dedupeKey({ orderId: "o1", occurrence: "9Sep" }));
   });
 
-  it("в сообщении только номер заказа и новое время — владельцу нужна лента, а не карточка", () => {
-    const text = renderOwnerDeliveryChanged(order);
-    expect(text).toContain("Клиент изменил время доставки");
-    expect(text).toContain("JF-1001374");
+  it("в сообщении номер заказа, кто перенёс, новое и прежнее время — владельцу нужна лента, а не карточка", () => {
+    const text = renderOwnerDeliveryChanged(order, "ИИ по переписке с клиентом", "09.09 11:00 - 15:00");
+    expect(text.split("\n")[0]).toBe("📅 <b>Перенос доставки</b> · <b>JF-1001374</b>");
+    // THEFLOW-20876: «Клиент изменил» стояло и на переносе, который сделал ИИ по своей догадке.
+    expect(text).toContain("Кто перенёс: ИИ по переписке с клиентом");
+    expect(text).not.toContain("Клиент изменил");
     expect(text).toContain("9 Sep");
+    expect(text).toContain("Было: 09.09 11:00 - 15:00");
     // Подробности заказа сюда не тянем: они есть в карточке, которую освежает order.created.
     expect(text).not.toContain("Ris Anderson");
     expect(text).not.toContain("Alta Mesa");
-    expect(text.split("\n").length).toBeLessThanOrEqual(3);
+    expect(text.split("\n").length).toBeLessThanOrEqual(4);
   });
 
   it("время берётся из заказа целиком: смена одного окна не оставляет время без даты", () => {

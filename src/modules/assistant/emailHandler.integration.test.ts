@@ -236,6 +236,35 @@ describe("письма подряд", () => {
   });
 });
 
+describe("перенос по переписке — когда ответ ушёл и только по словам клиента (владелец 30.09.2026)", () => {
+  const windowOf = (orderId: string) => prisma.order.findUniqueOrThrow({ where: { id: orderId }, select: { windowFrom: true, windowTo: true, deliveryDate: true } });
+
+  it("черновик ждёт человека — заказ стоит; человек отправил ответ — заказ переезжает на названное время", async () => {
+    const { order } = await makeOrder("DRAFT", "held");
+    const email = await inbound(order.id, order.senderEmail!, "Could you bring it after 5pm instead?", "held");
+    await buildAssistantEmailHandler(prisma, { client: model({ reply_en: "Sure, we'll bring it after 5 🌸", confirmed_from: "17:00" }) })({ payload: { emailMessageId: email.id } });
+    const turn = await prisma.aiTurn.findUniqueOrThrow({ where: { emailMessageId: email.id } });
+    expect(turn.status).toBe("DRAFT");
+    // FLWBR-91180: заказ переезжал, пока ответ ждал человека, а ответ так и не ушёл.
+    expect(await windowOf(order.id)).toMatchObject({ windowFrom: 660, windowTo: 900 });
+
+    fetchMock.mockResolvedValueOnce(json({ data: { id: `out-held-${suffix}`, threadId: `thr-${suffix}-held` } }));
+    expect(await sendAssistantReply(prisma, turn.id)).toEqual({ ok: true });
+    expect(await windowOf(order.id)).toMatchObject({ windowFrom: 17 * 60, windowTo: 21 * 60 });
+  });
+
+  it("«как можно раньше» — окно не трогаем, хоть ответ и пообещал «с 3:30» (THEFLOW-20876)", async () => {
+    const { order } = await makeOrder("AUTO_SIMPLE", "asap");
+    const email = await inbound(order.id, order.senderEmail!, "No worries, the earliest you can get them there, thanks!\nWill you text when 5 mins out?", "asap");
+    fetchMock.mockResolvedValueOnce(json({ data: { id: `out-asap-${suffix}`, threadId: `thr-${suffix}-asap` } }));
+    // Модель дописала своё «с 3:30» в поле обещания — клиент этого времени не называл.
+    await buildAssistantEmailHandler(prisma, { client: model({ reply_en: "We'll get it to you as early as we can 🌸", confirmed_from: "15:30" }) })({ payload: { emailMessageId: email.id } });
+
+    expect((await prisma.aiTurn.findUniqueOrThrow({ where: { emailMessageId: email.id } })).status).toBe("SENT");
+    expect(await windowOf(order.id)).toMatchObject({ windowFrom: 660, windowTo: 900 });
+  });
+});
+
 describe("кому уходит письмо", () => {
   it("ответ ассистента — на своё письмо, даже если потом по заказу написал другой человек", async () => {
     const { order } = await makeOrder("DRAFT", "own");

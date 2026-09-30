@@ -272,7 +272,7 @@ function renderFor(type: TelegramNotifyPayload["type"], order: OrderSnapshot, ct
     case "order.delivery_changed":
       return renderDeliveryChanged(order, ctx.fromText ?? null, ctx.toText ?? null);
     case "order.delivery_changed_owner":
-      return renderOwnerDeliveryChanged(order);
+      return renderOwnerDeliveryChanged(order, ctx.by ?? null, ctx.fromText ?? null);
     case "order.florist_note":
       return renderFloristNote(order, ctx.text ?? null);
     case "order.item_replaced":

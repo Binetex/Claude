@@ -66,7 +66,8 @@ export async function notifyFloristAssigned(
  */
 export async function notifyDeliveryChanged(
   orderId: string,
-  change: { fromText: string | null; toText: string | null }
+  /** `by` — кто перенёс: «ИИ по переписке с клиентом» или имя сотрудника. Владелец обязан видеть, чьё это решение. */
+  change: { fromText: string | null; toText: string | null; by?: string | null }
 ): Promise<void> {
   const order = await prisma.order
     .findUnique({ where: { id: orderId }, select: { currentFloristId: true } })
@@ -99,7 +100,7 @@ export async function notifyDeliveryChanged(
     type: "order.delivery_changed_owner",
     orderId,
     occurrenceKey: `${orderId}:owner:${stamp}`,
-    context: { toText: change.toText },
+    context: { fromText: change.fromText, toText: change.toText, by: change.by ?? null },
   });
 
   // И карточку у владельца — по той же причине.

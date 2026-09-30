@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { takeDeferredQueue, describeCall } from "./handler";
+import { takeDeferredQueue, describeCall, relaxedEarliest } from "./handler";
 
 /**
  * Очередь сообщений: человек пишет одну мысль в три приёма, и отвечаем мы на неё один раз.
@@ -82,5 +82,30 @@ describe("описание звонка в истории для модели", 
       describeCall({ type: "VOICEMAIL", status: "RECEIVED", direction: "INBOUND", durationSeconds: 10 }),
     ].join(" ");
     expect(all).not.toMatch(/[—–]/);
+  });
+});
+
+/**
+ * Самое раннее время по УЖЕ ПРИНЯТОМУ заказу, каким его видит ИИ (владелец 30.09.2026: «опоздаем на
+ * пару часов — не страшно, отказывать клиенту — страшно»).
+ */
+describe("relaxedEarliest", () => {
+  const hm = (h: number, m = 0) => h * 60 + m;
+
+  it("FLWBR-91180: расчёт дал 13:35 на окно 10–12 — согласованное окно ИИ не отменяет", () => {
+    expect(relaxedEarliest(hm(13, 35), hm(10), hm(8, 50))).toBe(hm(10));
+  });
+
+  it("запас в два часа: расчёт 16:00 — ИИ соглашается и на 14:00", () => {
+    expect(relaxedEarliest(hm(16), hm(15), null)).toBe(hm(14));
+  });
+
+  it("«сегодня уже не успеть» по расчёту — принятый заказ ИИ сам на завтра не уводит", () => {
+    expect(relaxedEarliest(null, hm(11), hm(9))).toBe(hm(11));
+  });
+
+  it("раньше «сейчас» не бывает, а после конца дня — уже не сегодня", () => {
+    expect(relaxedEarliest(hm(13, 35), hm(10), hm(14, 5))).toBe(hm(14, 30));
+    expect(relaxedEarliest(hm(13, 35), hm(10), hm(21, 10))).toBeNull();
   });
 });

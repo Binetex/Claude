@@ -244,10 +244,14 @@ function timingRules(hasOrder: boolean): string {
   argue with a customer who tells you when they are home. First see what they are doing with the
   time they named:
   1. TODAY, A SINGLE HOUR OR A START with nothing about until when: "I'm ready at 11", "2 pm
-     works for me", "can you come at 1?", "you can come now", "as soon as possible", "I'm home
-     from 10". Say we have a lot of deliveries today and ask until what time they will be home to
-     receive it. Confirm no time yet. (Anything from 5 PM on is point 3.) If they already said we
-     can leave it at the door or with someone, there is nothing to ask: just confirm that.
+     works for me", "can you come at 1?", "I'm home from 10". If it is at or after the earliest
+     possible delivery, confirm we will come around then${put('the hour in "confirmed_from" and one hour later in "confirmed_until"')};
+     a start ("from 10") is "from" it${put('the start in "confirmed_from" and nothing in "confirmed_until"')}. If it is
+     earlier, never say we are busy or have a lot of deliveries and never refuse: kindly ask until
+     what time they will be home, and confirm nothing yet. "As soon as possible" or "you can come
+     now": say we will get it to them as early as we can today and name no time. (Anything from
+     5 PM on is point 3.) If they already said we can leave it at the door or with someone, there
+     is nothing to ask: just confirm that.
   2. AN END: "I'm home until 4", "I have to leave at 1:40", "by 3 please", or the answer to our
      question. If that time is at or after the earliest possible delivery, confirm we will
      deliver by then and name it${put('it in "confirmed_until" as 24-hour HH:MM')}. If it is
@@ -255,11 +259,11 @@ function timingRules(hasOrder: boolean): string {
      ask when they will be home again after that; confirm nothing.
   3. EVENING (5 PM OR LATER) OR ANY TIME: "after 5", "from 6", "in the evening", "tonight", "any
      time works". Confirm it: a later delivery is no problem${put('the hour they named in "confirmed_from" (17:00 for "after 5"), none for "any time"')}.
-     A single evening hour ("5:30 works", "7pm please") is "around" it, never "at" it${put('the hour in "confirmed_from" and 30 minutes later in "confirmed_until"')}.
+     A single evening hour ("5:30 works", "7pm please") is "around" it, never "at" it${put('the hour in "confirmed_from" and one hour later in "confirmed_until"')}.
      If they are out and ask for later without saying when, ask around what time they'll be back.
   4. A DAY THAT IS NOT TODAY, A SINGLE HOUR OR A START: an early or a late hour both work when it
      is at or after the earliest possible delivery for that day. Confirm "around" that hour or
-     "from" that start${put('the hour in "confirmed_from", and for "around" 30 minutes later in "confirmed_until"')}. If
+     "from" that start${put('the hour in "confirmed_from", and for "around" one hour later in "confirmed_until"')}. If
      it is earlier, say that is too early for us that day and offer the earliest possible time.
   If the earliest possible delivery says it is not possible anymore that day, offer the next day.
   Whatever the case, name the delivery day correctly: "today" only if it really is today.${hasOrder ? "" : `
@@ -641,6 +645,26 @@ function confirmedMin(v: unknown): number | null {
  * про «tomorrow» и не про «today», проверяется по нему, иначе «around 1pm tomorrow» при сегодняшнем
  * самом раннем 14:30 уходил человеку зря.
  */
+/**
+ * Что ответ пообещал про день и время — как записала модель, без проверок «успеваем ли» и «так ли
+ * сказал клиент»: их делает перенос в момент отправки (`promisedChange.ts`). null — не разобрать.
+ */
+export function promisedChangeOf(raw: string | null): { intent: string; newDate: string | null; from: number | null; until: number | null } | null {
+  if (!raw) return null;
+  let data: Record<string, unknown>;
+  try {
+    data = JSON.parse(raw.trim().replace(/^```(?:json)?/i, "").replace(/```$/, "").trim()) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+  const intent = typeof data.intent === "string" ? data.intent.trim() : "other";
+  const newDate = typeof data.new_delivery_date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(data.new_delivery_date.trim()) ? data.new_delivery_date.trim() : null;
+  let from = confirmedMin(data.confirmed_from);
+  let until = confirmedMin(data.confirmed_until);
+  if (from != null && until != null && until <= from) from = until = null;
+  return { intent, newDate, from, until };
+}
+
 export function parseReply(raw: string, opts: { agreeFromMin?: number; agreeFromMinTomorrow?: number } = {}): ParsedReply {
   let data: Record<string, unknown> = {};
   try {

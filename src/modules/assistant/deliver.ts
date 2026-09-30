@@ -19,6 +19,7 @@ import { parseAttachments } from "@/integrations/quo/communicationsService";
 import { NUDGE_AFTER_MIN, ASSISTANT_NUDGE_ENABLED } from "./events";
 import { sendOrderEmail } from "@/integrations/emailFactory/send";
 import { emailNewText } from "@/integrations/emailFactory/ingest";
+import { applyPromisedChange } from "./promisedChange";
 
 /** `detail` — ответ провайдера («402:0201402»), чтобы человеку было что чинить. */
 export type DeliverResult = { ok: true } | { ok: false; code: string; detail?: string };
@@ -77,7 +78,8 @@ export async function sendAssistantReply(prisma: PrismaClient, turnId: string, d
       site: { select: { aiDryRun: true, aiMode: true } },
       communication: { select: { partyRole: true, externalPhoneNormalized: true } },
       emailMessageId: true,
-      order: { select: { senderPhone: true, recipientPhone: true, aiDisabled: true } },
+      emailMessage: { select: { fromEmail: true } },
+      order: { select: { senderPhone: true, recipientPhone: true, senderEmail: true, aiDisabled: true } },
     },
   });
   if (!turn) return { ok: false, code: "turn_not_found" };
@@ -104,6 +106,9 @@ export async function sendAssistantReply(prisma: PrismaClient, turnId: string, d
     });
     if (!sent.ok) return { ok: false, code: sent.code };
     await prisma.aiTurn.update({ where: { id: turn.id }, data: { status: "SENT", decidedAt: new Date(), decidedByUserId: decidedByUserId ?? null } });
+    // Письмо ушло — обещанное в нём становится днём и окном заказа, если так написал сам заказчик.
+    const fromCustomer = !!turn.order?.senderEmail && turn.order.senderEmail.trim().toLowerCase() === turn.emailMessage?.fromEmail.trim().toLowerCase();
+    await applyPromised(prisma, turn.id, fromCustomer);
     return { ok: true };
   }
   if (!turn.communication) return { ok: false, code: "no_incoming" };
@@ -136,7 +141,16 @@ export async function sendAssistantReply(prisma: PrismaClient, turnId: string, d
     where: { id: turn.id },
     data: { status: "SENT", sentCommunicationId: res.communicationId ?? null, decidedAt: new Date(), decidedByUserId: decidedByUserId ?? null },
   });
+  // Ответ ушёл — обещанное в нём становится днём и окном заказа, если так написала сторона заказа.
+  await applyPromised(prisma, turn.id, target !== null);
   return { ok: true };
+}
+
+/** Перенос по ушедшему ответу — best-effort: сбой переноса не делает отправленное неотправленным. */
+async function applyPromised(prisma: PrismaClient, turnId: string, isParty: boolean): Promise<void> {
+  await applyPromisedChange(prisma, { turnId, isParty }).catch((err) =>
+    console.error(`[assistant] перенос по ответу ${turnId} не применён:`, err instanceof Error ? err.message : String(err))
+  );
 }
 
 /**

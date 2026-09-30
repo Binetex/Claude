@@ -185,10 +185,12 @@ describe("подсказка о заказе от незнакомого ном�
 
   // Правила ниже выведены из боевых ошибок сентября 2026: каждое из них ассистент уже нарушил,
   // и нарушение видел клиент. Тест держит формулировку, чтобы её не выкинули при правке промпта.
-  it("названное клиентом время — не спор: только начало — спросить, до скольки он дома", () => {
+  it("названное клиентом время — не спор: час не раньше самого раннего — «около него», раньше — спросить, до скольки дома", () => {
     const rules = buildMessages({ knowledgeBase: "", order, history: [], incomingText: "hi" })[0].content;
     expect(rules).toContain("Never\n  argue with a customer who tells you when they are home");
-    expect(rules).toContain("ask until what time they will be home to\n     receive it");
+    expect(rules).toContain("confirm we will come around then");
+    // Владелец 30.09.2026: «много доставок» и отказ — не наш тон (FLWBR-91180).
+    expect(rules).toContain("never say we are busy or have a lot of deliveries and never refuse");
   });
 
   it("незнакомому номеру время по заказу не подтверждают: заказа ещё нет", () => {
@@ -473,7 +475,7 @@ describe("время доставки: одно правило", () => {
 
   it("четыре случая владельца: начало, конец, вечер, другой день", () => {
     expect(sys(order)).toContain('"2 pm\n     works for me"');
-    expect(sys(order)).toContain("we have a lot of deliveries today");
+    expect(sys(order)).not.toContain("we have a lot of deliveries today");
     expect(sys(order)).toContain("confirm we will\n     deliver by then");
     expect(sys(order)).toContain('(17:00 for "after 5")');
     expect(sys(order)).toContain("an early or a late hour both work");

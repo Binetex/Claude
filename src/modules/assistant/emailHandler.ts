@@ -28,7 +28,7 @@ import { mentionsDay } from "./reschedule";
 import type { AssistantEmailPayload } from "./events";
 import {
   snapshot, deliveredMoment, countReplies, renderPrompt, earliestFor, labelOf, finishTurn,
-  recordReadyTime, applyCustomerReschedule, alertNoBalance, notifyCallRequest, logCallRequestError,
+  recordReadyTime, alertNoBalance, notifyCallRequest, logCallRequestError,
   takeDeferredQueue, BURST_WINDOW_MIN, BURST_MAX,
 } from "./handler";
 
@@ -170,13 +170,8 @@ export function buildAssistantEmailHandler(prisma: PrismaClient, deps: { client?
     }
     if (parsed.newDeliveryDate && !mentionsDay(text)) parsed = { ...parsed, newDeliveryDate: null };
     if (!mentionsTime(text) && !/\d/.test(text)) parsed = { ...parsed, confirmedFrom: null, confirmedUntil: null };
-    const confirmed = { from: parsed.confirmedFrom, until: parsed.confirmedUntil };
-    const wantsChange = confirmed.from != null || confirmed.until != null || !!parsed.newDeliveryDate;
-    if (isCustomer && !site.aiDryRun && wantsChange) {
-      await applyCustomerReschedule(prisma, order.id, confirmed, parsed.newDeliveryDate, site.timezone, clock.dateStr).catch((err) =>
-        console.error(`[assistant] перенос по заказу ${order.id} (письмо) не применён:`, err instanceof Error ? err.message : String(err))
-      );
-    }
+    // Сам перенос — когда ответ уйдёт (`promisedChange.ts`), и только на то, что заказчик назвал сам.
+    const wantsChange = parsed.confirmedFrom != null || parsed.confirmedUntil != null || !!parsed.newDeliveryDate;
 
     // Перенос просит не заказчик (муж получателя, сама получательница со своего адреса): заказ по
     // его словам не двигаем — иначе любой, кто знает номер заказа, двигал бы чужой оплаченный
