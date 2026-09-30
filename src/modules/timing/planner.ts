@@ -7,8 +7,10 @@
  * возможное максимальное опоздание на одной линии — ровно вопрос «не сорвать ни одного срока»
  * (research R4).
  *
- * Главный магазин (TheFlow, владелец 29.09.2026) обязан успеть: если его заказ опаздывает, заказы
- * других магазинов, стоящие перед ним, уходят за него. Их опоздание не мешает и принять новый заказ.
+ * Главный магазин (TheFlow) — всегда первым в очереди, между собой — по сроку; заказы других
+ * магазинов — после них (владелец 30.09.2026: «TheFlow всегда первые»; до того TheFlow только
+ * «не должен был опоздать», и JF с Par стояли впереди, пока TheFlow успевал к сроку). Опоздание
+ * других магазинов не мешает и принять новый заказ.
  *
  * Плановая доставка = готовность + курьер + дорога, но не раньше начала окна: раньше букет просто
  * подождёт. Риск — доставка позже срока больше чем на допуск (20 минут, решение владельца).
@@ -62,39 +64,13 @@ function latestReady(j: PlanJob, courierMin: number): number {
 function order(jobs: PlanJob[], courierMin: number): PlanJob[] {
   return jobs
     .filter((j) => !j.fixed)
-    .sort((a, b) => latestReady(a, courierMin) - latestReady(b, courierMin) || a.windowFrom - b.windowFrom || a.id.localeCompare(b.id));
-}
-
-/** Опоздание каждого заказа очереди при сборке подряд с lineStart. */
-function lateness(queue: PlanJob[], lineStart: number, p: PlanParams): number[] {
-  let t = lineStart;
-  return queue.map((j) => {
-    t += p.prepMin(j.big);
-    return Math.max(0, Math.max(t + p.courierMin + j.driveMin, j.windowFrom) - j.deadline);
-  });
-}
-
-/**
- * Главный магазин вперёд: пока его заказ опаздывает, а перед ним стоит заказ другого магазина, тот
- * (с самым поздним сроком из стоящих перед ним) уходит сразу за опаздывающий. Каждый перенос
- * двигает чужой заказ только назад, а опоздание заказов главного магазина от этого не растёт, —
- * цикл конечен.
- */
-function priorityFirst(queue: PlanJob[], lineStart: number, p: PlanParams): PlanJob[] {
-  const q = [...queue];
-  for (;;) {
-    const late = lateness(q, lineStart, p);
-    const k = q.findIndex((j, i) => j.priority && late[i] > LATE_TOLERANCE_MIN);
-    if (k < 0) return q;
-    let move = -1;
-    for (let i = 0; i < k; i++) {
-      if (!q[i].priority && (move < 0 || latestReady(q[i], p.courierMin) >= latestReady(q[move], p.courierMin))) move = i;
-    }
-    // Перед ним только заказы главного магазина — переставлять нечего.
-    if (move < 0) return q;
-    const [j] = q.splice(move, 1);
-    q.splice(k, 0, j); // опаздывающий сдвинулся на место k − 1: вставка на k — сразу за ним
-  }
+    .sort(
+      (a, b) =>
+        Number(!!b.priority) - Number(!!a.priority) ||
+        latestReady(a, courierMin) - latestReady(b, courierMin) ||
+        a.windowFrom - b.windowFrom ||
+        a.id.localeCompare(b.id)
+    );
 }
 
 export function planDay(jobs: PlanJob[], p: PlanParams): Plan {
@@ -110,7 +86,8 @@ export function planDay(jobs: PlanJob[], p: PlanParams): Plan {
     }
     lineStart = Math.max(p.earliestLineStart, Math.min(lineStart, need));
   }
-  const queue = priorityFirst(byDeadline, lineStart, p);
+  // TheFlow уже впереди (`order`): переставлять по опозданию больше нечего.
+  const queue = byDeadline;
 
   const items: PlanItem[] = [];
   let t = lineStart;

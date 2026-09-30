@@ -83,7 +83,7 @@ describe("canFit / earliestBy — влезет ли ещё один", () => {
   });
 });
 
-describe("главный магазин (TheFlow) обязан успеть, остальные — в промежутки", () => {
+describe("главный магазин (TheFlow) — всегда первым, остальные — после", () => {
   it("чужой заказ перед опаздывающим заказом TheFlow уходит за него", () => {
     const plan = planDay([job("other", h(13)), job("flow", h(13, 10), { priority: true })], P);
     const byId = Object.fromEntries(plan.items.map((i) => [i.id, i]));
@@ -91,10 +91,10 @@ describe("главный магазин (TheFlow) обязан успеть, о�
     expect(byId.flow.risk).toBe(false);
   });
 
-  it("пока TheFlow успевает, порядок — по срокам", () => {
-    const plan = planDay([job("other", h(13)), job("flow", h(19), { priority: true })], P);
+  it("TheFlow первым даже с поздним сроком, между собой — по сроку (владелец 30.09.2026)", () => {
+    const plan = planDay([job("other", h(13)), job("flow-late", h(19), { priority: true }), job("flow-early", h(15), { priority: true })], P);
     const byId = Object.fromEntries(plan.items.map((i) => [i.id, i]));
-    expect([byId.other.seq, byId.flow.seq]).toEqual([1, 2]);
+    expect([byId["flow-early"].seq, byId["flow-late"].seq, byId.other.seq]).toEqual([1, 2, 3]);
   });
 
   it("опоздание заказа другого магазина новый заказ не останавливает, заказа TheFlow — останавливает", () => {
