@@ -48,7 +48,8 @@ export function ReplaceItemDialog({
 
   const n = Number(price.replace(",", "."));
   const unit = Number.isFinite(n) ? Math.round(n * 100) / 100 : NaN;
-  const ok = !!hit && Number.isFinite(unit) && unit >= 0;
+  // Пустое поле — не ноль: Number("") === 0, и стёртая цена ушла бы заменой за $0.
+  const ok = !!hit && price.trim() !== "" && Number.isFinite(unit) && unit >= 0;
   const diff = ok ? (unit - current.unitPrice) * current.quantity : 0;
   const next = customerTotal + diff;
 

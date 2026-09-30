@@ -14,6 +14,7 @@ import "server-only";
 import { Prisma, type Role } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
 import { fmtStoreDayTime } from "@/lib/tz";
+import { displayVariantName } from "@/lib/variantName";
 import { recomputeEstimatedProfit, snapshotItemFloristPrice } from "@/modules/pricing/service";
 import { recomputeDayForOrder } from "@/modules/finance/orderDayHook";
 import { publishTelegramNotification } from "@/integrations/telegram/events";
@@ -75,8 +76,10 @@ export async function replaceOrderItem(
   const customerTotal = { from: Number(order.customerTotal), to: Number(order.customerTotal) + diff };
   if (customerTotal.to < 0) return { ok: false, error: "Итог заказчика ушёл бы в минус — проверьте цену." };
 
+  // «Default Title» Shopify — заглушка платформы, а не вариант (правило одно: lib/variantName).
+  const variantName = displayVariantName(variant?.title);
   const before = label(item.name, item.variantName);
-  const after = label(product.name, variant?.title ?? null);
+  const after = label(product.name, variantName);
   const line = `${fmtStoreDayTime(new Date(), order.site?.timezone)} · Букет заменён: ${before} → ${after}`;
 
   const audit = await prisma.$transaction(async (tx) => {
@@ -88,7 +91,7 @@ export async function replaceOrderItem(
         productExternalId: product.externalId,
         variantExternalId: variant?.externalId ?? null,
         name: product.name,
-        variantName: variant?.title ?? null,
+        variantName,
         sku: variant?.sku ?? null,
         image: variant?.image ?? product.image,
         parentImageUrl: product.image,
@@ -144,7 +147,9 @@ export async function replaceOrderItem(
       orderId,
       floristId: order.currentFloristId,
       occurrenceKey: `${orderId}:${order.currentFloristId}:replaced:${audit.id}`,
-      context: { replacedFrom: before },
+      // occurrence — в ключ сообщения: без него вторая замена молча правила бы первую карточку
+      // (под фото прежнего букета), а флорист не узнал бы о ней вовсе.
+      context: { replacedFrom: before, occurrence: audit.id },
     });
   }
   return { ok: true };

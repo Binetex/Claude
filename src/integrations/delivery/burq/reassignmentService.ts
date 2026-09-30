@@ -98,6 +98,8 @@ export async function handleFloristReassignment(
     // Старый draft уже удалён/отменён. Новый не создан — это НЕ проблема доставки, а корректное
     // ожидание нового флориста/pickup (WAITING) или осознанный пропуск (SKIP). Intent уже записан.
     if (res.outcome === "waiting") return { outcome: "waiting", reason: res.reason };
+    // Адрес без номера дома — причину сохраняем: кнопка «Пересоздать» говорит, что исправить.
+    if (res.outcome === "skipped" && res.reason === "address_incomplete") return { outcome: "waiting", reason: res.reason };
     return { outcome: "waiting", reason: `recreate_${res.outcome}` };
   }
 

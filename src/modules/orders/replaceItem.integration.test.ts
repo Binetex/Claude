@@ -9,6 +9,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { prisma } from "@/lib/db";
 import { replaceOrderItem } from "./replaceItem";
+import { getTelegramEvent } from "@/integrations/telegram/registry";
 
 const RUN = `rep-${Date.now()}`;
 let siteId = "";
@@ -117,6 +118,30 @@ describe("замена букета в заказе", () => {
     await replaceOrderItem(orderId, itemId, { ...big, customerPrice: 180, composition: null, notifyFlorist: true }, actor);
     const [n] = await replaced(orderId);
     expect(n.payload).toMatchObject({ type: "order.item_replaced", floristId, context: { replacedFrom: "Golden Chestnut, Small" } });
+  });
+
+  it("вторая замена — ещё одна НОВАЯ карточка, а не правка первой (под фото прежнего букета)", async () => {
+    const { orderId, itemId } = await makeOrder();
+    await replaceOrderItem(orderId, itemId, { ...big, customerPrice: 180, composition: null, notifyFlorist: true }, actor);
+    await replaceOrderItem(orderId, itemId, { ...small, customerPrice: 120, composition: null, notifyFlorist: true }, actor);
+    // Ключ сообщения считается так же, как в обработчике Telegram: совпади он — вторая замена
+    // молча переписала бы подпись первой карточки, и флорист о ней не узнал бы.
+    const keys = (await replaced(orderId)).map((n) => {
+      const p = n.payload as { orderId: string; floristId: string; context: { occurrence?: string } };
+      return getTelegramEvent("order.item_replaced")!.dedupeKey({ orderId: p.orderId, floristId: p.floristId, occurrence: p.context.occurrence ?? null });
+    });
+    expect(keys).toHaveLength(2);
+    expect(new Set(keys).size).toBe(2);
+  });
+
+  it("«Default Title» Shopify — не вариант: в позицию, заметку и карточку не попадает", async () => {
+    const plain = await makeProduct(siteId, "Field of Dreams", "Default Title", 150, 60, null);
+    const { orderId, itemId } = await makeOrder();
+    await replaceOrderItem(orderId, itemId, { ...plain, customerPrice: 150, composition: null, notifyFlorist: true }, actor);
+    const item = await prisma.orderItem.findUniqueOrThrow({ where: { id: itemId } });
+    expect(item.variantName).toBeNull();
+    const o = await prisma.order.findUniqueOrThrow({ where: { id: orderId }, select: { customerNote: true } });
+    expect(o.customerNote).toMatch(/→ Field of Dreams$/);
   });
 
   it("ручная цена флористу не трогается, но строка позиции — уже нового букета", async () => {

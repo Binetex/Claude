@@ -331,6 +331,9 @@ async function loadOrderSnapshot(prisma: PrismaClient, orderId: string): Promise
     deliveryDate: o.deliveryDate,
     deliveryWindow: o.deliveryWindow,
     recipientName: o.recipientName,
+    // Заказчик — кому звонить: «нет номера дома», «попросить отзыв», «просит позвонить».
+    senderName: o.senderName,
+    senderPhone: o.senderPhone,
     addressLine: o.addressLine,
     apartment: o.apartment,
     city: o.city,

@@ -408,6 +408,18 @@ describe("Florist reassignment", () => {
     expect(old.supersededByDeliveryId).toBe(current[0].id);
   });
 
+  it("адрес стал без номера дома → старый черновик снят, новый не создан, причина — адрес", async () => {
+    __resetMockBurqStore();
+    const orderId = await makeOrder(floristAId);
+    const port = createPrismaDraftPort(prisma);
+    await handleBurqDraftCreate({ client: createMockBurqClient(), port }, { orderId, scheduleVersion: 0 });
+
+    await prisma.order.update({ where: { id: orderId }, data: { addressLine: "Steddom Drive" } });
+    // Причина доходит до кнопки «Пересоздать»: она говорит «исправьте адрес», а не «проверьте флориста».
+    expect(await handleFloristReassignment(prisma, orderId)).toEqual({ outcome: "waiting", reason: "address_incomplete" });
+    expect(await prisma.delivery.count({ where: { orderId, isCurrentAttempt: true } })).toBe(0);
+  });
+
   it("уже инициированный draft → FLAG_PROBLEM, без DELETE, без второй attempt", async () => {
     __resetMockBurqStore();
     const orderId = await makeOrder(floristAId);

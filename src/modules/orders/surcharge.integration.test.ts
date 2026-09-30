@@ -9,6 +9,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { prisma } from "@/lib/db";
 import { addOrderSurcharge, orderSurchargeTotal } from "./surcharge";
 import { updateManualOrderCharges } from "./manualCharges";
+import { getTelegramEvent } from "@/integrations/telegram/registry";
 
 const RUN = `sur-${Date.now()}`;
 let siteId = "";
@@ -89,7 +90,21 @@ describe("доплата к заказу", () => {
     const payload = n.payload as { type: string; floristId: string; context: Record<string, unknown> };
     expect(payload.type).toBe("order.florist_note");
     expect(payload.floristId).toBe(floristId);
-    expect(payload.context).toEqual({ text: "Добавить вазу" });
+    expect(payload.context).toMatchObject({ text: "Добавить вазу" });
+    expect(Object.keys(payload.context).sort()).toEqual(["occurrence", "text"]); // сумма флористу не уходит
+  });
+
+  it("две доплаты с галочкой — два НОВЫХ сообщения флористу, а не правка первого", async () => {
+    const id = await makeOrder("Website");
+    await addOrderSurcharge(id, { amount: 10, note: "Шарик", notifyFlorist: true }, actor);
+    await addOrderSurcharge(id, { amount: 12, note: "Шоколад", notifyFlorist: true }, actor);
+    // Ключ сообщения считается так же, как в обработчике Telegram: совпади он — вторая доплата
+    // молча переписала бы первое сообщение, и флорист её не заметил бы.
+    const keys = (await notices(id)).map((n) => {
+      const p = n.payload as { orderId: string; floristId: string; context: { occurrence?: string } };
+      return getTelegramEvent("order.florist_note")!.dedupeKey({ orderId: p.orderId, floristId: p.floristId, occurrence: p.context.occurrence ?? null });
+    });
+    expect(new Set(keys).size).toBe(2);
   });
 
   it("без галочки или без флориста — флористу не пишем", async () => {

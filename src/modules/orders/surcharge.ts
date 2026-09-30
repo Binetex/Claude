@@ -76,7 +76,8 @@ export async function addOrderSurcharge(
       orderId,
       floristId: order.currentFloristId,
       occurrenceKey: `${orderId}:${order.currentFloristId}:note:${audit.id}`,
-      context: { text: note },
+      // occurrence — в ключ сообщения: каждое изменение флорист получает НОВЫМ сообщением.
+      context: { text: note, occurrence: audit.id },
     });
   }
   return { ok: true };

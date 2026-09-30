@@ -516,6 +516,18 @@ describe("уведомления владельца", () => {
     expect(tokenOfCall(0)).toBe("token-owner");
   });
 
+  it("адрес без номера дома — с именем и телефоном заказчика: сообщение о том, кому звонить", async () => {
+    await makeOwnerBot();
+    const site = await makeSite();
+    const order = await makeOrder(site.id);
+    fetchMock.mockResolvedValueOnce(okSend(1101));
+
+    await handler(rec({ type: "order.address_incomplete", orderId: order.id, context: { issue: "no_house_number" } }));
+
+    // Заказчик приходит из снимка заказа, который собирает сам обработчик, — а не из теста.
+    expect(bodyOfCall(0).text).toContain("Заказчик: Anna · +13105550000");
+  });
+
   it("выключенное по одному уведомление молчит, соседние по тому же адресату идут", async () => {
     await makeOwnerBot();
     const site = await makeSite();
