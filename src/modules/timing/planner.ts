@@ -7,17 +7,17 @@
  * возможное максимальное опоздание на одной линии — ровно вопрос «не сорвать ни одного срока»
  * (research R4).
  *
- * Главный магазин (TheFlow) — всегда первым в очереди, между собой — по сроку; заказы других
- * магазинов — после них (владелец 30.09.2026: «TheFlow всегда первые»; до того TheFlow только
- * «не должен был опоздать», и JF с Par стояли впереди, пока TheFlow успевал к сроку). Опоздание
- * других магазинов не мешает и принять новый заказ.
+ * Главный магазин (TheFlow) — первым в очереди, между собой — по сроку; заказы других магазинов —
+ * после них (владелец 30.09.2026: «TheFlow всегда первые»). Кроме вечерних (окно с 17:00): они идут
+ * после дневных заказов всех магазинов, а среди вечерних TheFlow снова первым («вечерние TheFlow
+ * не надо пихать в начало очереди»). Опоздание других магазинов не мешает принять новый заказ.
  *
  * Плановая доставка = готовность + курьер + дорога, но не раньше начала окна: раньше букет просто
  * подождёт. Риск — доставка позже срока больше чем на допуск (20 минут, решение владельца).
  *
  * Чистый модуль: ни БД, ни «сейчас» — время начала линии передаётся параметром.
  */
-import { LATE_TOLERANCE_MIN, EARLIEST_DELIVERY_MIN, EARLIEST_DELIVERY_AHEAD_MIN } from "./day";
+import { LATE_TOLERANCE_MIN, EARLIEST_DELIVERY_MIN, EARLIEST_DELIVERY_AHEAD_MIN, EVENING_ORDER_MIN } from "./day";
 
 export type PlanJob = {
   id: string;
@@ -61,11 +61,19 @@ function latestReady(j: PlanJob, courierMin: number): number {
   return j.deadline - courierMin - j.driveMin;
 }
 
+/** Вечерний заказ — окно с 17:00: собирать его первым незачем, букет только простоит. */
+const isEvening = (j: PlanJob) => j.windowFrom >= EVENING_ORDER_MIN;
+
+/**
+ * Очередь: сначала дневные заказы, потом вечерние; внутри каждой части — TheFlow первым, дальше по
+ * сроку. Так дневной TheFlow идёт раньше всех, а вечерний — после дневных заказов других магазинов.
+ */
 function order(jobs: PlanJob[], courierMin: number): PlanJob[] {
   return jobs
     .filter((j) => !j.fixed)
     .sort(
       (a, b) =>
+        Number(isEvening(a)) - Number(isEvening(b)) ||
         Number(!!b.priority) - Number(!!a.priority) ||
         latestReady(a, courierMin) - latestReady(b, courierMin) ||
         a.windowFrom - b.windowFrom ||

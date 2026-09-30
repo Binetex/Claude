@@ -38,6 +38,11 @@ describe("замок дня (владелец 29.09.2026)", () => {
     expect(withClosure(11 * 60, "FULL", false)).toBe(11 * 60);
   });
 
+  it("«утро закрыто» и «только вечер» принятый заказ не двигают — замок только для новых", () => {
+    expect(withClosure(11 * 60, "MORNING", false)).toBe(11 * 60);
+    expect(withClosure(11 * 60, "DAY", false)).toBe(11 * 60);
+  });
+
   it("неизвестный уровень из базы — не замок", () => {
     expect(asClosureLevel("DAY")).toBe("DAY");
     expect(asClosureLevel("WEEK")).toBeNull();

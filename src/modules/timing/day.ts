@@ -18,6 +18,12 @@ export const LATE_TOLERANCE_MIN = 20;
 /** Вечер: с этого часа открыт день под замком «только вечер» и привозим сегодняшний заказ без места. */
 export const EVENING_START_MIN = 18 * 60;
 /**
+ * Вечерний заказ для очереди флориста — окно начинается с этого часа. Такой заказ TheFlow не
+ * лезет в начало очереди: он после дневных заказов всех магазинов (владелец 30.09.2026: «вечерние
+ * заказы TheFlow не надо пихать в начало очереди, их можно после утренних с других сайтов»).
+ */
+export const EVENING_ORDER_MIN = 17 * 60;
+/**
  * Сегодня раньше этого доставку не обещаем (владелец 30.09.2026: «обычно у нас в 11 утра доставляют
  * самое раннее»), и заранее сами тоже называем его. Без порога «Новый заказ» на завтра показывал
  * 8:30 (ранний старт флориста с 6:00), и ассистент назвал бы это клиенту.
@@ -68,9 +74,11 @@ export function asClosureLevel(v: string | null | undefined): ClosureLevel | nul
  * возим как обычно: отказывать им из-за замка значило бы перенести чужую оплаченную доставку.
  */
 export function withClosure(earliest: number | null, level: ClosureLevel | null, forNewOrder: boolean): number | null {
-  if (earliest == null || !level) return earliest;
+  // Замок — для НОВЫХ заказов. Принятый заказ возим как обычно на любом замке: «Утро закрыто» не
+  // двигает его утреннее окно (раньше двигало, и ИИ писал клиенту «к часу не успеем»).
+  if (earliest == null || !level || !forNewOrder) return earliest;
   const from = CLOSURE_OPEN_FROM[level];
-  if (from == null) return forNewOrder ? null : earliest;
+  if (from == null) return null;
   return Math.max(earliest, from);
 }
 
