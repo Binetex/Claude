@@ -17,6 +17,9 @@ import { ingestWooOrder, type WooIngestConfig } from "@/integrations/woocommerce
 import { AUTOMATION_TRIGGER_EVENT } from "./events";
 import { publishOrderDeliveredTrigger, publishPlatformOrderDeliveredTrigger } from "./lifecycle";
 
+/** Час назад: дата доставки заказа без меты — день оформления, то есть сегодня. */
+const CREATED_RECENTLY = new Date(Date.now() - 3_600_000).toISOString().slice(0, 19);
+
 const SHORT = `LT${crypto.randomBytes(4).toString("hex")}`.slice(0, 12);
 let siteId = "";
 
@@ -37,7 +40,8 @@ const wooOrder = (id: number, status: string, at: string) => ({
   id,
   number: String(id),
   status,
-  date_created_gmt: "2026-08-01T10:00:00",
+  // Заказ свежий: заказ из прошлого живой вебхук не заводит (`modules/orders/historical.ts`).
+  date_created_gmt: CREATED_RECENTLY,
   date_modified_gmt: at,
   billing: { first_name: "John", last_name: "Buyer", phone: "+15551112222", email: "j@x.com" },
   shipping: { first_name: "Ann", last_name: "Recip", phone: "+15553334444", address_1: "1 St", city: "Town", postcode: "1000" },

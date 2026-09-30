@@ -24,6 +24,7 @@ import { adoptOrphanCommunicationsForNewOrder } from "@/integrations/quo/adoptOr
 import { displayVariantName } from "@/lib/variantName";
 import { parseWindowText } from "@/lib/deliveryWindow";
 import { withCountryCode } from "@/lib/phoneCountry";
+import { isHistoricalOrder } from "@/modules/orders/historical";
 
 /** Планирование доставки, безопасное для импорта: ошибка логируется, но не роняет приём заказа. */
 async function scheduleDeliverySafe(orderId: string): Promise<void> {
@@ -276,6 +277,14 @@ export async function ingestShopifyOrder(
 
   const paymentStatus = mapPaymentStatus(payload.financial_status);
 
+  // Заказ из прошлого, которого у нас не было (приложение или сам магазин пересохранили старый
+  // заказ, и пришёл «заказ обновлён»): живым он не становится — не заводим (`orders/historical.ts`).
+  const known = await prisma.order.findFirst({ where: { siteId: site.id, externalId }, select: { id: true } });
+  if (!known && payload.created_at && isHistoricalOrder({ deliveryDate: shopifyDeliveryDay(payload, site.timezone).date, createdAt: new Date(payload.created_at), now: new Date(), timezone: site.timezone })) {
+    console.info(`[shopify] заказ ${externalId} из прошлого — не заводим`);
+    return;
+  }
+
   try {
     const order = await createNewOrder(site, externalId, payload, paymentStatus, createProductImageCache());
     // Назначаем флориста только активным заказам (оплачен, не выполнен/не отменён).
@@ -318,6 +327,17 @@ export async function ingestShopifyOrder(
  * (`backfillShopifyOrder`) — открытка/заметка/суммы/позиции не должны разъезжаться
  * между двумя путями создания заказа.
  */
+/**
+ * День доставки заказа Shopify — из note_attributes, а без явной даты — день САМОГО ЗАКАЗА, приведённый
+ * к виду, в котором поле хранится: UTC-полночь локального дня магазина. Сырой timestamp давал вечерним
+ * заказам (после 17:00 в Лос-Анджелесе — уже следующие сутки UTC) день доставки на сутки вперёд, со
+ * всеми последствиями: «доставка сегодня», списки дня, финансовый день.
+ */
+function shopifyDeliveryDay(payload: ShopifyOrder, timezone: string | null | undefined): { date: Date; parsed: boolean } {
+  const parsed = parseLocalDayToUtcMidnight(findNoteAttribute(payload, /delivery.*date/i));
+  return { date: parsed ?? utcMidnightOfLocalDay(new Date(payload.created_at ?? Date.now()), timezone), parsed: !!parsed };
+}
+
 function buildOrderData(
   site: Site,
   externalId: string,
@@ -334,13 +354,7 @@ function buildOrderData(
   const customerNote = ""; // у Shopify-заказов открытка всегда в payload.note — отдельного поля под заметку клиента нет
   const deliveryDateRaw = findNoteAttribute(payload, /delivery.*date/i);
   const deliveryWindow = findNoteAttribute(payload, /delivery.*(time|window)/i) ?? "";
-  // Без явной даты доставки берём дату САМОГО ЗАКАЗА, но приводим её к виду, в котором поле
-  // хранится, — UTC-полночь локального дня магазина. Сырой timestamp здесь давал вечерним
-  // заказам (после 17:00 в Лос-Анджелесе — это уже следующие сутки UTC) день доставки на сутки
-  // вперёд, со всеми последствиями: «доставка сегодня», списки дня, финансовый день.
-  const parsedDeliveryDay = parseLocalDayToUtcMidnight(deliveryDateRaw);
-  const deliveryDate =
-    parsedDeliveryDay ?? utcMidnightOfLocalDay(new Date(payload.created_at ?? Date.now()), site.timezone);
+  const { date: deliveryDate, parsed: parsedDeliveryDay } = shopifyDeliveryDay(payload, site.timezone);
   if (!parsedDeliveryDay) {
     // Неразобранная строка раньше давала Invalid Date и роняла приём заказа целиком.
     console.warn(

@@ -21,6 +21,7 @@ import { resolveMappedOrderFields, type OrderMetaMapping } from "./orderMeta";
 import { cleanCardMessage } from "@/integrations/cardMessageTail";
 import { utcMidnightOfLocalDay, parseLocalDayToUtcMidnight } from "@/lib/tz";
 import { scheduleDeliveryForNewOrder } from "@/integrations/delivery/burq/scheduleService";
+import { isHistoricalOrder } from "@/modules/orders/historical";
 import { assignInitial } from "@/modules/assignments/service";
 import {
   publishOrderCreatedTrigger,
@@ -156,7 +157,7 @@ export async function ingestWooOrder(
   // emitLifecycle: публиковать ли trigger-события авто-SMS (ORDER_CREATED). ТОЛЬКО для «живого»
   // webhook; при bulk-sync/backfill истории — false (по умолчанию), чтобы не слать SMS по старым заказам.
   opts: { emitLifecycle?: boolean } = {}
-): Promise<{ status: "created" | "updated" | "skipped_stale"; orderId: string | null; classification: string }> {
+): Promise<{ status: "created" | "updated" | "skipped_stale" | "skipped_historical"; orderId: string | null; classification: string }> {
   const externalId = String(wooOrder.id);
   const normalized = parseWooOrder(wooOrder);
   const mapped = resolveMappedOrderFields(wooOrder.meta_data, config.orderMetaMapping);
@@ -261,6 +262,15 @@ export async function ingestWooOrder(
     parseLocalDayToUtcMidnight(mapped.deliveryDate) ??
     parseLocalDayToUtcMidnight(normalized.deliveryDate) ??
     utcMidnightOfLocalDay(new Date(normalized.createdAt), site.timezone);
+  // Заказ из прошлого, которого у нас не было: клиент завёл на сайте аккаунт, WooCommerce
+  // пересохранил его старые гостевые заказы и разослал «заказ обновлён» (THEFLOW-15339, 30.09.2026).
+  // С живого пути (вебхук, свежий синк) такой не заводим вовсе: иначе он становился новым оплаченным
+  // заказом — флорист, карточка в Telegram, письма клиенту (`modules/orders/historical.ts`). Перенос
+  // истории (синк без триггеров) работает как раньше.
+  if (opts.emitLifecycle && isHistoricalOrder({ deliveryDate, createdAt: new Date(normalized.createdAt), now: new Date(), timezone: site.timezone })) {
+    console.info(`[woo] заказ ${externalId} из прошлого (доставка ${deliveryDate.toISOString().slice(0, 10)}) — не заводим`);
+    return { status: "skipped_historical", orderId: null, classification: payment.classification };
+  }
   // Тот же мусор магазина, что и у Shopify: служебный хвост приложения доставки и
   // HTML-сущности. См. cardMessageTail.ts. Сырой текст остаётся в originalCardMessage.
   const rawCardMessage = mapped.cardMessage ?? normalized.cardMessage ?? "";

@@ -9,6 +9,9 @@ import { FLOW_STEP_EVENT } from "./events";
 import type { ChannelSender, ChannelSendResult } from "@/modules/messaging/channels/types";
 import { ingestWooOrder, type WooIngestConfig } from "@/integrations/woocommerce/ingestWooOrder";
 
+/** Час назад: дата доставки заказа без меты — день оформления, то есть сегодня. */
+const CREATED_RECENTLY = new Date(Date.now() - 3_600_000).toISOString().slice(0, 19);
+
 /**
  * Automation Flows на реальной БД (throwaway prisma dev). Прогоняем настоящие обработчики
  * (trigger → старт цепочки, flow.step → выполнение шага); worker в этой цепочке только
@@ -591,7 +594,8 @@ describe("resync / backfill", () => {
     id,
     number: String(id),
     status,
-    date_created_gmt: "2026-08-01T10:00:00",
+    // Заказ свежий: заказ из прошлого живой вебхук не заводит (`modules/orders/historical.ts`).
+    date_created_gmt: CREATED_RECENTLY,
     date_modified_gmt: at,
     billing: { first_name: "John", last_name: "Buyer", phone: "+15551112222", email: "j@x.com" },
     shipping: { first_name: "Ann", last_name: "R", phone: "+15553334444", address_1: "1 St", city: "Town", postcode: "1000" },

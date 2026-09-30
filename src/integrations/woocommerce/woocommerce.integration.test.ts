@@ -161,6 +161,32 @@ describe("order ingest (сценарии 9,10 + out-of-order)", () => {
   });
 });
 
+describe("заказ из прошлого из вебхука не оживает (30.09.2026, THEFLOW-15339)", () => {
+  // Клиент завёл на сайте аккаунт — WooCommerce привязал к нему старые гостевые заказы, пересохранил
+  // их и прислал «заказ обновлён». Таких заказов у нас не было, и они приходили как новые оплаченные.
+  const order = (over: Record<string, unknown>) => ({
+    status: "processing",
+    billing: { first_name: "Andrew", last_name: "Singer", phone: "", email: "old-guest@x.com" },
+    shipping: { first_name: "Emily", last_name: "Singer", phone: "+2", address_1: "2320 Penmar Ave", city: "Venice", postcode: "90291" },
+    line_items: [{ id: 1, name: "Pure Love", product_id: 100, quantity: 1, price: "200" }],
+    total: "238.44", total_tax: "0", shipping_total: "0", discount_total: "0",
+    ...over,
+  });
+  const site = () => ({ id: siteId, shortName: SHORT });
+
+  it("заказ 2025 года из вебхука — не заводим: ни флориста, ни карточки, ни писем", async () => {
+    const r = await ingestWooOrder(site(), order({ id: 9915339, number: "9915339", date_created_gmt: "2025-03-13T13:51:40", date_modified_gmt: "2025-03-13T13:52:37" }) as never, ingestConfig, { emitLifecycle: true });
+    expect(r.status).toBe("skipped_historical");
+    expect(await prisma.order.count({ where: { siteId, externalId: "9915339" } })).toBe(0);
+  });
+
+  it("свежий заказ из того же вебхука заводится как обычно", async () => {
+    const createdGmt = new Date(Date.now() - 60_000).toISOString().slice(0, 19);
+    const r = await ingestWooOrder(site(), order({ id: 9920880, number: "9920880", date_created_gmt: createdGmt, date_modified_gmt: createdGmt }) as never, ingestConfig, { emitLifecycle: true });
+    expect(r.status).toBe("created");
+  });
+});
+
 describe("изображения позиции: parent + variant (WooCommerce)", () => {
   const PARENT = "https://cdn.example/woo-parent.jpg";
   const VARIANT = "https://cdn.example/woo-variant.jpg";
