@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { cn } from "@/lib/cn";
 import type { DaySchedule, FloristDay, ScheduleOrder } from "@/modules/timing/load";
-import { fmtDuration, type ClosureLevel } from "@/modules/timing/day";
+import { fmtDuration, EARLIEST_DELIVERY_MIN, type ClosureLevel } from "@/modules/timing/day";
 import { DayLock } from "./ScheduleControls";
 
 /**
@@ -104,7 +104,9 @@ function EarliestChip({ min, check }: { min: number | null; check: boolean }) {
   if (check) return <span className="whitespace-nowrap rounded-full bg-amber-50 px-3 py-1 text-sm font-medium text-amber-700 ring-1 ring-amber-200">Новый заказ на сегодня — решаете вы</span>;
   if (min == null) return <span className="rounded-full bg-rose-50 px-3 py-1 text-sm font-medium text-rose-700 ring-1 ring-rose-200">Новый заказ уже не успеть</span>;
   const tone = min <= 13 * 60 ? "bg-emerald-50 text-emerald-700 ring-emerald-200" : min <= 16 * 60 ? "bg-amber-50 text-amber-700 ring-amber-200" : "bg-rose-50 text-rose-700 ring-rose-200";
-  return <span className={cn("whitespace-nowrap rounded-full px-3 py-1 text-sm font-medium ring-1", tone)}>Новый заказ — к {hm(min)}</span>;
+  // Раньше 11 бывает только заранее, и ИИ называет это время, только если клиент сам просит раньше.
+  const label = min < EARLIEST_DELIVERY_MIN ? `к ${hm(EARLIEST_DELIVERY_MIN)} · если клиент просит — с ${hm(min)}` : `к ${hm(min)}`;
+  return <span className={cn("whitespace-nowrap rounded-full px-3 py-1 text-sm font-medium ring-1", tone)}>Новый заказ — {label}</span>;
 }
 
 function FloristPanel({ f, shops, mode, sameDayCheck }: { f: FloristDay; shops: string; mode: "plan" | "review"; sameDayCheck: boolean }) {

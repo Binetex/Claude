@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { takeDeferredQueue, describeCall, relaxedEarliest } from "./handler";
+import { takeDeferredQueue, describeCall, relaxedEarliest, earliestLabel } from "./handler";
 
 /**
  * Очередь сообщений: человек пишет одну мысль в три приёма, и отвечаем мы на неё один раз.
@@ -104,8 +104,34 @@ describe("relaxedEarliest", () => {
     expect(relaxedEarliest(null, hm(11), hm(9))).toBe(hm(11));
   });
 
+  it("в день доставки запас не уводит раньше 11:00, если окно заказа само не начинается раньше", () => {
+    expect(relaxedEarliest(hm(12), hm(11), hm(9))).toBe(hm(11));
+    expect(relaxedEarliest(hm(11), hm(11, 30), hm(9))).toBe(hm(11));
+    // Окно «с 10» согласовали люди — ИИ его не урезает.
+    expect(relaxedEarliest(hm(11), hm(10), hm(9))).toBe(hm(10));
+  });
+
+  it("заранее (завтра и дальше) — не раньше 8:00", () => {
+    expect(relaxedEarliest(hm(9, 30), hm(11), null)).toBe(hm(8));
+  });
+
   it("раньше «сейчас» не бывает, а после конца дня — уже не сегодня", () => {
     expect(relaxedEarliest(hm(13, 35), hm(10), hm(14, 5))).toBe(hm(14, 30));
     expect(relaxedEarliest(hm(13, 35), hm(10), hm(21, 10))).toBeNull();
+  });
+});
+
+describe("earliestLabel — раньше 11 модель сама не предлагает", () => {
+  it("раньше 11: по умолчанию 11 AM, раннее — только если клиент просит", () => {
+    const label = earliestLabel(8 * 60 + 30)!;
+    expect(label.startsWith("11")).toBe(true);
+    expect(label).toContain("8:30");
+    expect(label).toContain("only if the customer asks for earlier");
+  });
+
+  it("с 11 и позже, «не успеть» и «не знаем» — как было", () => {
+    expect(earliestLabel(14 * 60)).not.toContain("only if");
+    expect(earliestLabel(null)).toBeNull();
+    expect(earliestLabel(undefined)).toBeUndefined();
   });
 });

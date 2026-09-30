@@ -77,9 +77,14 @@ describe("canFit / earliestBy — влезет ли ещё один", () => {
     expect(canFit(day, job("new", e! - 30, { windowFrom: 0 }), P).ok).toBe(false);
   });
 
-  it("заказ заранее: самый ранний срок может быть и утром", () => {
+  it("заказ заранее: собрать можно с 6 утра, а доставка — не раньше 8:00 (владелец 30.09.2026)", () => {
     const e = earliestBy([], { id: "new", big: false, windowFrom: 0, driveMin: 30 }, { ...P, earliestLineStart: h(6) });
-    expect(e).toBeLessThan(h(9));
+    expect(e).toBe(h(8));
+  });
+
+  it("сегодня раньше 11:00 не обещаем, даже если собрать успеем раньше", () => {
+    const e = earliestBy([], { id: "new", big: false, windowFrom: 0, driveMin: 30 }, { ...P, lineStart: h(7) });
+    expect(e).toBe(h(11));
   });
 });
 

@@ -17,7 +17,7 @@ import { createDeepseekClient, type DeepseekClient } from "@/integrations/deepse
 import { DeepseekError } from "@/integrations/deepseek/errors";
 import { buildMessages, parseReply, describeDeliveryDay, agreeFromMin, type HistoryLine, type OrderSnapshot } from "./prompt";
 import { orderEarliest, siteEarliest, sameDayNeedsCheck } from "@/modules/timing/load";
-import { clockLabelEn } from "@/modules/timing/day";
+import { clockLabelEn, EARLIEST_DELIVERY_MIN, EARLIEST_DELIVERY_AHEAD_MIN } from "@/modules/timing/day";
 import { matchIntent } from "./intents";
 import { readTemplates, templateApplies, renderAssistantTemplate } from "./templates";
 import { loadCatalog, looksLikeShopping } from "./catalog";
@@ -237,8 +237,8 @@ export function buildAssistantHandler(prisma: PrismaClient, deps: AssistantDeps 
     const newEarliest = order ? null : await earliestForNew(prisma, site.id, clock.dateStr, now());
     const messages = buildMessages({
       knowledgeBase: order ? site.aiKnowledgeBase : site.aiUnknownKnowledgeBase,
-      order: order ? { ...snapshot(order, site.name, incoming.partyRole, clock.dateStr), earliest: labelOf(orderEarliestMin) } : null,
-      earliestNew: newEarliest ? { today: labelOf(newEarliest.today), tomorrow: labelOf(newEarliest.tomorrow), todayCheck: newEarliest.todayCheck } : undefined,
+      order: order ? { ...snapshot(order, site.name, incoming.partyRole, clock.dateStr), earliest: earliestLabel(orderEarliestMin) } : null,
+      earliestNew: newEarliest ? { today: labelOf(newEarliest.today), tomorrow: earliestLabel(newEarliest.tomorrow), todayCheck: newEarliest.todayCheck } : undefined,
       history: await loadHistory(prisma, order?.id ?? null, phone, incoming.storePhone, incoming, site.timezone, answeredIds),
       now: clock,
       globalNote,
@@ -310,7 +310,7 @@ export function buildAssistantHandler(prisma: PrismaClient, deps: AssistantDeps 
         const foundEarliest = await earliestFor(prisma, found, clock.dateStr, now());
         const again = buildMessages({
           knowledgeBase: site.aiKnowledgeBase,
-          order: { ...snapshot(found, site.name, incoming.partyRole, clock.dateStr), earliest: labelOf(foundEarliest) },
+          order: { ...snapshot(found, site.name, incoming.partyRole, clock.dateStr), earliest: earliestLabel(foundEarliest) },
           history: await loadHistory(prisma, found.id, phone, incoming.storePhone, incoming, site.timezone, answeredIds),
           now: clock,
           globalNote,
@@ -418,7 +418,11 @@ export const AI_LATE_OK_MIN = 120;
 export function relaxedEarliest(planned: number | null, windowFrom: number | null, nowMin: number | null): number | null {
   const promised = windowFrom ?? DAY_START_MIN;
   const base = planned == null ? promised : Math.min(planned - AI_LATE_OK_MIN, promised);
-  const e = nowMin == null ? base : Math.max(base, Math.ceil(nowMin / 30) * 30);
+  // Запас на опоздание не уводит раньше 11:00 сегодня и 8:00 заранее (`nowMin` есть только в день
+  // доставки) — если только окно заказа само не начинается раньше: его согласовали люди.
+  const dayFloor = nowMin == null ? EARLIEST_DELIVERY_AHEAD_MIN : EARLIEST_DELIVERY_MIN;
+  const floor = Math.min(dayFloor, windowFrom ?? dayFloor);
+  const e = Math.max(base, floor, nowMin == null ? 0 : Math.ceil(nowMin / 30) * 30);
   return e > DAY_END_MIN ? null : e;
 }
 
@@ -463,6 +467,16 @@ async function earliestForNew(
 /** Минуты → «2:30 PM» для модели; null и undefined проходят как есть. */
 export function labelOf(min: number | null | undefined): string | null | undefined {
   return min == null ? min : clockLabelEn(min);
+}
+
+/**
+ * Самое раннее время словами для модели. Раньше 11 бывает только заранее (завтра и дальше), и сама
+ * модель его не предлагает: по умолчанию 11 AM, раннее — только если клиент просит (владелец
+ * 30.09.2026: «на завтра можно согласовывать 8–9 утра, если клиент просит»).
+ */
+export function earliestLabel(min: number | null | undefined): string | null | undefined {
+  if (min == null || min >= EARLIEST_DELIVERY_MIN) return labelOf(min);
+  return `${clockLabelEn(EARLIEST_DELIVERY_MIN)} (as early as ${clockLabelEn(min)} only if the customer asks for earlier)`;
 }
 
 function logTimingError(err: unknown): undefined {

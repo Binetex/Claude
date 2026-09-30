@@ -17,7 +17,7 @@
  *
  * Чистый модуль: ни БД, ни «сейчас» — время начала линии передаётся параметром.
  */
-import { LATE_TOLERANCE_MIN } from "./day";
+import { LATE_TOLERANCE_MIN, EARLIEST_DELIVERY_MIN, EARLIEST_DELIVERY_AHEAD_MIN } from "./day";
 
 export type PlanJob = {
   id: string;
@@ -132,7 +132,10 @@ const LAST_DEADLINE = 21 * 60;
 export function earliestBy(jobs: PlanJob[], job: Omit<PlanJob, "deadline">, p: PlanParams): number | null {
   // Заказ заранее может начаться раньше обычного начала линии (earliestLineStart).
   const start = p.earliestLineStart != null ? Math.min(p.lineStart, p.earliestLineStart) : p.lineStart;
-  const first = Math.max(job.windowFrom, start + p.prepMin(job.big) + p.courierMin + job.driveMin);
+  // Сегодня раньше 11:00 не обещаем, даже если собрать успеем раньше; заранее (earliestLineStart
+  // есть только у будущего дня) — с 8:00, а сам ассистент раньше 11 называет, только если просят.
+  const floor = p.earliestLineStart != null ? EARLIEST_DELIVERY_AHEAD_MIN : EARLIEST_DELIVERY_MIN;
+  const first = Math.max(job.windowFrom, floor, start + p.prepMin(job.big) + p.courierMin + job.driveMin);
   const startAt = Math.ceil(first / STEP) * STEP;
   for (let d = startAt; d <= LAST_DEADLINE; d += STEP) {
     if (canFit(jobs, { ...job, deadline: d }, p).ok) return d;

@@ -27,7 +27,7 @@ import { mentionsTime } from "./note";
 import { mentionsDay } from "./reschedule";
 import type { AssistantEmailPayload } from "./events";
 import {
-  snapshot, deliveredMoment, countReplies, renderPrompt, earliestFor, labelOf, finishTurn,
+  snapshot, deliveredMoment, countReplies, renderPrompt, earliestFor, earliestLabel, finishTurn,
   recordReadyTime, alertNoBalance, notifyCallRequest, logCallRequestError,
   takeDeferredQueue, BURST_WINDOW_MIN, BURST_MAX,
 } from "./handler";
@@ -124,7 +124,7 @@ export function buildAssistantEmailHandler(prisma: PrismaClient, deps: { client?
       channel: "email",
       writerName: isCustomer ? order.senderName : null,
       knowledgeBase: site.aiKnowledgeBase,
-      order: { ...snapshot(order, site.name, isCustomer ? "CUSTOMER" : "UNKNOWN", clock.dateStr), earliest: labelOf(earliestMin) },
+      order: { ...snapshot(order, site.name, isCustomer ? "CUSTOMER" : "UNKNOWN", clock.dateStr), earliest: earliestLabel(earliestMin) },
       history: await loadEmailHistory(prisma, order.id, [...deferred.map((d) => d.id), email.id], site.timezone),
       now: clock,
       globalNote,
