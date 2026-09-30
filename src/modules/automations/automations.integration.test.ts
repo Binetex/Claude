@@ -352,6 +352,46 @@ describe("новые триггеры: доставка сегодня и сос
     expect(await jobsFor(auto.id, order.id)).toHaveLength(1);
   });
 
+  describe("«когда вам удобно?» — один раз на заказ (владелец 30.09.2026, FLWBR-91180)", () => {
+    /** Вчера по заказу уже уходила «доставка сегодня»; `replied` — ответил ли на неё человек. */
+    async function askedYesterday(order: { id: string }, automationId: string, replied: boolean) {
+      const sentAt = new Date(Date.now() - 20 * 3600_000);
+      await prisma.automationJob.create({
+        data: {
+          automationId, orderId: order.id, recipientType: "RECIPIENT", channel: "SMS", occurrenceKey: `${order.id}:yesterday`,
+          scheduledAt: sentAt, status: "SENT", sentAt, idempotencyKey: `${automationId}:${order.id}:RECIPIENT:${order.id}:yesterday:SMS`,
+        },
+      });
+      if (replied) {
+        await prisma.orderCommunication.create({
+          data: {
+            orderId: order.id, provider: "QUO", providerEventId: `EV-${suffix}-${order.id}`, type: "SMS", direction: "INBOUND", status: "RECEIVED",
+            externalPhone: "+15553334444", externalPhoneNormalized: "+15553334444", messageText: "Ok Tomorrow between 10 and noon will work",
+            occurredAt: new Date(sentAt.getTime() + 3600_000),
+          },
+        });
+      }
+    }
+
+    it("на вчерашний вопрос ответили, заказ перенесли на сегодня — второй раз не спрашиваем", async () => {
+      const site = await makeSite();
+      const auto = await makeAutomation(site.id, { triggerType: "DELIVERY_TODAY", audience: "RECIPIENT" });
+      const order = await makeOrder(site.id, { deliveryDate: storeTodayMidnightUtc() });
+      await askedYesterday(order, auto.id, true);
+      await fireTrigger(order, "DELIVERY_TODAY", `${order.id}:today`);
+      expect(await jobsFor(auto.id, order.id)).toHaveLength(1); // только вчерашний
+    });
+
+    it("на вчерашний не ответили — спрашиваем снова", async () => {
+      const site = await makeSite();
+      const auto = await makeAutomation(site.id, { triggerType: "DELIVERY_TODAY", audience: "RECIPIENT" });
+      const order = await makeOrder(site.id, { deliveryDate: storeTodayMidnightUtc() });
+      await askedYesterday(order, auto.id, false);
+      await fireTrigger(order, "DELIVERY_TODAY", `${order.id}:today`);
+      expect(await jobsFor(auto.id, order.id)).toHaveLength(2);
+    });
+  });
+
   it("DELIVERY_TODAY НЕ создаёт job, если дату перенесли (устаревшая задача)", async () => {
     const site = await makeSite();
     const auto = await makeAutomation(site.id, { triggerType: "DELIVERY_TODAY" });

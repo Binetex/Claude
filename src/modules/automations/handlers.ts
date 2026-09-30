@@ -225,6 +225,22 @@ async function reviveDuplicateSibling(
 
 // ─────────────────────────────  ЭТАП 1: TRIGGER → JOBS  ─────────────────────────────
 
+/**
+ * Уходил ли по заказу «доставка сегодня» в ДРУГОЙ день, и ответили ли на него. Ответом считается
+ * любое входящее по заказу после той отправки: время, «перенесите на завтра», даже «👍» — человек
+ * с нами уже на связи, и тот же вопрос второй раз выглядит так, будто его не услышали.
+ */
+async function answeredEarlierDeliveryToday(prisma: PrismaClient, orderId: string, occurrenceKey: string): Promise<boolean> {
+  const asked = await prisma.automationJob.findFirst({
+    where: { orderId, status: "SENT", occurrenceKey: { not: occurrenceKey }, automation: { triggerType: "DELIVERY_TODAY" } },
+    orderBy: { sentAt: "asc" },
+    select: { sentAt: true },
+  });
+  if (!asked?.sentAt) return false;
+  const replies = await prisma.orderCommunication.count({ where: { orderId, direction: "INBOUND", occurredAt: { gt: asked.sentAt } } });
+  return replies > 0;
+}
+
 export function buildAutomationTriggerHandler(prisma: PrismaClient): OutboxHandler {
   const repo = new PrismaOutboxRepository(prisma);
 
@@ -265,6 +281,9 @@ export function buildAutomationTriggerHandler(prisma: PrismaClient): OutboxHandl
 
     // Задача «доставка сегодня» ставится заранее; к моменту срабатывания дату могли перенести.
     if (p.triggerType === "DELIVERY_TODAY" && !isDeliveryToday(order.deliveryDate, order.site.timezone, now)) return;
+    // «Когда вам удобно?» — один раз на заказ (владелец 30.09.2026, FLWBR-91180): человек ответил
+    // на такой вопрос, заказ перенесли — на новый день второй раз не спрашиваем.
+    if (p.triggerType === "DELIVERY_TODAY" && (await answeredEarlierDeliveryToday(prisma, order.id, p.occurrenceKey))) return;
 
     // Условия проверяем ДО планирования адресатов: правило, не прошедшее условие, не должно
     // занимать телефон и лишать сообщения то правило, которое реально сработало.
