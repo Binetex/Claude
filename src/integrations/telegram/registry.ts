@@ -20,6 +20,8 @@ export const TELEGRAM_EVENTS = [
   "order.delivery_changed_owner",
   "order.florist_note",
   "order.item_replaced",
+  "order.address_incomplete",
+  "order.address_incomplete_cc",
   "payment.failed",
   "payment.pending_too_long",
   "payment.status_mismatch",
@@ -118,6 +120,23 @@ const REGISTRY: Record<TelegramEventType, TelegramEventDef> = {
     // и под прежним фото оказалась бы подпись нового букета.
     dedupeKey: ({ orderId, floristId, occurrence }) => `order:${orderId}:florist:${floristId}:replaced:${occurrence ?? "-"}`,
     description: "Букет в заказе заменили на другой — флористу новой карточкой с новым фото.",
+  },
+  // Адрес, который курьеру не отдать (нет номера дома или адреса вовсе), — сразу двоим, как
+  // «позвоните мне»: владельцу и оператору колл-центра, кто первый свободен, тот и уточняет.
+  "order.address_incomplete": {
+    type: "order.address_incomplete",
+    audience: "OWNER",
+    perFlorist: false,
+    // Одно сообщение на заказ: исправят адрес — повода писать снова нет.
+    dedupeKey: ({ orderId }) => `order:${orderId}:owner.address_incomplete`,
+    description: "Оплаченный заказ без номера дома в адресе — в Burq не уйдёт, пока адрес не исправят.",
+  },
+  "order.address_incomplete_cc": {
+    type: "order.address_incomplete_cc",
+    audience: "CUSTOMER_SERVICE",
+    perFlorist: false,
+    dedupeKey: ({ orderId }) => `order:${orderId}:cs.address_incomplete`,
+    description: "Оплаченный заказ без номера дома в адресе — задача оператору: уточнить адрес у заказчика.",
   },
   "payment.failed": {
     type: "payment.failed",

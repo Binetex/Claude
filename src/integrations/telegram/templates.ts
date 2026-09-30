@@ -289,6 +289,21 @@ export function renderDeliveryChanged(o: OrderSnapshot, fromText: string | null,
   );
 }
 
+/**
+ * Адрес, который курьеру не отдать (владелец 30.09.2026, THEFLOW-20867). Главное — чей заказ,
+ * какой адрес получился и кому звонить: исправить адрес может только заказчик.
+ */
+export function renderAddressIncomplete(o: OrderSnapshot, issue: string | null): string {
+  const head = issue === "empty" ? "📍 <b>Адрес не указан</b>" : "📍 <b>В адресе нет номера дома</b>";
+  return (
+    `${head} · <b>${esc(o.orderNumber)}</b> · ${esc(o.siteName)}\n\n` +
+    line("Адрес", addressText(o)) +
+    line("Заказчик", [o.senderName, o.senderPhone].filter(Boolean).join(" · ") || null) +
+    line("Доставка", [fmtDate(o.deliveryDate), fmtTimeWindow(o.deliveryWindow)].filter(Boolean).join(", ")) +
+    `\nВ Burq заказ не уйдёт, пока адрес не исправят. Уточните у заказчика и поправьте адрес в заказе.`
+  ).trimEnd();
+}
+
 /** Букеты заказа через запятую, без повторов: «Red Roses & Vase, Balloons». */
 function bouquetNames(o: OrderSnapshot): string {
   return [...new Set(o.items.map((i) => i.name.trim()).filter(Boolean))].join(", ");
@@ -382,7 +397,9 @@ export function renderAskReview(o: OrderSnapshot): string {
  */
 export function buttonsFor(type: TelegramEventType, o: OrderSnapshot): TelegramButton[] {
   // Оператор открывает СВОЮ карточку заказа: в кабинет владельца у него нет доступа.
-  if (type === "order.ask_review" || type === "customer.call_request_cc") return [{ text: "Open Order", url: callCenterOrderUrl(o.id) }];
+  if (type === "order.ask_review" || type === "customer.call_request_cc" || type === "order.address_incomplete_cc") {
+    return [{ text: "Open Order", url: callCenterOrderUrl(o.id) }];
+  }
   // Флористу — ЕГО карточка заказа: в кабинет владельца у него нет доступа.
   const forFlorist =
     type === "order.assigned" ||

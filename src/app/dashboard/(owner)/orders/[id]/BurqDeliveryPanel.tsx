@@ -80,6 +80,7 @@ const SKIP_RU: Record<string, string> = {
   site_disabled: "автосоздание отключено для магазина",
   order_terminal: "заказ в терминальном статусе",
   delivery_date_past: "дата доставки уже прошла",
+  address_incomplete: "в адресе нет номера дома — исправьте адрес получателя, и доставка создастся сама",
   draft_exists: "черновик уже существует",
 };
 

@@ -29,6 +29,7 @@ const ok = {
   },
   hasCurrentDraft: false,
   timezone: LA,
+  addressIssue: null,
 };
 
 describe("вечерний заказ на сегодня", () => {

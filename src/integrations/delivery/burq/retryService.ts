@@ -13,6 +13,7 @@ import type { DeliveryProviderStatus } from "@/generated/prisma/enums";
 import { getBurqRuntimeClient } from "./settings";
 import { createPrismaDraftPort } from "./draftPort.prisma";
 import { decideDraftEligibility } from "./eligibility";
+import { deliveryAddressIssue } from "@/lib/addressCheck";
 import { buildBurqDraftRequest, DEFAULT_BURQ_DIMENSIONS } from "./request";
 
 /** Статусы попытки, из которых разрешён ручной ретрай. */
@@ -73,10 +74,13 @@ export async function createRetryDeliveryAttempt(prisma: PrismaClient, orderId: 
       floristId: ctx.floristId,
       pickup: ctx.pickup,
       hasCurrentDraft: ctx.hasCurrentDraft,
+      // Ручной повтор тоже не отдаёт курьеру улицу без номера дома: сначала исправить адрес.
+      addressIssue: deliveryAddressIssue(ctx.order.dropoff.addressLine),
     });
     if (decision.action !== "CREATE_DRAFT") {
       await restore();
-      return { outcome: "not_eligible", reason: decision.action === "WAIT_FOR_FLORIST" ? decision.reason : "order_terminal" };
+      const reason = decision.action === "WAIT_FOR_FLORIST" ? decision.reason : decision.reason === "address_incomplete" ? "address_incomplete" : "order_terminal";
+      return { outcome: "not_eligible", reason };
     }
 
     // Bump версии расписания (инвалидирует устаревшие pending-задачи).

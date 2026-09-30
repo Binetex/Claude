@@ -20,6 +20,8 @@ export type ContactView = {
   email?: string | null;
   /** Адрес несколькими строками; пустой массив — блока адреса не будет. */
   addressLines?: string[];
+  /** Адрес курьеру не отдать (нет номера дома) — красная строка под адресом (`lib/addressCheck.ts`). */
+  addressWarning?: string | null;
   /** Иконка-карандаш правки (ContactEditDialog). Нет прав — не передавайте. */
   edit?: React.ReactNode;
 };
@@ -85,6 +87,7 @@ function ContactCard({
             )}
           </Line>
         )}
+        {contact.addressWarning && <p className="rounded-md bg-rose-50 px-2 py-1.5 text-xs font-medium text-rose-700">{contact.addressWarning}</p>}
       </CardBody>
     </Card>
   );

@@ -64,7 +64,13 @@ export async function createNewDeliveryAttemptAction(_prev: FormState, formData:
     case "already_active":
       return { ok: true, message: "Активная доставка уже существует — новая не создавалась." };
     case "not_eligible":
-      return { error: res.reason === "no_florist" ? "Не назначен флорист." : res.reason === "pickup_invalid" ? "Точка забора флориста не настроена/невалидна." : "Заказ не готов к новой доставке." };
+      return {
+        error:
+          res.reason === "no_florist" ? "Не назначен флорист."
+          : res.reason === "pickup_invalid" ? "Точка забора флориста не настроена/невалидна."
+          : res.reason === "address_incomplete" ? "В адресе нет номера дома — сначала исправьте адрес получателя."
+          : "Заказ не готов к новой доставке.",
+      };
     case "not_retryable":
     default:
       return { error: "Повторная доставка недоступна для этого заказа." };
@@ -109,6 +115,7 @@ export async function recreateDeliveryAction(_prev: RecreateFormState, formData:
         error:
           res.reason === "no_florist" ? "Не назначен флорист — новую доставку создать не из чего."
           : res.reason === "pickup_invalid" ? "У флориста не настроена точка забора."
+          : res.reason === "address_incomplete" ? "В адресе нет номера дома — сначала исправьте адрес получателя."
           : "Новую доставку создать не удалось — проверьте флориста и точку забора.",
       };
     case "not_possible":

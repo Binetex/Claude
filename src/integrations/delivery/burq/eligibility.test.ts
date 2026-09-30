@@ -18,9 +18,19 @@ const base: EligibilityInput = {
   floristId: "flo_1",
   pickup: PICKUP,
   hasCurrentDraft: false,
+  addressIssue: null,
 };
 
 describe("decideDraftEligibility", () => {
+  it("улица без номера дома → SKIP address_incomplete: курьеру не отдаём (THEFLOW-20867)", () => {
+    expect(decideDraftEligibility({ ...base, addressIssue: "no_house_number" })).toEqual({ action: "SKIP", reason: "address_incomplete" });
+    expect(decideDraftEligibility({ ...base, addressIssue: "empty" })).toEqual({ action: "SKIP", reason: "address_incomplete" });
+  });
+
+  it("адрес важнее флориста: без номера дома нечего ждать флориста", () => {
+    expect(decideDraftEligibility({ ...base, floristId: null, addressIssue: "no_house_number" })).toEqual({ action: "SKIP", reason: "address_incomplete" });
+  });
+
   it("все условия ок → CREATE_DRAFT", () => {
     expect(decideDraftEligibility(base)).toEqual({ action: "CREATE_DRAFT" });
   });

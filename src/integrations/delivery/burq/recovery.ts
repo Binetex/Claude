@@ -17,6 +17,7 @@ import type { PrismaClient } from "@/generated/prisma/client";
 import { isBurqRuntimeEnabled } from "@/lib/featureFlags";
 import { BURQ_DRAFT_CREATE_EVENT } from "./schedule";
 import { decideDraftEligibility } from "./eligibility";
+import { deliveryAddressIssue } from "@/lib/addressCheck";
 import { createPrismaDraftPort } from "./draftPort.prisma";
 import { rescheduleDeliveryForOrder } from "./scheduleService";
 import { TERMINAL_ORDER_STATUSES } from "@/lib/statuses";
@@ -83,6 +84,8 @@ export async function reconcileBurqSchedules(prisma: PrismaClient, now: Date = n
       // now, а проверка прошедшей даты — по системным часам: два шага одного прохода жили
       // в разном времени.
       now,
+      // Адрес без номера дома не воскрешаем: он ждёт правки, а правка перепланирует сама.
+      addressIssue: deliveryAddressIssue(ctx.order.dropoff.addressLine),
     });
     if (decision.action !== "CREATE_DRAFT") continue;
 

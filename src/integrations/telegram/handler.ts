@@ -13,6 +13,7 @@ import {
   renderOwnerCreated,
   renderDeliveryChanged,
   renderFloristNote,
+  renderAddressIncomplete,
   renderOwnerDeliveryChanged,
   renderOwnerDeliveryProblem,
   renderCustomerReadyTime,
@@ -276,6 +277,9 @@ function renderFor(type: TelegramNotifyPayload["type"], order: OrderSnapshot, ct
       return renderFloristNote(order, ctx.text ?? null);
     case "order.item_replaced":
       return renderFloristMessage(order, { replacedFrom: ctx.replacedFrom ?? "—" });
+    case "order.address_incomplete":
+    case "order.address_incomplete_cc":
+      return renderAddressIncomplete(order, ctx.issue ?? null);
     case "payment.failed":
       return renderOwnerPaymentProblem(order, ctx.safeReason ?? ctx.attemptStatus ?? "платёж отклонён");
     case "payment.pending_too_long":

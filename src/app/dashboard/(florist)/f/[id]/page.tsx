@@ -32,6 +32,7 @@ import { OrderQuickActions } from "@/components/orders/OrderQuickActions";
 import { OrderFinanceBreakdown } from "@/components/orders/OrderFinanceBreakdown";
 import { OrderStatusBadge } from "@/components/StatusBadge";
 import { recipientMapsUrl, recipientAddressLines } from "@/components/orders/address";
+import { addressWarning } from "@/lib/addressCheck";
 import { BouquetPhotoButton } from "@/components/orders/BouquetPhotoButton";
 import { backToList } from "@/lib/backLink";
 
@@ -127,6 +128,7 @@ export default async function FloristOrderPage({
               name: order.recipientName,
               phone: order.recipientPhone,
               addressLines: recipientAddressLines(order),
+              addressWarning: addressWarning(order.addressLine),
               edit: (
                 <ContactEditDialog
                   kind="recipient"

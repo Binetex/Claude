@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { getTelegramEvent } from "./registry";
-import { renderDeliveryChanged, renderOwnerDeliveryChanged, renderFloristNote, renderFloristMessage, buttonsFor } from "./templates";
+import { renderDeliveryChanged, renderOwnerDeliveryChanged, renderFloristNote, renderFloristMessage, buttonsFor, renderAddressIncomplete } from "./templates";
 
 const order = {
   id: "o1",
@@ -135,7 +135,28 @@ describe("букет заменён — флористу новой карточ
 
   it("у флористских сообщений кнопка открывает карточку ФЛОРИСТА, а не кабинет владельца", () => {
     for (const type of ["order.item_replaced", "order.delivery_changed", "order.florist_note"] as const) {
-      expect(buttonsFor(type, order)[0].url).toContain("/dashboard/f/o1");
+      const [first] = buttonsFor(type, order);
+      expect("url" in first ? first.url : "").toContain("/dashboard/f/o1");
     }
+  });
+});
+
+describe("адрес без номера дома — владельцу и колл-центру (30.09.2026)", () => {
+  it("двум адресатам, по одному сообщению на заказ", () => {
+    expect(getTelegramEvent("order.address_incomplete")!.audience).toBe("OWNER");
+    expect(getTelegramEvent("order.address_incomplete_cc")!.audience).toBe("CUSTOMER_SERVICE");
+  });
+
+  it("чей заказ, какой адрес получился, кому звонить и что делать", () => {
+    const text = renderAddressIncomplete({ ...order, addressLine: "Steddom Drive", senderPhone: "+13105550100" } as typeof order, "no_house_number");
+    expect(text.split("\n")[0]).toBe("📍 <b>В адресе нет номера дома</b> · <b>JF-1001374</b> · JF");
+    expect(text).toContain("Адрес: Steddom Drive");
+    expect(text).toContain("Заказчик: Bob · +13105550100");
+    expect(text).toContain("В Burq заказ не уйдёт, пока адрес не исправят.");
+  });
+
+  it("оператору — ссылка в ЕГО карточку заказа", () => {
+    const [first] = buttonsFor("order.address_incomplete_cc", order);
+    expect("url" in first ? first.url : "").toContain("/dashboard/cc/o1");
   });
 });

@@ -9,6 +9,7 @@
  */
 import type { BurqClient } from "./client";
 import { decideDraftEligibility } from "./eligibility";
+import { deliveryAddressIssue } from "@/lib/addressCheck";
 import { buildBurqDraftRequest, DEFAULT_BURQ_DIMENSIONS, type DraftOrderInput, type PickupInput, type BurqDimensions } from "./request";
 import type { PickupLocationInput } from "./pickupValidation";
 import type { BurqDraftCreatePayload } from "./schedule";
@@ -108,6 +109,7 @@ export async function handleBurqDraftCreate(deps: DraftHandlerDeps, payload: Bur
     hasCurrentDraft: ctx.hasCurrentDraft,
     deliveryDate: ctx.order.deliveryDate, // авто-путь: прошедшую дату не создаём
     timezone: ctx.order.timezone, // «сегодня» — по календарю магазина, не по UTC
+    addressIssue: deliveryAddressIssue(ctx.order.dropoff.addressLine),
   });
 
   if (decision.action === "SKIP") {

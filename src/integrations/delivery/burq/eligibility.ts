@@ -6,10 +6,12 @@
  * Возможные исходы:
  *  - CREATE_DRAFT     — все условия выполнены, создаём черновик;
  *  - WAIT_FOR_FLORIST — временно нельзя (нет флориста / pickup не настроен); задача переносится/ждёт;
- *  - SKIP             — создавать не нужно (выключено, заказ терминальный, draft уже есть).
+ *  - SKIP             — создавать не нужно (выключено, заказ терминальный, draft уже есть) или
+ *                       нельзя, пока адрес без номера дома (правка адреса перепланирует сама).
  */
 import { validatePickupLocation, type PickupLocationInput } from "./pickupValidation";
 import { todayStrInTz } from "@/lib/tz";
+import type { AddressIssue } from "@/lib/addressCheck";
 
 export type EligibilityInput = {
   /** Site.burqDraftAutoCreateEnabled */
@@ -32,12 +34,17 @@ export type EligibilityInput = {
   timezone?: string | null;
   /** «Сейчас» — для сравнения даты доставки (инъекция в тестах). */
   now?: Date;
+  /**
+   * Что не так с адресом доставки (`lib/addressCheck.ts`), null — годится. Обязательное поле:
+   * ни один путь в Burq — авто, перепланирование, ручной повтор — не должен его пропустить.
+   */
+  addressIssue: AddressIssue | null;
 };
 
 export type EligibilityDecision =
   | { action: "CREATE_DRAFT" }
   | { action: "WAIT_FOR_FLORIST"; reason: "no_florist" | "pickup_invalid" }
-  | { action: "SKIP"; reason: "site_disabled" | "order_terminal" | "draft_exists" | "delivery_date_past" };
+  | { action: "SKIP"; reason: "site_disabled" | "order_terminal" | "draft_exists" | "delivery_date_past" | "address_incomplete" };
 
 /** Заказы в этих статусах не требуют доставки — draft создавать не нужно. */
 const TERMINAL_ORDER_STATUSES = new Set(["DELIVERED", "CANCELLED", "REFUNDED", "PROBLEM"]);
@@ -65,6 +72,9 @@ export function decideDraftEligibility(input: EligibilityInput): EligibilityDeci
     return { action: "SKIP", reason: "delivery_date_past" };
   }
 
+  // Улица без номера дома: Burq принимает её и ставит точку «куда-то на улицу» (THEFLOW-20867).
+  // Пока адрес не исправят, курьеру заказ не отдаём; правка адреса в карточке перепланирует сама.
+  if (input.addressIssue) return { action: "SKIP", reason: "address_incomplete" };
   if (!input.floristId) return { action: "WAIT_FOR_FLORIST", reason: "no_florist" };
   if (!validatePickupLocation(input.pickup).valid) return { action: "WAIT_FOR_FLORIST", reason: "pickup_invalid" };
 

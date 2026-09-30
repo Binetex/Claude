@@ -58,6 +58,13 @@ export const SMS_TRIGGERS: readonly SmsTriggerDef[] = [
     domainEvent: "order.delivery.today",
   },
   {
+    type: "ORDER_ADDRESS_INCOMPLETE",
+    label: "В адресе нет номера дома",
+    description:
+      "Оплаченный заказ, в адресе доставки которого нет номера дома: в Burq он не уйдёт, пока адрес не исправят. Правило — попросить заказчика прислать полный адрес (ответ придёт в переписку заказа).",
+    domainEvent: "order.address.incomplete",
+  },
+  {
     type: "CHAINED",
     label: "Запускается по цепочке",
     description:

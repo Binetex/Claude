@@ -23,6 +23,8 @@ vi.mock("./draftPort.prisma", () => ({
         siteAutoCreateEnabled: true,
         deliveryDate: new Date("2026-08-08T00:00:00.000Z"),
         timezone: "America/Los_Angeles",
+        // Адрес с номером дома: без номера заказ ждёт правки адреса и не воскрешается (eligibility).
+        dropoff: { addressLine: "1250 N Kings Rd" },
       },
       floristId: "f1",
       pickup: {

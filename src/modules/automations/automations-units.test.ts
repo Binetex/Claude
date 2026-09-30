@@ -213,6 +213,7 @@ describe("triggers registry", () => {
       "ORDER_CANCELLED",
       "TRACKING_LINK_AVAILABLE",
       "DELIVERY_TODAY",
+      "ORDER_ADDRESS_INCOMPLETE",
       // Шаг цепочки: своего события у него нет, его запускает предыдущее правило.
       "CHAINED",
       "PAYMENT_PENDING",

@@ -14,6 +14,7 @@ import { OrderQuickActions } from "@/components/orders/OrderQuickActions";
 import { getAvailableFloristIds, getSitePriorityFloristIds } from "@/modules/assignments/service";
 import { OrderFinanceBreakdown } from "@/components/orders/OrderFinanceBreakdown";
 import { recipientAddressLines, recipientMapsUrl, senderAddressLines } from "@/components/orders/address";
+import { addressWarning } from "@/lib/addressCheck";
 import { resolveProfileAt } from "@/modules/finance/profile";
 import { OrderStatusBadge, PaymentStatusBadge } from "@/components/StatusBadge";
 import { formatMoney } from "@/lib/money";
@@ -288,6 +289,7 @@ export default async function OwnerOrderPage({
               phone: order.recipientPhone,
               email: order.recipientEmail ?? "",
               addressLines: recipientAddressLines(order),
+              addressWarning: addressWarning(order.addressLine),
               edit: (
                 <ContactEditDialog
                   kind="recipient"

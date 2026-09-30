@@ -13,6 +13,7 @@ import { computeDailyTriggerAt, deliveryLocalDay } from "./dailySchedule";
 import { orderLifecycleTriggers, type OrderLifecycleSnapshot } from "./orderLifecycle";
 import { TERMINAL_ORDER_STATUSES } from "@/lib/statuses";
 import { recomputeDayForOrder } from "@/modules/finance/orderDayHook";
+import { flagIncompleteAddress } from "@/modules/orders/addressAlert";
 
 export async function publishOrderCreatedTrigger(prisma: PrismaClient, args: { orderId: string; siteId: string }): Promise<void> {
   try {
@@ -197,7 +198,11 @@ export async function publishOrderLifecycleTriggers(
     next: OrderLifecycleSnapshot;
   }
 ): Promise<void> {
-  for (const triggerType of orderLifecycleTriggers(args.prev, args.next)) {
+  const triggers = orderLifecycleTriggers(args.prev, args.next);
+  // Оплаченный заказ с адресом без номера дома — людям и заказчику сразу, пока есть время
+  // (THEFLOW-20867): в Burq такой заказ сам не уйдёт.
+  if (triggers.includes("ORDER_PAID")) await flagIncompleteAddress(prisma, { orderId: args.orderId, siteId: args.siteId });
+  for (const triggerType of triggers) {
     if (triggerType === "ORDER_DELIVERED") {
       await publishPlatformOrderDeliveredTrigger(prisma, { orderId: args.orderId, siteId: args.siteId });
       continue;

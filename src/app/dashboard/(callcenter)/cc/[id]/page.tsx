@@ -27,6 +27,7 @@ import { OrderItemsCard } from "@/components/orders/OrderItemsCard";
 import { OrderContactCards } from "@/components/orders/OrderContactCards";
 import { OrderQuickActions } from "@/components/orders/OrderQuickActions";
 import { recipientAddressLines, recipientMapsUrl } from "@/components/orders/address";
+import { addressWarning } from "@/lib/addressCheck";
 import { OrderStatusBadge } from "@/components/StatusBadge";
 import { FloristAvatar } from "@/components/FloristAvatar";
 import { MARKETING_MARK_META } from "@/lib/marketingMark";
@@ -126,6 +127,7 @@ export default async function CallCenterOrderPage({
               phone: order.recipientPhone,
               email: order.recipientEmail ?? "",
               addressLines: recipientAddressLines(order),
+              addressWarning: addressWarning(order.addressLine),
               edit: (
                 <ContactEditDialog
                   kind="recipient"
