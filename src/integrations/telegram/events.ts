@@ -21,6 +21,11 @@ export type TelegramNotifyPayload = {
  * защиты — unique dedupeKey в TelegramMessage: даже если событие продублируется, обработчик
  * отредактирует существующее сообщение, а не отправит новое.
  *
+ * `occurrenceKey` уходит и в `context.occurrence`, если его не задали явно: из него реестр строит
+ * ключ сообщения у событий «каждый случай — новое сообщение» (перенос, ответ на письмо). Без этого
+ * второй перенос одного заказа молча правил первое сообщение, и его никто не видел (до 30.09.2026).
+ * Типам, чей ключ случая не учитывает (карточка назначения), это ничего не меняет.
+ *
  * Best-effort: сбой публикации логируется и НЕ ломает бизнес-операцию (назначение, приём заказа).
  */
 export async function publishTelegramNotification(
@@ -33,7 +38,12 @@ export async function publishTelegramNotification(
       eventType: TELEGRAM_NOTIFY_EVENT,
       aggregateType: "order",
       aggregateId: p.orderId,
-      payload: { type: p.type, orderId: p.orderId, floristId: p.floristId ?? null, context: p.context ?? {} },
+      payload: {
+        type: p.type,
+        orderId: p.orderId,
+        floristId: p.floristId ?? null,
+        context: { ...p.context, occurrence: p.context?.occurrence ?? p.occurrenceKey },
+      },
       idempotencyKey: `telegram:${p.type}:${p.occurrenceKey}`,
     });
   } catch (err) {

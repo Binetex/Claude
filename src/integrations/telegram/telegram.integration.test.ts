@@ -30,6 +30,7 @@ const okAlbum = (ids: number[]) => reply({ ok: true, result: ids.map((id) => ({ 
 process.env.CREDENTIALS_ENCRYPTION_KEY ||= Buffer.alloc(32, 7).toString("base64");
 
 const { buildTelegramNotifyHandler } = await import("./handler");
+const { notifyDeliveryChanged } = await import("@/integrations/notifications/telegram");
 const { encryptSecret } = await import("@/lib/crypto/secretBox");
 const handler = buildTelegramNotifyHandler(prisma);
 
@@ -126,6 +127,7 @@ beforeEach(async () => {
 });
 
 afterAll(async () => {
+  await prisma.outboxEvent.deleteMany({ where: { aggregateId: { in: createdOrderIds } } });
   await prisma.telegramMessage.deleteMany({ where: { orderId: { in: createdOrderIds } } });
   await prisma.orderItem.deleteMany({ where: { orderId: { in: createdOrderIds } } });
   await prisma.order.deleteMany({ where: { id: { in: createdOrderIds } } });
@@ -557,6 +559,32 @@ describe("уведомления владельца", () => {
     fetchMock.mockResolvedValueOnce(okSend(2002));
     await handler(rec({ type: "order.created", orderId: order.id }));
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("каждый случай — новое сообщение (публикация → очередь → обработчик)", () => {
+  it("два переноса одного заказа → флористу и владельцу по два НОВЫХ сообщения, а не правка первых", async () => {
+    await makeOwnerBot();
+    const site = await makeSite();
+    const florist = await makeFlorist("Переносы", { chatId: "901" });
+    const order = await makeOrder(site.id);
+    await prisma.order.update({ where: { id: order.id }, data: { currentFloristId: florist.id } });
+
+    // Публикация — настоящая, как из карточки заказа; обработчик получает ровно то, что в очереди.
+    await notifyDeliveryChanged(order.id, { fromText: "1 Oct, 12:00 - 16:00", toText: "1 Oct, 16:00 - 20:00" });
+    await notifyDeliveryChanged(order.id, { fromText: "1 Oct, 16:00 - 20:00", toText: "2 Oct, 12:00 - 16:00" });
+    const queued = await prisma.outboxEvent.findMany({ where: { aggregateId: order.id, eventType: "telegram.notify" }, orderBy: { createdAt: "asc" } });
+    const moves = queued.filter((e) => ["order.delivery_changed", "order.delivery_changed_owner"].includes((e.payload as { type: string }).type));
+    expect(moves).toHaveLength(4);
+
+    fetchMock.mockResolvedValueOnce(okSend(1301)).mockResolvedValueOnce(okSend(1302)).mockResolvedValueOnce(okSend(1303)).mockResolvedValueOnce(okSend(1304));
+    for (const e of moves) await handler(rec(e.payload));
+
+    const rows = await tgMessages(order.id);
+    expect(rows.filter((r) => r.eventType === "order.delivery_changed")).toHaveLength(2);
+    expect(rows.filter((r) => r.eventType === "order.delivery_changed_owner")).toHaveLength(2);
+    // Ни одной правки: каждый перенос ушёл отдельным сообщением.
+    expect(fetchMock.mock.calls.map(([url]) => String(url).split("/").pop())).toEqual(["sendMessage", "sendMessage", "sendMessage", "sendMessage"]);
   });
 });
 
