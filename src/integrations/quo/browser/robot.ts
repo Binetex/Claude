@@ -18,6 +18,7 @@ import "server-only";
 import { chromium, type Browser, type Page } from "playwright-core";
 import { existsSync, writeFileSync, renameSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
+import { spawn, type ChildProcess } from "node:child_process";
 import type { BrowserSender, BrowserSendInput, BrowserSendResult } from "./transport";
 
 const QUO = "https://my.quo.com";
@@ -27,14 +28,46 @@ const STEP_MS = 20_000;
 const LOGGED_OUT_PAUSE_MS = 10 * 60_000;
 /** Сессию (обновлённые токены) пишем на диск не чаще: файл — пара мегабайт. */
 const SAVE_EVERY_MS = 10 * 60_000;
+/**
+ * Без отправок столько — браузер сохраняет вход и закрывается (владелец 01.10.2026: «не хочу, чтобы
+ * постоянно был запущен»). Следующая SMS откроет его заново, это несколько секунд.
+ */
+const IDLE_CLOSE_MS = 2 * 60_000;
 
 export type QuoBrowserOptions = {
   /** Файл сессии от `scripts/quo-browser-login.ts`. */
   statePath: string;
   /** Сессия больше не пускает: пора владельцу войти заново. */
   onLoggedOut?: () => Promise<void> | void;
-  headless?: boolean;
+  /**
+   * Обычный Chrome с окном (по умолчанию, владелец 01.10.2026: «сделай браузер с окном»). На сервере
+   * монитора нет — окно рисуется на виртуальном экране Xvfb, который поднимается вместе с браузером.
+   */
+  headed?: boolean;
 };
+
+/**
+ * Виртуальный экран для окна браузера на сервере без монитора. Номер Xvfb выбирает сам (-displayfd),
+ * а с -terminate гаснет, как только браузер закрылся, — висящих экранов не остаётся.
+ */
+function startVirtualDisplay(): Promise<{ display: string; proc: ChildProcess }> {
+  const proc = spawn("Xvfb", ["-displayfd", "3", "-screen", "0", "1440x900x24", "-nolisten", "tcp", "-terminate"], {
+    stdio: ["ignore", "ignore", "ignore", "pipe"],
+  });
+  return new Promise((resolve, reject) => {
+    let out = "";
+    const timer = setTimeout(() => reject(new Error("xvfb_timeout")), 10_000);
+    proc.once("error", (e) => (clearTimeout(timer), reject(e)));
+    proc.once("exit", (code) => (clearTimeout(timer), reject(new Error(`xvfb_exit_${code}`))));
+    proc.stdio[3]?.on("data", (d: Buffer) => {
+      out += d.toString();
+      if (out.includes("\n")) {
+        clearTimeout(timer);
+        resolve({ display: `:${out.trim()}`, proc });
+      }
+    });
+  });
+}
 
 class NotSent extends Error {}
 
@@ -46,6 +79,8 @@ export function createQuoBrowserSender(opts: QuoBrowserOptions): { send: Browser
   let queue: Promise<unknown> = Promise.resolve();
   let pausedUntil = 0;
   let savedAt = Date.now();
+  let screen: { display: string; proc: ChildProcess } | null = null;
+  let idleTimer: NodeJS.Timeout | null = null;
 
   async function reset(): Promise<void> {
     const b = browser;
@@ -58,7 +93,19 @@ export function createQuoBrowserSender(opts: QuoBrowserOptions): { send: Browser
     if (page && !page.isClosed()) return page;
     await reset();
     if (!existsSync(opts.statePath)) throw new NotSent("no_session_file");
-    browser = await chromium.launch({ headless: opts.headless ?? true });
+    const headed = opts.headed ?? true;
+    let env: Record<string, string> | undefined;
+    if (headed && process.platform === "linux" && !process.env.DISPLAY) {
+      if (!screen || screen.proc.exitCode !== null) {
+        const started = await startVirtualDisplay();
+        started.proc.once("exit", () => {
+          if (screen === started) screen = null;
+        });
+        screen = started;
+      }
+      env = { ...Object.fromEntries(Object.entries(process.env).filter((e): e is [string, string] => e[1] !== undefined)), DISPLAY: screen.display };
+    }
+    browser = await chromium.launch({ headless: !headed, ...(env ? { env } : {}) });
     const context = await browser.newContext({ storageState: opts.statePath, viewport: { width: 1440, height: 900 } });
     page = await context.newPage();
     page.setDefaultTimeout(STEP_MS);
@@ -138,16 +185,36 @@ export function createQuoBrowserSender(opts: QuoBrowserOptions): { send: Browser
     }
   }
 
+  /** Простой — сохранить вход и закрыть браузер. Через очередь: закрытие не оборвёт начатую отправку. */
+  function scheduleIdleClose(): void {
+    if (idleTimer) clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => {
+      idleTimer = null;
+      queue = queue.then(async () => {
+        if (!browser) return;
+        await saveSession(true);
+        await reset();
+      }).catch(() => {});
+    }, IDLE_CLOSE_MS);
+    idleTimer.unref?.();
+  }
+
   const send: BrowserSender = (input) => {
+    if (idleTimer) clearTimeout(idleTimer);
+    idleTimer = null;
     const run = queue.then(() => sendOne(input));
-    queue = run.catch(() => {});
+    queue = run.catch(() => {}).finally(scheduleIdleClose);
     return run;
   };
 
   async function close(): Promise<void> {
+    if (idleTimer) clearTimeout(idleTimer);
+    idleTimer = null;
     await queue;
     await saveSession(true);
     await reset();
+    screen?.proc.kill();
+    screen = null;
   }
 
   return { send, close };
