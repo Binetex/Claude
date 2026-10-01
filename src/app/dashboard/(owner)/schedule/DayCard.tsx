@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { cn } from "@/lib/cn";
 import type { DaySchedule, FloristDay, ScheduleOrder } from "@/modules/timing/load";
-import { fmtDuration, EARLIEST_DELIVERY_MIN, type ClosureLevel } from "@/modules/timing/day";
+import { fmtDuration, EARLIEST_DELIVERY_MIN, NERVOUS_MIN_INBOUND, type ClosureLevel } from "@/modules/timing/day";
 import { DayLock } from "./ScheduleControls";
 
 /**
@@ -212,6 +212,7 @@ function OrderRow({ o }: { o: ScheduleOrder }) {
       <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-sm">
         <span className="text-slate-500">окно {o.promised ? `${hm(o.promised.from)}–${hm(o.promised.to)}` : o.window}</span>
         {o.wish && <span className="text-slate-500">клиент писал: {o.wish}</span>}
+        {o.inbound >= NERVOUS_MIN_INBOUND && <span className="font-medium text-amber-700">клиент пишет: {o.inbound} за сутки — собираем раньше</span>}
         {o.deliveredAt ? (
           <span className={o.late ? "font-medium text-rose-600" : "text-emerald-600"}>
             привезли {o.deliveredAt}

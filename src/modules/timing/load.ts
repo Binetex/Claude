@@ -25,7 +25,7 @@ import { driveMin, prepMin, setupMin, DEFAULT_WORK_START_MIN, type TimeModel } f
 import { planDay, earliestBy, type PlanJob, type PlanParams } from "./planner";
 import {
   isBigOrder, readyTimeWishes, isPriorityShop, withClosure, sameDayFallback, asClosureLevel, morningOverload,
-  LATE_TOLERANCE_MIN, BIG_BOUQUET_PRICE, BOUQUET_MIN_PRICE, SAME_DAY_CUTOFF_MIN, CLOSURE_OPEN_FROM, type ClosureLevel,
+  NERVOUS_MIN_INBOUND, LATE_TOLERANCE_MIN, BIG_BOUQUET_PRICE, BOUQUET_MIN_PRICE, SAME_DAY_CUTOFF_MIN, CLOSURE_OPEN_FROM, type ClosureLevel,
 } from "./day";
 
 /** Неоплаченные попытки и отменённые — не заказы: места у флориста они не занимают. */
@@ -56,11 +56,30 @@ const ORDER_SELECT = {
 
 type DayOrder = Awaited<ReturnType<typeof loadOrders>>[number];
 
-function loadOrders(prisma: PrismaClient, where: { deliveryDate: Date; currentFloristId?: string | null }) {
-  return prisma.order.findMany({
+/** Сколько входящих от сторон заказа считаем: «написывает» клиент сейчас, а не неделю назад. */
+const INBOUND_LOOKBACK_MS = 24 * 3_600_000;
+
+/**
+ * Входящие (SMS, звонки) по каждому заказу за сутки — одним запросом на весь день. По ним видно
+ * клиента, который «написывает» (`day.ts::NERVOUS_MIN_INBOUND`).
+ */
+async function withInbound<T extends { id: string }>(prisma: PrismaClient, orders: T[], now: Date): Promise<(T & { inbound: number })[]> {
+  if (!orders.length) return [];
+  const rows = await prisma.orderCommunication.groupBy({
+    by: ["orderId"],
+    where: { orderId: { in: orders.map((o) => o.id) }, direction: "INBOUND", occurredAt: { gte: new Date(now.getTime() - INBOUND_LOOKBACK_MS) } },
+    _count: { _all: true },
+  });
+  const count = new Map(rows.map((r) => [r.orderId, r._count._all]));
+  return orders.map((o) => ({ ...o, inbound: count.get(o.id) ?? 0 }));
+}
+
+async function loadOrders(prisma: PrismaClient, where: { deliveryDate: Date; currentFloristId?: string | null }, now: Date) {
+  const orders = await prisma.order.findMany({
     where: { ...where, orderStatus: { notIn: [...NOT_ORDERS] } },
     select: ORDER_SELECT,
   });
+  return withInbound(prisma, orders, now);
 }
 
 /** Основная точка забора флориста — «где он находится» для расчёта дороги. */
@@ -102,6 +121,7 @@ function toJob(o: DayOrder, model: TimeModel, floristZip: string | null | undefi
     driveMin: driveMin(model, milesFor(o, floristZip)),
     fixed: isDone(o),
     priority: isPriorityShop(o.site.shortName),
+    nervous: o.inbound >= NERVOUS_MIN_INBOUND,
   };
 }
 
@@ -130,8 +150,9 @@ async function closureOf(prisma: PrismaClient, day: string): Promise<ClosureLeve
  * приоритету; нет и такого — undefined: судить не по чему.
  */
 export async function orderEarliest(prisma: PrismaClient, orderId: string, now: Date = new Date()): Promise<number | null | undefined> {
-  const order = await prisma.order.findUnique({ where: { id: orderId }, select: { ...ORDER_SELECT, siteId: true, deliveryDate: true } });
-  if (!order) return undefined;
+  const found = await prisma.order.findUnique({ where: { id: orderId }, select: { ...ORDER_SELECT, siteId: true, deliveryDate: true } });
+  if (!found) return undefined;
+  const [order] = await withInbound(prisma, [found], now);
   const day = order.deliveryDate.toISOString().slice(0, 10);
   const floristId = order.currentFloristId ?? (await getAvailableFloristIds(order.siteId, order.deliveryDate))[0] ?? null;
   if (!floristId) return undefined;
@@ -139,7 +160,7 @@ export async function orderEarliest(prisma: PrismaClient, orderId: string, now: 
     loadTimeModel(prisma, now),
     prisma.florist.findUnique({ where: { id: floristId }, select: { id: true, workStartMin: true } }),
     floristZips(prisma),
-    loadOrders(prisma, { deliveryDate: order.deliveryDate, currentFloristId: floristId }),
+    loadOrders(prisma, { deliveryDate: order.deliveryDate, currentFloristId: floristId }, now),
     closureOf(prisma, day),
   ]);
   if (!florist) return undefined;
@@ -169,7 +190,7 @@ export async function siteEarliest(prisma: PrismaClient, siteId: string, day: st
     loadTimeModel(prisma, now),
     prisma.florist.findUnique({ where: { id: floristId }, select: { id: true, workStartMin: true } }),
     floristZips(prisma),
-    loadOrders(prisma, { deliveryDate: dayDate(day), currentFloristId: floristId }),
+    loadOrders(prisma, { deliveryDate: dayDate(day), currentFloristId: floristId }, now),
     closureOf(prisma, day),
     prisma.site.findUnique({ where: { id: siteId }, select: { shortName: true } }),
   ]);
@@ -196,6 +217,8 @@ export type ScheduleOrder = {
   window: string;
   /** Последнее пожелание времени от клиента из заметки («after 5pm»), если было — как есть. */
   wish: string | null;
+  /** Входящих от заказчика и получателя за сутки; от NERVOUS_MIN_INBOUND — «клиент пишет», букет вперёд. */
+  inbound: number;
   bouquets: string;
   big: boolean;
   status: string;
@@ -258,6 +281,7 @@ function toScheduleOrder(o: DayOrder, planned: { seq: number | null; etaAt: numb
     site: o.site.shortName ?? "",
     window: formatDeliveryWindow(o.deliveryWindow) || "—",
     wish,
+    inbound: o.inbound,
     bouquets: items.filter((i) => i.price >= BOUQUET_MIN_PRICE).map((i) => `$${Math.round(i.price)}${i.quantity > 1 ? `×${i.quantity}` : ""}`).join(" + ") || "—",
     big: items.some((i) => i.price >= BIG_BOUQUET_PRICE),
     status: o.orderStatus,
@@ -285,7 +309,7 @@ function byQueue(a: ScheduleOrder & { sortIndex?: number | null }, b: ScheduleOr
 
 export async function loadDaySchedule(prisma: PrismaClient, day: string, now: Date = new Date()): Promise<DaySchedule> {
   const [orders, closure, florists, model, zips] = await Promise.all([
-    loadOrders(prisma, { deliveryDate: dayDate(day) }),
+    loadOrders(prisma, { deliveryDate: dayDate(day) }, now),
     prisma.morningClosure.findUnique({ where: { day }, select: { note: true, level: true } }),
     prisma.florist.findMany({
       where: { active: true, user: { active: true } },

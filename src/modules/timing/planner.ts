@@ -17,7 +17,7 @@
  *
  * Чистый модуль: ни БД, ни «сейчас» — время начала линии передаётся параметром.
  */
-import { LATE_TOLERANCE_MIN, EARLIEST_DELIVERY_MIN, EARLIEST_DELIVERY_AHEAD_MIN, EVENING_ORDER_MIN } from "./day";
+import { LATE_TOLERANCE_MIN, EARLIEST_DELIVERY_MIN, EARLIEST_DELIVERY_AHEAD_MIN, EVENING_ORDER_MIN, NERVOUS_HEAD_START_MIN } from "./day";
 
 export type PlanJob = {
   id: string;
@@ -31,6 +31,8 @@ export type PlanJob = {
   fixed?: boolean;
   /** Заказ главного магазина: обязан успеть, остальные — в промежутки. */
   priority?: boolean;
+  /** Клиент «написывает» (`day.ts::NERVOUS_MIN_INBOUND`): при почти том же сроке — вперёд. */
+  nervous?: boolean;
 };
 
 export type PlanItem = PlanJob & {
@@ -61,12 +63,21 @@ function latestReady(j: PlanJob, courierMin: number): number {
   return j.deadline - courierMin - j.driveMin;
 }
 
+/**
+ * Место в очереди внутри части дня и магазина: последний момент готовности, а пишущему клиенту —
+ * на полчаса раньше. Так он обгоняет заказы с почти тем же сроком, но не тот, что срочнее заметно.
+ */
+function urgency(j: PlanJob, courierMin: number): number {
+  return latestReady(j, courierMin) - (j.nervous ? NERVOUS_HEAD_START_MIN : 0);
+}
+
 /** Вечерний заказ — окно с 17:00: собирать его первым незачем, букет только простоит. */
 const isEvening = (j: PlanJob) => j.windowFrom >= EVENING_ORDER_MIN;
 
 /**
  * Очередь: сначала дневные заказы, потом вечерние; внутри каждой части — TheFlow первым, дальше по
- * сроку. Так дневной TheFlow идёт раньше всех, а вечерний — после дневных заказов других магазинов.
+ * сроку (пишущий клиент — на полчаса вперёд). Так дневной TheFlow идёт раньше всех, а вечерний —
+ * после дневных заказов других магазинов.
  */
 function order(jobs: PlanJob[], courierMin: number): PlanJob[] {
   return jobs
@@ -75,7 +86,7 @@ function order(jobs: PlanJob[], courierMin: number): PlanJob[] {
       (a, b) =>
         Number(isEvening(a)) - Number(isEvening(b)) ||
         Number(!!b.priority) - Number(!!a.priority) ||
-        latestReady(a, courierMin) - latestReady(b, courierMin) ||
+        urgency(a, courierMin) - urgency(b, courierMin) ||
         a.windowFrom - b.windowFrom ||
         a.id.localeCompare(b.id)
     );

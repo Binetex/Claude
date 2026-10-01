@@ -23,6 +23,28 @@ describe("planDay — очередь по срокам", () => {
     expect(plan.items.find((i) => i.id === "far")!.seq).toBe(1);
   });
 
+  it("клиент «написывает» — его букет вперёд среди почти одинаковых по сроку (владелец 01.10.2026)", () => {
+    // Оба до 15:00, оба рядом: пишущий обгоняет, хотя дорога у него чуть короче.
+    const same = planDay([job("calm", h(15), { driveMin: 40 }), job("nervous", h(15), { driveMin: 30, nervous: true })], P);
+    expect(same.items.find((i) => i.id === "nervous")!.seq).toBe(1);
+    // Но заметно срочнее (на 40 минут) — срочный первым: пишущий обгоняет только в пределах получаса.
+    const urgent = planDay([job("urgent", h(14, 20)), job("nervous", h(15), { nervous: true })], P);
+    expect(urgent.items.find((i) => i.id === "urgent")!.seq).toBe(1);
+  });
+
+  it("пишущий клиент не обгоняет TheFlow и дневные заказы, если сам вечерний", () => {
+    const plan = planDay([job("theflow", h(15), { priority: true }), job("nervous", h(15), { nervous: true })], P);
+    expect(plan.items.find((i) => i.id === "theflow")!.seq).toBe(1);
+    const evening = planDay([job("day", h(19)), job("nervousEvening", h(21), { windowFrom: h(18), nervous: true })], P);
+    expect(evening.items.find((i) => i.id === "day")!.seq).toBe(1);
+  });
+
+  it("далёкий букет с тем же окном — первым, даже если ближний клиент просил «к 2»: просьба очередь не двигает", () => {
+    // Окно обоих 13–15; ближний просил к двум — это пожелание, срок остаётся 15:00 (reschedule.ts::laterOnly).
+    const plan = planDay([job("near-asked-2pm", h(15), { driveMin: 20, windowFrom: h(13) }), job("far", h(15), { driveMin: 90, windowFrom: h(13) })], P);
+    expect(plan.items.find((i) => i.id === "far")!.seq).toBe(1);
+  });
+
   it("раньше начала окна не везут: букет ждёт", () => {
     const plan = planDay([job("evening", h(21), { windowFrom: h(18) })], P);
     expect(plan.items[0].etaAt).toBe(h(18));
