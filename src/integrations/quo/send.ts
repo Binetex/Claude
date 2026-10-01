@@ -16,6 +16,9 @@ import { maskPhone, quoLog } from "./logging";
 import { isP2002 } from "@/lib/prismaErrors";
 import { isQuoOutOfMoney, alertQuoOutOfMoney } from "./balanceAlert";
 import { toSmsText, smsSegments } from "@/lib/smsText";
+import { PrismaOutboxRepository } from "@/outbox/prismaRepository";
+import type { OutboxHandler } from "@/outbox/worker";
+import { smsTransport, type SmsTransport, type BrowserSender, type BrowserSendResult } from "./browser/transport";
 
 export const SMS_MAX_LENGTH = 1600;
 export type SendTarget = "CUSTOMER" | "RECIPIENT";
@@ -108,28 +111,7 @@ export async function sendOrderSms(prisma: PrismaClient, client: QuoClient | nul
     throw err;
   }
 
-  // Вызов QUO. Клиент без авто-ретрая: неоднозначную сетевую/5xx ошибку не повторяем автоматически.
-  try {
-    const res = await client.sendMessage({ content: text, from: fromId, to: [e164] });
-    await prisma.orderCommunication.update({
-      where: { id: pendingId },
-      data: { status: "SENT", providerResourceId: res.id, providerConversationId: res.conversationId, providerPhoneNumberId: fromId, occurredAt: new Date() },
-    });
-    quoLog("sms.sent", { communicationId: pendingId, target: input.target, phone: maskPhone(e164), resourceId: res.id, textLen: text.length, segments: smsSegments(text).segments });
-    return { ok: true, communicationId: pendingId, status: "SENT", duplicate: false };
-  } catch (err) {
-    const kind = err instanceof QuoApiError ? err.kind : "network";
-    const safeCode = err instanceof QuoApiError ? `${err.kind}:${err.status}` : "network:0";
-    // Код из тела ответа («0201402» — истёкшая подписка) — единственное, с чем можно идти в
-    // поддержку Quo. Без него в журнале оставалось только «client:402».
-    const detail = providerDetail(err);
-    await prisma.orderCommunication.update({ where: { id: pendingId }, data: { status: "FAILED", rawMetadata: { error: safeCode, providerCode: detail ?? null } } });
-    quoLog("sms.failed", { communicationId: pendingId, target: input.target, phone: maskPhone(e164), errorCode: safeCode, providerCode: detail });
-    // Пустой баланс QUO останавливает ВСЕ SMS магазина, а не одно сообщение: владелец должен
-    // узнать об этом сразу, а не из журнала через неделю.
-    if (isQuoOutOfMoney(detail)) await alertQuoOutOfMoney(prisma);
-    return { ok: false, code: `quo_${kind}`, communicationId: pendingId, detail };
-  }
+  return dispatch(prisma, client, smsTransport(), { pendingId, fromId, to: e164, text, target: input.target });
 }
 
 /** «402» или «402:0201402» — статус ответа провайдера и его собственный код ошибки. */
@@ -216,21 +198,160 @@ export async function sendUnlinkedSms(prisma: PrismaClient, client: QuoClient | 
     throw err;
   }
 
+  return dispatch(prisma, client, smsTransport(), { pendingId, fromId, to: e164, text, target: "UNKNOWN" });
+}
+
+/** Записанное PENDING-сообщение, которое осталось отправить. */
+type Outgoing = { pendingId: string; fromId: string; to: string; text: string; target: string };
+
+/**
+ * Отправка записанного PENDING-сообщения: браузером Quo (входит в подписку, `browser/transport.ts`),
+ * через воркер (Next.js браузер не держит) или через API — по-старому и запасным путём.
+ */
+async function dispatch(prisma: PrismaClient, client: QuoClient, t: SmsTransport, o: Outgoing): Promise<SendSmsResult> {
+  if (t.via === "worker") return handOverToWorker(prisma, o);
+  if (t.via === "browser") {
+    const sent = await sendViaBrowser(prisma, t.send, o);
+    if (sent) return sent;
+  }
+  return sendViaApi(prisma, client, o);
+}
+
+/** Вызов QUO API. Клиент без авто-ретрая: неоднозначную сетевую/5xx ошибку не повторяем автоматически. */
+async function sendViaApi(prisma: PrismaClient, client: QuoClient, o: Outgoing): Promise<SendSmsResult> {
   try {
-    const res = await client.sendMessage({ content: text, from: fromId, to: [e164] });
+    const res = await client.sendMessage({ content: o.text, from: o.fromId, to: [o.to] });
     await prisma.orderCommunication.update({
-      where: { id: pendingId },
+      where: { id: o.pendingId },
       data: { status: "SENT", providerResourceId: res.id, providerConversationId: res.conversationId, occurredAt: new Date() },
     });
-    quoLog("sms.sent", { communicationId: pendingId, target: "UNKNOWN", phone: maskPhone(e164), resourceId: res.id, textLen: text.length, segments: smsSegments(text).segments });
-    return { ok: true, communicationId: pendingId, status: "SENT", duplicate: false };
+    quoLog("sms.sent", { communicationId: o.pendingId, target: o.target, phone: maskPhone(o.to), resourceId: res.id, via: "api", textLen: o.text.length, segments: smsSegments(o.text).segments });
+    return { ok: true, communicationId: o.pendingId, status: "SENT", duplicate: false };
   } catch (err) {
     const kind = err instanceof QuoApiError ? err.kind : "network";
     const safeCode = err instanceof QuoApiError ? `${err.kind}:${err.status}` : "network:0";
+    // Код из тела ответа («0201402» — истёкшая подписка) — единственное, с чем можно идти в
+    // поддержку Quo. Без него в журнале оставалось только «client:402». `code` — тот же код, что
+    // получает вызывающий: по нему Next.js читает исход отправки, сделанной воркером.
     const detail = providerDetail(err);
-    await prisma.orderCommunication.update({ where: { id: pendingId }, data: { status: "FAILED", rawMetadata: { error: safeCode, providerCode: detail ?? null } } });
-    quoLog("sms.failed", { communicationId: pendingId, target: "UNKNOWN", phone: maskPhone(e164), errorCode: safeCode, providerCode: detail });
+    await prisma.orderCommunication.update({ where: { id: o.pendingId }, data: { status: "FAILED", rawMetadata: { error: safeCode, providerCode: detail ?? null, code: `quo_${kind}` } } });
+    quoLog("sms.failed", { communicationId: o.pendingId, target: o.target, phone: maskPhone(o.to), errorCode: safeCode, providerCode: detail });
+    // Пустой баланс QUO останавливает ВСЕ SMS магазина, а не одно сообщение: владелец должен
+    // узнать об этом сразу, а не из журнала через неделю.
     if (isQuoOutOfMoney(detail)) await alertQuoOutOfMoney(prisma);
-    return { ok: false, code: `quo_${kind}`, communicationId: pendingId, detail };
+    return { ok: false, code: `quo_${kind}`, communicationId: o.pendingId, detail };
   }
+}
+
+/** Отметка «ушло браузером»: id сообщения у такой записи нет, его приносит вебхук Quo. */
+function isBrowserMarked(raw: unknown): boolean {
+  return !!raw && typeof raw === "object" && (raw as { via?: unknown }).via === "browser";
+}
+
+/**
+ * Браузером Quo. null — до «Отправить» не дошли (не вошёл, ящик не открылся, номер не принят):
+ * сообщение уходит через API. Кнопку нажали — второго пути нет: при сомнении сообщение считается
+ * ушедшим, а подтверждает его вебхук Quo (`ingest.ts`, сверка по номеру и тексту).
+ */
+async function sendViaBrowser(prisma: PrismaClient, send: BrowserSender, o: Outgoing): Promise<SendSmsResult | null> {
+  let pressed = false;
+  let r: BrowserSendResult;
+  try {
+    r = await send({
+      fromPhoneNumberId: o.fromId,
+      to: o.to,
+      text: o.text,
+      // Отметка ДО нажатия: упади воркер сразу после него, повтор задачи второй раз не отправит
+      // (`buildQuoSmsSendHandler`), а вебхук найдёт запись по ней.
+      beforeSend: async () => {
+        pressed = true;
+        await prisma.orderCommunication.update({ where: { id: o.pendingId }, data: { rawMetadata: { via: "browser" } } });
+      },
+    });
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    r = pressed ? { outcome: "unknown", reason } : { outcome: "not_sent", reason };
+  }
+  if (r.outcome === "not_sent") {
+    quoLog("sms.browser_fallback", { communicationId: o.pendingId, reason: r.reason.slice(0, 200) });
+    return null;
+  }
+  const unconfirmed = r.outcome === "unknown" ? r.reason.slice(0, 200) : null;
+  // Только из PENDING: вебхук мог успеть раньше и поставить DELIVERED — назад не откатываем.
+  await prisma.orderCommunication.updateMany({
+    where: { id: o.pendingId, status: "PENDING" },
+    data: { status: "SENT", occurredAt: new Date(), rawMetadata: unconfirmed ? { via: "browser", unconfirmed } : { via: "browser" } },
+  });
+  quoLog("sms.sent", { communicationId: o.pendingId, target: o.target, phone: maskPhone(o.to), via: "browser", unconfirmed: !!unconfirmed, textLen: o.text.length, segments: smsSegments(o.text).segments });
+  return { ok: true, communicationId: o.pendingId, status: "SENT", duplicate: false };
+}
+
+/** Сколько Next.js ждёт воркер: кнопка «Отправить» в карточке крутится, пока робот печатает. */
+const HANDOVER_WAIT_MS = 30_000;
+const HANDOVER_POLL_MS = 500;
+
+/**
+ * Next.js браузера не держит: отправку делает воркер (`buildQuoSmsSendHandler`, тот же `dispatch`),
+ * а здесь ждём исход, чтобы карточка показала «отправлено» или ошибку, как раньше. Не дождались
+ * (воркер разбирает утреннюю пачку) — в ленте сообщение «отправляется» и уйдёт в свою очередь.
+ */
+async function handOverToWorker(prisma: PrismaClient, o: Outgoing): Promise<SendSmsResult> {
+  await new PrismaOutboxRepository(prisma).enqueue({
+    eventType: QUO_SMS_SEND_EVENT,
+    aggregateType: "communication",
+    aggregateId: o.pendingId,
+    payload: { communicationId: o.pendingId },
+    idempotencyKey: `quo-sms-send:${o.pendingId}`,
+  });
+  const deadline = Date.now() + HANDOVER_WAIT_MS;
+  while (Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, HANDOVER_POLL_MS));
+    const row = await prisma.orderCommunication.findUnique({ where: { id: o.pendingId }, select: { status: true, rawMetadata: true } });
+    if (!row || row.status === "PENDING") continue;
+    if (row.status === "FAILED") {
+      const m = (row.rawMetadata ?? {}) as { code?: string; providerCode?: string | null };
+      return { ok: false, code: m.code ?? "quo_failed", communicationId: o.pendingId, detail: m.providerCode ?? undefined };
+    }
+    return { ok: true, communicationId: o.pendingId, status: "SENT", duplicate: false };
+  }
+  return { ok: true, communicationId: o.pendingId, status: "PENDING", duplicate: false };
+}
+
+export const QUO_SMS_SEND_EVENT = "quo.sms.send";
+
+/**
+ * Воркер: отправить сообщение, записанное в Next.js (`handOverToWorker`). Отправка та же — браузер,
+ * при неудаче API. Запись уже не PENDING — исход решён раньше, повтор задачи ничего не делает.
+ */
+export function buildQuoSmsSendHandler(
+  prisma: PrismaClient,
+  deps: { client: () => QuoClient | null; browser: () => BrowserSender | null },
+): OutboxHandler {
+  return async (record) => {
+    const id = (record.payload as { communicationId?: unknown } | null)?.communicationId;
+    if (typeof id !== "string") return;
+    const row = await prisma.orderCommunication.findUnique({
+      where: { id },
+      select: { id: true, status: true, type: true, direction: true, providerPhoneNumberId: true, externalPhoneNormalized: true, messageText: true, partyRole: true, rawMetadata: true },
+    });
+    if (!row || row.status !== "PENDING" || row.type !== "SMS" || row.direction !== "OUTBOUND") return;
+    // Прошлый заход успел нажать «Отправить» и не дожил до ответа: второй раз не шлём.
+    if (isBrowserMarked(row.rawMetadata)) {
+      await prisma.orderCommunication.updateMany({ where: { id, status: "PENDING" }, data: { status: "SENT", rawMetadata: { via: "browser", unconfirmed: "worker_restarted" } } });
+      return;
+    }
+    const client = deps.client();
+    if (!client || !row.providerPhoneNumberId || !row.messageText) {
+      await prisma.orderCommunication.update({ where: { id }, data: { status: "FAILED", rawMetadata: { code: "quo_not_configured" } } });
+      return;
+    }
+    const browser = deps.browser();
+    await dispatch(prisma, client, browser ? { via: "browser", send: browser } : { via: "api" }, {
+      pendingId: row.id,
+      fromId: row.providerPhoneNumberId,
+      to: row.externalPhoneNormalized,
+      text: row.messageText,
+      target: row.partyRole,
+    });
+  };
 }

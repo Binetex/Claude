@@ -146,6 +146,24 @@ export async function ingestQuoEvent(prisma: PrismaClient, event: NormalizedQuoE
     return { outcome: "updated", communicationId: updated.id, orderId: updated.orderId };
   }
 
+  // ── Наше SMS, ушедшее браузером Quo (browser/robot.ts): id сообщения у записи нет, его знает
+  // только Quo. Без сверки вебхук завёл бы вторую запись — то же сообщение дважды в ленте заказа.
+  const sentByBrowser = event.kind === "message" && event.direction === "OUTBOUND" ? await findBrowserSent(prisma, event) : null;
+  if (sentByBrowser) {
+    const updated = await prisma.orderCommunication.update({
+      where: { id: sentByBrowser.id },
+      data: {
+        providerResourceId: event.resourceId,
+        providerConversationId: event.conversationId,
+        providerUserId: event.userId,
+        status: event.status,
+        ...(event.status === "DELIVERED" ? { deliveredAt: new Date(event.occurredAt) } : {}),
+      },
+    });
+    quoLog("comm.browser_matched", { providerEventId: event.providerEventId, communicationId: updated.id, status: updated.status });
+    return { outcome: "updated", communicationId: updated.id, orderId: updated.orderId };
+  }
+
   // ── Новая коммуникация: привязка к заказу по нормализованному телефону ──
   let externalPhone = event.externalPhone;
   let e164 = toE164(event.externalPhone);
@@ -224,4 +242,36 @@ export async function ingestQuoEvent(prisma: PrismaClient, event: NormalizedQuoE
     }
     throw err;
   }
+}
+
+/** Окно сверки: вебхук приходит за секунды, но запас — на занятую очередь воркера. */
+const BROWSER_MATCH_HOURS = 6;
+
+/**
+ * Наша запись об SMS, отправленной браузером, для исходящего из вебхука: тот же номер магазина,
+ * тот же получатель, тот же текст (с точностью до пробелов), ещё без id сообщения. Из нескольких
+ * одинаковых — самая ранняя: вебхуки приходят в порядке отправки.
+ */
+async function findBrowserSent(prisma: PrismaClient, event: NormalizedQuoEvent): Promise<{ id: string } | null> {
+  const e164 = toE164(event.externalPhone);
+  if (!e164 || !event.messageText || !event.resourceId) return null;
+  const rows = await prisma.orderCommunication.findMany({
+    where: {
+      provider: "QUO",
+      type: "SMS",
+      direction: "OUTBOUND",
+      providerResourceId: null,
+      sendKey: { not: null },
+      status: { in: ["PENDING", "SENT"] },
+      externalPhoneNormalized: e164,
+      ...(event.phoneNumberId ? { providerPhoneNumberId: event.phoneNumberId } : {}),
+      rawMetadata: { path: ["via"], equals: "browser" },
+      createdAt: { gte: new Date(Date.now() - BROWSER_MATCH_HOURS * 3_600_000) },
+    },
+    orderBy: { createdAt: "asc" },
+    select: { id: true, messageText: true },
+  });
+  const norm = (t: string) => t.replace(/\s+/g, " ").trim();
+  const text = norm(event.messageText);
+  return rows.find((r) => norm(r.messageText ?? "") === text) ?? null;
 }

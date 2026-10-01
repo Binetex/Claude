@@ -64,3 +64,6 @@ next-env.d.ts
 # нормализация git: бэкап старого prod .git и устаревший маркер rsync-деплоя
 /.git.legacy-*
 .deploy-fast.deps.hash
+
+# сессия Quo для отправки SMS через браузер (scripts/quo-browser-login.ts) — секрет, не в git
+/.quo-browser/

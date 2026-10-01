@@ -63,6 +63,10 @@ import { isBurqRuntimeEnabled, featureFlags } from "@/lib/featureFlags";
 import { MessagingService } from "@/messaging/service";
 import { createMockProviders } from "@/messaging/providers/mock";
 import { processPromisedDeadlines, processIgnoredRequests } from "@/modules/reviews/deadlines";
+import { QUO_SMS_SEND_EVENT, buildQuoSmsSendHandler } from "@/integrations/quo/send";
+import { registerBrowserSender, isBrowserSendingEnabled } from "@/integrations/quo/browser/transport";
+import { createQuoBrowserSender } from "@/integrations/quo/browser/robot";
+import { alertQuoBrowserLoggedOut } from "@/integrations/quo/browser/loggedOutAlert";
 
 function log(event: string, extra: Record<string, unknown> = {}) {
   console.log(JSON.stringify({ ts: new Date().toISOString(), level: "info", event, ...extra }));
@@ -85,10 +89,23 @@ async function main() {
   // Каналы автоматизаций. SMS у правил и цепочек один. Письмо — разное: у правил это тот же текст
   // через наш почтовый модуль (решение владельца 29.09.2026), у цепочек (Flows) — шаблоны Brevo,
   // это маркетинг со своей вёрсткой.
-  const smsChannel = createSmsChannelSender(() => {
+  const quoApiClient = () => {
     const cfg = getQuoConfig();
     return cfg && featureFlags.quo ? createQuoClient({ ...cfg, maxRetries: 0 }) : null;
-  });
+  };
+  const smsChannel = createSmsChannelSender(quoApiClient);
+
+  // SMS через веб-приложение Quo — бесплатно, в отличие от API, который остаётся запасным путём
+  // (integrations/quo/browser). Браузер один на систему и живёт здесь: все отправки воркера идут
+  // им, отправки Next.js поручаются воркеру задачей QUO_SMS_SEND_EVENT. Выключено — всё через API.
+  const quoBrowser = isBrowserSendingEnabled()
+    ? createQuoBrowserSender({
+        statePath: process.env.QUO_BROWSER_STATE_PATH ?? ".quo-browser/state.json",
+        onLoggedOut: () => alertQuoBrowserLoggedOut(prisma),
+      })
+    : null;
+  registerBrowserSender(quoBrowser?.send ?? null);
+  log(quoBrowser ? "quo.browser.enabled" : "quo.browser.disabled");
   const automationChannels = { SMS: smsChannel, EMAIL: createEmailFactoryChannelSender(prisma) };
   const flowChannels = { SMS: smsChannel, EMAIL: createEmailChannelSender(prisma) };
 
@@ -125,6 +142,8 @@ async function main() {
     [BURQ_POD_REFETCH_EVENT]: buildBurqPodRefetchHandler(prisma),
     // QUO (ex-OpenPhone): обработка проверенного webhook-события → OrderCommunication + привязка.
     [QUO_WEBHOOK_EVENT]: buildQuoWebhookHandler(prisma),
+    // SMS, записанное в Next.js (карточка заказа, «Другие сообщения», отзывы): отправка — здесь, браузером.
+    [QUO_SMS_SEND_EVENT]: buildQuoSmsSendHandler(prisma, { client: quoApiClient, browser: () => quoBrowser?.send ?? null }),
     // Automation Engine: событие заказа → создать job'ы под активные правила Site (отложенно),
     // затем отправка job'а в канал и шаги цепочек. Без этих трёх строк любое событие
     // автоматизаций уходит в DEAD_LETTER с «no handler», и авто-SMS молча не отправляются.
@@ -322,6 +341,7 @@ async function main() {
     // Гасятся ВСЕ, включая стартовые: раньше опрос статусов доставок не гасился вовсе —
     // при копировании блока про него просто забыли.
     for (const t of timers) clearTimeout(t);
+    await quoBrowser?.close();
     await prisma.$disconnect();
     log("worker.stopped", { workerId: worker.id });
   }
