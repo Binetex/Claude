@@ -11,7 +11,7 @@ import "server-only";
  * Доступ к этим операциям — на уровне вызывающих server actions (любой аутентифицированный).
  */
 import type { PrismaClient, Prisma } from "@/generated/prisma/client";
-import { findCandidateOrdersByPhone } from "./ingest";
+import { findCandidateOrdersByPhone, resolveQuoSiteByPhoneNumberId } from "./ingest";
 import { classifyThread, isTopicKey, type TopicKey } from "./otherMessages";
 import { isCallRequest } from "@/modules/assistant/policy";
 import { toE164 } from "@/lib/phone";
@@ -519,11 +519,25 @@ export async function reprocessUnlinkedCommunications(prisma: PrismaClient, opts
     where: { orderId: null, ignoredAt: null },
     orderBy: { occurredAt: "desc" },
     take: opts.limit ?? 500,
-    select: { id: true, externalPhoneNormalized: true, occurredAt: true, partyRole: true },
+    select: { id: true, externalPhoneNormalized: true, occurredAt: true, partyRole: true, providerPhoneNumberId: true },
   });
+  // Как при приёме (ingest.ts): заказ ищется только у магазина, на чей номер пришло событие, а номер
+  // без магазина или выключенный магазин не привязываем. Иначе сообщение на номер TheFlow уехало бы
+  // к заказу Paradise с тем же телефоном.
+  const siteOf = new Map<string, string | null>();
   let linked = 0;
   for (const c of items) {
-    const candidates = await findCandidateOrdersByPhone(prisma, c.externalPhoneNormalized);
+    let siteId: string | undefined;
+    if (c.providerPhoneNumberId) {
+      if (!siteOf.has(c.providerPhoneNumberId)) {
+        const site = await resolveQuoSiteByPhoneNumberId(prisma, c.providerPhoneNumberId);
+        siteOf.set(c.providerPhoneNumberId, site?.quoEnabled ? site.id : null);
+      }
+      const known = siteOf.get(c.providerPhoneNumberId);
+      if (!known) continue;
+      siteId = known;
+    }
+    const candidates = await findCandidateOrdersByPhone(prisma, c.externalPhoneNormalized, siteId);
     const m = matchCommunicationToOrder(c.externalPhoneNormalized, c.occurredAt, candidates);
     if (m.matched) {
       await prisma.orderCommunication.update({ where: { id: c.id }, data: { orderId: m.orderId, ...(c.partyRole === "UNKNOWN" ? { partyRole: m.partyRole } : {}) } });

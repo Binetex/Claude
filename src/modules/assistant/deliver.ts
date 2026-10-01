@@ -20,6 +20,7 @@ import { NUDGE_AFTER_MIN, ASSISTANT_NUDGE_ENABLED } from "./events";
 import { sendOrderEmail } from "@/integrations/emailFactory/send";
 import { emailNewText } from "@/integrations/emailFactory/ingest";
 import { applyPromisedChange } from "./promisedChange";
+import { isTipItem, type ItemIdentity } from "@/modules/pricing/serviceItems";
 
 /** `detail` — ответ провайдера («402:0201402»), чтобы человеку было что чинить. */
 export type DeliverResult = { ok: true } | { ok: false; code: string; detail?: string };
@@ -185,6 +186,16 @@ function clip(text: string, limit: number): string {
 }
 
 /**
+ * «THEFLOW-20888 (Red Roses Box, Vase)» — в черновике сразу видно, о каком букете пишет клиент
+ * (владелец 01.10.2026: «в телеге сразу пиши, что за заказ, плюс букет»). Чаевые — не букет.
+ */
+export function orderWithBouquet(orderNumber: string, items: ItemIdentity[]): string {
+  const names = [...new Set(items.filter((i) => !isTipItem(i)).map((i) => i.name.trim()).filter(Boolean))].join(", ");
+  if (!names) return orderNumber;
+  return `${orderNumber} (${names.length > 80 ? `${names.slice(0, 79)}…` : names})`;
+}
+
+/**
  * Показывает черновик тому, кто сейчас отвечает: до полудня владельцу, после — флористу заказа.
  * В сухом прогоне — тоже, с пометкой: так весь путь до кнопки проверяется без риска для клиента.
  * У флориста нет бота — владельцу: черновик, который никто не увидел, это молчание магазина.
@@ -207,7 +218,7 @@ export async function notifyDraft(
     select: {
       id: true, replyText: true, important: true, needsHuman: true, intent: true, orderId: true,
       site: { select: { name: true, timezone: true, aiDryRun: true } },
-      order: { select: { orderNumber: true, currentFloristId: true, senderPhone: true, recipientPhone: true, site: { select: { timezone: true } } } },
+      order: { select: { orderNumber: true, currentFloristId: true, senderPhone: true, recipientPhone: true, site: { select: { timezone: true } }, items: { select: { name: true, productId: true, variantId: true } } } },
       communication: { select: { messageText: true, transcript: true, externalPhone: true, externalPhoneNormalized: true, partyRole: true, attachmentsJson: true } },
       emailMessage: { select: { text: true, fromEmail: true } },
     },
@@ -249,10 +260,11 @@ export async function notifyDraft(
     ? pickOrderTarget(comm.externalPhoneNormalized, comm.partyRole, turn.order)
     : null;
   const sideLabel = side === "RECIPIENT" ? "получатель" : side === "CUSTOMER" ? "заказчик" : "другой номер";
+  const orderLabel = turn.order ? escapeHtml(orderWithBouquet(turn.order.orderNumber, turn.order.items)) : "";
   const where = turn.emailMessage
-    ? `заказ ${escapeHtml(turn.order?.orderNumber ?? "")} · письмо от ${escapeHtml(turn.emailMessage.fromEmail)}`
+    ? `заказ ${orderLabel} · письмо от ${escapeHtml(turn.emailMessage.fromEmail)}`
     : turn.order
-      ? `заказ ${escapeHtml(turn.order.orderNumber)} · ${sideLabel} ${escapeHtml(comm?.externalPhone ?? "")}`
+      ? `заказ ${orderLabel} · ${sideLabel} ${escapeHtml(comm?.externalPhone ?? "")}`
       : `незнакомый номер ${escapeHtml(comm?.externalPhone ?? "")} · ${escapeHtml(turn.site.name)}`;
   const lines = [
     `<b>${head}</b> · ${where}`,

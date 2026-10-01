@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { pickOrderTarget, escapeHtml, NUDGE_TEXT, nextSendKey } from "./deliver";
+import { pickOrderTarget, escapeHtml, NUDGE_TEXT, nextSendKey, orderWithBouquet } from "./deliver";
 
 describe("pickOrderTarget", () => {
   const order = { senderPhone: "+13100000001", recipientPhone: "+13100000002" };
@@ -46,5 +46,16 @@ describe("nextSendKey", () => {
     expect(nextSendKey("t1", [{ status: "SENT" }])).toEqual({ alreadySent: true });
     // PENDING — тоже «в пути»: ответ провайдера мог не дойти до нас, а SMS уйти.
     expect(nextSendKey("t1", [{ status: "FAILED" }, { status: "PENDING" }])).toEqual({ alreadySent: true });
+  });
+});
+
+describe("orderWithBouquet", () => {
+  it("в черновике сразу видно заказ и букет (владелец 01.10.2026)", () => {
+    expect(orderWithBouquet("THEFLOW-20888", [{ name: "Red Roses Box" }, { name: "Glass Vase" }])).toBe("THEFLOW-20888 (Red Roses Box, Glass Vase)");
+  });
+
+  it("чаевые — не букет, повторы — один раз, пусто — только номер", () => {
+    expect(orderWithBouquet("PAR-1", [{ name: "Peonies" }, { name: "Tip" }, { name: "Peonies" }])).toBe("PAR-1 (Peonies)");
+    expect(orderWithBouquet("PAR-2", [])).toBe("PAR-2");
   });
 });

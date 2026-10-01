@@ -48,9 +48,25 @@ export async function findCandidateOrdersByPhone(prisma: PrismaClient, e164: str
   const siteFilter = siteId ? { siteId } : {};
   // 1) Точное совпадение по строке (покрывает чисто сохранённые E.164).
   const exact = await prisma.order.findMany({ where: { ...siteFilter, OR: [{ senderPhone: e164 }, { recipientPhone: e164 }] }, select, take: 50 });
-  // 2) Недавние заказы (покрывают разночтения форматирования) — фильтруем строго по toE164 в коде.
+  // 2) Недавние заказы с теми же ПОСЛЕДНИМИ ЧЕТЫРЬМЯ цифрами — они стоят подряд в любой записи
+  //    номера («9495337048», «(949) 533-7048»), — дальше строго по toE164 в коде. Раньше брались
+  //    просто 500 недавних заказов без сортировки: у TheFlow за 90 дней их стало больше 500, и
+  //    сегодняшний заказ в выборку не попадал — 01.10.2026 входящие получателя THEFLOW-20888 не
+  //    привязались, в карточке заказа их не было, а бот считал номер незнакомым.
   const since = new Date(Date.now() - CANDIDATE_WINDOW_MS);
-  const recent = await prisma.order.findMany({ where: { ...siteFilter, OR: [{ createdAt: { gte: since } }, { deliveryDate: { gte: since } }] }, select, take: 500 });
+  const tail = e164.replace(/\D/g, "").slice(-4);
+  const recent = tail.length < 4 ? [] : await prisma.order.findMany({
+    where: {
+      ...siteFilter,
+      AND: [
+        { OR: [{ createdAt: { gte: since } }, { deliveryDate: { gte: since } }] },
+        { OR: [{ senderPhone: { contains: tail } }, { recipientPhone: { contains: tail } }] },
+      ],
+    },
+    select,
+    orderBy: { createdAt: "desc" },
+    take: 500,
+  });
   const byId = new Map<string, (typeof exact)[number]>();
   for (const o of exact) byId.set(o.id, o);
   for (const o of recent) if (toE164(o.senderPhone) === e164 || toE164(o.recipientPhone) === e164) byId.set(o.id, o);
@@ -74,7 +90,7 @@ async function isCallToOwnStoreNumber(prisma: PrismaClient, phoneNumberId: strin
 }
 
 /** Магазин-владелец QUO-номера события — для маршрутизации входящих строго в свой Site. */
-async function resolveQuoSiteByPhoneNumberId(prisma: PrismaClient, phoneNumberId: string | null): Promise<{ id: string; quoEnabled: boolean } | null> {
+export async function resolveQuoSiteByPhoneNumberId(prisma: PrismaClient, phoneNumberId: string | null): Promise<{ id: string; quoEnabled: boolean } | null> {
   if (!phoneNumberId) return null;
   return prisma.site.findFirst({ where: { quoPhoneNumberId: phoneNumberId }, select: { id: true, quoEnabled: true } });
 }
