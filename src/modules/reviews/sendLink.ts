@@ -47,7 +47,7 @@ export const DEFAULT_ASK_SMS =
   "Hi {{sender_name}}, thank you for your order with {{store_name}}! If you were happy with it, would you mind leaving us a quick review? {{review_url}}";
 
 export const DEFAULT_REMINDER_SMS =
-  "Hi {{sender_name}}, a gentle reminder about the review you kindly promised — it only takes a minute: {{review_url}}";
+  "Hi {{sender_name}}, a gentle reminder about the review you kindly promised. It only takes a minute: {{review_url}}";
 
 export type SendLinkKind = "ASK" | "REMINDER";
 

@@ -116,7 +116,8 @@ describe("разбор письма", () => {
     expect(String(fetchMock.mock.calls[0][0])).toContain(`/threads/thr-${suffix}-auto/reply`);
     const out = await prisma.orderEmailMessage.findFirstOrThrow({ where: { orderId: order.id, direction: "OUTBOUND" } });
     expect(out.status).toBe("SENT");
-    expect(out.text).toBe("Hi Jorge, sure, we'll bring it after 5 🌸");
+    // Эмодзи модель больше не ставит, а поставит — разбор вычистит (lib/smsText.ts), и в письме тоже.
+    expect(out.text).toBe("Hi Jorge, sure, we'll bring it after 5");
     expect(out.sendKey).toBe(`ai-turn:${turn.id}`);
     const after = await prisma.order.findUniqueOrThrow({ where: { id: order.id }, select: { windowFrom: true, windowTo: true } });
     expect(after).toEqual({ windowFrom: 17 * 60, windowTo: 21 * 60 });

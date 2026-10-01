@@ -1,6 +1,7 @@
 import "dotenv/config";
 import { PrismaClient } from "../src/generated/prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
+import { toSmsText } from "../src/lib/smsText";
 
 /**
  * Первое наполнение заготовок ответов (MessageTemplate).
@@ -133,7 +134,8 @@ async function main() {
 
   await prisma.$transaction(
     fresh.map((t, i) =>
-      prisma.messageTemplate.create({ data: { title: t.title, text: t.text, position: start + i + 1, createdBy: owner.id } }),
+      // Тексты с телефона владельца — с ’ и эмодзи; в базу кладём то, что уйдёт клиенту (lib/smsText.ts).
+      prisma.messageTemplate.create({ data: { title: t.title, text: toSmsText(t.text), position: start + i + 1, createdBy: owner.id } }),
     ),
   );
   console.log(`\nЗаписано: ${fresh.length} (createdBy ${owner.email}).`);

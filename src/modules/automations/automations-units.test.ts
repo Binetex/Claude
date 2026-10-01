@@ -237,7 +237,7 @@ describe("testSend (тест не создаёт production-задачу)", () =
     const body = buildTestMessage("Hi from {{store_name}}, review: {{review_url}}", {
       name: "Floremart", quoPhoneNumber: "+15550000000", reviewUrl: "https://rev",
     });
-    expect(body).toContain("[ТЕСТ]");
+    expect(body).toContain("[TEST]");
     expect(body).toContain("Floremart");
     expect(body).toContain("https://rev");
     expect(body).not.toContain("undefined");
@@ -246,7 +246,7 @@ describe("testSend (тест не создаёт production-задачу)", () =
   it("sendTestSmsViaClient только вызывает клиент (без записи в БД — нет prisma)", async () => {
     const calls: unknown[] = [];
     const fakeClient = { sendMessage: async (i: unknown) => { calls.push(i); return { id: "AC1", conversationId: "CN1" }; } };
-    await sendTestSmsViaClient(fakeClient as never, { fromId: "PN1", to: "+15551112222", body: "[ТЕСТ] hi" });
+    await sendTestSmsViaClient(fakeClient as never, { fromId: "PN1", to: "+15551112222", body: "[TEST] hi" });
     expect(calls).toHaveLength(1);
     expect(calls[0]).toMatchObject({ from: "PN1", to: ["+15551112222"] });
   });

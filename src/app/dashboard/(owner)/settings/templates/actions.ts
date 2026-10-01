@@ -6,6 +6,7 @@
 import { revalidatePath } from "next/cache";
 import { requireRole } from "@/lib/rbac";
 import { prisma } from "@/lib/db";
+import { toSmsText } from "@/lib/smsText";
 
 export type TemplateResult = { ok?: true; error?: string };
 const PATH = "/dashboard/settings/templates";
@@ -14,7 +15,9 @@ const MAX_TEXT = 1600; // тот же потолок, что у одной SMS �
 export async function saveTemplate(input: { id?: string; title: string; text: string }): Promise<TemplateResult> {
   const user = await requireRole("OWNER");
   const title = input.title.trim();
-  const text = input.text.trim();
+  // Храним ровно то, что уйдёт клиенту: отправка всё равно очистит текст (quo/send.ts), а оператор,
+  // вставив заготовку, должен видеть настоящее сообщение, а не эмодзи, которых клиент не получит.
+  const text = toSmsText(input.text);
   if (!title) return { error: "Нужна подпись на кнопке." };
   if (!text) return { error: "Нужен текст заготовки." };
   if (text.length > MAX_TEXT) return { error: `Текст длиннее ${MAX_TEXT} символов — столько в одну SMS не влезет.` };

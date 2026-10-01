@@ -8,6 +8,7 @@
 
 import { dayDiff } from "@/lib/tz";
 import { parseHm } from "@/lib/deliveryWindow";
+import { toSmsText } from "@/lib/smsText";
 
 export type OrderSnapshot = {
   orderNumber: string;
@@ -83,15 +84,14 @@ Voice: a warm, friendly young woman who loves her work: light, personal, caring,
 playful; never a corporate support agent. Say "I" and "we". Never call yourself an assistant,
 a bot, a team member or "support". Never say "a team member", "our team", "the team", "support"
 or "an agent" will do something: say "I'll check" or "we'll check". Do not sign with a name and
-never invent one. A flower emoji now and then is fine, not in every message, and never when
-the talk is sad or upset: a funeral, an illness, a complaint, an apology. For a funeral or a
-death, begin with "I'm so sorry for your loss".
+never invent one. No emoji, ever. For a funeral or a death, begin with "I'm so sorry for your
+loss".
 
 HOW YOU WRITE. You text from your phone between bouquets; this is not an email:
 - Usually one short sentence, two at most. Lead with the answer: "Sure!", "Yes", "Got it", never
   "Absolutely".
-  When it is answered, stop: "Got it, 402 👍" is a whole reply, never add a sentence to fill it.
-- Never say back what the customer just told you. "Got it, 402 👍" is enough, never "I've noted
+  When it is answered, stop: "Got it, 402" is a whole reply, never add a sentence to fill it.
+- Never say back what the customer just told you. "Got it, 402" is enough, never "I've noted
   that the courier should press 402 when he arrives". Repeat a detail only if it is a code or a
   number (never a phone number), and then only the detail itself.
 - Never describe your own process: no "I've noted", "I've kept", "I'll make sure the courier has
@@ -109,7 +109,7 @@ HOW YOU WRITE. You text from your phone between bouquets; this is not an email:
   confirm with you".
 - Example. To "Is it possible to deliver tomorrow? I'll be home all day basically" never write
   "Yes, we can move your delivery to tomorrow, Tuesday September 29, and being home all day works
-  perfectly for us." Write "Sure, we'll bring it tomorrow then 🌸".`;
+  perfectly for us." Write "Sure, we'll bring it tomorrow then!".`;
 
 /** Правила, одинаковые для клиента с заказом и для незнакомого номера. */
 const COMMON_RULES = `- Reply ONLY in English, whatever language the customer writes in.
@@ -323,7 +323,7 @@ ${timingRules(true)}
   their time words, if any, in "ready_time". Only for a day AFTER the current delivery day.
   Moving the delivery to an EARLIER day, a different address, a refund, a discount or compensation
   you never decide yourself, and you never refuse them either. Write the reply that goes out if
-  the shop agrees, as if it is done ("Sure, we'll deliver to 845 S Spring St instead 🌸"), and set
+  the shop agrees, as if it is done ("Sure, we'll deliver to 845 S Spring St instead!"), and set
   "needs_human": true: a person makes the change and sends your reply. This is the one place
   where YOU CANNOT CHANGE ANYTHING does not stop you, because a person reads it first.
 - A COMPLAINT about the bouquet (wilted, damaged, not like the photo, wrong flowers): say you're
@@ -506,20 +506,6 @@ const ENGLISH_MARKERS = new Set([
  * Разбор ответа модели. Любая неожиданность — не ошибка, а повод отдать ответ человеку:
  * поэтому здесь нет исключений, есть `needsHuman: true`.
  */
-/**
- * Длинные тире наружу не уходят (решение владельца): модель их любит, и инструкцией одной это
- * не лечится. Диапазон цифр «2–4 PM» остаётся диапазоном через дефис, остальное — запятая.
- */
-export function stripDashes(text: string): string {
-  return text
-    .replace(/(\d)\s*[—–]\s*(?=\d)/g, "$1-")
-    .replace(/\s*[—–]+\s*(?=[.,!?;:])/g, "")
-    .replace(/^\s*[—–]+\s*/gm, "")
-    .replace(/\s*[—–]+\s*$/gm, "")
-    .replace(/\s*[—–]+\s*/g, ", ")
-    .replace(/,\s*,/g, ",")
-    .trim();
-}
 
 /**
  * Обещания, которых магазин не выполняет. Стоят В КОДЕ, а не только в промпте: инструкцию
@@ -691,7 +677,7 @@ export function parseReply(raw: string, opts: { agreeFromMin?: number; agreeFrom
   }
 
   const intent = typeof data.intent === "string" && data.intent.trim() ? data.intent.trim().slice(0, 40) : "other";
-  const rawReply = typeof data.reply_en === "string" ? stripDashes(data.reply_en.trim()) : "";
+  const rawReply = typeof data.reply_en === "string" ? toSmsText(data.reply_en) : "";
   // Спам — это «не отвечаем», а не «ответь вот так»: текст при этом намерении не уходит никогда,
   // иначе в автоматическом режиме модель отправила бы «перестаньте писать» живому человеку.
   const replyEn = intent === "spam" ? "" : rawReply;

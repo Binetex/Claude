@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { buildMessages, parseReply, looksEnglish, stripDashes, describeDeliveryDay, forbiddenOffer, confirmsEarlyTime, agreeFromMin, type OrderSnapshot } from "./prompt";
+import { buildMessages, parseReply, looksEnglish, describeDeliveryDay, forbiddenOffer, confirmsEarlyTime, agreeFromMin, type OrderSnapshot } from "./prompt";
+import { stripDashes } from "@/lib/smsText";
 
 /**
  * Что уходит в модель и как читается её ответ. Главное здесь — запреты: разбор устроен так,
@@ -119,7 +120,8 @@ describe("подсказка о заказе от незнакомого ном�
       expect(looksEnglish(t), t).toBe(true);
     }
     const r = parseReply(JSON.stringify({ reply_en: "Sure, around 7pm works 🌸", intent: "delivery_time", important: false, needs_human: false, confirmed_from: "19:00", confirmed_until: "19:30" }), { agreeFromMin: 13 * 60 + 30 });
-    expect(r.replyEn).toBe("Sure, around 7pm works 🌸");
+    // Эмодзи вычищается: с ним SMS уходит в Unicode и стоит вдвое (lib/smsText.ts).
+    expect(r.replyEn).toBe("Sure, around 7pm works");
     expect(r.confirmedUntil).toBe(19 * 60 + 30);
   });
 
@@ -151,6 +153,12 @@ describe("подсказка о заказе от незнакомого ном�
   it("сама инструкция без длинных тире: модель копирует стиль, который видит", () => {
     const m = buildMessages({ knowledgeBase: "", order: null, history: [], incomingText: "hi" });
     expect(m[0].content.replace(/\(— or –\)/g, "")).not.toMatch(/[—–]/);
+  });
+
+  it("без эмодзи: в инструкции их нет, а из ответа они вычищаются (SMS с эмодзи стоит вдвое)", () => {
+    const m = buildMessages({ knowledgeBase: "", order: null, history: [], incomingText: "hi" });
+    expect(m[0].content).not.toMatch(/\p{Extended_Pictographic}/u);
+    expect(parseReply(JSON.stringify({ reply_en: "Got it, 402 👍", intent: "other" })).replyEn).toBe("Got it, 402");
   });
 
   it("модель знает, какое сейчас число, и видит, что доставка завтра", () => {

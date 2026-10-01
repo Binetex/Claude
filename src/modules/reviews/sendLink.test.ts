@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { DEFAULT_ASK_SMS, DEFAULT_REMINDER_SMS } from "./sendLink";
 import { SMS_VARIABLES } from "@/modules/messaging/variables";
 import { extractVariables, renderTemplate } from "@/modules/messaging/template";
+import { isGsm7 } from "@/lib/smsText";
 
 /**
  * Тексты, которые уходят КЛИЕНТУ. Проверяется два свойства, каждое из которых ломалось молча:
@@ -23,6 +24,10 @@ describe("шаблоны сообщений клиенту", () => {
     it(`${name}: по-английски, без кириллицы`, () => {
       // Клиенты у всех магазинов американские. Русский — язык интерфейса владельца, не переписки.
       expect(template).not.toMatch(/[а-яА-ЯёЁ]/);
+    });
+
+    it(`${name}: только базовый SMS-алфавит — одно тире или эмодзи делают SMS вдвое дороже`, () => {
+      expect(isGsm7(template)).toBe(true);
     });
 
     it(`${name}: ссылка на отзыв обязательна — без неё сообщение бессмысленно`, () => {

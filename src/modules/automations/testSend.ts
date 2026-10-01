@@ -7,6 +7,7 @@ import "server-only";
 import type { QuoClient } from "@/integrations/quo/client";
 import { buildOrderVariables, SMS_VARIABLES } from "@/modules/messaging/variables";
 import { renderTemplate } from "@/modules/messaging/template";
+import { toSmsText } from "@/lib/smsText";
 
 export type TestSendSite = { name: string | null; quoPhoneNumber: string | null; reviewUrl: string | null };
 
@@ -38,7 +39,9 @@ export function buildTestMessage(template: string, site: TestSendSite): string {
     supportEmail: null,
   });
   const { text } = renderTemplate(template, vars);
-  return `[ТЕСТ] ${text || "Test message"}`;
+  // Тест обязан стоить столько же, сколько настоящее сообщение: та же очистка, что в quo/send.ts, и
+  // пометка латиницей — кириллица перевела бы весь тест в части по 70 знаков.
+  return toSmsText(`[TEST] ${text || "Test message"}`);
 }
 
 export async function sendTestSmsViaClient(client: QuoClient, args: { fromId: string; to: string; body: string }): Promise<void> {

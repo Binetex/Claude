@@ -15,7 +15,8 @@ import { resolveBotById } from "@/integrations/telegram/bots";
 import { resolveDeepseekConfig } from "@/integrations/deepseek/settings";
 import { createDeepseekClient, type DeepseekClient } from "@/integrations/deepseek/client";
 import { sendAssistantReply, discardAssistantReply, escapeHtml, SEND_ACTION_PREFIX, DISCARD_ACTION_PREFIX } from "./deliver";
-import { looksEnglish, stripDashes } from "./prompt";
+import { looksEnglish } from "./prompt";
+import { toSmsText } from "@/lib/smsText";
 import { getSpeechConfig, createTranscriber, type Transcriber } from "@/integrations/speech/transcribe";
 import { describeSendFailure } from "@/lib/smsFailure";
 
@@ -57,7 +58,7 @@ export async function translateForCustomer(client: DeepseekClient, text: string)
       { role: "user", content: text },
     ]);
     const parsed = JSON.parse(res.text.trim().replace(/^```(?:json)?/i, "").replace(/```$/, "").trim()) as { text?: unknown };
-    const out = typeof parsed.text === "string" ? stripDashes(parsed.text.trim()) : "";
+    const out = typeof parsed.text === "string" ? toSmsText(parsed.text) : "";
     if (!out || !looksEnglish(out)) return null;
     return out;
   } catch {

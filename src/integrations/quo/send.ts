@@ -15,6 +15,7 @@ import { toE164 } from "@/lib/phone";
 import { maskPhone, quoLog } from "./logging";
 import { isP2002 } from "@/lib/prismaErrors";
 import { isQuoOutOfMoney, alertQuoOutOfMoney } from "./balanceAlert";
+import { toSmsText, smsSegments } from "@/lib/smsText";
 
 export const SMS_MAX_LENGTH = 1600;
 export type SendTarget = "CUSTOMER" | "RECIPIENT";
@@ -42,7 +43,9 @@ export type SendSmsResult =
 
 
 export async function sendOrderSms(prisma: PrismaClient, client: QuoClient | null, input: SendSmsInput): Promise<SendSmsResult> {
-  const text = (input.text ?? "").trim();
+  // Единственная очистка перед Quo: ’ “ … эмодзи á переводят ВСЁ сообщение в части по 70 знаков
+  // вместо 160 — и Quo берёт за него вдвое-втрое больше (lib/smsText.ts). Записываем то, что ушло.
+  const text = toSmsText(input.text ?? "");
   if (!text) return { ok: false, code: "empty_text" };
   if (text.length > SMS_MAX_LENGTH) return { ok: false, code: "too_long" };
   if (!input.idempotencyKey) return { ok: false, code: "missing_idempotency_key" };
@@ -112,7 +115,7 @@ export async function sendOrderSms(prisma: PrismaClient, client: QuoClient | nul
       where: { id: pendingId },
       data: { status: "SENT", providerResourceId: res.id, providerConversationId: res.conversationId, providerPhoneNumberId: fromId, occurredAt: new Date() },
     });
-    quoLog("sms.sent", { communicationId: pendingId, target: input.target, phone: maskPhone(e164), resourceId: res.id, textLen: text.length });
+    quoLog("sms.sent", { communicationId: pendingId, target: input.target, phone: maskPhone(e164), resourceId: res.id, textLen: text.length, segments: smsSegments(text).segments });
     return { ok: true, communicationId: pendingId, status: "SENT", duplicate: false };
   } catch (err) {
     const kind = err instanceof QuoApiError ? err.kind : "network";
@@ -160,7 +163,7 @@ export type SendUnlinkedSmsInput = {
  * найдётся. Второго способа отправить SMS в проекте нет и не должно быть.
  */
 export async function sendUnlinkedSms(prisma: PrismaClient, client: QuoClient | null, input: SendUnlinkedSmsInput): Promise<SendSmsResult> {
-  const text = (input.text ?? "").trim();
+  const text = toSmsText(input.text ?? ""); // та же очистка, что в sendOrderSms
   if (!text) return { ok: false, code: "empty_text" };
   if (text.length > SMS_MAX_LENGTH) return { ok: false, code: "too_long" };
   if (!input.idempotencyKey) return { ok: false, code: "missing_idempotency_key" };
@@ -219,7 +222,7 @@ export async function sendUnlinkedSms(prisma: PrismaClient, client: QuoClient | 
       where: { id: pendingId },
       data: { status: "SENT", providerResourceId: res.id, providerConversationId: res.conversationId, occurredAt: new Date() },
     });
-    quoLog("sms.sent", { communicationId: pendingId, target: "UNKNOWN", phone: maskPhone(e164), resourceId: res.id, textLen: text.length });
+    quoLog("sms.sent", { communicationId: pendingId, target: "UNKNOWN", phone: maskPhone(e164), resourceId: res.id, textLen: text.length, segments: smsSegments(text).segments });
     return { ok: true, communicationId: pendingId, status: "SENT", duplicate: false };
   } catch (err) {
     const kind = err instanceof QuoApiError ? err.kind : "network";
