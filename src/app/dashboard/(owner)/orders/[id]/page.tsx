@@ -176,7 +176,9 @@ export default async function OwnerOrderPage({
   // карточку заказа — ассистент здесь гость.
   const assistantTurns: AssistantTurn[] = await prisma.aiTurn
     .findMany({
-      where: { orderId: id },
+      // И разборы, сделанные, пока сообщение ещё не было привязано к заказу: разбор помнит «незнакомый
+      // номер», а само сообщение уже здесь (перепривязка 01.10.2026, THEFLOW-20891).
+      where: { OR: [{ orderId: id }, { communication: { orderId: id } }] },
       orderBy: { createdAt: "desc" },
       take: 20,
       select: {
