@@ -62,8 +62,22 @@ const SMALL_TALK = new Set([
 /** Слова-связки, которые сами по себе ничего не значат: «thanks so much», «thanks a lot». */
 const FILLER = new Set(["you", "very", "much", "so", "a", "lot", "the", "and", "that", "it", "too", "again"]);
 
-/** Похоже ли входящее на вежливую точку, а не на вопрос. */
+/**
+ * Реакция iPhone на НАШЕ сообщение, пересланная обычной SMS: «Liked “…”», «Loved “…”», «👍 to “…”»,
+ * «Reacted 😂 to “…”», «Removed a heart from “…”», по-испански «Le gustó “…”». Это лайк, а не слова
+ * клиента (владелец 01.10.2026: «они лайкают мои же сообщения — на такое не надо запускать
+ * нейронку»). Цитата бывает обрезана, поэтому смотрим только начало: глагол реакции и открывающую кавычку.
+ */
+const TAPBACK =
+  /^(?:liked|loved|laughed at|emphasi[sz]ed|questioned|disliked|reacted .{1,12} to|removed an? .{1,24} from|le gustó|le encantó|se rió de|destacó|no le gustó|[\p{Extended_Pictographic}\u{FE0F}\u{200D}\u{1F3FB}-\u{1F3FF}]{1,8} to)\s*[“"„«]/iu;
+
+export function isTapback(raw: string): boolean {
+  return TAPBACK.test(raw.trim());
+}
+
+/** Похоже ли входящее на вежливую точку, а не на вопрос. Лайк нашего сообщения — тоже точка. */
 export function isSmallTalk(raw: string): boolean {
+  if (isTapback(raw)) return true;
   const text = raw
     .toLowerCase()
     // Эмодзи и знаки препинания сами по себе смысла не несут: «👍», «ok!», «thanks :)».

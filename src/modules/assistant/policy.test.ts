@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { shouldConsider, decideDelivery, isSmallTalk, isCallRequest, DAILY_CAP, ORDER_CAP, AUTOMATED_SILENCE_MIN } from "./policy";
+import { shouldConsider, decideDelivery, isSmallTalk, isTapback, isCallRequest, DAILY_CAP, ORDER_CAP, AUTOMATED_SILENCE_MIN } from "./policy";
 
 /**
  * Правила ассистента. Каждая проверка здесь — про живого человека с телефоном: лишний ответ
@@ -88,6 +88,31 @@ describe("вежливая точка в разговоре", () => {
   it("вопрос благодарностью не считается", () => {
     for (const t of ["thanks, but where is it?", "ok what time?", "thank you, can I change the address", "confirmed, but can you come at 2?", "good morning", "so very much"]) {
       expect(isSmallTalk(t)).toBe(false);
+    }
+  });
+
+  it("лайк iPhone на наше сообщение — не слова клиента, нейронку не зовём (владелец 01.10.2026)", () => {
+    for (const t of [
+      "👍 to “ Got it, we'll leave the bouquet outside your door. Thank you so much for the tip, I'll make sure it's there for the courier. ”",
+      "Loved “Hi, Harley Angel Pro! We've received your flower delivery order THEFLOW-20894 for matthew lawrence Golden Apple Comics 7018 Melrose…",
+      "Liked “Your bouquet is on the way”",
+      "Laughed at “We'll be there by 3”",
+      "Emphasized “Delivery today between 11 AM and 3 PM”",
+      "Questioned “Is the address correct?”",
+      "Reacted 😂 to “See you soon”",
+      "Removed a heart from “Thank you!”",
+      "❤️ to “Delivered!”",
+      "Le gustó “Your bouquet is ready”",
+      'Liked "Your bouquet is on the way"',
+    ]) {
+      expect(isTapback(t), t).toBe(true);
+      expect(isSmallTalk(t), t).toBe(true);
+    }
+  });
+
+  it("обычное сообщение со словом «loved» или кавычками — не лайк", () => {
+    for (const t of ["Loved the flowers, what time tomorrow?", "liked it! can you deliver at 2?", "Can you write “Happy birthday” on the card?", "to “the back door” please"]) {
+      expect(isTapback(t), t).toBe(false);
     }
   });
 
