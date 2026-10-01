@@ -70,6 +70,37 @@ export function asClosureLevel(v: string | null | undefined): ClosureLevel | nul
 }
 
 /**
+ * Утро закрывается само, когда по графику утренний заказ TheFlow опаздывает хотя бы на столько
+ * (владелец 01.10.2026: «чтобы бот сам закрывал утренний слот — когда уже прям точно не успеваем
+ * на 1–2 часа»; повод — пять заказов на слот 11–15 при лимите плагина в четыре).
+ */
+export const AUTO_CLOSE_LATE_MIN = 60;
+
+export type PlannedOrderLike = {
+  id: string;
+  orderNumber: string;
+  site: string;
+  plannedAt: number | null;
+  promised: { from: number; to: number } | null;
+};
+
+/**
+ * Самый опаздывающий утренний заказ главного магазина, если опоздание дошло до порога автозамка;
+ * иначе null. Утренний — окно начинается до 15:00 (утренний слот сайта 11–15). Чужие магазины не
+ * считаются: их опоздание новый заказ TheFlow не останавливает (`planner.ts::canFit`).
+ */
+export function morningOverload(orders: PlannedOrderLike[]): { id: string; orderNumber: string; lateMin: number } | null {
+  let worst: { id: string; orderNumber: string; lateMin: number } | null = null;
+  for (const o of orders) {
+    if (!isPriorityShop(o.site) || o.plannedAt == null || !o.promised) continue;
+    if (o.promised.from >= MORNING_END_HOUR * 60) continue;
+    const lateMin = o.plannedAt - o.promised.to;
+    if (lateMin >= AUTO_CLOSE_LATE_MIN && (!worst || lateMin > worst.lateMin)) worst = { id: o.id, orderNumber: o.orderNumber, lateMin };
+  }
+  return worst;
+}
+
+/**
  * Самое раннее время с учётом замка дня. Весь день закрыт — новых заказов нет, а уже принятые
  * возим как обычно: отказывать им из-за замка значило бы перенести чужую оплаченную доставку.
  */

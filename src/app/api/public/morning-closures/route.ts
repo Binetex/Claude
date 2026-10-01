@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { todayStrInTz, DEFAULT_STORE_TZ } from "@/lib/tz";
-import { asClosureLevel, CLOSURE_OPEN_FROM } from "@/modules/timing/day";
+import { siteDayClosures } from "@/modules/timing/load";
 
 /**
- * Дни, закрытые замком в «Графике доставки»: утро, только вечер или весь день.
+ * Закрытые дни: замок в «Графике доставки» (утро, только вечер или весь день) и автозамок утра —
+ * когда по графику утренний заказ TheFlow уже не успеваем на час и больше (`siteDayClosures`).
  *
  * Читают сайты с плагином доставки (mu-plugin `floremart-morning-closures.php`, TheFlow и JF): в
  * эти дни они прячут слоты раньше `openFrom`, а день с `openFrom: null` убирают из календаря.
@@ -15,9 +15,6 @@ import { asClosureLevel, CLOSURE_OPEN_FROM } from "@/modules/timing/day";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  const today = todayStrInTz(DEFAULT_STORE_TZ);
-  const rows = await prisma.morningClosure.findMany({ where: { day: { gte: today } }, select: { day: true, level: true }, orderBy: { day: "asc" } });
-  const openFrom: Record<string, number | null> = {};
-  for (const r of rows) openFrom[r.day] = CLOSURE_OPEN_FROM[asClosureLevel(r.level) ?? "MORNING"];
-  return NextResponse.json({ days: rows.map((r) => r.day), openFrom }, { headers: { "Cache-Control": "no-store" } });
+  const openFrom = await siteDayClosures(prisma);
+  return NextResponse.json({ days: Object.keys(openFrom).sort(), openFrom }, { headers: { "Cache-Control": "no-store" } });
 }

@@ -24,8 +24,8 @@ import { loadTimeModel } from "./stats";
 import { driveMin, prepMin, setupMin, DEFAULT_WORK_START_MIN, type TimeModel } from "./model";
 import { planDay, earliestBy, type PlanJob, type PlanParams } from "./planner";
 import {
-  isBigOrder, readyTimeWishes, isPriorityShop, withClosure, sameDayFallback, asClosureLevel,
-  LATE_TOLERANCE_MIN, BIG_BOUQUET_PRICE, BOUQUET_MIN_PRICE, SAME_DAY_CUTOFF_MIN, type ClosureLevel,
+  isBigOrder, readyTimeWishes, isPriorityShop, withClosure, sameDayFallback, asClosureLevel, morningOverload,
+  LATE_TOLERANCE_MIN, BIG_BOUQUET_PRICE, BOUQUET_MIN_PRICE, SAME_DAY_CUTOFF_MIN, CLOSURE_OPEN_FROM, type ClosureLevel,
 } from "./day";
 
 /** Неоплаченные попытки и отменённые — не заказы: места у флориста они не занимают. */
@@ -232,6 +232,11 @@ export type FloristDay = {
 export type DaySchedule = {
   day: string;
   closure: { note: string | null; level: ClosureLevel } | null;
+  /**
+   * Автозамок утра: замка владельца нет, а утренний заказ TheFlow по графику не успеваем на час и
+   * больше — сайты закрывают утро сами (`siteDayClosures`). Самый опаздывающий заказ; иначе null.
+   */
+  autoClose: { id: string; orderNumber: string; lateMin: number } | null;
   /** Сегодня после 13:00: новый заказ на сегодня — только после проверки человеком. */
   sameDayCheck: boolean;
   florists: FloristDay[];
@@ -323,10 +328,56 @@ export async function loadDaySchedule(prisma: PrismaClient, day: string, now: Da
   return {
     day,
     closure: closure && level ? { note: closure.note, level } : null,
+    autoClose: level ? null : morningOverload(floristDays.flatMap((f) => f.orders)),
     sameDayCheck: sameDayNeedsCheck(day, now),
     florists: floristDays,
     unassigned: orders.filter((o) => !o.currentFloristId).map((o) => toScheduleOrder(o, null)),
   };
+}
+
+/** Автозамок считается на те же три дня, что показывает «График доставки». */
+const AUTO_CLOSE_DAYS = 3;
+
+function addDays(day: string, n: number): string {
+  const d = dayDate(day);
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+
+/**
+ * Замки дней для сайтов с плагином доставки (`/api/public/morning-closures`): день → с какой
+ * минуты открыт (null — закрыт целиком). Замки владельца — как есть. К ним на ближайшие три дня
+ * добавляется утро, которое по графику уже не успеваем (владелец 01.10.2026: «чтобы бот сам
+ * закрывал утренний слот — когда уже прям точно не успеваем на 1–2 часа»).
+ *
+ * Автозамок нигде не хранится, а считается в момент запроса сайта: разгрузится график (перенесли,
+ * отменили, собрали) — утро откроется само. ИИ его отдельно не читает: новому клиенту он и так
+ * называет время по тому же графику, а перегруженное утро там уже занято.
+ */
+export async function siteDayClosures(prisma: PrismaClient, now: Date = new Date()): Promise<Record<string, number | null>> {
+  const today = nowParts(now).day;
+  const rows = await prisma.morningClosure.findMany({ where: { day: { gte: today } }, select: { day: true, level: true } });
+  const openFrom: Record<string, number | null> = {};
+  for (const r of rows) openFrom[r.day] = CLOSURE_OPEN_FROM[asClosureLevel(r.level) ?? "MORNING"];
+  // Дни параллельно: сайт ждёт ответ 3 секунды, а не дождался — не закрывает ничего.
+  const days = Array.from({ length: AUTO_CLOSE_DAYS }, (_, i) => addDays(today, i)).filter((day) => !(day in openFrom));
+  const overloaded = await Promise.all(
+    days.map((day) =>
+      loadDaySchedule(prisma, day, now).then(
+        (s) => !!s.autoClose,
+        (err) => {
+          // Сбой расчёта не должен ронять ответ: сайт при ошибке не закрывает НИЧЕГО, и вместе с
+          // автозамком пропали бы замки владельца.
+          console.error(`[timing] автозамок утра ${day} не посчитан:`, err instanceof Error ? err.message : String(err));
+          return false;
+        }
+      )
+    )
+  );
+  days.forEach((day, i) => {
+    if (overloaded[i]) openFrom[day] = CLOSURE_OPEN_FROM.MORNING;
+  });
+  return openFrom;
 }
 
 /** Модель времени для блока «Как считаем время» на графике. */

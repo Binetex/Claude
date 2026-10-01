@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isBigOrder, readyTimeWishes, clockLabelEn, fmtDuration, withClosure, sameDayFallback, isPriorityShop, asClosureLevel } from "./day";
+import { isBigOrder, readyTimeWishes, clockLabelEn, fmtDuration, withClosure, sameDayFallback, isPriorityShop, asClosureLevel, morningOverload } from "./day";
 
 describe("помощники времени", () => {
   it("большой букет — от $250", () => {
@@ -63,5 +63,30 @@ describe("новый заказ на сегодня и главный магаз
     expect(isPriorityShop("THEFLOW")).toBe(true);
     expect(isPriorityShop("JF")).toBe(false);
     expect(isPriorityShop(null)).toBe(false);
+  });
+});
+
+describe("автозамок утра (владелец 01.10.2026)", () => {
+  const morning = { from: 11 * 60, to: 15 * 60 };
+  const o = (id: string, plannedAt: number | null, extra: Partial<{ site: string; promised: { from: number; to: number } | null }> = {}) => ({
+    id, orderNumber: id, site: "THEFLOW", plannedAt, promised: morning, ...extra,
+  });
+
+  it("закрываем, когда утренний TheFlow опаздывает на час и больше — по самому опаздывающему", () => {
+    // Реальный день 01.10: 20889 +49 мин, 20890 +1 ч 31 мин, 20885 +2 ч 41 мин.
+    const day = [o("20888", 14 * 60 + 21), o("20889", 15 * 60 + 49), o("20890", 16 * 60 + 31), o("20885", 17 * 60 + 41)];
+    expect(morningOverload(day)).toEqual({ id: "20885", orderNumber: "20885", lateMin: 161 });
+  });
+
+  it("опоздание меньше часа — не закрываем", () => {
+    expect(morningOverload([o("a", 15 * 60 + 59)])).toBeNull();
+    expect(morningOverload([o("a", 16 * 60)])).toEqual({ id: "a", orderNumber: "a", lateMin: 60 });
+  });
+
+  it("чужие магазины, вечерние окна, готовые букеты и заказы без окна не считаются", () => {
+    expect(morningOverload([o("par", 18 * 60, { site: "PAR" })])).toBeNull();
+    expect(morningOverload([o("eve", 21 * 60, { promised: { from: 15 * 60, to: 19 * 60 } })])).toBeNull();
+    expect(morningOverload([o("ready", null)])).toBeNull();
+    expect(morningOverload([o("nowin", 20 * 60, { promised: null })])).toBeNull();
   });
 });

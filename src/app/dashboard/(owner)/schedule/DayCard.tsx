@@ -72,6 +72,12 @@ export function DayCard({
       {mode === "plan" && s.closure && (
         <div className="mx-6 mt-4 rounded-lg bg-rose-50 px-4 py-2.5 text-sm text-rose-700">{CLOSURE_NOTE[s.closure.level]}</div>
       )}
+      {mode === "plan" && s.autoClose && (
+        <div className="mx-6 mt-4 rounded-lg bg-rose-50 px-4 py-2.5 text-sm text-rose-700">
+          Утро закрыто автоматически: {s.autoClose.orderNumber} не успеваем на {fmtDuration(s.autoClose.lateMin)} — сайты не
+          принимают доставку раньше 15:00, пока график не разгрузится
+        </div>
+      )}
       {mode === "plan" && s.unassigned.length > 0 && (
         <div className="mx-6 mt-4 rounded-lg bg-amber-50 px-4 py-2.5 text-sm text-amber-800">
           Без флориста: {s.unassigned.map((o) => o.orderNumber).join(", ")} — в расписание не входят, пока не назначены
