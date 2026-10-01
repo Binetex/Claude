@@ -8,6 +8,7 @@ import { createQuoClient } from "@/integrations/quo/client";
 import { sendOrderSms, type SendTarget } from "@/integrations/quo/send";
 import { describeSendFailure } from "@/lib/smsFailure";
 import { toE164 } from "@/lib/phone";
+import { suggestReply, type SuggestResult } from "@/modules/assistant/suggest";
 
 type FormState = { ok?: boolean; error?: string; status?: string } | null;
 
@@ -55,4 +56,23 @@ async function hasInboundFromRecipient(orderId: string): Promise<boolean> {
     select: { id: true },
   });
   return !!inbound;
+}
+
+const SUGGEST_FAILED: Record<Exclude<SuggestResult, { ok: true }>["code"], string> = {
+  order_not_found: "Заказ не найден.",
+  no_phone: "В заказе нет номера этой стороны.",
+  model_not_configured: "ИИ не подключён.",
+  model_failed: "ИИ сейчас не ответил — нажмите ещё раз.",
+  no_reply: "Подходящего ответа не вышло — нажмите ещё раз.",
+};
+
+/**
+ * ✨ у «Отправить»: ИИ пишет текст ответа клиенту в поле (`assistant/suggest.ts`), отправляет
+ * человек сам. `avoid` — прошлые варианты: следующее нажатие даёт другой.
+ */
+export async function suggestSmsReplyAction(orderId: string, target: SendTarget, avoid: string[]): Promise<{ text?: string; error?: string }> {
+  await requireUser();
+  if (!orderId || (target !== "CUSTOMER" && target !== "RECIPIENT")) return { error: "Некорректный запрос." };
+  const res = await suggestReply(prisma, { orderId, target, avoid: Array.isArray(avoid) ? avoid.map(String) : [] });
+  return res.ok ? { text: res.text } : { error: SUGGEST_FAILED[res.code] };
 }

@@ -1,10 +1,10 @@
 "use client";
 import { useState } from "react";
 import { fmtStoreDateTime } from "@/lib/tz";
-import { MessageSquare } from "lucide-react";
+import { MessageSquare, Sparkles, Loader2 } from "lucide-react";
 import { Card, CardHeader, CardTitle, CardBody } from "@/components/ui/Card";
 import { Button } from "@/components/ui/button";
-import { sendOrderSmsAction } from "./commActions";
+import { sendOrderSmsAction, suggestSmsReplyAction } from "./commActions";
 import { sendOrderEmailReplyAction } from "./emailActions";
 import { CommunicationTimeline, type TimelineItem } from "@/components/orders/CommunicationTimeline";
 import { buildCommTabs, commGroupOf, type CommTab } from "@/integrations/quo/communicationsView";
@@ -95,6 +95,9 @@ export function OrderCommunications({
   const [idem, setIdem] = useState<string>(newKey);
   const [pending, setPending] = useState(false);
   const [result, setResult] = useState<{ ok?: boolean; error?: string; status?: string } | null>(null);
+  // ✨: варианты ИИ для этой стороны — следующее нажатие просит другой.
+  const [aiPending, setAiPending] = useState(false);
+  const [aiTried, setAiTried] = useState<string[]>([]);
 
   const isEmail = activeKey === "EMAIL";
   const active = tabs.find((t) => t.key === activeKey) ?? tabs[0];
@@ -118,6 +121,22 @@ export function OrderCommunications({
   const tooLong = text.length > limit;
   const disabled = pending || !text.trim() || tooLong || (isEmail ? !canReply : !storeHasQuoNumber);
 
+  async function suggest() {
+    setAiPending(true);
+    setResult(null);
+    try {
+      const res = await suggestSmsReplyAction(orderId, active.target, aiTried);
+      if (res.text) {
+        setText(res.text);
+        setAiTried((t) => [...t, res.text!]);
+      } else setResult({ error: res.error ?? "ИИ не ответил." });
+    } catch {
+      setResult({ error: "ИИ не ответил — нажмите ещё раз." });
+    } finally {
+      setAiPending(false);
+    }
+  }
+
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (disabled) return; // двойной клик заблокирован
@@ -133,7 +152,10 @@ export function OrderCommunications({
       // письма заказа, иначе подменой поля можно было бы написать в чужую переписку.
       const res = isEmail ? await sendOrderEmailReplyAction(null, fd) : await sendOrderSmsAction(null, fd);
       setResult(res);
-      if (res?.ok) setText("");
+      if (res?.ok) {
+        setText("");
+        setAiTried([]);
+      }
       // Ключ одноразовый и меняется ТАКЖЕ после ошибки: сервер уже записал неудачную попытку под
       // этим ключом, и повтор с ним никогда не дошёл бы до QUO — кнопка «Отправить» молча перестала
       // бы работать до перезагрузки страницы. Двойной клик по-прежнему заблокирован `disabled`.
@@ -173,7 +195,10 @@ export function OrderCommunications({
               <button
                 key={t.key}
                 type="button"
-                onClick={() => setActiveKey(t.key)}
+                onClick={() => {
+                  setActiveKey(t.key);
+                  setAiTried([]);
+                }}
                 className={"inline-flex items-center gap-1 rounded-md px-3 py-1 text-xs font-medium " + (isActive ? "bg-sky-600 text-white" : "bg-slate-100 text-slate-700")}
               >
                 {t.label}
@@ -230,9 +255,23 @@ export function OrderCommunications({
           />
           <div className="flex items-center justify-between">
             <span className={"text-[11px] " + (tooLong ? "text-red-600" : "text-slate-400")}>{text.length}/{limit}</span>
-            <Button type="submit" size="sm" disabled={disabled}>
-              {pending ? "Отправка…" : isEmail ? (lastInboundFrom ? "Ответить письмом" : "Написать письмо") : "Отправить SMS"}
-            </Button>
+            <div className="flex items-center gap-1.5">
+              {!isEmail && (
+                <button
+                  type="button"
+                  title="ИИ напишет ответ клиенту (ещё раз — другой вариант)"
+                  aria-label="ИИ напишет ответ клиенту"
+                  disabled={aiPending || pending}
+                  onClick={suggest}
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-300 text-violet-600 hover:bg-violet-50 disabled:opacity-50"
+                >
+                  {aiPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+                </button>
+              )}
+              <Button type="submit" size="sm" disabled={disabled}>
+                {pending ? "Отправка…" : isEmail ? (lastInboundFrom ? "Ответить письмом" : "Написать письмо") : "Отправить SMS"}
+              </Button>
+            </div>
           </div>
           {result?.error && <p className="text-xs text-red-600">{result.error}</p>}
           {result?.ok && (

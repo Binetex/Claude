@@ -64,7 +64,7 @@ export function createDeepseekClient(config: DeepseekConfig, deps: DeepseekClien
   const sleep = deps.sleep ?? ((ms: number) => new Promise((r) => setTimeout(r, ms)));
   const now = deps.now ?? (() => Date.now());
 
-  async function once(messages: DeepseekMessage[]): Promise<string> {
+  async function once(messages: DeepseekMessage[], temperature: number): Promise<string> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
@@ -79,7 +79,7 @@ export function createDeepseekClient(config: DeepseekConfig, deps: DeepseekClien
           // Рассуждающие модели не принимают temperature и считают лимит вместе с размышлением.
           ...(reasoning
             ? { max_completion_tokens: REASONING_MAX_TOKENS }
-            : { temperature: 0.2, max_tokens: 700 }),
+            : { temperature, max_tokens: 700 }),
         }),
         signal: controller.signal,
       });
@@ -100,16 +100,20 @@ export function createDeepseekClient(config: DeepseekConfig, deps: DeepseekClien
   }
 
   return {
-    /** Один вопрос модели. Ровно один повтор на временную ошибку — человек ждёт ответа. */
-    async complete(messages: DeepseekMessage[]): Promise<DeepseekCallResult> {
+    /**
+     * Один вопрос модели. Ровно один повтор на временную ошибку — человек ждёт ответа.
+     * `temperature` выше обычной — для «✨ Переписать»: нужен другой ответ, а не тот же другими словами.
+     */
+    async complete(messages: DeepseekMessage[], opts: { temperature?: number } = {}): Promise<DeepseekCallResult> {
       const started = now();
+      const temperature = opts.temperature ?? 0.2;
       try {
-        const text = await once(messages);
+        const text = await once(messages, temperature);
         return { text, model: config.model, latencyMs: now() - started };
       } catch (err) {
         if (err instanceof DeepseekError && err.retryable) {
           await sleep(RETRY_DELAY_MS);
-          const text = await once(messages);
+          const text = await once(messages, temperature);
           return { text, model: config.model, latencyMs: now() - started };
         }
         throw err;

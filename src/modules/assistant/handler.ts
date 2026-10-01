@@ -56,7 +56,7 @@ export type AssistantDeps = {
 
 type LoadedOrder = NonNullable<Awaited<ReturnType<typeof loadOrder>>>;
 
-function loadOrder(prisma: PrismaClient, id: string) {
+export function loadOrder(prisma: PrismaClient, id: string) {
   return prisma.order.findUnique({ where: { id }, include: SMS_ORDER_INCLUDE });
 }
 
@@ -657,7 +657,7 @@ function callRequestBucket(now: Date): string {
  * подписи — тоже сообщение: клиент прислал чек или букет и ждёт реакции, а не тишины. Модель
  * картинку не видит, поэтому ей говорится ровно это.
  */
-function pickText(c: { messageText: string | null; transcript: string | null; summary: string | null; attachmentsJson?: Prisma.JsonValue | null }): { body: string; text: string; photos: number } {
+export function pickText(c: { messageText: string | null; transcript: string | null; summary: string | null; attachmentsJson?: Prisma.JsonValue | null }): { body: string; text: string; photos: number } {
   const body = (c.messageText || c.transcript || c.summary || "").trim();
   const photos = parseAttachments(c.attachmentsJson).length;
   if (!photos) return { body, text: body, photos };
@@ -775,7 +775,7 @@ export function describeCall(r: { type: string; status: string; direction: strin
   return `(phone call: ${who}${mins ? `, about ${mins} min` : ""}; what was said is not available)`;
 }
 
-async function loadHistory(prisma: PrismaClient, orderId: string | null, phone: string, storePhone: string | null, incoming: { id: string; occurredAt: Date }, tz: string | null, exceptIds: string[] = []): Promise<HistoryLine[]> {
+export async function loadHistory(prisma: PrismaClient, orderId: string | null, phone: string, storePhone: string | null, incoming: { id: string; occurredAt: Date }, tz: string | null, exceptIds: string[] = []): Promise<HistoryLine[]> {
   const rows = await prisma.orderCommunication.findMany({
     where: {
       // ТОЛЬКО переписка с этим номером. У заказа две стороны — заказчик и получатель, и у
