@@ -4,14 +4,13 @@
  *
  * Операция необратима, поэтому интерфейс намеренно неудобный: состояние подгружается с
  * Airwallex при открытии (сколько оплачено и сколько уже вернули), сумму видно, а до кнопки
- * «Вернуть» нужно набрать номер заказа И пароль от учётной записи. Одного клика мало.
- *
- * Пароль здесь не хранится нигде, кроме поля ввода до отправки: в состояние он не кладётся,
- * между открытиями не переживает и в адрес не попадает.
+ * «Вернуть» нужно набрать номер заказа. Одного клика мало. Пароля нет — решение владельца.
  *
  * `requestId` создаётся ОДИН РАЗ при открытии модалки и не меняется между попытками отправки:
  * это ключ идемпотентности Airwallex, и именно он не даёт вернуть деньги дважды, если форму
- * отправили повторно или ответ не дошёл.
+ * отправили повторно или ответ не дошёл. Им же помечен ответ сервера: после повторного
+ * открытия прошлый «возврат создан» не показывается и кнопку не держит — следующий частичный
+ * возврат делается без перезагрузки страницы.
  */
 import { useActionState, useState } from "react";
 import { Undo2, TriangleAlert } from "lucide-react";
@@ -31,9 +30,10 @@ export function RefundDialog({ orderId, orderNumber }: { orderId: string; orderN
   const [loading, setLoading] = useState(false);
   const [amount, setAmount] = useState("");
   const [confirmation, setConfirmation] = useState("");
-  const [password, setPassword] = useState("");
   const [requestId, setRequestId] = useState(newRequestId);
   const [result, formAction, pending] = useActionState<RefundFormState, FormData>(createRefundAction, null);
+  // Ответ на ЭТУ отправку. Ответ на прошлую (до повторного открытия) — уже не наш.
+  const current = result?.requestId === requestId ? result : null;
 
   // Состояние тянем при КАЖДОМ открытии, а не один раз: возврат могли сделать из кабинета
   // Airwallex, пока страница висела открытой, и показывать устаревшую «доступную сумму»
@@ -43,7 +43,6 @@ export function RefundDialog({ orderId, orderNumber }: { orderId: string; orderN
     setOpen(true);
     setLoading(true);
     setConfirmation("");
-    setPassword("");
     setRequestId(newRequestId());
     try {
       const s = await loadRefundState(orderId);
@@ -122,7 +121,8 @@ export function RefundDialog({ orderId, orderNumber }: { orderId: string; orderN
 
               <div>
                 <Label htmlFor="refund-reason">Причина (уйдёт в Airwallex)</Label>
-                <Input id="refund-reason" name="reason" defaultValue="Requested by customer" />
+                {/* Длиннее 128 знаков Airwallex причину не примет, и возврат не создастся. */}
+                <Input id="refund-reason" name="reason" defaultValue="Requested by customer" maxLength={128} />
               </div>
 
               <div className="rounded-md border border-red-200 bg-red-50 p-2.5">
@@ -141,26 +141,14 @@ export function RefundDialog({ orderId, orderNumber }: { orderId: string; orderN
                   placeholder={orderNumber}
                   autoComplete="off"
                 />
-
-                <Label htmlFor="refund-password" className="mt-2 block text-xs text-red-900">
-                  Пароль вашей учётной записи
-                </Label>
-                <Input
-                  id="refund-password"
-                  name="password"
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  autoComplete="current-password"
-                />
               </div>
 
-              {result?.error && (
-                <p className={result.unknown ? "text-sm font-medium text-amber-700" : "text-sm text-red-600"}>
-                  {result.error}
+              {current?.error && (
+                <p className={current.unknown ? "text-sm font-medium text-amber-700" : "text-sm text-red-600"}>
+                  {current.error}
                 </p>
               )}
-              {result?.ok && <p className="text-sm text-emerald-700">{result.message}</p>}
+              {current?.ok && <p className="text-sm text-emerald-700">{current.message}</p>}
 
               <div className="flex justify-end gap-2">
                 <Button type="button" variant="outline" size="sm" onClick={() => setOpen(false)}>
@@ -169,7 +157,7 @@ export function RefundDialog({ orderId, orderNumber }: { orderId: string; orderN
                 <Button
                   type="submit"
                   size="sm"
-                  disabled={pending || !confirmed || !password || !amountValid || !!result?.ok}
+                  disabled={pending || !confirmed || !amountValid || !!current?.ok}
                 >
                   {pending ? "Возвращаем…" : "Вернуть деньги"}
                 </Button>

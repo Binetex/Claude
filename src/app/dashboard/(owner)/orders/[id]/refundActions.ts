@@ -9,12 +9,15 @@
  * права, разбор формы и подтверждение. Второго места, где создаётся возврат, быть не должно.
  */
 import { revalidatePath } from "next/cache";
-import bcrypt from "bcryptjs";
 import { requireRole } from "@/lib/rbac";
-import { prisma } from "@/lib/db";
 import { createOrderRefund, getRefundState } from "@/integrations/airwallex/refund";
 
-export type RefundFormState = { error?: string; ok?: boolean; message?: string; unknown?: boolean } | null;
+/**
+ * `requestId` — какой отправке формы принадлежит ответ. Модалка показывает только ответ на
+ * СВОЮ отправку: иначе «возврат создан» от прошлого раза висел бы в новой форме и держал
+ * кнопку выключенной, и второй частичный возврат требовал бы перезагрузки страницы.
+ */
+export type RefundFormState = { error?: string; ok?: boolean; message?: string; unknown?: boolean; requestId?: string } | null;
 
 /** Состояние для модалки: сколько оплачено, сколько уже вернули, сколько можно вернуть. */
 export async function loadRefundState(orderId: string) {
@@ -25,17 +28,13 @@ export async function loadRefundState(orderId: string) {
 /**
  * Создать возврат.
  *
- * Подтверждений два, и оба проверяются НА СЕРВЕРЕ: номер заказа и пароль от учётной записи.
- *
- * Номер заказа защищает от случайного клика. Пароль — от чужих рук: живой сессии владельца
- * недостаточно, а значит открытый ноутбук больше не даёт вернуть деньги. Пароль хранится
- * только хешем, поэтому подставить его, зная содержимое базы, нельзя.
- *
- * Пароль НИКУДА не пишется: ни в логи, ни в текст ошибки, ни в revalidate. Из формы он
- * читается один раз и остаётся в этой функции.
+ * Подтверждение одно — номер заказа, и проверяется оно НА СЕРВЕРЕ: защита от случайного
+ * клика. Пароля учётной записи здесь нет (владелец 03.10.2026: «чтобы не спрашивал какой-то
+ * пароль непонятный»). От двойного возврата защищает не форма, а `requestId` и перепроверка
+ * доступной суммы по свежим данным Airwallex (`createOrderRefund`).
  */
 export async function createRefundAction(_prev: RefundFormState, formData: FormData): Promise<RefundFormState> {
-  const user = await requireRole("OWNER");
+  await requireRole("OWNER");
 
   const orderId = String(formData.get("orderId") ?? "");
   const orderNumber = String(formData.get("orderNumber") ?? "").trim();
@@ -46,31 +45,22 @@ export async function createRefundAction(_prev: RefundFormState, formData: FormD
 
   if (!orderId || !requestId) return { error: "Неполные данные формы." };
   if (confirmation.toLowerCase() !== orderNumber.toLowerCase()) {
-    return { error: `Для подтверждения введите номер заказа: ${orderNumber}` };
+    return { requestId, error: `Для подтверждения введите номер заказа: ${orderNumber}` };
   }
 
   const amount = Number(amountRaw.replace(",", "."));
-  if (!Number.isFinite(amount) || amount <= 0) return { error: "Сумма возврата должна быть больше нуля." };
-
-  // Пароль проверяется ПОСЛЕДНИМ из проверок формы, но ДО обращения к Airwallex: неверный
-  // пароль не должен приводить даже к запросу состояния платежа.
-  const password = String(formData.get("password") ?? "");
-  if (!password) return { error: "Введите пароль." };
-  const account = await prisma.user.findUnique({ where: { id: user.id }, select: { passwordHash: true } });
-  if (!account || !(await bcrypt.compare(password, account.passwordHash))) {
-    return { error: "Неверный пароль." };
-  }
+  if (!Number.isFinite(amount) || amount <= 0) return { requestId, error: "Сумма возврата должна быть больше нуля." };
 
   const res = await createOrderRefund({ orderId, amount, reason, requestId });
 
   if (res.ok) {
     revalidatePath(`/dashboard/orders/${orderId}`);
-    return { ok: true, message: `Возврат ${res.refund.amount} ${res.refund.currency} создан (${res.refund.status}).` };
+    return { requestId, ok: true, message: `Возврат ${res.refund.amount} ${res.refund.currency} создан (${res.refund.status}).` };
   }
   // Исход неизвестен — повторять нельзя, и форма обязана сказать это иначе, чем «ошибка».
   if (res.kind === "unknown") {
     revalidatePath(`/dashboard/orders/${orderId}`);
-    return { error: res.message, unknown: true };
+    return { requestId, error: res.message, unknown: true };
   }
-  return { error: res.message };
+  return { requestId, error: res.message };
 }

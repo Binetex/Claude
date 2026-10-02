@@ -103,3 +103,37 @@ describe("getPaymentIntent — статусы", () => {
     expect(dump).not.toContain("cid");
   });
 });
+
+describe("createRefund — тело запроса по документации", () => {
+  const login = () => reply(201, { token: "tok", expires_at: new Date(Date.now() + 30 * 60000).toISOString() });
+
+  it("частичный возврат: сумма в долларах и только поля документации — валюты в запросе нет", async () => {
+    fetchMock
+      .mockResolvedValueOnce(login())
+      .mockResolvedValueOnce(reply(201, { id: "rfd_1", amount: 25.5, currency: "USD", status: "RECEIVED", reason: "Requested by customer", created_at: "2026-10-03T18:00:00+00:00" }));
+    const r = await new AirwallexClient(creds).createRefund({ paymentIntentId: "int_1", amount: 25.5, reason: "Requested by customer", requestId: "req-1" });
+    expect(r).toEqual({
+      ok: true,
+      refund: { id: "rfd_1", status: "RECEIVED", amount: 25.5, currency: "USD", reason: "Requested by customer", createdAt: "2026-10-03T18:00:00+00:00" },
+    });
+    const [url, init] = fetchMock.mock.calls[1];
+    expect(String(url)).toBe("https://api.airwallex.com/api/v1/pa/refunds/create");
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(init.body)).toEqual({ request_id: "req-1", payment_intent_id: "int_1", amount: 25.5, reason: "Requested by customer" });
+  });
+
+  it("обрыв сети — «неизвестно», и второй раз деньги не просим", async () => {
+    fetchMock.mockResolvedValueOnce(login()).mockRejectedValueOnce(new Error("socket hang up"));
+    const r = await new AirwallexClient(creds).createRefund({ paymentIntentId: "int_1", amount: 10, reason: "x", requestId: "req-2" });
+    expect(r).toMatchObject({ ok: false, code: "network_unknown" });
+    expect(fetchMock.mock.calls.filter((c) => String(c[0]).includes("/refunds/create"))).toHaveLength(1);
+  });
+
+  it("отказ Airwallex доходит его же словами", async () => {
+    fetchMock
+      .mockResolvedValueOnce(login())
+      .mockResolvedValueOnce(reply(400, { code: "validation_error", message: "The refund amount exceeds the refundable amount." }));
+    const r = await new AirwallexClient(creds).createRefund({ paymentIntentId: "int_1", amount: 500, reason: "x", requestId: "req-3" });
+    expect(r).toEqual({ ok: false, retryable: false, code: "validation_error", message: "The refund amount exceeds the refundable amount." });
+  });
+});

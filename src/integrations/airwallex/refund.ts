@@ -211,7 +211,6 @@ export async function createOrderRefund(input: {
   const res = await new AirwallexClient(creds).createRefund({
     paymentIntentId: pay.paymentIntentId,
     amount,
-    currency: state.currency,
     reason: input.reason,
     requestId: input.requestId,
   });

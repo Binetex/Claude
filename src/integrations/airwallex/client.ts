@@ -213,11 +213,15 @@ export class AirwallexClient {
    * Повторов здесь НЕТ намеренно — ни на 429, ни на 5xx, ни на разрыв сети. Ответ мог не
    * дойти уже после того, как возврат создан; молча повторять денежную операцию нельзя.
    * Владельцу возвращается честное «неизвестно», и он сверяется со списком возвратов.
+   *
+   * Тело — строго поля документации (POST /api/v1/pa/refunds/create): `request_id`,
+   * `payment_intent_id`, `amount` в единицах валюты (частичный возврат — просто меньшая сумма,
+   * их можно делать несколько, пока не вернётся всё), `reason` до 128 знаков. Валюты в запросе
+   * нет: возврат идёт в валюте платежа.
    */
   async createRefund(input: {
     paymentIntentId: string;
     amount: number;
-    currency: string;
     reason: string;
     requestId: string;
   }): Promise<CreateRefundResult> {
@@ -231,7 +235,6 @@ export class AirwallexClient {
         request_id: input.requestId,
         payment_intent_id: input.paymentIntentId,
         amount: input.amount,
-        currency: input.currency,
         reason: input.reason,
       }),
     });
