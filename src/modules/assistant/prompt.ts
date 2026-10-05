@@ -231,15 +231,19 @@ const COMMON_RULES = `- Reply ONLY in English, whatever language the customer wr
  *
  * У ПРИНЯТОГО заказа цифра — плановое время по графику (владелец 05.10.2026, FLWBR-91183): заказ
  * уже оформлен, и обещать раньше реального невыгодно — человек ждёт к обещанному. Раньше неё не
- * называем ничего, даже внутри окна; хотят раньше или спрашивают «когда» — честно «около неё»
- * (namesEarlyTime не пропустит и случайное «around 12»). До оформления, новому клиенту, цифра —
- * самое раннее, к чему успеваем новый заказ, и называть её незачем.
+ * называем ничего, даже внутри окна (namesEarlyTime не пропустит и случайное «around 12»); хотят
+ * раньше или спрашивают «когда» — уклончиво, по части дня, без часа («later this afternoon»), а
+ * «около N» — только если настаивают (владелец 05.10.2026: «конкретное время сразу не называть,
+ * говорить уклончиво»). До оформления, новому клиенту, цифра — самое раннее, к чему успеваем
+ * новый заказ, и называть её незачем.
  */
 const PLANNED_ARRIVAL = `For this order the earliest possible delivery
   is when the florist's queue really gets the bouquet there: never name or promise anything
-  earlier, not even a time inside the order's window. Asked when the bouquet will arrive, answer
-  with the order's delivery window if the earliest possible delivery is inside it, otherwise say
-  honestly it will be around the earliest possible delivery.`;
+  earlier, not even a time inside the order's window. Do not name that hour right away either:
+  speak of it loosely, by the part of the day ("this afternoon", "later this afternoon", "this
+  evening"), and say "around" the hour only if they insist on a time. Asked when the bouquet will
+  arrive, answer with the order's delivery window if the earliest possible delivery is inside it,
+  otherwise say loosely that it will be a bit later, by the part of the day.`;
 
 /**
  * Окно заказа — обещание, и держим именно его (владелец 30.09.2026: «оформили 3–7, а хотят до 4 —
@@ -251,8 +255,8 @@ const WINDOW_IS_PROMISE = `
      ordering. A time they name INSIDE the window or before its end ("by 4" for a 3-7 PM window,
      "can you come at 12?" for 11 AM-3 PM) is only a wish: never promise it and never name a
      narrower time. Say we deliver within their window and will try to come as early as we can
-     (if the earliest possible delivery is later than the window, say honestly it will be around
-     then instead); put nothing in "confirmed_from" or "confirmed_until". If they will not be home for part of
+     (if the earliest possible delivery is later than the window, say loosely that it will be a
+     bit later, by the part of the day, with no hour); put nothing in "confirmed_from" or "confirmed_until". If they will not be home for part of
      the window, ask where we can leave the bouquet. Only a time that needs the delivery LATER
      than the window allows (they are not home until after it starts, or only after it ends) or
      another day is a change: see the points below.`;
@@ -273,7 +277,8 @@ function timingRules(hasOrder: boolean): string {
      possible delivery, confirm we will come around then${put('the hour in "confirmed_from" and one hour later in "confirmed_until"')};
      a start ("from 10") is "from" it${put('the start in "confirmed_from" and nothing in "confirmed_until"')}. If it is
      earlier, never say we are busy or have a lot of deliveries and never refuse: ${hasOrder ? `say honestly it
-     will be around the earliest possible delivery and ask if someone can take it then` : `kindly ask until
+     will be later than that, loosely by the part of the day with no hour, and ask if someone can
+     take it then` : `kindly ask until
      what time they will be home`}, and confirm nothing yet. "As soon as possible" or "you can come
      now": say we will get it to them as early as we can today and name no time. (Anything from
      5 PM on is point 3.) If they already said we can leave it at the door or with someone, there
@@ -281,8 +286,8 @@ function timingRules(hasOrder: boolean): string {
   2. AN END: "I'm home until 4", "I have to leave at 1:40", "by 3 please", or the answer to our
      question. If that time is at or after the earliest possible delivery, confirm we will
      deliver by then and name it${put('it in "confirmed_until" as 24-hour HH:MM')}. If it is
-     earlier, say honestly that we cannot make it by then, ${hasOrder ? `that it will be around the
-     earliest possible delivery, and ask if someone can take it then` : `without naming our earliest time, and
+     earlier, say honestly that we cannot make it by then, ${hasOrder ? `that it will be later, loosely
+     by the part of the day with no hour, and ask if someone can take it then` : `without naming our earliest time, and
      ask when they will be home again after that`}; confirm nothing.
   3. EVENING (5 PM OR LATER) OR ANY TIME: "after 5", "from 6", "in the evening", "tonight", "any
      time works". Confirm it: a later delivery is no problem${put('the hour they named in "confirmed_from" (17:00 for "after 5"), none for "any time"')}.
@@ -633,8 +638,11 @@ export function confirmsEarlyTime(replyEn: string, fromMin = 16 * 60): boolean {
  */
 const BARE_HOUR = /\b(?:around|about|at|by|before|until|till|near|closer to)\s+(1[0-2]|[1-9])(?::([0-5]\d))?\b(?!\s*(?:am|pm|a\.m|p\.m|%|minutes?|mins?|hours?|hrs?|days?|weeks?|blocks?|miles?))/gi;
 const bareHourMin = (h: number, m: number): number => (h === 12 ? 12 : h < 8 ? h + 12 : h) * 60 + m;
-/** Нижняя граница («from 3», «after 5»): позже нам всегда можно, обещанием раньше это не считается. */
-const LOWER_BOUND_BEFORE = /\b(from|after|since|past)\s*$/i;
+/**
+ * Нижняя граница («from 3», «after 5», «a bit later than noon»): позже нам всегда можно, обещанием
+ * раньше это не считается.
+ */
+const LOWER_BOUND_BEFORE = /\b(from|after|since|past|later than)\s*$/i;
 const NOT_A_TIME_AFTER = /^\s*(days?|weeks?|hours?|hrs?|minutes?|mins?)\b/i;
 
 /** Конец диапазона («11:30 AM - 12:30 PM», «3-5 PM», «11 to 3») в минутах, или null. */

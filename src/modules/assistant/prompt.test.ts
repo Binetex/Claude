@@ -501,9 +501,10 @@ describe("время доставки: одно правило", () => {
     expect(sys(order)).toContain('"confirmed_from": string|null, "confirmed_until": string|null');
   });
 
-  it("принятый заказ: раньше графика не называем, хотят раньше — честно «около» (владелец 05.10.2026)", () => {
+  it("принятый заказ: раньше графика не называем, хотят раньше — уклончиво, без часа (владелец 05.10.2026)", () => {
     expect(sys(order)).toContain("never name or promise anything\n  earlier, not even a time inside the order's window");
-    expect(sys(order)).toContain("say honestly it\n     will be around the earliest possible delivery");
+    expect(sys(order)).toContain("Do not name that hour right away either");
+    expect(sys(order)).toContain("say honestly it\n     will be later than that, loosely by the part of the day with no hour");
     // Новому клиенту — по-прежнему: самое раннее называем только на вопрос о самом раннем.
     expect(sys(null)).toContain("The earliest possible delivery is a limit, not an arrival time");
     expect(sys(null)).not.toContain("not even a time inside the order's window");
@@ -583,6 +584,8 @@ describe("принятый заказ: время раньше графика к
       "We'll bring it after 2, closer to 4 PM.",
       "Same day delivery if you order before 12 noon.",
       "Delivery usually takes 1-2 days for big orders.",
+      // Уклончивый ответ настоящей модели на FLWBR-91183: «позже полудня» — не обещание полудня.
+      "It'll be a bit later than noon, this afternoon, so we'll leave it at the door if you're not in.",
     ]) {
       expect(namesEarlyTime(t, FOUR), t).toBe(false);
     }
