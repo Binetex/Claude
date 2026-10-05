@@ -150,7 +150,7 @@ export function buildAssistantEmailHandler(prisma: PrismaClient, deps: { client?
       return;
     }
 
-    let parsed = parseReply(raw, { agreeFromMin: agreeFromMin(earliestMin) });
+    let parsed = parseReply(raw, { agreeFromMin: agreeFromMin(earliestMin), plannedFromMin: earliestMin });
     if (parsed.intent === "spam" && !parsed.important) {
       await prisma.aiTurn.create({
         data: { siteId: site.id, orderId: order.id, emailMessageId: email.id, status: "SKIPPED", source: "model", intent: "spam", skipReason: "spam", promptText: renderPrompt(messages), responseText: raw, modelName, latencyMs },

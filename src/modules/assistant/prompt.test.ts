@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildMessages, parseReply, looksEnglish, describeDeliveryDay, forbiddenOffer, confirmsEarlyTime, agreeFromMin, type OrderSnapshot } from "./prompt";
+import { buildMessages, parseReply, looksEnglish, describeDeliveryDay, forbiddenOffer, confirmsEarlyTime, namesEarlyTime, agreeFromMin, type OrderSnapshot } from "./prompt";
 import { stripDashes } from "@/lib/smsText";
 
 /**
@@ -500,6 +500,14 @@ describe("время доставки: одно правило", () => {
   it("что обещано — отдельными полями, их ставит в заказ код", () => {
     expect(sys(order)).toContain('"confirmed_from": string|null, "confirmed_until": string|null');
   });
+
+  it("принятый заказ: раньше графика не называем, хотят раньше — честно «около» (владелец 05.10.2026)", () => {
+    expect(sys(order)).toContain("never name or promise anything\n  earlier, not even a time inside the order's window");
+    expect(sys(order)).toContain("say honestly it\n     will be around the earliest possible delivery");
+    // Новому клиенту — по-прежнему: самое раннее называем только на вопрос о самом раннем.
+    expect(sys(null)).toContain("The earliest possible delivery is a limit, not an arrival time");
+    expect(sys(null)).not.toContain("not even a time inside the order's window");
+  });
 });
 
 describe("самое раннее время в запросе", () => {
@@ -531,6 +539,67 @@ describe("самое раннее время в запросе", () => {
     expect(confirmsEarlyTime("Perfect, we'll deliver by 3 PM.", 14 * 60 + 30)).toBe(false);
     // Утро, когда его успеваем, — разрешённый ответ.
     expect(confirmsEarlyTime("Sure, a morning delivery works.", 11 * 60)).toBe(false);
+  });
+});
+
+/**
+ * Принятый заказ (владелец 05.10.2026, FLWBR-91183): получатель написал «you can leave the bouquet
+ * at 12 pm», ИИ ответил «Got it, we'll come around 12.», а по графику заказ шёл к ~16:00. Слов
+ * согласия в ответе нет, и confirmsEarlyTime его пропускал; теперь любое время раньше графика —
+ * человеку.
+ */
+describe("принятый заказ: время раньше графика клиенту не уходит", () => {
+  const FOUR = 16 * 60;
+  const reply = (text: string, extra: Record<string, unknown> = {}) =>
+    JSON.stringify({ reply_en: text, intent: "delivery_time", important: false, needs_human: false, ...extra });
+
+  it("FLWBR-91183: «Got it, we'll come around 12.» при графике 16:00 — человеку", () => {
+    const p = parseReply(reply("Got it, we'll come around 12.", { confirmed_from: "12:00", confirmed_until: "13:00" }), { agreeFromMin: FOUR, plannedFromMin: FOUR });
+    expect(p.replyEn).toBe("");
+    expect(p.needsHuman).toBe(true);
+    // Тот же текст без полей окна — тоже человеку: держит сам текст, а не только поля.
+    expect(parseReply(reply("Got it, we'll come around 12."), { agreeFromMin: FOUR, plannedFromMin: FOUR }).replyEn).toBe("");
+  });
+
+  it("голый час, am/pm, двоеточие, полдень, утро и диапазон раньше графика ловятся", () => {
+    for (const t of [
+      "We'll be there around 12.",
+      "It should arrive by 2 PM.",
+      "Your bouquet comes at 1:30.",
+      "We'll deliver between 11:30 AM and 12:30 PM.",
+      "Expect us around noon.",
+      "We'll bring it this morning.",
+    ]) {
+      expect(namesEarlyTime(t, FOUR), t).toBe(true);
+    }
+  });
+
+  it("честное время по графику и позже, нижняя граница, отказ и порог заказа — проходят", () => {
+    for (const t of [
+      "It should be there around 4 PM.",
+      "We can't make it by 12, it'll be around 4.",
+      "Your window is 1 to 5 PM and it should be there around 4.",
+      "Someone can take it any time from 3.",
+      "We'll bring it after 2, closer to 4 PM.",
+      "Same day delivery if you order before 12 noon.",
+      "Delivery usually takes 1-2 days for big orders.",
+    ]) {
+      expect(namesEarlyTime(t, FOUR), t).toBe(false);
+    }
+    expect(parseReply(reply("It should be there around 4 PM."), { agreeFromMin: FOUR, plannedFromMin: FOUR }).replyEn).toBe("It should be there around 4 PM.");
+  });
+
+  it("утро по графику — «утром» не обещание раньше", () => {
+    expect(namesEarlyTime("We'll bring it in the morning.", 11 * 60)).toBe(false);
+  });
+
+  it("перенос на другой день сверяет сам перенос, а не график этого дня", () => {
+    const text = "Sure, tomorrow around 11 then.";
+    expect(parseReply(reply(text, { new_delivery_date: "2026-10-06" }), { agreeFromMin: FOUR, plannedFromMin: FOUR }).replyEn).toBe(text);
+  });
+
+  it("новому клиенту строгой проверки нет: до оформления заказа правила другие", () => {
+    expect(parseReply(reply("We can deliver today around 12."), { agreeFromMin: FOUR }).replyEn).toBe("We can deliver today around 12.");
   });
 });
 

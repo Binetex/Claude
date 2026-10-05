@@ -16,7 +16,7 @@ import { resolveDeepseekConfig } from "@/integrations/deepseek/settings";
 import { createDeepseekClient, type DeepseekClient } from "@/integrations/deepseek/client";
 import { DeepseekError } from "@/integrations/deepseek/errors";
 import { buildMessages, parseReply, describeDeliveryDay, agreeFromMin, type HistoryLine, type OrderSnapshot } from "./prompt";
-import { orderEarliest, siteEarliest, sameDayNeedsCheck } from "@/modules/timing/load";
+import { orderPlanned, siteEarliest, sameDayNeedsCheck } from "@/modules/timing/load";
 import { clockLabelEn, EARLIEST_DELIVERY_MIN, EARLIEST_DELIVERY_AHEAD_MIN } from "@/modules/timing/day";
 import { matchIntent } from "./intents";
 import { readTemplates, templateApplies, renderAssistantTemplate } from "./templates";
@@ -31,7 +31,7 @@ import { prependReadyTimeNote, hasReadyTime, mentionsTime } from "./note";
 import { findOrderByHint, linkConversation } from "./link";
 import { junkReason } from "./junk";
 import { BURST_WINDOW_MIN, BURST_MAX, takeDeferredQueue } from "./burst";
-import { DAY_END_MIN, DAY_START_MIN, parseHm } from "@/lib/deliveryWindow";
+import { DAY_END_MIN, parseHm } from "@/lib/deliveryWindow";
 import { loadGlobalNote, activeGlobalNoteText } from "./globalNote";
 import { bouquetPageUrl } from "@/lib/bouquetPage";
 import { publishTelegramNotification } from "@/integrations/telegram/events";
@@ -276,7 +276,8 @@ export function buildAssistantHandler(prisma: PrismaClient, deps: AssistantDeps 
     let earliestMin = order ? orderEarliestMin : newEarliest?.todayCheck ? null : newEarliest?.today;
     // Незнакомому номеру ответ бывает и про завтра — у завтра свой порог.
     const tomorrowAgree = newEarliest ? { agreeFromMinTomorrow: agreeFromMin(newEarliest.tomorrow) } : {};
-    let parsed = parseReply(raw, { agreeFromMin: agreeFromMin(earliestMin), ...tomorrowAgree });
+    // Заказ уже оформлен — любое время раньше графика человеку (`plannedFromMin`); новому клиенту — нет.
+    let parsed = parseReply(raw, { agreeFromMin: agreeFromMin(earliestMin), ...tomorrowAgree, ...(order ? { plannedFromMin: earliestMin } : {}) });
 
     // Незнакомый номер назвал заказ. Нашли ровно один — привязываем разговор и спрашиваем
     // модель ещё раз, уже с данными заказа: человек ждёт ответа про свой заказ сейчас, а не в
@@ -321,7 +322,7 @@ export function buildAssistantHandler(prisma: PrismaClient, deps: AssistantDeps 
           raw = res.text;
           latencyMs += res.latencyMs;
           earliestMin = foundEarliest;
-          parsed = parseReply(raw, { agreeFromMin: agreeFromMin(earliestMin) });
+          parsed = parseReply(raw, { agreeFromMin: agreeFromMin(earliestMin), plannedFromMin: earliestMin });
           messages.splice(0, messages.length, ...again);
         } catch {
           // Не вышло переспросить — остаёмся с ответом «без заказа», он безопасен.
@@ -403,33 +404,25 @@ export function buildAssistantHandler(prisma: PrismaClient, deps: AssistantDeps 
 }
 
 /**
- * Опоздать на пару часов не страшно, отказать клиенту — страшно (владелец 30.09.2026, после
- * FLWBR-91180: по согласованному окну 10–12 ИИ писал «сегодня не успеем», потому что расчёт с
- * запасом на каждом шаге давал первый букет дня Насти только к 13:35).
+ * Время для УЖЕ ПРИНЯТОГО заказа, каким его видит ИИ: плановое по графику (`orderPlanned`) —
+ * ровно то, что у заказа на «Графике доставки». Заказ оформлен, и называть время раньше реального
+ * невыгодно: человек будет ждать к обещанному (владелец 05.10.2026, FLWBR-91183 — получатель
+ * услышал «около 12» при графике ~16:00). Прежняя «мягкая» цифра от 30.09 — график минус 2 часа,
+ * но не позже начала окна — снята. Вверх до получаса и не раньше «сейчас» в день доставки; порог
+ * «не раньше 11 сегодня и 8 заранее» — если окно заказа само не начинается раньше: его согласовали
+ * люди. null — только когда день уже кончился: принятый заказ на другой день ИИ сам не уводит.
  */
-export const AI_LATE_OK_MIN = 120;
-
-/**
- * Самое раннее время для УЖЕ ПРИНЯТОГО заказа, каким его видит ИИ: расчёт графика минус запас на
- * опоздание, но не позже начала окна самого заказа (согласованное окно ИИ не отменяет и «не
- * успеем» про него клиенту не пишет) и не раньше «сейчас» в день доставки. null — только когда
- * день уже кончился: принятый заказ на другой день ИИ сам не уводит.
- */
-export function relaxedEarliest(planned: number | null, windowFrom: number | null, nowMin: number | null): number | null {
-  const promised = windowFrom ?? DAY_START_MIN;
-  const base = planned == null ? promised : Math.min(planned - AI_LATE_OK_MIN, promised);
-  // Запас на опоздание не уводит раньше 11:00 сегодня и 8:00 заранее (`nowMin` есть только в день
-  // доставки) — если только окно заказа само не начинается раньше: его согласовали люди.
+export function plannedEarliest(planned: number, windowFrom: number | null, nowMin: number | null): number | null {
+  if (nowMin != null && nowMin >= DAY_END_MIN) return null;
   const dayFloor = nowMin == null ? EARLIEST_DELIVERY_AHEAD_MIN : EARLIEST_DELIVERY_MIN;
   const floor = Math.min(dayFloor, windowFrom ?? dayFloor);
-  const e = Math.max(base, floor, nowMin == null ? 0 : Math.ceil(nowMin / 30) * 30);
-  return e > DAY_END_MIN ? null : e;
+  return Math.max(Math.ceil(planned / 30) * 30, floor, nowMin == null ? 0 : Math.ceil(nowMin / 30) * 30);
 }
 
 /**
- * Самое раннее время доставки заказа в его день (минуты), как его видит ИИ (`relaxedEarliest`).
- * Только пока доставка впереди (сегодня или позже) и заказ не доставлен — про прошедший день
- * обещать нечего: undefined, «не знаем». null — в этот день уже не успеть.
+ * Время доставки заказа в его день (минуты), как его видит ИИ (`plannedEarliest`). Только пока
+ * доставка впереди (сегодня или позже) и заказ не доставлен — про прошедший день обещать нечего:
+ * undefined, «не знаем». null — день уже кончился.
  */
 export async function earliestFor(
   prisma: PrismaClient,
@@ -440,10 +433,10 @@ export async function earliestFor(
   if (!order.deliveryDate || order.orderStatus === "DELIVERED") return undefined;
   const day = order.deliveryDate.toISOString().slice(0, 10);
   if (dayDiff(todayStr, day) < 0) return undefined;
-  const planned = await orderEarliest(prisma, order.id, now).catch(logTimingError);
+  const planned = await orderPlanned(prisma, order.id, now).catch(logTimingError);
   if (planned === undefined) return undefined;
   const nowMin = day === todayStr ? parseHm(localClock(order.site?.timezone ?? null, now).timeStr) : null;
-  return relaxedEarliest(planned, order.windowFrom ?? null, nowMin);
+  return plannedEarliest(planned, order.windowFrom ?? null, nowMin);
 }
 
 /**

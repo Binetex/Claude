@@ -228,9 +228,18 @@ const COMMON_RULES = `- Reply ONLY in English, whatever language the customer wr
  * (confirmsEarlyTime). Разговор — как ведёт его владелец: назвали только начало — спросить, до
  * какого времени дома; назвали конец — подтвердить «до него» или спросить, когда вернутся; позже —
  * можно всегда. Что пообещала, модель отдаёт полями, и заказ меняет код, а не модель.
+ *
+ * У ПРИНЯТОГО заказа цифра — плановое время по графику (владелец 05.10.2026, FLWBR-91183): заказ
+ * уже оформлен, и обещать раньше реального невыгодно — человек ждёт к обещанному. Раньше неё не
+ * называем ничего, даже внутри окна; хотят раньше или спрашивают «когда» — честно «около неё»
+ * (namesEarlyTime не пропустит и случайное «around 12»). До оформления, новому клиенту, цифра —
+ * самое раннее, к чему успеваем новый заказ, и называть её незачем.
  */
-const ASKED_WHEN = `: asked when the
-  bouquet will arrive, answer with the order's delivery window`;
+const PLANNED_ARRIVAL = `For this order the earliest possible delivery
+  is when the florist's queue really gets the bouquet there: never name or promise anything
+  earlier, not even a time inside the order's window. Asked when the bouquet will arrive, answer
+  with the order's delivery window if the earliest possible delivery is inside it, otherwise say
+  honestly it will be around the earliest possible delivery.`;
 
 /**
  * Окно заказа — обещание, и держим именно его (владелец 30.09.2026: «оформили 3–7, а хотят до 4 —
@@ -241,8 +250,9 @@ const WINDOW_IS_PROMISE = `
   0. THE ORDER'S DELIVERY WINDOW IS OUR PROMISE, and we keep it: the customer chose it when
      ordering. A time they name INSIDE the window or before its end ("by 4" for a 3-7 PM window,
      "can you come at 12?" for 11 AM-3 PM) is only a wish: never promise it and never name a
-     narrower time. Say we deliver within their window and will try to come as early as we can;
-     put nothing in "confirmed_from" or "confirmed_until". If they will not be home for part of
+     narrower time. Say we deliver within their window and will try to come as early as we can
+     (if the earliest possible delivery is later than the window, say honestly it will be around
+     then instead); put nothing in "confirmed_from" or "confirmed_until". If they will not be home for part of
      the window, ask where we can leave the bouquet. Only a time that needs the delivery LATER
      than the window allows (they are not home until after it starts, or only after it ends) or
      another day is a change: see the points below.`;
@@ -254,24 +264,26 @@ function timingRules(hasOrder: boolean): string {
   time is always fine for us: the later a bouquet goes out, the better it survives. Never agree
   to, confirm or offer any time earlier than the earliest possible delivery, never use the
   order's delivery window to argue that an earlier hour is fine, and never promise an exact
-  minute. The earliest possible delivery is a limit, not an arrival time${hasOrder ? ASKED_WHEN : ""}: name
-  it only when they ask what the earliest is. Never
+  minute. ${hasOrder ? PLANNED_ARRIVAL : `The earliest possible delivery is a limit, not an arrival time: name
+  it only when they ask what the earliest is.`} Never
   argue with a customer who tells you when they are home. First see what they are doing with the
   time they named:${hasOrder ? WINDOW_IS_PROMISE : ""}
   1. TODAY, A SINGLE HOUR OR A START with nothing about until when: "I'm ready at 11", "2 pm
      works for me", "can you come at 1?", "I'm home from 10". If it is at or after the earliest
      possible delivery, confirm we will come around then${put('the hour in "confirmed_from" and one hour later in "confirmed_until"')};
      a start ("from 10") is "from" it${put('the start in "confirmed_from" and nothing in "confirmed_until"')}. If it is
-     earlier, never say we are busy or have a lot of deliveries and never refuse: kindly ask until
-     what time they will be home, and confirm nothing yet. "As soon as possible" or "you can come
+     earlier, never say we are busy or have a lot of deliveries and never refuse: ${hasOrder ? `say honestly it
+     will be around the earliest possible delivery and ask if someone can take it then` : `kindly ask until
+     what time they will be home`}, and confirm nothing yet. "As soon as possible" or "you can come
      now": say we will get it to them as early as we can today and name no time. (Anything from
      5 PM on is point 3.) If they already said we can leave it at the door or with someone, there
      is nothing to ask: just confirm that.
   2. AN END: "I'm home until 4", "I have to leave at 1:40", "by 3 please", or the answer to our
      question. If that time is at or after the earliest possible delivery, confirm we will
      deliver by then and name it${put('it in "confirmed_until" as 24-hour HH:MM')}. If it is
-     earlier, say honestly that we cannot make it by then, without naming our earliest time, and
-     ask when they will be home again after that; confirm nothing.
+     earlier, say honestly that we cannot make it by then, ${hasOrder ? `that it will be around the
+     earliest possible delivery, and ask if someone can take it then` : `without naming our earliest time, and
+     ask when they will be home again after that`}; confirm nothing.
   3. EVENING (5 PM OR LATER) OR ANY TIME: "after 5", "from 6", "in the evening", "tonight", "any
      time works". Confirm it: a later delivery is no problem${put('the hour they named in "confirmed_from" (17:00 for "after 5"), none for "any time"')}.
      A single evening hour ("5:30 works", "7pm please") is "around" it, never "at" it${put('the hour in "confirmed_from" and one hour later in "confirmed_until"')}.
@@ -614,6 +626,60 @@ export function confirmsEarlyTime(replyEn: string, fromMin = 16 * 60): boolean {
   return false;
 }
 
+/**
+ * Голый час без am/pm после слова времени — «around 12», «at 3», «by 4», «before 5». Модель так и
+ * пишет («Got it, we'll come around 12.»), а TIME_TOKEN без am/pm и двоеточия его не видит. Возим
+ * днём: 8–11 — утро, 12 — полдень, 1–7 — после полудня (так же, как minuteOf читает «5:30»).
+ */
+const BARE_HOUR = /\b(?:around|about|at|by|before|until|till|near|closer to)\s+(1[0-2]|[1-9])(?::([0-5]\d))?\b(?!\s*(?:am|pm|a\.m|p\.m|%|minutes?|mins?|hours?|hrs?|days?|weeks?|blocks?|miles?))/gi;
+const bareHourMin = (h: number, m: number): number => (h === 12 ? 12 : h < 8 ? h + 12 : h) * 60 + m;
+/** Нижняя граница («from 3», «after 5»): позже нам всегда можно, обещанием раньше это не считается. */
+const LOWER_BOUND_BEFORE = /\b(from|after|since|past)\s*$/i;
+const NOT_A_TIME_AFTER = /^\s*(days?|weeks?|hours?|hrs?|minutes?|mins?)\b/i;
+
+/** Конец диапазона («11:30 AM - 12:30 PM», «3-5 PM», «11 to 3») в минутах, или null. */
+function rangeEndMin(range: string): number | null {
+  const m = /(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s*$/i.exec(range.trim());
+  if (!m) return null;
+  const h = Number(m[1]);
+  const min = Number(m[2] ?? 0);
+  if (h > 23 || min > 59) return null;
+  if (m[3]) return ((h % 12) + (/pm/i.test(m[3]) ? 12 : 0)) * 60 + min;
+  return h > 12 ? h * 60 + min : bareHourMin(h, min);
+}
+
+/**
+ * Называет ли ответ ЛЮБОЕ время доставки раньше `fromMin` — для принятого заказа, где `fromMin` —
+ * время по графику (владелец 05.10.2026, FLWBR-91183). Не только согласие, как confirmsEarlyTime:
+ * «we'll come around 12» обещает, не сказав ни одного слова согласия. Диапазон («between 11:30 and
+ * 12:30») — по КОНЦУ: быть до него не успеем, если по графику позже. Нижняя граница («from 3»,
+ * «after 5»), отрицание, «too early» и порог приёма заказа обещанием раньше не считаются.
+ */
+export function namesEarlyTime(replyEn: string, fromMin: number): boolean {
+  const text = replyEn.replace(/[‘’ʼ]/g, "'");
+  for (const clause of text.split(/[,;.!?]+/)) {
+    if (NEGATED.test(clause) || TOO_EARLY.test(clause) || ORDER_CUTOFF.test(clause)) continue;
+    let rest = clause;
+    for (const r of clause.matchAll(new RegExp(WINDOW_RANGE.source, "gi"))) {
+      rest = rest.replace(r[0], " ");
+      if (NOT_A_TIME_AFTER.test(clause.slice((r.index ?? 0) + r[0].length))) continue;
+      const end = rangeEndMin(r[0]);
+      if (end !== null && end < fromMin) return true;
+    }
+    for (const m of rest.matchAll(new RegExp(TIME_TOKEN.source, "gi"))) {
+      if (LOWER_BOUND_BEFORE.test(rest.slice(0, m.index))) continue;
+      // «Утренняя доставка», когда по графику и правда утро, — не обещание раньше.
+      if (fromMin <= 12 * 60 && /morning/i.test(m[0])) continue;
+      const t = minuteOf(m);
+      if (t !== null && t < fromMin) return true;
+    }
+    for (const m of rest.matchAll(new RegExp(BARE_HOUR.source, "gi"))) {
+      if (bareHourMin(Number(m[1]), Number(m[2] ?? 0)) < fromMin) return true;
+    }
+  }
+  return false;
+}
+
 export function forbiddenOffer(replyEn: string): string | null {
   const text = replyEn.replace(/[\u2018\u2019\u02BC]/g, "'");
   // Телефонный номер не зависит от фразы: своего номера в SMS быть не должно нигде.
@@ -666,7 +732,15 @@ export function promisedChangeOf(raw: string | null): { intent: string; newDate:
   return { intent, newDate, from, until };
 }
 
-export function parseReply(raw: string, opts: { agreeFromMin?: number; agreeFromMinTomorrow?: number } = {}): ParsedReply {
+/**
+ * `plannedFromMin` — по ПРИНЯТОМУ заказу время по графику (`earliestFor`): любое время доставки в
+ * ответе раньше него клиенту не уходит (`namesEarlyTime`). Новому клиенту не передаётся: до
+ * оформления заказа правила другие.
+ */
+export function parseReply(
+  raw: string,
+  opts: { agreeFromMin?: number; agreeFromMinTomorrow?: number; plannedFromMin?: number | null } = {}
+): ParsedReply {
   let data: Record<string, unknown> = {};
   try {
     // Модель иногда оборачивает JSON в ```json — срезаем обёртку, если она есть.
@@ -707,6 +781,11 @@ export function parseReply(raw: string, opts: { agreeFromMin?: number; agreeFrom
   const agreeFrom = (aboutTomorrow ? opts.agreeFromMinTomorrow : undefined) ?? opts.agreeFromMin ?? 16 * 60;
   if (replyEn && confirmsEarlyTime(replyEn, agreeFrom)) return held;
   if (confirmedUntil != null && confirmedUntil < agreeFrom) return held;
+
+  // Принятый заказ: время раньше графика клиенту не уходит, даже без слов согласия (FLWBR-91183:
+  // «Got it, we'll come around 12.» при графике ~16:00). Перенос на другой день сверяется не с
+  // графиком этого дня — его проверяет сам перенос.
+  if (replyEn && typeof opts.plannedFromMin === "number" && !newDeliveryDate && namesEarlyTime(replyEn, opts.plannedFromMin)) return held;
 
   return { replyEn, intent, important, needsHuman, readyTime, orderHint, newDeliveryDate, confirmedFrom, confirmedUntil };
 }

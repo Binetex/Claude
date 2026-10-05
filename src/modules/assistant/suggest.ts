@@ -97,7 +97,7 @@ export async function suggestReply(
   } catch {
     return { ok: false, code: "model_failed" };
   }
-  const reply = parseReply(raw, { agreeFromMin: agreeFromMin(earliestMin) }).replyEn?.trim();
+  const reply = parseReply(raw, { agreeFromMin: agreeFromMin(earliestMin), plannedFromMin: earliestMin }).replyEn?.trim();
   if (!reply || avoid.some((a) => a.toLowerCase() === reply.toLowerCase())) return { ok: false, code: "no_reply" };
   return { ok: true, text: reply };
 }

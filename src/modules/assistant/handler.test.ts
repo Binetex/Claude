@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { takeDeferredQueue, describeCall, relaxedEarliest, earliestLabel } from "./handler";
+import { takeDeferredQueue, describeCall, plannedEarliest, earliestLabel } from "./handler";
 
 /**
  * Очередь сообщений: человек пишет одну мысль в три приёма, и отвечаем мы на неё один раз.
@@ -86,38 +86,37 @@ describe("описание звонка в истории для модели", 
 });
 
 /**
- * Самое раннее время по УЖЕ ПРИНЯТОМУ заказу, каким его видит ИИ (владелец 30.09.2026: «опоздаем на
- * пару часов — не страшно, отказывать клиенту — страшно»).
+ * Время по УЖЕ ПРИНЯТОМУ заказу, каким его видит ИИ: плановое по графику (владелец 05.10.2026,
+ * FLWBR-91183 — «по графику очевидно около трёх», а получатель услышал «около 12»).
  */
-describe("relaxedEarliest", () => {
+describe("plannedEarliest", () => {
   const hm = (h: number, m = 0) => h * 60 + m;
 
-  it("FLWBR-91180: расчёт дал 13:35 на окно 10–12 — согласованное окно ИИ не отменяет", () => {
-    expect(relaxedEarliest(hm(13, 35), hm(10), hm(8, 50))).toBe(hm(10));
+  it("FLWBR-91183: окно 11:30–12:30, по графику 15:59 — ИИ видит 16:00, а не 12:00", () => {
+    expect(plannedEarliest(hm(15, 59), hm(11, 30), hm(11, 53))).toBe(hm(16));
   });
 
-  it("запас в два часа: расчёт 16:00 — ИИ соглашается и на 14:00", () => {
-    expect(relaxedEarliest(hm(16), hm(15), null)).toBe(hm(14));
+  it("время по графику как есть: без запаса в два часа и без потолка «начало окна»", () => {
+    expect(plannedEarliest(hm(16), hm(15), null)).toBe(hm(16));
+    // FLWBR-91180: график 13:35 на окно 10–12 — теперь это честные «около двух».
+    expect(plannedEarliest(hm(13, 35), hm(10), hm(8, 50))).toBe(hm(14));
   });
 
-  it("«сегодня уже не успеть» по расчёту — принятый заказ ИИ сам на завтра не уводит", () => {
-    expect(relaxedEarliest(null, hm(11), hm(9))).toBe(hm(11));
+  it("вверх до получаса и не раньше «сейчас» в день доставки", () => {
+    expect(plannedEarliest(hm(12, 10), hm(11), hm(9))).toBe(hm(12, 30));
+    expect(plannedEarliest(hm(11), hm(11), hm(14, 5))).toBe(hm(14, 30));
   });
 
-  it("в день доставки запас не уводит раньше 11:00, если окно заказа само не начинается раньше", () => {
-    expect(relaxedEarliest(hm(12), hm(11), hm(9))).toBe(hm(11));
-    expect(relaxedEarliest(hm(11), hm(11, 30), hm(9))).toBe(hm(11));
-    // Окно «с 10» согласовали люди — ИИ его не урезает.
-    expect(relaxedEarliest(hm(11), hm(10), hm(9))).toBe(hm(10));
+  it("не раньше 11 сегодня и 8 заранее — если окно заказа само не начинается раньше", () => {
+    expect(plannedEarliest(hm(10), hm(11), hm(9))).toBe(hm(11));
+    // Окно «с 10» согласовали люди — порог его не урезает.
+    expect(plannedEarliest(hm(10), hm(10), hm(9))).toBe(hm(10));
+    expect(plannedEarliest(hm(7), hm(11), null)).toBe(hm(8));
   });
 
-  it("заранее (завтра и дальше) — не раньше 8:00", () => {
-    expect(relaxedEarliest(hm(9, 30), hm(11), null)).toBe(hm(8));
-  });
-
-  it("раньше «сейчас» не бывает, а после конца дня — уже не сегодня", () => {
-    expect(relaxedEarliest(hm(13, 35), hm(10), hm(14, 5))).toBe(hm(14, 30));
-    expect(relaxedEarliest(hm(13, 35), hm(10), hm(21, 10))).toBeNull();
+  it("поздно по графику — так и называем; null — только когда день уже кончился", () => {
+    expect(plannedEarliest(hm(21, 40), hm(11), hm(15))).toBe(hm(22));
+    expect(plannedEarliest(hm(13), hm(10), hm(21, 10))).toBeNull();
   });
 });
 

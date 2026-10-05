@@ -145,35 +145,33 @@ async function closureOf(prisma: PrismaClient, day: string): Promise<ClosureLeve
 }
 
 /**
- * Самое раннее время, к которому успеваем ЭТОТ заказ в его день, не сорвав остальным их сроки
- * (минуты; null — в этот день уже не успеть). Флориста нет — тот, кому заказ достался бы по
- * приоритету; нет и такого — undefined: судить не по чему.
+ * Плановое время доставки ЭТОГО заказа по графику флориста (минуты) — ровно то, что «График
+ * доставки» показывает у заказа (`plannedAt`): место в очереди, сборка, курьер и дорога, не раньше
+ * начала окна. Его называет ИИ по принятому заказу (владелец 05.10.2026, FLWBR-91183): прежнее
+ * «самое раннее, если втиснуть» давало 12:00 там, где по графику выходило ~16:00, и получатель
+ * услышал «около 12». Букет уже собран или уехал — «сейчас + курьер + дорога». Флориста нет — тот,
+ * кому заказ достался бы по приоритету; нет и такого — undefined: судить не по чему.
  */
-export async function orderEarliest(prisma: PrismaClient, orderId: string, now: Date = new Date()): Promise<number | null | undefined> {
+export async function orderPlanned(prisma: PrismaClient, orderId: string, now: Date = new Date()): Promise<number | undefined> {
   const found = await prisma.order.findUnique({ where: { id: orderId }, select: { ...ORDER_SELECT, siteId: true, deliveryDate: true } });
   if (!found) return undefined;
   const [order] = await withInbound(prisma, [found], now);
   const day = order.deliveryDate.toISOString().slice(0, 10);
   const floristId = order.currentFloristId ?? (await getAvailableFloristIds(order.siteId, order.deliveryDate))[0] ?? null;
   if (!floristId) return undefined;
-  const [model, florist, zips, others, closed] = await Promise.all([
+  const [model, florist, zips, others] = await Promise.all([
     loadTimeModel(prisma, now),
     prisma.florist.findUnique({ where: { id: floristId }, select: { id: true, workStartMin: true } }),
     floristZips(prisma),
     loadOrders(prisma, { deliveryDate: order.deliveryDate, currentFloristId: floristId }, now),
-    closureOf(prisma, day),
   ]);
   if (!florist) return undefined;
   const own = toJob(order, model, zips.get(floristId));
-  const n = nowParts(now);
-  // Букет уже собран или уехал: очередь ему не мешает — успеваем к «сейчас + курьер + дорога».
-  if (own.fixed && day === n.day) {
-    const e = Math.ceil((n.min + model.courierMin + own.driveMin) / 30) * 30;
-    return e <= DAY_END_MIN ? e : null;
-  }
-  const jobs = others.filter((o) => o.id !== order.id).map((o) => toJob(o, model, zips.get(floristId)));
-  const earliest = earliestBy(jobs, { id: own.id, big: own.big, windowFrom: 0, driveMin: own.driveMin, priority: own.priority }, lineParams(model, florist, day, now));
-  return withClosure(earliest, closed, false);
+  // Букет уже собран или уехал: очередь ему не мешает — «сейчас + курьер + дорога».
+  if (own.fixed) return day === nowParts(now).day ? nowParts(now).min + model.courierMin + own.driveMin : undefined;
+  // Та же очередь, что на «Графике доставки»: заказы флориста на день, и этот среди них.
+  const jobs = [...others.filter((o) => o.id !== order.id), order].map((o) => toJob(o, model, zips.get(floristId)));
+  return planDay(jobs, lineParams(model, florist, day, now)).items.find((i) => i.id === order.id)?.etaAt ?? undefined;
 }
 
 /**
