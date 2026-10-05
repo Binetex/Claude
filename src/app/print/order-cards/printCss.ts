@@ -67,14 +67,16 @@ export function printCss(g: PrintGeometry): string {
   overflow-wrap: anywhere;
   font-family: var(--font-lora), Georgia, serif; color: #111;
 }
-/* Блок получателя приподнят над серединой карточки. Содержимое центрируется, поэтому поле
-   снизу работает вполовину — механика в geometry(). */
-.card.recipient { padding-bottom: ${g.recipientPadBottom}px; }
+/* Блоки сдвинуты от середины своей половины: получатель вверх, текст открытки вниз. Сдвиг,
+   а не поле: карточка и её отступы остаются те же, переезжает только содержимое. Что ни один
+   блок не уедет за край, обеспечивает clampSettings, а текст открытки подбирается в
+   geometry().messageHeightPx. */
+.rec { max-width: 100%; transform: translateY(${-s.recipientLiftPx}px); }
 .rec-name { font-size: ${s.recipientPt}pt; font-weight: 400; line-height: 1.3; }
 .rec-phone { font-size: ${s.recipientPt}pt; margin-top: 4px; }
 .rec-addr { font-size: ${s.recipientPt}pt; margin-top: 4px; line-height: 1.3; }
 /* Текст открытки — крупно, по центру, с сохранением переносов */
-.msg { white-space: pre-wrap; line-height: ${g.lineHeight}; max-width: 100%; }
+.msg { white-space: pre-wrap; line-height: ${g.lineHeight}; max-width: 100%; transform: translateY(${s.messageDropPx}px); }
 /* На ЭКРАНЕ лист ужимается под ширину окна: он задан в дюймах, и альбомные 11in (1056px)
    в окно уже не влезали — браузер обрезал правый край без всякой прокрутки. Масштаб
    считает PrintDocument и кладёт в --fit; zoom, а не transform, потому что transform не

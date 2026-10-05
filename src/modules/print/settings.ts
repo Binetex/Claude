@@ -39,6 +39,7 @@ export type PrintSettings = {
   lineHeightPct: number;
   recipientPt: number;
   recipientLiftPx: number;
+  messageDropPx: number;
 };
 
 /**
@@ -61,6 +62,7 @@ export const PRINT_DEFAULTS: Record<PrintLayout, PrintSettings> = {
     lineHeightPct: 140,
     recipientPt: 12,
     recipientLiftPx: 0,
+    messageDropPx: 0,
   },
   tall: {
     safeMarginMils: 500,
@@ -73,6 +75,7 @@ export const PRINT_DEFAULTS: Record<PrintLayout, PrintSettings> = {
     lineHeightPct: 140,
     recipientPt: 12,
     recipientLiftPx: 80,
+    messageDropPx: 0,
   },
 };
 
@@ -93,12 +96,22 @@ export const PRINT_LIMITS = {
   crowdedStepPt: { min: 0, max: 12, label: "Шаг уменьшения кегля", unit: "pt", step: 1 },
   lineHeightPct: { min: 90, max: 250, label: "Интерлиньяж", unit: "%", step: 5 },
   recipientPt: { min: 6, max: 36, label: "Кегль блока получателя", unit: "pt", step: 1 },
-  recipientLiftPx: { min: 0, max: 300, label: "Подъём блока получателя", unit: "px", step: 10 },
+  recipientLiftPx: { min: 0, max: 300, label: "Поднять блок получателя", unit: "px", step: 10 },
+  messageDropPx: { min: 0, max: 300, label: "Опустить текст открытки", unit: "px", step: 10 },
 } as const satisfies Record<keyof PrintSettings, { min: number; max: number; label: string; unit: string; step: number }>;
 
 export const PRINT_FIELDS = Object.keys(PRINT_LIMITS) as (keyof PrintSettings)[];
 
 const clamp = (v: number, min: number, max: number): number => Math.min(max, Math.max(min, Math.round(v)));
+
+/** Сантиметры для подписей в форме: владелец меряет лист линейкой, а не пикселями. */
+export const pxToCm = (px: number): string => ((px * 2.54) / PX).toFixed(1).replace(".", ",");
+
+/**
+ * Половина высоты блока получателя: имя, телефон и адрес — до пяти строк его кеглем.
+ * Столько нужно оставить над серединой блока, чтобы подъём не срезал верхнюю строку краем.
+ */
+const recipientHalfPx = (pt: number): number => Math.ceil(2.5 * ((pt * PX) / 72) * 1.3) + 6;
 
 /** Размер карточки, px: лист минус безопасное поле, поделённый на сетку. */
 export function cellSize(layout: PrintLayout, s: PrintSettings): { w: number; h: number } {
@@ -133,9 +146,12 @@ export function clampSettings(layout: PrintLayout, raw: PrintSettings): PrintSet
   // записках, и менять его молча значит менять внешний вид всех записок разом.
   s.minPt = Math.min(s.minPt, s.basePt);
 
-  // Подъём съедает ВДВОЕ больше места, чем поднимает (поле снизу двойное), поэтому больше
-  // четверти поля для текста ему не отдаём: остальное нужно самому блоку получателя.
-  s.recipientLiftPx = Math.min(s.recipientLiftPx, Math.floor(s.textHeightPx / 4));
+  // Блоки двигаются от середины своей половины листа: получатель вверх, текст открытки вниз
+  // (владелец 05.10.2026: на бумаге оба стояли слишком близко к середине). За край карточки
+  // не уезжает ни один: получателю оставляем место на его пять строк, а место под текст
+  // открытки ужимается на двойной сдвиг (geometry), но не меньше минимального поля для текста.
+  s.recipientLiftPx = Math.min(s.recipientLiftPx, Math.max(0, Math.floor(cell.h / 2 - recipientHalfPx(s.recipientPt))));
+  s.messageDropPx = Math.min(s.messageDropPx, Math.max(0, Math.floor((cell.h - PRINT_LIMITS.textHeightPx.min) / 2)));
 
   return s;
 }
@@ -153,9 +169,13 @@ export type PrintGeometry = {
   padX: number;
   padY: number;
   lineHeight: number;
-  /** Поле снизу у блока получателя. Содержимое центрируется, поэтому подъём на N требует
-   *  2N снизу: «поднять на N» и «добавить снизу N» — не одно и то же. */
-  recipientPadBottom: number;
+  /**
+   * Высота, в которую подбирается текст открытки. Текст стоит по середине карточки и
+   * опущен на `messageDropPx`, поэтому снизу ему остаётся на сдвиг меньше — а держать его
+   * по центру значит отнять столько же и сверху: (карточка − 2 × сдвиг), не больше поля.
+   * Без сдвига это ровно поле для текста.
+   */
+  messageHeightPx: number;
 };
 
 export function geometry(layout: PrintLayout, raw: PrintSettings): PrintGeometry {
@@ -173,7 +193,7 @@ export function geometry(layout: PrintLayout, raw: PrintSettings): PrintGeometry
     padX,
     padY,
     lineHeight: s.lineHeightPct / 100,
-    recipientPadBottom: padY + 2 * s.recipientLiftPx,
+    messageHeightPx: Math.min(s.textHeightPx, Math.floor(cell.h - 2 * s.messageDropPx)),
   };
 }
 

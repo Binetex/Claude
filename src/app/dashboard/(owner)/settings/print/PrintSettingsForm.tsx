@@ -15,6 +15,7 @@ import {
   PRINT_LIMITS,
   SHEET_FORMAT,
   geometry,
+  pxToCm,
   type PrintLayout,
   type PrintSettings,
 } from "@/modules/print/settings";
@@ -36,7 +37,12 @@ const GROUPS: { title: string; hint: string; fields: (keyof PrintSettings)[] }[]
   {
     title: "Блок получателя",
     hint: "Имя, телефон и адрес — та половина карточки, по которой везут букет.",
-    fields: ["recipientPt", "recipientLiftPx"],
+    fields: ["recipientPt"],
+  },
+  {
+    title: "Положение на листе",
+    hint: "Получатель печатается в верхней половине, текст открытки — в нижней, оба по середине своей половины. Стоят на бумаге слишком близко к середине листа — поднимите получателя и опустите текст. Место под текст открытки при этом ужимается само, чтобы текст не уехал за край: длинная записка напечатается мельче.",
+    fields: ["recipientLiftPx", "messageDropPx"],
   },
 ];
 
@@ -110,6 +116,7 @@ export function PrintSettingsForm({ layout, initial }: { layout: PrintLayout; in
                       />
                       <span className="mt-1 block text-[11px] text-slate-400">
                         от {lim.min} до {lim.max}
+                        {lim.unit === "px" && ` · ≈ ${pxToCm(Number(draft[key]) || 0)} см`}
                       </span>
                     </label>
                   );
@@ -121,7 +128,7 @@ export function PrintSettingsForm({ layout, initial }: { layout: PrintLayout; in
           <div className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600">
             <span className="font-medium text-slate-700">Пересчёт: </span>
             отступы карточки {Math.round(g.padY)}px сверху и снизу, {Math.round(g.padX)}px по бокам ·
-            поле снизу у получателя {Math.round(g.recipientPadBottom)}px ·
+            место под текст открытки по высоте {g.messageHeightPx}px (≈ {pxToCm(g.messageHeightPx)} см) ·
             интерлиньяж {g.lineHeight.toFixed(2)}
             {corrected.length > 0 && (
               <span className="mt-1 block text-amber-700">

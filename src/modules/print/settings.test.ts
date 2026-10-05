@@ -40,12 +40,16 @@ describe("значения по умолчанию = прежняя вёрстк
     expect(g.settings.minPt).toBe(8);
   });
 
-  it("блок получателя поднят на 80px только на портретной", () => {
-    // Подъём задан полем СНИЗУ в двойном размере: содержимое центрируется.
+  it("блок получателя поднят на 80px только на портретной, текст открытки на месте", () => {
     const tall = geometry("tall", def("tall"));
-    expect(tall.recipientPadBottom).toBe(tall.padY + 160);
+    expect(tall.settings.recipientLiftPx).toBe(80);
     const wide = geometry("wide", def("wide"));
-    expect(wide.recipientPadBottom).toBe(wide.padY);
+    expect(wide.settings.recipientLiftPx).toBe(0);
+    // Без сдвига текст подбирается ровно под поле для текста — как и раньше.
+    for (const g of [tall, wide]) {
+      expect(g.settings.messageDropPx).toBe(0);
+      expect(g.messageHeightPx).toBe(g.settings.textHeightPx);
+    }
   });
 
   it("лист остаётся US Letter, обе ориентации", () => {
@@ -118,9 +122,13 @@ describe("приведение к допустимому", () => {
     expect(s.basePt).toBe(10); // двигается именно пол: потолок владелец видит на коротких записках
   });
 
-  it("подъём получателя не выкидывает блок за край карточки", () => {
-    const g = geometry("tall", { ...def("tall"), recipientLiftPx: 300 });
-    expect(g.recipientPadBottom).toBeLessThan(g.cell.h);
+  it("подъём получателя не выкидывает блок за верх карточки", () => {
+    for (const l of LAYOUTS) {
+      const g = geometry(l, { ...def(l), recipientLiftPx: 300 });
+      // Над серединой поднятого блока остаётся место на его пять строк.
+      expect(g.cell.h / 2 - g.settings.recipientLiftPx).toBeGreaterThanOrEqual(50);
+      expect(g.settings.recipientLiftPx).toBeGreaterThan(0);
+    }
   });
 
   it("мусор вместо числа не ломает печать", () => {
@@ -133,6 +141,38 @@ describe("приведение к допустимому", () => {
     const s = clampSettings("wide", { ...def("wide"), textWidthPx: 300.7, lineHeightPct: 140.4 });
     expect(s.textWidthPx).toBe(301);
     expect(s.lineHeightPct).toBe(140);
+  });
+});
+
+/**
+ * Положение блоков на листе (владелец 05.10.2026): на бумаге получатель стоял слишком низко,
+ * а текст открытки слишком высоко — «где-то на 4 сантиметра». Двигает владелец сам.
+ */
+describe("положение на листе: получатель вверх, текст открытки вниз", () => {
+  const CM4 = Math.round((4 / 2.54) * 96); // 151px
+
+  it("на портретной оба блока отодвигаются от середины на 4 см", () => {
+    const s = clampSettings("tall", { ...def("tall"), recipientLiftPx: CM4, messageDropPx: CM4 });
+    expect(s.recipientLiftPx).toBe(CM4);
+    expect(s.messageDropPx).toBe(CM4);
+    expect(geometry("tall", s).messageHeightPx).toBe(480 - 2 * CM4);
+  });
+
+  it("опущенный текст не уезжает за низ: место под него ужимается на двойной сдвиг", () => {
+    for (const l of LAYOUTS) {
+      for (const drop of [0, 40, CM4, 1000]) {
+        const g = geometry(l, { ...def(l), messageDropPx: drop });
+        // Нижний край самого высокого текста: середина карточки + половина места + сдвиг.
+        expect(g.cell.h / 2 + g.messageHeightPx / 2 + g.settings.messageDropPx).toBeLessThanOrEqual(g.cell.h);
+        expect(g.messageHeightPx).toBeLessThanOrEqual(g.settings.textHeightPx);
+        expect(g.messageHeightPx).toBeGreaterThanOrEqual(PRINT_LIMITS.textHeightPx.min);
+      }
+    }
+  });
+
+  it("сдвиг сверх возможного подрезается, а не ломает лист", () => {
+    // Карточка альбомной 360px: места под текст остаётся не меньше минимального поля.
+    expect(clampSettings("wide", { ...def("wide"), messageDropPx: 300 }).messageDropPx).toBe(150);
   });
 });
 

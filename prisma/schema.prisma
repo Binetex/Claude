@@ -3029,6 +3029,9 @@ model PrintLayoutSettings {
   /// Блок получателя: кегль и подъём над серединой карточки, px.
   recipientPt     Int
   recipientLiftPx Int
+  /// Текст открытки: насколько опущен ниже середины своей карточки, px. Место под текст
+  /// ужимается на двойной сдвиг, поэтому за край он не уезжает.
+  messageDropPx   Int @default(0)
 
   updatedBy String?
   updatedAt DateTime @updatedAt

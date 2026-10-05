@@ -65,7 +65,10 @@ export function PrintDocument({
   useLayoutEffect(() => {
     const meas = measRef.current;
     if (!meas) return;
-    const { textWidthPx, textHeightPx, basePt, minPt, baseMaxLines, crowdedStepPt } = g.settings;
+    const { textWidthPx, basePt, minPt, baseMaxLines, crowdedStepPt } = g.settings;
+    // Не поле для текста, а место под текст с учётом сдвига вниз: опущенный текст иначе
+    // подбирался бы под высоту, которой у него уже нет, и длинная записка уходила бы за край.
+    const textHeightPx = g.messageHeightPx;
     const lineHeight = g.lineHeight;
     meas.style.width = `${textWidthPx}px`;
     const measure = (text: string, fontPt: number): number => {
@@ -155,13 +158,16 @@ function CardView({ half }: { half: Half }) {
     const r = half.recipient;
     return (
       <div className="card recipient">
-        <div className="rec-name">{r.recipientName}</div>
-        <div className="rec-phone">{r.recipientPhone}</div>
-        <div className="rec-addr">
-          {r.addressLine}
-          {r.apartment ? `, ${r.apartment}` : ""}
+        {/* Одной обёрткой: подъём сдвигает блок целиком. */}
+        <div className="rec">
+          <div className="rec-name">{r.recipientName}</div>
+          <div className="rec-phone">{r.recipientPhone}</div>
+          <div className="rec-addr">
+            {r.addressLine}
+            {r.apartment ? `, ${r.apartment}` : ""}
+          </div>
+          <div className="rec-addr">{cityStateZip(r)}</div>
         </div>
-        <div className="rec-addr">{cityStateZip(r)}</div>
       </div>
     );
   }

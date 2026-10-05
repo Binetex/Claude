@@ -90,14 +90,21 @@ describe("настройки доходят до листа", () => {
     expect(out).toMatch(/\.msg\s*\{[^}]*line-height:\s*1\.75/);
   });
 
-  it("подъём получателя — поле снизу в двойном размере", () => {
-    const g = geometry("tall", { ...PRINT_DEFAULTS.tall, recipientLiftPx: 30 });
-    expect(printCss(g)).toMatch(new RegExp(`\\.card\\.recipient\\s*\\{[^}]*padding-bottom:\\s*${g.padY + 60}px`));
+  it("подъём получателя — сдвиг блока вверх, отступы карточки те же", () => {
+    const out = css("tall", { recipientLiftPx: 30 });
+    expect(out).toMatch(/\.rec\s*\{[^}]*transform:\s*translateY\(-30px\)/);
+    // Поле снизу больше не крутится: подъёмом оно съедало место у самого блока.
+    expect(out).not.toMatch(/\.card\.recipient\s*\{/);
   });
 
-  it("без подъёма получатель остаётся ровно по центру", () => {
-    const g = geometry("wide", { ...PRINT_DEFAULTS.wide, recipientLiftPx: 0 });
-    expect(printCss(g)).toMatch(new RegExp(`\\.card\\.recipient\\s*\\{[^}]*padding-bottom:\\s*${g.padY}px`));
+  it("опускание текста открытки — сдвиг вниз", () => {
+    expect(css("wide", { messageDropPx: 40 })).toMatch(/\.msg\s*\{[^}]*transform:\s*translateY\(40px\)/);
+  });
+
+  it("без сдвигов оба блока ровно по центру своих половин", () => {
+    const out = css("wide", { recipientLiftPx: 0, messageDropPx: 0 });
+    expect(out).toMatch(/\.rec\s*\{[^}]*translateY\(0px\)/);
+    expect(out).toMatch(/\.msg\s*\{[^}]*translateY\(0px\)/);
   });
 });
 
