@@ -4,9 +4,15 @@ import {
   PRINT_FIELDS,
   PRINT_LIMITS,
   SHEET_FORMAT,
+  blockCenters,
   cellSize,
   clampSettings,
+  cmOfMils,
+  cmOfPx,
   geometry,
+  milsOfCm,
+  pxOfCm,
+  withBlockCenters,
   kindToLayout,
   layoutToKind,
   sheetWidthPx,
@@ -170,9 +176,62 @@ describe("положение на листе: получатель вверх, �
     }
   });
 
-  it("сдвиг сверх возможного подрезается, а не ломает лист", () => {
+  it("сдвиг сверх возможного подрезается, а не ломает лист — в обе стороны", () => {
     // Карточка альбомной 360px: места под текст остаётся не меньше минимального поля.
     expect(clampSettings("wide", { ...def("wide"), messageDropPx: 300 }).messageDropPx).toBe(150);
+    expect(clampSettings("wide", { ...def("wide"), messageDropPx: -300 }).messageDropPx).toBe(-150);
+  });
+
+  it("текст открытки можно и поднять: место ужимается так же, за верх он не уходит", () => {
+    for (const l of LAYOUTS) {
+      const g = geometry(l, { ...def(l), messageDropPx: -CM4 });
+      expect(g.cell.h / 2 - g.messageHeightPx / 2 + g.settings.messageDropPx).toBeGreaterThanOrEqual(0);
+    }
+  });
+
+  it("получателя можно и опустить — до низа своей половины, не дальше", () => {
+    for (const l of LAYOUTS) {
+      const g = geometry(l, { ...def(l), recipientLiftPx: -300 });
+      expect(g.cell.h / 2 + g.settings.recipientLiftPx).toBeGreaterThanOrEqual(50);
+      expect(g.settings.recipientLiftPx).toBeLessThan(0);
+    }
+  });
+});
+
+/**
+ * Форма показывает положение блоков от ВЕРХНЕГО КРАЯ листа и в сантиметрах (владелец 05.10.2026:
+ * «мне проще смотреть отступы от верхней границы и писать сразу см»), а в базе — сдвиги от
+ * середины своей половины в px. Пересчёт обязан сходиться в обе стороны.
+ */
+describe("от верхнего края листа, в сантиметрах", () => {
+  const CM4 = Math.round((4 / 2.54) * 96); // 151px
+
+  it("сантиметры ↔ px и тысячные дюйма", () => {
+    expect(pxOfCm(4)).toBe(151);
+    expect(cmOfPx(151)).toBeCloseTo(3.995, 2);
+    expect(milsOfCm(1.27)).toBe(500);
+    expect(cmOfMils(500)).toBeCloseTo(1.27, 5);
+  });
+
+  it("портретная по умолчанию: получатель на 208px от верха, текст открытки на 768px", () => {
+    // Поле листа 0,5in = 48px, карточка 480px: середина верхней половины 288px − подъём 80.
+    expect(blockCenters("tall", def("tall"))).toEqual({ recipient: 208, message: 768 });
+  });
+
+  it("поставили середину текста на 4 см ниже — в базе ровно такой сдвиг", () => {
+    const moved = withBlockCenters("tall", def("tall"), { message: 768 + CM4 });
+    expect(moved.messageDropPx).toBe(CM4);
+    expect(moved.recipientLiftPx).toBe(80); // второй блок не трогаем
+    expect(blockCenters("tall", moved).message).toBe(768 + CM4);
+  });
+
+  it("поле листа поменяли — блоки остаются на своём месте листа", () => {
+    const s = withBlockCenters("tall", def("tall"), { recipient: 150, message: 900 });
+    const wider = withBlockCenters("tall", { ...s, safeMarginMils: 300 }, blockCenters("tall", s));
+    // Сдвиги в базе — целые px, поэтому совпадение в пределах пикселя (сотые доли миллиметра).
+    const c = blockCenters("tall", wider);
+    expect(Math.abs(c.recipient - 150)).toBeLessThan(1);
+    expect(Math.abs(c.message - 900)).toBeLessThan(1);
   });
 });
 

@@ -96,16 +96,25 @@ export const PRINT_LIMITS = {
   crowdedStepPt: { min: 0, max: 12, label: "Шаг уменьшения кегля", unit: "pt", step: 1 },
   lineHeightPct: { min: 90, max: 250, label: "Интерлиньяж", unit: "%", step: 5 },
   recipientPt: { min: 6, max: 36, label: "Кегль блока получателя", unit: "pt", step: 1 },
-  recipientLiftPx: { min: 0, max: 300, label: "Поднять блок получателя", unit: "px", step: 10 },
-  messageDropPx: { min: 0, max: 300, label: "Опустить текст открытки", unit: "px", step: 10 },
+  recipientLiftPx: { min: -300, max: 300, label: "Блок получателя", unit: "px", step: 10 },
+  messageDropPx: { min: -300, max: 300, label: "Текст открытки", unit: "px", step: 10 },
 } as const satisfies Record<keyof PrintSettings, { min: number; max: number; label: string; unit: string; step: number }>;
 
 export const PRINT_FIELDS = Object.keys(PRINT_LIMITS) as (keyof PrintSettings)[];
 
 const clamp = (v: number, min: number, max: number): number => Math.min(max, Math.max(min, Math.round(v)));
 
-/** Сантиметры для подписей в форме: владелец меряет лист линейкой, а не пикселями. */
-export const pxToCm = (px: number): string => ((px * 2.54) / PX).toFixed(1).replace(".", ",");
+/**
+ * Сантиметры. Форма показывает и принимает только их (владелец 05.10.2026: «писать сразу см»), а в
+ * базе остаются px при 96 dpi и тысячные дюйма — форма лишь переводит туда и обратно.
+ */
+export const PX_PER_CM = PX / 2.54;
+export const cmOfPx = (px: number): number => px / PX_PER_CM;
+export const pxOfCm = (cm: number): number => Math.round(cm * PX_PER_CM);
+export const cmOfMils = (mils: number): number => (mils / 1000) * 2.54;
+export const milsOfCm = (cm: number): number => Math.round((cm / 2.54) * 1000);
+/** «4,5» — как пишут сантиметры по-русски. */
+export const pxToCm = (px: number): string => cmOfPx(px).toFixed(1).replace(".", ",");
 
 /**
  * Половина высоты блока получателя: имя, телефон и адрес — до пяти строк его кеглем.
@@ -146,14 +155,43 @@ export function clampSettings(layout: PrintLayout, raw: PrintSettings): PrintSet
   // записках, и менять его молча значит менять внешний вид всех записок разом.
   s.minPt = Math.min(s.minPt, s.basePt);
 
-  // Блоки двигаются от середины своей половины листа: получатель вверх, текст открытки вниз
-  // (владелец 05.10.2026: на бумаге оба стояли слишком близко к середине). За край карточки
-  // не уезжает ни один: получателю оставляем место на его пять строк, а место под текст
+  // Блоки двигаются от середины своей половины листа в обе стороны: подъём получателя и сдвиг
+  // текста открытки вниз со знаком (владелец 05.10.2026: на бумаге оба стояли не там). За край
+  // карточки не уезжает ни один: получателю оставляем место на его пять строк, а место под текст
   // открытки ужимается на двойной сдвиг (geometry), но не меньше минимального поля для текста.
-  s.recipientLiftPx = Math.min(s.recipientLiftPx, Math.max(0, Math.floor(cell.h / 2 - recipientHalfPx(s.recipientPt))));
-  s.messageDropPx = Math.min(s.messageDropPx, Math.max(0, Math.floor((cell.h - PRINT_LIMITS.textHeightPx.min) / 2)));
+  const liftMax = Math.max(0, Math.floor(cell.h / 2 - recipientHalfPx(s.recipientPt)));
+  s.recipientLiftPx = Math.max(-liftMax, Math.min(liftMax, s.recipientLiftPx));
+  const dropMax = Math.max(0, Math.floor((cell.h - PRINT_LIMITS.textHeightPx.min) / 2));
+  s.messageDropPx = Math.max(-dropMax, Math.min(dropMax, s.messageDropPx));
 
   return s;
+}
+
+/**
+ * Где на листе середины блоков — от ВЕРХНЕГО КРАЯ листа, px. Так их меряет владелец линейкой
+ * (05.10.2026: «мне проще смотреть отступы от верхней границы»), и от числа строк в блоке это
+ * число не зависит. В базе хранится сдвиг от середины своей половины — отсюда пересчёт.
+ */
+export function blockCenters(layout: PrintLayout, raw: PrintSettings): { recipient: number; message: number } {
+  const s = clampSettings(layout, raw);
+  const cell = cellSize(layout, s);
+  const top = (s.safeMarginMils / 1000) * PX;
+  return { recipient: top + cell.h / 2 - s.recipientLiftPx, message: top + cell.h * 1.5 + s.messageDropPx };
+}
+
+/**
+ * Обратно: середины блоков от верхнего края листа → сдвиги для базы. Что недостижимо (за краем
+ * карточки), подрежет clampSettings, и форма покажет, куда блок встал на самом деле.
+ */
+export function withBlockCenters(layout: PrintLayout, raw: PrintSettings, centers: { recipient?: number; message?: number }): PrintSettings {
+  const s = clampSettings(layout, raw);
+  const cell = cellSize(layout, s);
+  const top = (s.safeMarginMils / 1000) * PX;
+  return {
+    ...raw,
+    ...(centers.recipient != null ? { recipientLiftPx: Math.round(top + cell.h / 2 - centers.recipient) } : {}),
+    ...(centers.message != null ? { messageDropPx: Math.round(centers.message - top - cell.h * 1.5) } : {}),
+  };
 }
 
 /**
@@ -170,10 +208,10 @@ export type PrintGeometry = {
   padY: number;
   lineHeight: number;
   /**
-   * Высота, в которую подбирается текст открытки. Текст стоит по середине карточки и
-   * опущен на `messageDropPx`, поэтому снизу ему остаётся на сдвиг меньше — а держать его
-   * по центру значит отнять столько же и сверху: (карточка − 2 × сдвиг), не больше поля.
-   * Без сдвига это ровно поле для текста.
+   * Высота, в которую подбирается текст открытки. Текст стоит по середине карточки и сдвинут
+   * на `messageDropPx` (вниз или вверх), поэтому с одной стороны ему остаётся на сдвиг меньше — а
+   * держать его по центру значит отнять столько же и с другой: (карточка − 2 × |сдвиг|), не больше
+   * поля. Без сдвига это ровно поле для текста.
    */
   messageHeightPx: number;
 };
@@ -193,7 +231,7 @@ export function geometry(layout: PrintLayout, raw: PrintSettings): PrintGeometry
     padX,
     padY,
     lineHeight: s.lineHeightPct / 100,
-    messageHeightPx: Math.min(s.textHeightPx, Math.floor(cell.h - 2 * s.messageDropPx)),
+    messageHeightPx: Math.min(s.textHeightPx, Math.floor(cell.h - 2 * Math.abs(s.messageDropPx))),
   };
 }
 
