@@ -32,7 +32,7 @@ import { prependReadyTimeNote, hasReadyTime, mentionsTime } from "./note";
 import { findOrderByHint, linkConversation } from "./link";
 import { junkReason } from "./junk";
 import { BURST_WINDOW_MIN, BURST_MAX, takeDeferredQueue } from "./burst";
-import { DAY_END_MIN, parseHm } from "@/lib/deliveryWindow";
+import { DAY_END_MIN, parseHm, fmtHm, windowOf } from "@/lib/deliveryWindow";
 import { loadGlobalNote, activeGlobalNoteText } from "./globalNote";
 import { bouquetPageUrl } from "@/lib/bouquetPage";
 import { publishTelegramNotification } from "@/integrations/telegram/events";
@@ -361,11 +361,13 @@ export function buildAssistantHandler(prisma: PrismaClient, deps: AssistantDeps 
       !!linkedOrder?.recipientMuted &&
       pickOrderTarget(phone, incoming.partyRole, linkedOrder) === "RECIPIENT";
 
+    // По графику не успеваем в окно — сами клиенту не пишем, решают люди (`lateByPlanNote`).
+    const lateNote = linkedOrder ? lateByPlanNote(linkedOrder, earliestMin) : null;
     const action = decideDelivery({
       mode: site.aiMode as AssistantMode,
       dryRun: site.aiDryRun,
       hasReply: !!parsed.replyEn,
-      needsHuman: parsed.needsHuman,
+      needsHuman: parsed.needsHuman || !!lateNote,
       important: parsed.important,
       mutedRecipient,
     });
@@ -411,7 +413,7 @@ export function buildAssistantHandler(prisma: PrismaClient, deps: AssistantDeps 
     if (!plainThanks && parsed.intent === "thanks") {
       await suggestRecipientReview(prisma, linkedOrder, site, incoming, body).catch(logReviewSuggestError);
     }
-    await finishTurn(prisma, turn.id, action, site.aiDryRun, burst);
+    await finishTurn(prisma, turn.id, action, site.aiDryRun, burst, lateNote);
   };
 }
 
@@ -429,6 +431,24 @@ export function plannedEarliest(planned: number, windowFrom: number | null, nowM
   const dayFloor = nowMin == null ? EARLIEST_DELIVERY_AHEAD_MIN : EARLIEST_DELIVERY_MIN;
   const floor = Math.min(dayFloor, windowFrom ?? dayFloor);
   return Math.max(Math.ceil(planned / 30) * 30, floor, nowMin == null ? 0 : Math.ceil(nowMin / 30) * 30);
+}
+
+/**
+ * По графику заказ не успевает в своё окно — строка-предупреждение для черновика, иначе null.
+ *
+ * Об опоздании за окно клиенту говорит не ИИ, а люди (владелец 07.10.2026, FLWBR-91184: окно до 5,
+ * график сползал к 8 вечера, ИИ сам написал «до 5 не успеем, будет вечером» — клиент попросил
+ * возврат, а довезти до 5 было можно). График — оценка, и очередь можно сдвинуть; знает это человек.
+ * Поэтому ответ по такому заказу не уходит сам: черновиком, с этой строкой сверху. Заодно ИИ не
+ * пообещает и время раньше графика (FLWBR-91183) — его тоже увидит человек.
+ */
+export function lateByPlanNote(
+  order: { windowFrom?: number | null; windowTo?: number | null; deliveryWindow?: string | null },
+  earliestMin: number | null | undefined
+): string | null {
+  const w = windowOf(order);
+  if (!w || earliestMin == null || earliestMin <= w.to) return null;
+  return `⚠️ По графику заказ не успевает в окно: окно до ${fmtHm(w.to)}, по графику ~${fmtHm(earliestMin)}. Успеваете — ответьте клиенту сами; нет — сдвиньте очередь в «Графике доставки».`;
 }
 
 /**
@@ -547,7 +567,9 @@ export async function finishTurn(
   action: "send" | "draft",
   dryRun: boolean,
   /** Очередь сообщений, на которую отвечаем, — её показываем человеку вместо одной реплики. */
-  burst: { text: string; photoUrls: string[] } | null = null
+  burst: { text: string; photoUrls: string[] } | null = null,
+  /** Предупреждение человеку над черновиком (`lateByPlanNote`). */
+  note: string | null = null
 ): Promise<boolean> {
   let shown = false;
   try {
@@ -556,7 +578,7 @@ export async function finishTurn(
       if (res.ok) return true;
       console.warn(`[assistant] автоответ ${turnId} не ушёл (${res.code}) — черновик человеку`);
     }
-    shown = await notifyDraft(prisma, turnId, new Date(), burst);
+    shown = await notifyDraft(prisma, turnId, new Date(), burst, note);
     // Напоминание ставим, только если черновик реально дошёл до человека: иначе «одну минуту»
     // уйдёт клиенту по разбору, которого никто не видел.
     if (shown && !dryRun) await scheduleAssistantNudge(new PrismaOutboxRepository(prisma), turnId, new Date());

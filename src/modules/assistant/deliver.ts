@@ -210,7 +210,9 @@ export async function notifyDraft(
    * ВСЁ, что клиент написал, а не только последнюю реплику. Пусто — обычный случай, одно
    * сообщение, и берём его из самого разбора.
    */
-  burst: { text: string; photoUrls: string[] } | null = null
+  burst: { text: string; photoUrls: string[] } | null = null,
+  /** Предупреждение над черновиком: например, «по графику не успеваем в окно» (`lateByPlanNote`). */
+  note: string | null = null
 ): Promise<boolean> {
   if (!(await isTelegramGloballyEnabled(prisma))) return false;
   const turn = await prisma.aiTurn.findUnique({
@@ -268,6 +270,7 @@ export async function notifyDraft(
       : `незнакомый номер ${escapeHtml(comm?.externalPhone ?? "")} · ${escapeHtml(turn.site.name)}`;
   const lines = [
     `<b>${head}</b> · ${where}`,
+    ...(note ? ["", escapeHtml(note)] : []),
     "",
     `Клиент: ${incoming || (photos.length ? "(фото без текста)" : "")}`,
     ...photos.map((u, i) => `Фото ${photos.length > 1 ? i + 1 : ""}: ${escapeHtml(u)}`.replace("Фото :", "Фото:")),

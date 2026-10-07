@@ -27,7 +27,7 @@ import { mentionsTime } from "./note";
 import { mentionsDay } from "./reschedule";
 import type { AssistantEmailPayload } from "./events";
 import {
-  snapshot, deliveredMoment, countReplies, renderPrompt, earliestFor, earliestLabel, finishTurn,
+  snapshot, deliveredMoment, countReplies, renderPrompt, earliestFor, earliestLabel, finishTurn, lateByPlanNote,
   recordReadyTime, alertNoBalance, notifyCallRequest, logCallRequestError,
   takeDeferredQueue, BURST_WINDOW_MIN, BURST_MAX,
 } from "./handler";
@@ -176,9 +176,11 @@ export function buildAssistantEmailHandler(prisma: PrismaClient, deps: { client?
     // Перенос просит не заказчик (муж получателя, сама получательница со своего адреса): заказ по
     // его словам не двигаем — иначе любой, кто знает номер заказа, двигал бы чужой оплаченный
     // заказ. Значит, и «привезём завтра» сами не обещаем: ответ — черновиком, решает человек.
+    // По графику не успеваем в окно — сами не пишем, решают люди (`handler.ts::lateByPlanNote`).
+    const lateNote = lateByPlanNote(order, earliestMin);
     const action = !isCustomer && wantsChange
       ? "draft"
-      : decideDelivery({ mode: site.aiMode as AssistantMode, dryRun: site.aiDryRun, hasReply: !!parsed.replyEn, needsHuman: parsed.needsHuman, important: parsed.important });
+      : decideDelivery({ mode: site.aiMode as AssistantMode, dryRun: site.aiDryRun, hasReply: !!parsed.replyEn, needsHuman: parsed.needsHuman || !!lateNote, important: parsed.important });
 
     const turn = await prisma.aiTurn.create({
       data: {
@@ -192,7 +194,7 @@ export function buildAssistantEmailHandler(prisma: PrismaClient, deps: { client?
     });
     // Модель разглядела просьбу позвонить там, где слова её не выдали, — добавка к сигналу выше.
     if (!callRequested && parsed.intent === "call_request") await callPeople();
-    const reached = await finishTurn(prisma, turn.id, action, site.aiDryRun, deferred.length ? { text, photoUrls: [] } : null);
+    const reached = await finishTurn(prisma, turn.id, action, site.aiDryRun, deferred.length ? { text, photoUrls: [] } : null, lateNote);
     // Ни клиенту, ни человеку разбор не дошёл (уведомления ассистента выключены, Telegram молчит):
     // письмо не должно остаться только в карточке.
     if (!reached) await tellPeople();

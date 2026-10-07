@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { takeDeferredQueue, describeCall, plannedEarliest, earliestLabel } from "./handler";
+import { takeDeferredQueue, describeCall, plannedEarliest, earliestLabel, lateByPlanNote } from "./handler";
 
 /**
  * Очередь сообщений: человек пишет одну мысль в три приёма, и отвечаем мы на неё один раз.
@@ -132,5 +132,25 @@ describe("earliestLabel — раньше 11 модель сама не пред�
     expect(earliestLabel(14 * 60)).not.toContain("only if");
     expect(earliestLabel(null)).toBeNull();
     expect(earliestLabel(undefined)).toBeUndefined();
+  });
+});
+
+describe("lateByPlanNote — опоздание за окно объявляют люди, а не ИИ", () => {
+  it("FLWBR-91184: окно 11–4, по графику 8 вечера — черновик человеку с предупреждением", () => {
+    const note = lateByPlanNote({ windowFrom: 660, windowTo: 960, deliveryWindow: "11:00 - 16:00" }, 1200);
+    expect(note).toContain("не успевает в окно");
+    expect(note).toContain("до 16:00");
+    expect(note).toContain("~20:00");
+  });
+
+  it("успеваем в окно (и ровно к его концу) — ИИ отвечает как обычно", () => {
+    expect(lateByPlanNote({ windowFrom: 660, windowTo: 1020 }, 960)).toBeNull();
+    expect(lateByPlanNote({ windowFrom: 660, windowTo: 1020 }, 1020)).toBeNull();
+  });
+
+  it("окна нет или время по графику неизвестно — предупреждать не о чем", () => {
+    expect(lateByPlanNote({ windowFrom: null, windowTo: null, deliveryWindow: null }, 1200)).toBeNull();
+    expect(lateByPlanNote({ windowFrom: 660, windowTo: 960 }, null)).toBeNull();
+    expect(lateByPlanNote({ windowFrom: 660, windowTo: 960 }, undefined)).toBeNull();
   });
 });
