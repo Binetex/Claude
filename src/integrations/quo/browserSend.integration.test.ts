@@ -244,4 +244,22 @@ describe("картинка к SMS браузером Quo", () => {
     expect(send).not.toHaveBeenCalled();
     expect(await prisma.orderCommunication.findUnique({ where: { id: row.id } })).toMatchObject({ status: "SENT" });
   });
+
+  it("файла к моменту отправки нет — браузером без картинки не шлём, уходит ссылка через API", async () => {
+    const orderId = await makeOrder();
+    const gone = `gone-${suffix}.jpg`;
+    const row = await prisma.orderCommunication.create({
+      data: {
+        orderId, provider: "QUO", type: "SMS", direction: "OUTBOUND", partyRole: "CUSTOMER", status: "PENDING",
+        externalPhone: CUST, externalPhoneNormalized: CUST, messageText: "Hi", providerPhoneNumberId: STORE_PN,
+        occurredAt: new Date(), sendKey: `${orderId}-wgone`, attachmentsJson: [{ url: `/api/media/${gone}`, type: "image/jpeg", fallbackUrl: FALLBACK }],
+      },
+    });
+    const browser = fakeBrowser({ outcome: "sent" });
+    const { client, send } = apiClient();
+    await buildQuoSmsSendHandler(prisma, { client: () => client, browser: () => browser })({ payload: { communicationId: row.id } } as unknown as OutboxRecord);
+    expect(browser).not.toHaveBeenCalled();
+    expect(send.mock.calls[0][0]).toMatchObject({ content: `Hi\n${FALLBACK}` });
+    expect(await prisma.orderCommunication.findUnique({ where: { id: row.id } })).toMatchObject({ status: "SENT", attachmentsJson: null });
+  });
 });

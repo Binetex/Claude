@@ -43,9 +43,6 @@ const SEND_ERRORS: Record<string, string> = {
   quo_not_configured: "SMS не настроены на сервере.",
   previous_attempt_failed: "Прошлая отправка этого фото не удалась — замените фото и попробуйте снова.",
   too_long: "Сообщение получилось слишком длинным.",
-  attachment_missing: "Файл фото не найден — загрузите фото заново.",
-  attachment_too_large: "Фото слишком большое — загрузите его заново.",
-  attachment_unsupported: "Этот формат фото не уходит в SMS — загрузите фото заново.",
 };
 
 /**
@@ -72,14 +69,11 @@ export async function sendBouquetPhotoLinkAction(orderId: string): Promise<SendB
 
   const cfg = getQuoConfig();
   const client = cfg && featureFlags.quo ? createQuoClient({ ...cfg, maxRetries: 0 }) : null;
-  const res = await sendOrderSms(prisma, client, {
-    orderId,
-    target: "CUSTOMER",
-    text: BOUQUET_PHOTO_SMS,
-    attachments: [{ name, fallbackUrl: url }],
-    idempotencyKey: `bouquet-photo:${orderId}:${name}`,
-    sentByUserId: user.id,
-  });
+  const base = { orderId, target: "CUSTOMER" as const, idempotencyKey: `bouquet-photo:${orderId}:${name}`, sentByUserId: user.id };
+  let res = await sendOrderSms(prisma, client, { ...base, text: BOUQUET_PHOTO_SMS, attachments: [{ name, fallbackUrl: url }] });
+  // Фото не годится в MMS (старое, до сжатия в браузере: webp, больше 5 МБ) — ссылкой, как раньше.
+  // Записи под ключом при этом ещё нет: проверка вложения идёт до неё.
+  if (!res.ok && res.code.startsWith("attachment_")) res = await sendOrderSms(prisma, client, { ...base, text: `${BOUQUET_PHOTO_SMS}\n${url}` });
   revalidatePath(`/dashboard/f/${orderId}`);
   revalidatePath(`/dashboard/cc/${orderId}`);
   revalidatePath(`/dashboard/orders/${orderId}`);

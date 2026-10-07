@@ -175,6 +175,8 @@ export function createQuoBrowserSender(opts: QuoBrowserOptions): { send: Browser
       // ушло бы без вложения.
       const files = input.files ?? [];
       const composer = p.locator("div").filter({ has: box }).filter({ has: sendButton }).last();
+      // Чужих картинок в поле нет (черновик прошлой попытки): иначе ушли бы вместе с нашим сообщением.
+      if (await composer.locator("img[alt='preview']").count()) throw new NotSent("composer_mismatch");
       if (files.length) {
         await p.locator("input[type=file]").first().setInputFiles(files);
         await composer.locator("img[alt='preview']").nth(files.length - 1).waitFor();

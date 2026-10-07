@@ -43,7 +43,8 @@ export async function sendOrderSmsAction(_prev: FormState, formData: FormData): 
   const attachmentData = String(formData.get("attachment") ?? "");
   let attachments: SmsAttachment[] | undefined;
   if (attachmentData) {
-    if (!attachmentData.startsWith("data:image/")) return { error: "Приложить можно только картинку." };
+    // Браузер шлёт JPEG; другие типы в MMS не пойдут — отказ до записи файла на диск.
+    if (!/^data:image\/(jpeg|png|gif);base64,/.test(attachmentData)) return { error: "Приложить можно только картинку JPEG, PNG или GIF." };
     const url = await imageStorage.saveImage(attachmentData).catch(() => null);
     const name = url ? bouquetMediaName(url) : null;
     if (!url || !name) return { error: "Не удалось сохранить картинку — попробуйте ещё раз." };

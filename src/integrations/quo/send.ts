@@ -8,7 +8,7 @@ import "server-only";
  * отправлено», а `previous_attempt_failed`; новая попытка обязана прийти с новым ключом. Клиент должен быть создан БЕЗ авто-ретрая (maxRetries:0), чтобы не
  * повторять POST при неоднозначной сетевой ошибке (неизвестно, принял ли QUO). PII в логи не пишем.
  */
-import { statSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
 import { Prisma, type PrismaClient } from "@/generated/prisma/client";
 import type { QuoClient } from "./client";
 import { uploadedFilePath } from "@/lib/storage";
@@ -320,6 +320,13 @@ function isBrowserMarked(raw: unknown): boolean {
  * ушедшим, а подтверждает его вебхук Quo (`ingest.ts`, сверка по номеру и тексту).
  */
 async function sendViaBrowser(prisma: PrismaClient, send: BrowserSender, o: Outgoing): Promise<SendSmsResult | null> {
+  // Каждой картинке — свой файл на диске. Не нашёлся хоть один — браузером не шлём: ушло бы без
+  // картинки, а лента показала бы её. Через API уйдут ссылки.
+  const files = o.attachments.map((a) => uploadedFilePath(bouquetMediaName(a.url) ?? ""));
+  if (files.some((f) => !f || !existsSync(f))) {
+    quoLog("sms.browser_fallback", { communicationId: o.pendingId, reason: "attachment_missing" });
+    return null;
+  }
   let pressed = false;
   let r: BrowserSendResult;
   try {
@@ -327,7 +334,7 @@ async function sendViaBrowser(prisma: PrismaClient, send: BrowserSender, o: Outg
       fromPhoneNumberId: o.fromId,
       to: o.to,
       text: o.text,
-      files: o.attachments.map((a) => uploadedFilePath(bouquetMediaName(a.url) ?? "")).filter((f): f is string => !!f),
+      files: files as string[],
       // Отметка ДО нажатия: упади воркер сразу после него, повтор задачи второй раз не отправит
       // (`buildQuoSmsSendHandler`), а вебхук найдёт запись по ней.
       beforeSend: async () => {

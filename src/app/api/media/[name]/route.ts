@@ -1,5 +1,6 @@
 import { readFile } from "fs/promises";
 import path from "path";
+import { uploadedFilePath } from "@/lib/storage";
 
 // Раздаёт загруженные файлы из public/uploads. Нужно потому, что `next start` отдаёт из public/
 // ТОЛЬКО файлы, существовавшие на момент сборки; файлы, загруженные в рантайме (аватарки,
@@ -18,16 +19,15 @@ const CONTENT_TYPES: Record<string, string> = {
 export async function GET(_req: Request, { params }: { params: Promise<{ name: string }> }) {
   const { name } = await params;
 
-  // Защита от path traversal: только безопасное базовое имя.
-  if (!/^[A-Za-z0-9._-]+$/.test(name) || name.includes("..")) {
-    return new Response("Not found", { status: 404 });
-  }
+  // Защита от path traversal: только безопасное базовое имя (`uploadedFilePath` — одно правило на всех).
+  const file = uploadedFilePath(name);
+  if (!file) return new Response("Not found", { status: 404 });
   const contentType = CONTENT_TYPES[path.extname(name).toLowerCase()];
   if (!contentType) return new Response("Not found", { status: 404 });
 
   try {
-    const file = await readFile(path.join(process.cwd(), "public", "uploads", name));
-    return new Response(new Uint8Array(file), {
+    const bytes = await readFile(file);
+    return new Response(new Uint8Array(bytes), {
       headers: {
         "Content-Type": contentType,
         "Cache-Control": "public, max-age=31536000, immutable",

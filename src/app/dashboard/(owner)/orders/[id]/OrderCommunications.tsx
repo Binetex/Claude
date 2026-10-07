@@ -101,7 +101,9 @@ export function OrderCommunications({
   const [aiTried, setAiTried] = useState<string[]>([]);
   // Скрепка: картинка к SMS (владелец 07.10.2026). Уходит клиенту картинкой браузером Quo, без
   // браузера — ссылкой (`quo/send.ts`). Ужимается здесь же до JPEG, как фото букета.
-  const [attachment, setAttachment] = useState<string | null>(null);
+  // Картинка помнит вкладку, для которой её выбрали: ужатие идёт секунды, и переключение вкладки
+  // за это время не должно приклеить её к переписке с другой стороной.
+  const [picked, setPicked] = useState<{ key: string; data: string } | null>(null);
   const [attaching, setAttaching] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -126,15 +128,17 @@ export function OrderCommunications({
   const limit = isEmail ? EMAIL_MAX : SMS_MAX;
   const tooLong = text.length > limit;
   // Картинка без текста — тоже сообщение, но только в SMS: к письму вложений нет.
+  const attachment = picked?.key === activeKey ? picked.data : null;
   const hasPicture = !isEmail && !!attachment;
   const disabled = pending || attaching || (!text.trim() && !hasPicture) || tooLong || (isEmail ? !canReply : !storeHasQuoNumber);
 
   async function pickPicture(file: File | undefined) {
     if (!file) return;
+    const key = activeKey;
     setAttaching(true);
     setResult(null);
     try {
-      setAttachment(await compressImage(file));
+      setPicked({ key, data: await compressImage(file) });
     } catch {
       setResult({ error: "Не удалось открыть картинку — попробуйте другую." });
     } finally {
@@ -178,7 +182,7 @@ export function OrderCommunications({
       if (res?.ok) {
         setText("");
         setAiTried([]);
-        setAttachment(null);
+        setPicked(null);
       }
       // Ключ одноразовый и меняется ТАКЖЕ после ошибки: сервер уже записал неудачную попытку под
       // этим ключом, и повтор с ним никогда не дошёл бы до QUO — кнопка «Отправить» молча перестала
@@ -222,7 +226,7 @@ export function OrderCommunications({
                 onClick={() => {
                   setActiveKey(t.key);
                   setAiTried([]);
-                  setAttachment(null); // картинка выбиралась для другой стороны
+                  setPicked(null); // картинка выбиралась для другой стороны
                 }}
                 className={"inline-flex items-center gap-1 rounded-md px-3 py-1 text-xs font-medium " + (isActive ? "bg-sky-600 text-white" : "bg-slate-100 text-slate-700")}
               >
@@ -242,7 +246,7 @@ export function OrderCommunications({
             type="button"
             onClick={() => {
               setActiveKey("EMAIL");
-              setAttachment(null);
+              setPicked(null);
             }}
             className={"inline-flex items-center gap-1 rounded-md px-3 py-1 text-xs font-medium " + (isEmail ? "bg-sky-600 text-white" : "bg-slate-100 text-slate-700")}
           >
@@ -285,7 +289,7 @@ export function OrderCommunications({
                 aria-label="Убрать картинку"
                 title="Убрать картинку"
                 disabled={pending}
-                onClick={() => setAttachment(null)}
+                onClick={() => setPicked(null)}
                 className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-slate-300 text-slate-500 hover:bg-slate-50 disabled:opacity-50"
               >
                 <X className="h-3.5 w-3.5" />
