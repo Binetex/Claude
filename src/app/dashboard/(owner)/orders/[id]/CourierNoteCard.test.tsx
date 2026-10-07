@@ -13,7 +13,6 @@ const render = (courierNote: string, deliveryAlreadyCreated = false) =>
   renderToStaticMarkup(
     <CourierNoteCard
       orderId="o1"
-      updatedAt="2026-09-04T00:00:00.000Z"
       courierNote={courierNote}
       deliveryAlreadyCreated={deliveryAlreadyCreated}
     />

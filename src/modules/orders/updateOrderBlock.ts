@@ -9,16 +9,16 @@ import { manualOrderStatuses } from "@/lib/statuses";
 import { localDateStr, parseLocalDayToUtcMidnight } from "@/lib/tz";
 
 /**
- * Общий сервис редактирования ОДНОГО блока заказа с оптимистической блокировкой (OCC) и
- * аудитом в одной транзакции. Используется тонкими server actions (owner/call-center/florist),
- * чтобы был ЕДИНЫЙ путь обновления заказа.
+ * Общий сервис редактирования ОДНОГО блока заказа с аудитом в одной транзакции. Используется
+ * тонкими server actions (owner/call-center/florist), чтобы был ЕДИНЫЙ путь обновления заказа.
  *
- * OCC: атомарный updateMany по (id + updatedAt = expectedUpdatedAt). Если строку уже изменил
- * другой пользователь — count === 0 → CONFLICT (без записи, без audit), возвращаем свежие значения
- * из БД, чтобы UI показал их пользователю. Никакого silent overwrite.
+ * Пишутся ТОЛЬКО присланные поля, и формы присылают только то, что человек изменил. Сверки
+ * версии строки («заказ изменён другим пользователем») НЕТ (владелец 07.10.2026): версия была
+ * одна на весь заказ, а заказ всё время трогает сама система — синхронизация с сайтом, Burq, ИИ,
+ * финансы, — и почти каждое сохранение кончалось ложным конфликтом. Кто что менял — в аудите.
  *
- * Обновляются ТОЛЬКО поля выбранного блока. `changed` в аудите — только реально изменившиеся
- * поля (before/after), без секретов/паролей (в этих блоках их нет).
+ * `changed` в аудите — только реально изменившиеся поля (before/after), без секретов/паролей
+ * (в этих блоках их нет).
  */
 
 export type OrderBlock = "contacts" | "sender" | "status" | "delivery" | "cardNote" | "courierNote";
@@ -29,8 +29,7 @@ export type BlockFormData = Record<string, string | null | undefined>;
 export type OrderBlockChange = { from: unknown; to: unknown };
 
 export type UpdateOrderBlockResult =
-  | { status: "ok"; updatedAt: string; changed: Record<string, OrderBlockChange> }
-  | { status: "conflict"; current: Record<string, string>; updatedAt: string }
+  | { status: "ok"; changed: Record<string, OrderBlockChange> }
   | { status: "notfound" }
   | { status: "invalid"; error: string };
 
@@ -138,15 +137,6 @@ function fieldToString(key: string, value: unknown): string {
   return String(value);
 }
 
-/** Приводит строку заказа к «плоскому» виду, который понимает форма UI. */
-function toFormShape(block: OrderBlock, row: Record<string, unknown>): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const key of Object.keys(BLOCK_SELECT[block])) {
-    out[key] = fieldToString(key, row[key]);
-  }
-  return out;
-}
-
 /** Только реально изменившиеся поля блока: { field: { from, to } }. */
 function diffChanged(block: OrderBlock, before: Record<string, unknown>, after: Record<string, unknown>) {
   const changed: Record<string, OrderBlockChange> = {};
@@ -161,7 +151,6 @@ function diffChanged(block: OrderBlock, before: Record<string, unknown>, after: 
 export async function updateOrderBlock(input: {
   orderId: string;
   block: OrderBlock;
-  expectedUpdatedAt: string;
   data: BlockFormData;
   actor: { userId: string; role: Role };
 }): Promise<UpdateOrderBlockResult> {
@@ -169,37 +158,20 @@ export async function updateOrderBlock(input: {
   if ("error" in built) return { status: "invalid", error: built.error };
 
   const select = BLOCK_SELECT[input.block];
-  const selectWithTs = { ...select, updatedAt: true } as Prisma.OrderSelect;
-  const expected = new Date(input.expectedUpdatedAt);
-  if (Number.isNaN(expected.getTime())) return { status: "invalid", error: "Некорректная версия записи." };
 
   // Дни, чей финансовый итог изменился этой правкой. Заполняются внутри транзакции, а
   // пересчёт запускается ПОСЛЕ коммита: он читает заказ из базы и внутри транзакции увидел
   // бы ещё не зафиксированные данные.
   const affectedDays: Date[] = [];
 
-  // Тип возврата указан явно: без него литеральные "ok"/"conflict" расширяются до string,
+  // Тип возврата указан явно: без него литеральные "ok"/"notfound" расширяются до string,
   // потому что результат больше не возвращается напрямую из функции.
   const result = await prisma.$transaction(async (tx): Promise<UpdateOrderBlockResult> => {
     const before = await tx.order.findUnique({ where: { id: input.orderId }, select });
     if (!before) return { status: "notfound" };
 
-    // Атомарная OCC: обновит строку только если updatedAt всё ещё равен ожидаемому.
-    const upd = await tx.order.updateMany({
-      where: { id: input.orderId, updatedAt: expected },
-      data: built.data,
-    });
-
-    if (upd.count === 0) {
-      // Кто-то изменил заказ раньше — читаем СВЕЖИЕ значения (не before, оно могло устареть).
-      const fresh = await tx.order.findUnique({ where: { id: input.orderId }, select: selectWithTs });
-      if (!fresh) return { status: "notfound" };
-      const { updatedAt, ...rest } = fresh as Record<string, unknown> & { updatedAt: Date };
-      return { status: "conflict", current: toFormShape(input.block, rest), updatedAt: updatedAt.toISOString() };
-    }
-
-    const after = await tx.order.findUnique({ where: { id: input.orderId }, select: selectWithTs });
-    const { updatedAt, ...afterRest } = after as Record<string, unknown> & { updatedAt: Date };
+    const after = await tx.order.update({ where: { id: input.orderId }, data: built.data, select });
+    const afterRest = after as Record<string, unknown>;
     const changed = diffChanged(input.block, before as Record<string, unknown>, afterRest);
 
     // Что меняет состав финансового дня: статус (заказ входит в день по «Доставлен») и дата
@@ -225,7 +197,7 @@ export async function updateOrderBlock(input: {
       },
     });
 
-    return { status: "ok", updatedAt: updatedAt.toISOString(), changed };
+    return { status: "ok", changed };
   });
 
   if (result.status === "ok" && affectedDays.length > 0) {

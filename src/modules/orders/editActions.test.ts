@@ -29,13 +29,13 @@ beforeEach(() => {
   updateOrderBlock.mockReset();
   syncOrderToShopify.mockClear();
   onOrderDeliveryChangeSafe.mockClear();
-  updateOrderBlock.mockResolvedValue({ status: "ok", updatedAt: "2026-07-21T12:00:00.000Z" });
+  updateOrderBlock.mockResolvedValue({ status: "ok", changed: {} });
 });
 
 describe("saveOrderBlock — call-center", () => {
   it("редактирует контакты и запускает Shopify sync + re-plan", async () => {
     requireOrderEditor.mockResolvedValue({ id: "u-cc", role: "CALL_CENTER", floristId: null });
-    const res = await saveOrderBlock("o1", "contacts", "v0", { recipientName: "X" });
+    const res = await saveOrderBlock("o1", "contacts", { recipientName: "X" });
     expect(res.status).toBe("ok");
     expect(findUnique).not.toHaveBeenCalled(); // проверка владения только для флориста
     expect(updateOrderBlock).toHaveBeenCalledTimes(1);
@@ -47,7 +47,7 @@ describe("saveOrderBlock — call-center", () => {
 describe("saveOrderBlock — owner", () => {
   it("меняет статус без побочных эффектов доставки", async () => {
     requireOrderEditor.mockResolvedValue({ id: "u-o", role: "OWNER", floristId: null });
-    await saveOrderBlock("o1", "status", "v0", { orderStatus: "READY" });
+    await saveOrderBlock("o1", "status", { orderStatus: "READY" });
     expect(updateOrderBlock).toHaveBeenCalledTimes(1);
     expect(syncOrderToShopify).not.toHaveBeenCalled();
     expect(onOrderDeliveryChangeSafe).not.toHaveBeenCalled();
@@ -58,7 +58,7 @@ describe("saveOrderBlock — florist ownership", () => {
   it("свой заказ (currentFloristId совпадает) → редактирует", async () => {
     requireOrderEditor.mockResolvedValue({ id: "u-f", role: "FLORIST", floristId: "f1" });
     findUnique.mockResolvedValue({ currentFloristId: "f1" });
-    const res = await saveOrderBlock("o1", "cardNote", "v0", { cardMessage: "hi" });
+    const res = await saveOrderBlock("o1", "cardNote", { cardMessage: "hi" });
     expect(res.status).toBe("ok");
     expect(updateOrderBlock).toHaveBeenCalledTimes(1);
   });
@@ -66,7 +66,7 @@ describe("saveOrderBlock — florist ownership", () => {
   it("ЧУЖОЙ заказ → forbidden, сервис не вызывается", async () => {
     requireOrderEditor.mockResolvedValue({ id: "u-f", role: "FLORIST", floristId: "f1" });
     findUnique.mockResolvedValue({ currentFloristId: "f2" });
-    const res = await saveOrderBlock("o1", "contacts", "v0", { recipientName: "X" });
+    const res = await saveOrderBlock("o1", "contacts", { recipientName: "X" });
     expect(res).toEqual({ status: "forbidden" });
     expect(updateOrderBlock).not.toHaveBeenCalled();
     expect(syncOrderToShopify).not.toHaveBeenCalled();
@@ -75,7 +75,7 @@ describe("saveOrderBlock — florist ownership", () => {
   it("флорист без профиля (floristId=null) → forbidden", async () => {
     requireOrderEditor.mockResolvedValue({ id: "u-f", role: "FLORIST", floristId: null });
     findUnique.mockResolvedValue({ currentFloristId: "f1" });
-    const res = await saveOrderBlock("o1", "status", "v0", { orderStatus: "READY" });
+    const res = await saveOrderBlock("o1", "status", { orderStatus: "READY" });
     expect(res).toEqual({ status: "forbidden" });
     expect(updateOrderBlock).not.toHaveBeenCalled();
   });

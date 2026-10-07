@@ -1,7 +1,7 @@
 /**
- * DB integration: оптимистическая блокировка (OCC) + аудит редактирования блоков заказа на
- * ЖИВОЙ локальной БД (реальные updateMany + @updatedAt). Проверяет то, что нельзя проверить на
- * моках: реальную гонку версий, изоляцию полей блока и запись OrderAudit.
+ * DB integration: редактирование блоков заказа и аудит на ЖИВОЙ локальной БД. Проверяет то, что
+ * нельзя проверить на моках: правка не спотыкается о системные изменения заказа, изоляцию полей
+ * блока и запись OrderAudit.
  *
  * Запуск: DATABASE_URL=<local> npx vitest run --no-file-parallelism src/modules/orders/updateOrderBlock.integration.test.ts
  */
@@ -59,37 +59,26 @@ afterAll(async () => {
   await prisma.site.deleteMany({ where: { id: siteId } });
 });
 
-describe("OCC — гонка двух пользователей на одной версии", () => {
-  it("первый сохраняет, второй (та же версия) → CONFLICT без перезаписи; после reload — сохраняет", async () => {
-    const o = await makeOrder("race");
-    const actor = { userId, role: "CALL_CENTER" as const };
+describe("без сверки версии заказа", () => {
+  it("систему, тронувшую заказ после открытия карточки, правка не спотыкается и чужое поле не затирает", async () => {
+    // Владелец 07.10.2026: «постоянно пишет, что изменено другим пользователем, и пока несколько
+    // раз не прокликаю сохранить — не уходит». Заказ трогает сама система (синк сайта, Burq, ИИ
+    // дописывает заметку), а версия была одна на всю строку.
+    const o = await makeOrder("touched");
+    await prisma.order.update({ where: { id: o.id }, data: { customerNote: "ИИ: клиент дома после 5" } });
 
-    // Оба «загрузили» одну версию o.updatedAt.
-    const first = await updateOrderBlock({ orderId: o.id, block: "status", expectedUpdatedAt: o.updatedAt, data: { orderStatus: "IN_PROGRESS" }, actor });
-    expect(first.status).toBe("ok");
-
-    const second = await updateOrderBlock({ orderId: o.id, block: "status", expectedUpdatedAt: o.updatedAt, data: { orderStatus: "READY" }, actor });
-    expect(second.status).toBe("conflict");
-    if (second.status !== "conflict") throw new Error("unreachable");
-    expect(second.current.orderStatus).toBe("IN_PROGRESS"); // значение первого, не перезатёрто
-
-    // В БД осталось значение первого пользователя.
-    const dbNow = await prisma.order.findUniqueOrThrow({ where: { id: o.id }, select: { orderStatus: true } });
-    expect(dbNow.orderStatus).toBe("IN_PROGRESS");
-
-    // Reload: используем свежую версию из конфликта → сохранение проходит.
-    const retry = await updateOrderBlock({ orderId: o.id, block: "status", expectedUpdatedAt: second.updatedAt, data: { orderStatus: "READY" }, actor });
-    expect(retry.status).toBe("ok");
-    const dbFinal = await prisma.order.findUniqueOrThrow({ where: { id: o.id }, select: { orderStatus: true } });
-    expect(dbFinal.orderStatus).toBe("READY");
+    const res = await updateOrderBlock({ orderId: o.id, block: "status", data: { orderStatus: "READY" }, actor: { userId, role: "OWNER" } });
+    expect(res.status).toBe("ok");
+    const db = await prisma.order.findUniqueOrThrow({ where: { id: o.id }, select: { orderStatus: true, customerNote: true } });
+    expect(db).toEqual({ orderStatus: "READY", customerNote: "ИИ: клиент дома после 5" });
   });
 });
 
-describe("OCC — изоляция полей блока", () => {
+describe("изоляция полей блока", () => {
   it("сохранение блока contacts не трогает cardMessage/orderStatus/deliveryWindow", async () => {
     const o = await makeOrder("iso");
     const res = await updateOrderBlock({
-      orderId: o.id, block: "contacts", expectedUpdatedAt: o.updatedAt,
+      orderId: o.id, block: "contacts", 
       data: { recipientName: "New R", recipientPhone: "3105559999", addressLine: "2 St", city: "SF", zip: "94101" },
       actor: { userId, role: "CALL_CENTER" },
     });
@@ -107,7 +96,7 @@ describe("Аудит — только изменённые поля", () => {
   it("пишет OrderAudit с блоком/ролью и только изменёнными полями (без секретов)", async () => {
     const o = await makeOrder("audit");
     await updateOrderBlock({
-      orderId: o.id, block: "cardNote", expectedUpdatedAt: o.updatedAt,
+      orderId: o.id, block: "cardNote", 
       data: { cardMessage: "Changed", customerNote: "NOTE" }, // note не менялся
       actor: { userId, role: "CALL_CENTER" },
     });

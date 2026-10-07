@@ -15,7 +15,7 @@ import { CardNoteCard } from "./CardNoteCard";
 const render = (cardMessage: string) =>
   renderToStaticMarkup(
     <TooltipProvider>
-      <CardNoteCard orderId="o1" updatedAt="2026-08-06T00:00:00.000Z" cardMessage={cardMessage} collapsible />
+      <CardNoteCard orderId="o1" cardMessage={cardMessage} collapsible />
     </TooltipProvider>
   );
 

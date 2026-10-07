@@ -14,7 +14,7 @@ import { CustomerNoteBanner } from "./CustomerNoteBanner";
 const render = (customerNote: string) =>
   renderToStaticMarkup(
     <TooltipProvider>
-      <CustomerNoteBanner orderId="o1" updatedAt="2026-09-04T00:00:00.000Z" customerNote={customerNote} />
+      <CustomerNoteBanner orderId="o1" customerNote={customerNote} />
     </TooltipProvider>
   );
 

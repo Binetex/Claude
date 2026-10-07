@@ -4,7 +4,7 @@ import { Truck, Pencil } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { COURIER_NOTE_MAX } from "@/lib/courierNote";
-import { useBlockSave, ConflictNotice } from "./orderEditShared";
+import { useBlockSave } from "./orderEditShared";
 
 /**
  * Инструкция КУРЬЕРУ — единственное поле заказа, которое уезжает в Burq.
@@ -21,12 +21,10 @@ import { useBlockSave, ConflictNotice } from "./orderEditShared";
  */
 export function CourierNoteCard({
   orderId,
-  updatedAt,
   courierNote,
   deliveryAlreadyCreated,
 }: {
   orderId: string;
-  updatedAt: string;
   courierNote: string;
   /** У созданного черновика Burq инструкцию уже не изменить — предупреждаем честно. */
   deliveryAlreadyCreated: boolean;
@@ -43,9 +41,7 @@ export function CourierNoteCard({
     }
   }
 
-  const { pending, conflict, save, acceptCurrentVersion } = useBlockSave(orderId, "courierNote", updatedAt, {
-    hasUnsavedChanges: editing && draft !== note,
-  });
+  const { pending, save } = useBlockSave(orderId, "courierNote");
 
   const tooLong = draft.trim().length > COURIER_NOTE_MAX;
 
@@ -90,20 +86,6 @@ export function CourierNoteCard({
           стандартный текст.
         </p>
         {warning}
-        {conflict && (
-          <ConflictNotice
-            current={conflict.current}
-            labels={[{ k: "courierNote", label: "Инструкция курьеру" }]}
-            onRefresh={() =>
-              acceptCurrentVersion((current) => {
-                if ("courierNote" in current) {
-                  setNote(current.courierNote);
-                  setDraft(current.courierNote);
-                }
-              })
-            }
-          />
-        )}
         <div className="flex justify-end gap-2">
           <Button size="sm" variant="ghost" disabled={pending} onClick={() => { setDraft(note); setEditing(false); }}>
             Отмена

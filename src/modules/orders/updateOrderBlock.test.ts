@@ -1,15 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 /**
- * Юнит-тесты логики OCC/аудита сервиса updateOrderBlock на мокнутом Prisma (без БД).
- * Проверяют ветвление: успех пишет аудит только по изменённым полям; конфликт (count=0)
- * возвращает свежие значения и НЕ пишет аудит и НЕ перезаписывает; обновляются только поля
- * блока; нормализация телефона; валидация статуса. Реальную гонку двух транзакций проверяет
- * updateOrderBlock.integration.test.ts (на живой БД).
+ * Юнит-тесты сервиса updateOrderBlock на мокнутом Prisma (без БД): успех пишет аудит только по
+ * изменённым полям; обновляются только присланные поля блока, строго по id — без сверки версии
+ * заказа; нормализация телефона; валидация статуса.
  */
 
 const tx = {
-  order: { findUnique: vi.fn(), updateMany: vi.fn() },
+  order: { findUnique: vi.fn(), update: vi.fn() },
   orderAudit: { create: vi.fn() },
 };
 const $transaction = vi.fn(async (fn: (t: typeof tx) => unknown) => fn(tx));
@@ -18,12 +16,10 @@ vi.mock("@/lib/db", () => ({ prisma: { $transaction: (fn: (t: typeof tx) => unkn
 
 import { updateOrderBlock } from "./updateOrderBlock";
 
-const EXPECTED = "2026-07-21T10:00:00.000Z";
-const NEW_TS = new Date("2026-07-21T12:00:00.000Z");
 
 beforeEach(() => {
   tx.order.findUnique.mockReset();
-  tx.order.updateMany.mockReset();
+  tx.order.update.mockReset();
   tx.orderAudit.create.mockReset();
   $transaction.mockClear();
   tx.orderAudit.create.mockResolvedValue({});
@@ -32,24 +28,25 @@ beforeEach(() => {
 describe("updateOrderBlock — успех (контакты, роль CALL_CENTER)", () => {
   it("обновляет только поля блока и пишет аудит только по изменённым полям", async () => {
     const before = { recipientName: "Old", recipientPhone: "+13105550001", recipientEmail: null, addressLine: "1 St", apartment: null, city: "Austin", zip: "78701" };
-    const after = { ...before, recipientName: "New Name", updatedAt: NEW_TS };
-    tx.order.findUnique.mockResolvedValueOnce(before).mockResolvedValueOnce(after);
-    tx.order.updateMany.mockResolvedValueOnce({ count: 1 });
+    const after = { ...before, recipientName: "New Name" };
+    tx.order.findUnique.mockResolvedValueOnce(before);
+    tx.order.update.mockResolvedValueOnce(after);
 
     const res = await updateOrderBlock({
-      orderId: "o1", block: "contacts", expectedUpdatedAt: EXPECTED,
+      orderId: "o1", block: "contacts",
       data: { recipientName: "New Name", recipientPhone: "+13105550001", recipientEmail: "", addressLine: "1 St", apartment: "", city: "Austin", zip: "78701" },
       actor: { userId: "u-cc", role: "CALL_CENTER" },
     });
 
-    expect(res).toEqual({ status: "ok", updatedAt: NEW_TS.toISOString(), changed: { recipientName: { from: "Old", to: "New Name" } } });
+    expect(res).toEqual({ status: "ok", changed: { recipientName: { from: "Old", to: "New Name" } } });
 
-    // OCC: updateMany строго по id + ожидаемой версии.
-    const where = tx.order.updateMany.mock.calls[0][0].where;
-    expect(where).toEqual({ id: "o1", updatedAt: new Date(EXPECTED) });
+    // Строго по id: версии заказа больше нет — её сдвигала сама система, и сохранение
+    // кончалось ложным «изменён другим пользователем» (владелец 07.10.2026).
+    const where = tx.order.update.mock.calls[0][0].where;
+    expect(where).toEqual({ id: "o1" });
 
     // Обновляются ТОЛЬКО поля блока «contacts» — никаких status/cardMessage/delivery.
-    const data = tx.order.updateMany.mock.calls[0][0].data;
+    const data = tx.order.update.mock.calls[0][0].data;
     expect(Object.keys(data).sort()).toEqual(["addressLine", "apartment", "city", "recipientEmail", "recipientName", "recipientPhone", "zip"]);
 
     // Аудит: та же транзакция, блок/роль/только изменённые поля.
@@ -63,74 +60,60 @@ describe("updateOrderBlock — успех (контакты, роль CALL_CENTE
 
 describe("updateOrderBlock — florist меняет дату и статус", () => {
   it("статус (роль FLORIST) — ок", async () => {
-    tx.order.findUnique.mockResolvedValueOnce({ orderStatus: "CONFIRMED" }).mockResolvedValueOnce({ orderStatus: "READY", updatedAt: NEW_TS });
-    tx.order.updateMany.mockResolvedValueOnce({ count: 1 });
-    const res = await updateOrderBlock({ orderId: "o1", block: "status", expectedUpdatedAt: EXPECTED, data: { orderStatus: "READY" }, actor: { userId: "u-f", role: "FLORIST" } });
+    tx.order.findUnique.mockResolvedValueOnce({ orderStatus: "CONFIRMED" });
+    tx.order.update.mockResolvedValueOnce({ orderStatus: "READY" });
+    const res = await updateOrderBlock({ orderId: "o1", block: "status", data: { orderStatus: "READY" }, actor: { userId: "u-f", role: "FLORIST" } });
     expect(res.status).toBe("ok");
-    expect(tx.order.updateMany.mock.calls[0][0].data).toEqual({ orderStatus: "READY" });
+    expect(tx.order.update.mock.calls[0][0].data).toEqual({ orderStatus: "READY" });
     expect(tx.orderAudit.create.mock.calls[0][0].data).toMatchObject({ role: "FLORIST", block: "status", changed: { orderStatus: { from: "CONFIRMED", to: "READY" } } });
   });
 
   it("дата доставки — строка приводится к Date", async () => {
-    tx.order.findUnique.mockResolvedValueOnce({ deliveryDate: new Date("2026-07-20T00:00:00.000Z"), deliveryWindow: "10-12" }).mockResolvedValueOnce({ deliveryDate: new Date("2026-07-22T00:00:00.000Z"), deliveryWindow: "12-16", updatedAt: NEW_TS });
-    tx.order.updateMany.mockResolvedValueOnce({ count: 1 });
-    const res = await updateOrderBlock({ orderId: "o1", block: "delivery", expectedUpdatedAt: EXPECTED, data: { deliveryDate: "2026-07-22", deliveryWindow: "12-16" }, actor: { userId: "u-f", role: "FLORIST" } });
+    tx.order.findUnique.mockResolvedValueOnce({ deliveryDate: new Date("2026-07-20T00:00:00.000Z"), deliveryWindow: "10-12" });
+    tx.order.update.mockResolvedValueOnce({ deliveryDate: new Date("2026-07-22T00:00:00.000Z"), deliveryWindow: "12-16" });
+    const res = await updateOrderBlock({ orderId: "o1", block: "delivery", data: { deliveryDate: "2026-07-22", deliveryWindow: "12-16" }, actor: { userId: "u-f", role: "FLORIST" } });
     expect(res.status).toBe("ok");
-    expect(tx.order.updateMany.mock.calls[0][0].data.deliveryDate).toBeInstanceOf(Date);
+    expect(tx.order.update.mock.calls[0][0].data.deliveryDate).toBeInstanceOf(Date);
     // Окно строго «с — до»: текст разобран в числа и записан системой одним форматом.
-    expect(tx.order.updateMany.mock.calls[0][0].data.deliveryWindow).toBe("12:00 - 16:00");
-    expect(tx.order.updateMany.mock.calls[0][0].data.windowFrom).toBe(720);
-    expect(tx.order.updateMany.mock.calls[0][0].data.windowTo).toBe(960);
+    expect(tx.order.update.mock.calls[0][0].data.deliveryWindow).toBe("12:00 - 16:00");
+    expect(tx.order.update.mock.calls[0][0].data.windowFrom).toBe(720);
+    expect(tx.order.update.mock.calls[0][0].data.windowTo).toBe(960);
   });
 });
 
 describe("updateOrderBlock — нормализация телефона (sender)", () => {
   it("телефон без + получает код страны", async () => {
-    tx.order.findUnique.mockResolvedValueOnce({ senderName: "A", senderPhone: "+13105550000", senderEmail: null }).mockResolvedValueOnce({ senderName: "A", senderPhone: "+13105551234", senderEmail: null, updatedAt: NEW_TS });
-    tx.order.updateMany.mockResolvedValueOnce({ count: 1 });
-    await updateOrderBlock({ orderId: "o1", block: "sender", expectedUpdatedAt: EXPECTED, data: { senderName: "A", senderPhone: "3105551234" }, actor: { userId: "u", role: "OWNER" } });
-    expect(tx.order.updateMany.mock.calls[0][0].data.senderPhone).toBe("+13105551234");
-  });
-});
-
-describe("updateOrderBlock — конфликт версий (OCC)", () => {
-  it("count=0 → CONFLICT: свежие значения из БД, БЕЗ аудита и БЕЗ перезаписи", async () => {
-    const before = { orderStatus: "CONFIRMED" };
-    const fresh = { orderStatus: "IN_PROGRESS", updatedAt: NEW_TS }; // другой пользователь уже поменял
-    tx.order.findUnique.mockResolvedValueOnce(before).mockResolvedValueOnce(fresh);
-    tx.order.updateMany.mockResolvedValueOnce({ count: 0 });
-
-    const res = await updateOrderBlock({ orderId: "o1", block: "status", expectedUpdatedAt: EXPECTED, data: { orderStatus: "READY" }, actor: { userId: "u", role: "CALL_CENTER" } });
-
-    expect(res).toEqual({ status: "conflict", current: { orderStatus: "IN_PROGRESS" }, updatedAt: NEW_TS.toISOString() });
-    expect(tx.orderAudit.create).not.toHaveBeenCalled(); // нет аудита при конфликте
+    tx.order.findUnique.mockResolvedValueOnce({ senderName: "A", senderPhone: "+13105550000", senderEmail: null });
+    tx.order.update.mockResolvedValueOnce({ senderName: "A", senderPhone: "+13105551234", senderEmail: null });
+    await updateOrderBlock({ orderId: "o1", block: "sender", data: { senderName: "A", senderPhone: "3105551234" }, actor: { userId: "u", role: "OWNER" } });
+    expect(tx.order.update.mock.calls[0][0].data.senderPhone).toBe("+13105551234");
   });
 });
 
 describe("updateOrderBlock — валидация", () => {
   it("недопустимый статус → invalid, транзакция не открывается", async () => {
-    const res = await updateOrderBlock({ orderId: "o1", block: "status", expectedUpdatedAt: EXPECTED, data: { orderStatus: "AWAITING_PAYMENT" }, actor: { userId: "u", role: "OWNER" } });
+    const res = await updateOrderBlock({ orderId: "o1", block: "status", data: { orderStatus: "AWAITING_PAYMENT" }, actor: { userId: "u", role: "OWNER" } });
     expect(res.status).toBe("invalid");
     expect($transaction).not.toHaveBeenCalled();
   });
 
   it("несуществующий заказ → notfound", async () => {
     tx.order.findUnique.mockResolvedValueOnce(null);
-    const res = await updateOrderBlock({ orderId: "nope", block: "status", expectedUpdatedAt: EXPECTED, data: { orderStatus: "READY" }, actor: { userId: "u", role: "OWNER" } });
+    const res = await updateOrderBlock({ orderId: "nope", block: "status", data: { orderStatus: "READY" }, actor: { userId: "u", role: "OWNER" } });
     expect(res.status).toBe("notfound");
-    expect(tx.order.updateMany).not.toHaveBeenCalled();
+    expect(tx.order.update).not.toHaveBeenCalled();
   });
 });
 
 describe("updateOrderBlock — окно из выбора времени", () => {
   it("«с — до» из формы: числа и текст одним форматом; «до» раньше «с» — ошибка", async () => {
-    tx.order.findUnique.mockResolvedValueOnce({ deliveryDate: new Date("2026-07-20T00:00:00.000Z"), deliveryWindow: "11:00 - 15:00", windowFrom: 660, windowTo: 900 }).mockResolvedValueOnce({ deliveryDate: new Date("2026-07-20T00:00:00.000Z"), deliveryWindow: "17:00 - 21:00", windowFrom: 1020, windowTo: 1260, updatedAt: NEW_TS });
-    tx.order.updateMany.mockResolvedValueOnce({ count: 1 });
-    const ok = await updateOrderBlock({ orderId: "o1", block: "delivery", expectedUpdatedAt: EXPECTED, data: { windowFrom: "17:00", windowTo: "21:00" }, actor: { userId: "u-o", role: "OWNER" } });
+    tx.order.findUnique.mockResolvedValueOnce({ deliveryDate: new Date("2026-07-20T00:00:00.000Z"), deliveryWindow: "11:00 - 15:00", windowFrom: 660, windowTo: 900 });
+    tx.order.update.mockResolvedValueOnce({ deliveryDate: new Date("2026-07-20T00:00:00.000Z"), deliveryWindow: "17:00 - 21:00", windowFrom: 1020, windowTo: 1260 });
+    const ok = await updateOrderBlock({ orderId: "o1", block: "delivery", data: { windowFrom: "17:00", windowTo: "21:00" }, actor: { userId: "u-o", role: "OWNER" } });
     expect(ok.status).toBe("ok");
-    expect(tx.order.updateMany.mock.calls.at(-1)![0].data).toMatchObject({ windowFrom: 1020, windowTo: 1260, deliveryWindow: "17:00 - 21:00" });
+    expect(tx.order.update.mock.calls.at(-1)![0].data).toMatchObject({ windowFrom: 1020, windowTo: 1260, deliveryWindow: "17:00 - 21:00" });
 
-    const bad = await updateOrderBlock({ orderId: "o1", block: "delivery", expectedUpdatedAt: EXPECTED, data: { windowFrom: "18:00", windowTo: "17:00" }, actor: { userId: "u-o", role: "OWNER" } });
+    const bad = await updateOrderBlock({ orderId: "o1", block: "delivery", data: { windowFrom: "18:00", windowTo: "17:00" }, actor: { userId: "u-o", role: "OWNER" } });
     expect(bad.status).toBe("invalid");
   });
 });

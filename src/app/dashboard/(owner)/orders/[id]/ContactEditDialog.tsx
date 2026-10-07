@@ -6,7 +6,7 @@ import { Dialog, DialogTrigger, DialogContent, DialogHeader, DialogTitle, Dialog
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { useBlockSave, ConflictNotice } from "./orderEditShared";
+import { useBlockSave } from "./orderEditShared";
 import { checkUnlinkedComms, attachUnlinkedComms } from "@/modules/orders/editActions";
 
 type FieldDef = { k: string; label: string; wide?: boolean };
@@ -28,39 +28,53 @@ const SENDER_FIELDS: FieldDef[] = [
 
 /**
  * Иконка-редактирование на карточке «Отправитель»/«Получатель» → модалка с полями.
- * Единый путь сохранения (OCC): владелец/колл-центр/флорист. Показываются только те поля,
- * что переданы в `initial` (например, флористу отправитель отдаётся без email).
+ * Единый путь сохранения: владелец/колл-центр/флорист. Показываются только те поля, что
+ * переданы в `initial` (например, флористу отправитель отдаётся без email). Уходят ТОЛЬКО
+ * изменённые поля: нетронутые не перетрутся копией, снятой при открытии.
  */
 export function ContactEditDialog({
   kind,
   orderId,
-  updatedAt,
   initial,
 }: {
   kind: "recipient" | "sender";
   orderId: string;
-  updatedAt: string;
   initial: Record<string, string>;
 }) {
   const [open, setOpen] = useState(false);
   const [f, setF] = useState<Record<string, string>>(initial);
+  // Что было в полях при открытии — с этим сравниваем, чтобы отправить только изменённое.
+  const [base, setBase] = useState<Record<string, string>>(initial);
   const [unlinked, setUnlinked] = useState<{ count: number } | null>(null);
   const [busy, startBusy] = useTransition();
   const block = kind === "recipient" ? "contacts" : "sender";
   const side = kind === "recipient" ? "RECIPIENT" : "CUSTOMER";
   const phoneKey = kind === "recipient" ? "recipientPhone" : "senderPhone";
-  const { pending, conflict, save, acceptCurrentVersion } = useBlockSave(orderId, block, updatedAt);
+  const { pending, save } = useBlockSave(orderId, block);
 
   const allFields = kind === "recipient" ? RECIPIENT_FIELDS : SENDER_FIELDS;
   const fields = allFields.filter((fl) => fl.k in initial);
   const title = kind === "recipient" ? "Получатель" : "Отправитель";
 
+  /** Открыли — в полях текущие данные заказа, а не то, что осталось с прошлого открытия. */
+  function onOpenChange(next: boolean) {
+    if (next) {
+      setF(initial);
+      setBase(initial);
+      setUnlinked(null);
+    }
+    setOpen(next);
+  }
+
   function submit() {
-    // Отправляем только видимые поля блока.
     const data: Record<string, string> = {};
-    for (const fl of fields) data[fl.k] = f[fl.k] ?? "";
-    const phoneChanged = (f[phoneKey] ?? "") !== (initial[phoneKey] ?? "");
-    // onOk НЕ вызывается при OCC-конфликте (useBlockSave) → при конфликте ничего не ищем.
+    for (const fl of fields) if ((f[fl.k] ?? "") !== (base[fl.k] ?? "")) data[fl.k] = f[fl.k] ?? "";
+    if (Object.keys(data).length === 0) {
+      setOpen(false); // ничего не меняли — сохранять нечего
+      return;
+    }
+    const phoneChanged = phoneKey in data;
+    // onOk не вызывается при ошибке сохранения → тогда ничего не ищем.
     save(data, {
       successMessage: `${title} обновлён`,
       onOk: () => {
@@ -84,16 +98,8 @@ export function ContactEditDialog({
     });
   }
 
-  function refreshFromDb(current: Record<string, string>) {
-    setF((prev) => {
-      const next = { ...prev };
-      for (const fl of fields) if (fl.k in current) next[fl.k] = current[fl.k];
-      return next;
-    });
-  }
-
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogTrigger asChild>
         <Button variant="ghost" size="iconSm" title="Редактировать">
           <Pencil />
@@ -113,11 +119,6 @@ export function ContactEditDialog({
             </div>
           ))}
         </div>
-        {conflict && (
-          <div className="mt-4">
-            <ConflictNotice current={conflict.current} labels={fields} onRefresh={() => acceptCurrentVersion(refreshFromDb)} />
-          </div>
-        )}
         {unlinked ? (
           <div className="mt-4 space-y-2 rounded-lg border border-sky-200 bg-sky-50 p-3 text-sm">
             <p className="text-sky-800">По новому номеру найдено непривязанных сообщений: <b>{unlinked.count}</b>. Привязать их к этому заказу?</p>

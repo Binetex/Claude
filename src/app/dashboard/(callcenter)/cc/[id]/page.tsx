@@ -97,14 +97,13 @@ export default async function CallCenterOrderPage({
       deliveryAction={
         <DeliveryDateDialog
           orderId={order.id}
-          updatedAt={order.updatedAt}
           deliveryDate={localDateStr(new Date(order.deliveryDate), "UTC")}
           window={windowOf(order)}
           presets={windowPresets}
         />
       }
       belowDelivery={
-        <CustomerNoteBanner orderId={order.id} updatedAt={order.updatedAt} customerNote={order.customerNote} />
+        <CustomerNoteBanner orderId={order.id} customerNote={order.customerNote} />
       }
       left={
         <>
@@ -132,7 +131,6 @@ export default async function CallCenterOrderPage({
                 <ContactEditDialog
                   kind="recipient"
                   orderId={order.id}
-                  updatedAt={order.updatedAt}
                   initial={{
                     recipientName: order.recipientName,
                     recipientPhone: order.recipientPhone,
@@ -153,7 +151,6 @@ export default async function CallCenterOrderPage({
                 <ContactEditDialog
                   kind="sender"
                   orderId={order.id}
-                  updatedAt={order.updatedAt}
                   initial={{ senderName: order.senderName, senderPhone: order.senderPhone, senderEmail: order.senderEmail ?? "" }}
                 />
               ),
@@ -162,7 +159,6 @@ export default async function CallCenterOrderPage({
 
           <CardNoteCard
             orderId={order.id}
-            updatedAt={order.updatedAt}
             cardMessage={order.cardMessage}
             collapsible
           />
@@ -197,7 +193,6 @@ export default async function CallCenterOrderPage({
 
                 orderId={order.id}
 
-                updatedAt={order.updatedAt}
 
                 courierNote={order.courierNote}
 
@@ -211,7 +206,7 @@ export default async function CallCenterOrderPage({
       }
       right={
         <>
-          <OrderStatusCard orderId={order.id} updatedAt={order.updatedAt} orderStatus={order.orderStatus} />
+          <OrderStatusCard orderId={order.id} orderStatus={order.orderStatus} />
 
           <OrderQuickActions
             orderId={order.id}

@@ -8,10 +8,10 @@ import { Button } from "@/components/ui/button";
 import { Tooltip } from "@/components/ui/tooltip";
 import { Select } from "@/components/ui/select";
 import type { OrderStatus } from "@/generated/prisma/enums";
-import { useBlockSave, ConflictNotice } from "./orderEditShared";
+import { useBlockSave } from "./orderEditShared";
 
 /**
- * «Статус заказа» — одна карточка на владельца, колл-центр и флориста, единый путь с OCC.
+ * «Статус заказа» — одна карточка на владельца, колл-центр и флориста, единый путь сохранения.
  *
  * Дата и интервал доставки СЮДА НЕ ВХОДЯТ: они уже показаны в шапке заказа, и правятся
  * оттуда же карандашом (DeliveryDateDialog). Прежняя связка «статус + дата» отдельной
@@ -19,11 +19,9 @@ import { useBlockSave, ConflictNotice } from "./orderEditShared";
  */
 export function OrderStatusCard({
   orderId,
-  updatedAt,
   orderStatus,
 }: {
   orderId: string;
-  updatedAt: string;
   orderStatus: OrderStatus;
 }) {
   return (
@@ -34,13 +32,13 @@ export function OrderStatusCard({
         <OrderStatusBadge status={orderStatus} />
       </CardHeader>
       <CardBody className="py-3">
-        <StatusForm orderId={orderId} updatedAt={updatedAt} current={orderStatus} />
+        <StatusForm orderId={orderId} current={orderStatus} />
       </CardBody>
     </Card>
   );
 }
 
-function StatusForm({ orderId, updatedAt, current }: { orderId: string; updatedAt: string; current: OrderStatus }) {
+function StatusForm({ orderId, current }: { orderId: string; current: OrderStatus }) {
   // Текущий статус может отсутствовать в списке выбираемых вручную (AWAITING_PAYMENT ставит
   // оплата, ASSIGNED/FLORIST_ACCEPTED — назначение). Тогда select показал бы ПЕРВЫЙ пункт
   // вместо реального статуса, и «ОК» без выбора молча переписал бы заказ. Поэтому группу
@@ -49,7 +47,7 @@ function StatusForm({ orderId, updatedAt, current }: { orderId: string; updatedA
   const selectable = ACCEPTED_ORDER_STATUSES.includes(current) ? "FLORIST_ACCEPTED" : current;
   const isManual = manualOrderStatuses.includes(selectable);
   const [status, setStatus] = useState<OrderStatus>(selectable);
-  const { pending, conflict, save, acceptCurrentVersion } = useBlockSave(orderId, "status", updatedAt);
+  const { pending, save } = useBlockSave(orderId, "status");
   return (
     <div className="space-y-2">
       <div className="flex gap-2">
@@ -77,13 +75,6 @@ function StatusForm({ orderId, updatedAt, current }: { orderId: string; updatedA
           </Tooltip>
         )}
       </div>
-      {conflict && (
-        <ConflictNotice
-          current={conflict.current}
-          labels={[{ k: "orderStatus", label: "Статус" }]}
-          onRefresh={() => acceptCurrentVersion((c) => { if (c.orderStatus) setStatus(c.orderStatus as OrderStatus); })}
-        />
-      )}
     </div>
   );
 }

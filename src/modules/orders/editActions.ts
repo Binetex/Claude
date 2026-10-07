@@ -13,13 +13,12 @@ import { findUnlinkedCommunicationsForOrderPhone, attachUnlinkedCommunicationsTo
 
 /**
  * ЕДИНЫЙ путь редактирования блока заказа для всех редакторов (owner/call-center/florist).
- * Тонкая обёртка: role guard + владение (для флориста) + OCC-сервис + побочные эффекты + revalidate.
+ * Тонкая обёртка: role guard + владение (для флориста) + сервис блока + побочные эффекты + revalidate.
  * Финансовые действия и назначение флориста сюда НЕ входят — они остаются OWNER-only.
  */
 
 export type SaveOrderBlockResult =
-  | { status: "ok"; updatedAt: string }
-  | { status: "conflict"; current: Record<string, string>; updatedAt: string }
+  | { status: "ok" }
   | { status: "forbidden" }
   | { status: "notfound" }
   | { status: "invalid"; error: string };
@@ -63,7 +62,6 @@ async function runPostSave(block: OrderBlock, orderId: string, changed: Record<s
 export async function saveOrderBlock(
   orderId: string,
   block: OrderBlock,
-  expectedUpdatedAt: string,
   data: BlockFormData
 ): Promise<SaveOrderBlockResult> {
   const user = await requireOrderEditor();
@@ -79,7 +77,6 @@ export async function saveOrderBlock(
   const res = await updateOrderBlock({
     orderId,
     block,
-    expectedUpdatedAt,
     data,
     actor: { userId: user.id, role: user.role },
   });
@@ -87,7 +84,7 @@ export async function saveOrderBlock(
   if (res.status === "ok") {
     await runPostSave(block, orderId, res.changed, user.name);
     revalidateOrder(orderId);
-    return { status: "ok", updatedAt: res.updatedAt };
+    return { status: "ok" };
   }
   return res;
 }

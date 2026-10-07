@@ -4,7 +4,7 @@ import { StickyNote, Pencil } from "lucide-react";
 import { CopyButton } from "@/components/CopyButton";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
-import { useBlockSave, ConflictNotice } from "./orderEditShared";
+import { useBlockSave } from "./orderEditShared";
 
 /**
  * Заметка заказчика — ОТДЕЛЬНОЙ плашкой сразу под полосой доставки, у всех трёх ролей.
@@ -15,18 +15,16 @@ import { useBlockSave, ConflictNotice } from "./orderEditShared";
  * первым экраном и жёлтым, чтобы взгляд цеплялся.
  *
  * Единственное место заметки в карточке: из «Открытки» она убрана намеренно. Два поля,
- * правящих одно значение на одной странице, спорили бы друг с другом через OCC.
+ * правящих одно значение на одной странице, затирали бы друг друга.
  *
  * Править может любой редактор заказа (владелец, колл-центр, флорист своего заказа) — права
  * целиком на стороне `saveOrderBlock`, компонент ролей не знает.
  */
 export function CustomerNoteBanner({
   orderId,
-  updatedAt,
   customerNote,
 }: {
   orderId: string;
-  updatedAt: string;
   customerNote: string;
 }) {
   const [note, setNote] = useState(customerNote);
@@ -43,9 +41,7 @@ export function CustomerNoteBanner({
       setDraft(customerNote);
     }
   }
-  const { pending, conflict, save, acceptCurrentVersion } = useBlockSave(orderId, "cardNote", updatedAt, {
-    hasUnsavedChanges: editing && draft !== note,
-  });
+  const { pending, save } = useBlockSave(orderId, "cardNote");
 
   function submit() {
     // Шлём ТОЛЬКО заметку: блок cardNote пишет лишь присланные поля, поэтому текст
@@ -86,20 +82,6 @@ export function CustomerNoteBanner({
           rows={2}
           placeholder="Например: позвонить за час до доставки"
         />
-        {conflict && (
-          <ConflictNotice
-            current={conflict.current}
-            labels={[{ k: "customerNote", label: "Заметка" }]}
-            onRefresh={() =>
-              acceptCurrentVersion((current) => {
-                if ("customerNote" in current) {
-                  setNote(current.customerNote);
-                  setDraft(current.customerNote);
-                }
-              })
-            }
-          />
-        )}
         <div className="flex justify-end gap-2">
           <Button size="sm" variant="ghost" disabled={pending} onClick={cancel}>
             Отмена

@@ -6,24 +6,22 @@ import { PrintCardButton } from "@/components/PrintCardButton";
 import { Card, CardHeader, CardTitle, CardBody } from "@/components/ui/Card";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
-import { useBlockSave, ConflictNotice } from "./orderEditShared";
+import { useBlockSave } from "./orderEditShared";
 
 /**
- * Текст открытки. Меняется только вручную (OCC).
+ * Текст открытки. Меняется только вручную.
  *
  * Заметка заказчика ЖИЛА здесь же и переехала в `CustomerNoteBanner` — плашку под полосой
  * доставки: она про выполнение заказа, а не про поздравление, и внизу свёрнутого блока её
- * не замечали. Возвращать её сюда нельзя — два поля на одно значение спорят через OCC.
+ * не замечали. Возвращать её сюда нельзя — два поля на одно значение затирали бы друг друга.
  */
 export function CardNoteCard({
   orderId,
-  updatedAt,
   cardMessage,
   showPrint = false,
   collapsible = false,
 }: {
   orderId: string;
-  updatedAt: string;
   cardMessage: string;
   /** Кнопка печати открытки. Включается точечно (кабинет флориста); у владельца и
       колл-центра блок остаётся прежним. */
@@ -43,18 +41,12 @@ export function CardNoteCard({
   /** Свёрнутый блок раскрыт, только когда в нём есть что показать. */
   const hasContent = cardMessage.trim() !== "";
   const dirty = card !== cardMessage;
-  const { pending, conflict, save, acceptCurrentVersion } = useBlockSave(orderId, "cardNote", updatedAt, {
-    hasUnsavedChanges: dirty,
-  });
+  const { pending, save } = useBlockSave(orderId, "cardNote");
 
   function submit() {
     // Только открытка: заметку правит своя плашка, и присылать её отсюда — значит
     // затирать чужую правку старым значением из этой формы.
     save({ cardMessage: card }, { successMessage: "Открытка сохранена" });
-  }
-
-  function refreshFromDb(current: Record<string, string>) {
-    if ("cardMessage" in current) setCard(current.cardMessage);
   }
 
   const saveButton = (
@@ -77,13 +69,6 @@ export function CardNoteCard({
         </div>
         <Textarea value={card} onChange={(e) => setCard(e.target.value)} rows={3} placeholder="Текст открытки…" />
       </div>
-      {conflict && (
-        <ConflictNotice
-          current={conflict.current}
-          labels={[{ k: "cardMessage", label: "Открытка" }]}
-          onRefresh={() => acceptCurrentVersion(refreshFromDb)}
-        />
-      )}
     </>
   );
 
