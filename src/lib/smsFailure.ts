@@ -30,6 +30,9 @@ function byProviderStatus(status: number): string | null {
 const CODES: Record<string, string> = {
   empty_text: "Пустой текст.",
   too_long: "Сообщение слишком длинное.",
+  attachment_missing: "Файл картинки не найден — приложите его заново.",
+  attachment_too_large: "Картинка слишком большая для SMS (до 5 МБ).",
+  attachment_unsupported: "В SMS уходят только картинки JPEG, PNG и GIF.",
   invalid_target_phone: "Номер получателя не распознан.",
   store_no_quo_number: "У магазина не задан номер отправителя QUO.",
   from_number_not_owned: "Этот QUO-номер не принадлежит магазину — отправка с него запрещена.",

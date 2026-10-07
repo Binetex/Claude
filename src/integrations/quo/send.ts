@@ -8,8 +8,11 @@ import "server-only";
  * отправлено», а `previous_attempt_failed`; новая попытка обязана прийти с новым ключом. Клиент должен быть создан БЕЗ авто-ретрая (maxRetries:0), чтобы не
  * повторять POST при неоднозначной сетевой ошибке (неизвестно, принял ли QUO). PII в логи не пишем.
  */
-import type { PrismaClient } from "@/generated/prisma/client";
+import { statSync } from "node:fs";
+import { Prisma, type PrismaClient } from "@/generated/prisma/client";
 import type { QuoClient } from "./client";
+import { uploadedFilePath } from "@/lib/storage";
+import { bouquetMediaName } from "@/lib/bouquetPage";
 import { QuoApiError } from "./errors";
 import { toE164 } from "@/lib/phone";
 import { maskPhone, quoLog } from "./logging";
@@ -35,7 +38,53 @@ export type SendSmsInput = {
    * прямой вопрос хуже любого сюрприза. Ставится только там, где входящее действительно есть.
    */
   replyToInbound?: boolean;
+  /** Картинки к сообщению (MMS): фото букета, вложение из переписки карточки. Текст тогда может быть пустым. */
+  attachments?: SmsAttachment[];
 };
+
+/**
+ * Картинка к SMS — файл из загруженных (`/api/media/<name>`). Уходит ТОЛЬКО браузером Quo: в их API
+ * вложений нет (владелец 07.10.2026: «раз мы теперь используем браузер»). Не вышло браузером до
+ * нажатия «Отправить» — сообщение уходит через API текстом, а вместо картинки — ссылка `fallbackUrl`.
+ */
+export type SmsAttachment = { name: string; fallbackUrl: string };
+/** Как вложение лежит в `OrderCommunication.attachmentsJson` — тот же вид, что у входящих MMS. */
+type StoredAttachment = { url: string; type: string; fallbackUrl: string };
+
+/** MMS везут не всё: JPEG, PNG и GIF доходят на любой телефон. */
+const MMS_TYPES: Record<string, string> = { jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", gif: "image/gif" };
+/** Больше операторы режут или не доставляют; наши фото после сжатия — сотни килобайт. */
+const MMS_MAX_BYTES = 5 * 1024 * 1024;
+
+function storeAttachments(list: SmsAttachment[] | undefined): { ok: true; list: StoredAttachment[] } | { ok: false; code: string } {
+  const out: StoredAttachment[] = [];
+  for (const a of list ?? []) {
+    const file = uploadedFilePath(a.name);
+    const type = MMS_TYPES[a.name.split(".").pop()?.toLowerCase() ?? ""];
+    if (!file || !type) return { ok: false, code: "attachment_unsupported" };
+    let size: number;
+    try {
+      size = statSync(file).size;
+    } catch {
+      return { ok: false, code: "attachment_missing" };
+    }
+    if (size > MMS_MAX_BYTES) return { ok: false, code: "attachment_too_large" };
+    out.push({ url: `/api/media/${a.name}`, type, fallbackUrl: a.fallbackUrl });
+  }
+  return { ok: true, list: out };
+}
+
+/** Записанные вложения обратно (воркер получает сообщение из записи). Чужие записи (входящие MMS) не подходят. */
+function storedAttachments(json: unknown): StoredAttachment[] {
+  if (!Array.isArray(json)) return [];
+  return json.flatMap((x) => {
+    const a = x as Partial<StoredAttachment> | null;
+    return a && typeof a.url === "string" && typeof a.fallbackUrl === "string" ? [{ url: a.url, type: typeof a.type === "string" ? a.type : "image/jpeg", fallbackUrl: a.fallbackUrl }] : [];
+  });
+}
+
+/** Текст, который уходит, если картинки пришлось заменить ссылками. */
+const withLinks = (text: string, list: { fallbackUrl: string }[]) => [text, ...list.map((a) => a.fallbackUrl)].filter(Boolean).join("\n");
 
 /** Заказ помечен «получателю не писать»: отправка не сбой, а запрет владельца. */
 export const RECIPIENT_MUTED_CODE = "recipient_muted";
@@ -49,8 +98,12 @@ export async function sendOrderSms(prisma: PrismaClient, client: QuoClient | nul
   // Единственная очистка перед Quo: ’ “ … эмодзи á переводят ВСЁ сообщение в части по 70 знаков
   // вместо 160 — и Quo берёт за него вдвое-втрое больше (lib/smsText.ts). Записываем то, что ушло.
   const text = toSmsText(input.text ?? "");
-  if (!text) return { ok: false, code: "empty_text" };
-  if (text.length > SMS_MAX_LENGTH) return { ok: false, code: "too_long" };
+  const attached = storeAttachments(input.attachments);
+  if (!attached.ok) return { ok: false, code: attached.code };
+  const attachments = attached.list;
+  if (!text && !attachments.length) return { ok: false, code: "empty_text" };
+  // Длина — с запасом на ссылки: без браузера картинки уйдут ими.
+  if (withLinks(text, attachments).length > SMS_MAX_LENGTH) return { ok: false, code: "too_long" };
   if (!input.idempotencyKey) return { ok: false, code: "missing_idempotency_key" };
 
   const order = await prisma.order.findUnique({
@@ -89,6 +142,8 @@ export async function sendOrderSms(prisma: PrismaClient, client: QuoClient | nul
         storePhone: order.site?.quoPhoneNumber ?? null, externalPhone: e164, externalPhoneNormalized: e164,
         messageText: text, providerPhoneNumberId: fromId, occurredAt: new Date(),
         sendKey: input.idempotencyKey, sentByUserId: input.sentByUserId ?? null,
+        // Картинки — сразу в запись: лента карточки показывает их, как у входящих MMS.
+        ...(attachments.length ? { attachmentsJson: attachments } : {}),
       },
       select: { id: true },
     });
@@ -111,7 +166,7 @@ export async function sendOrderSms(prisma: PrismaClient, client: QuoClient | nul
     throw err;
   }
 
-  return dispatch(prisma, client, smsTransport(), { pendingId, fromId, to: e164, text, target: input.target });
+  return dispatch(prisma, client, smsTransport(), { pendingId, fromId, to: e164, text, target: input.target, attachments });
 }
 
 /** «402» или «402:0201402» — статус ответа провайдера и его собственный код ошибки. */
@@ -198,11 +253,11 @@ export async function sendUnlinkedSms(prisma: PrismaClient, client: QuoClient | 
     throw err;
   }
 
-  return dispatch(prisma, client, smsTransport(), { pendingId, fromId, to: e164, text, target: "UNKNOWN" });
+  return dispatch(prisma, client, smsTransport(), { pendingId, fromId, to: e164, text, target: "UNKNOWN", attachments: [] });
 }
 
 /** Записанное PENDING-сообщение, которое осталось отправить. */
-type Outgoing = { pendingId: string; fromId: string; to: string; text: string; target: string };
+type Outgoing = { pendingId: string; fromId: string; to: string; text: string; target: string; attachments: StoredAttachment[] };
 
 /**
  * Отправка записанного PENDING-сообщения: браузером Quo (входит в подписку, `browser/transport.ts`),
@@ -214,7 +269,18 @@ async function dispatch(prisma: PrismaClient, client: QuoClient, t: SmsTransport
     const sent = await sendViaBrowser(prisma, t.send, o);
     if (sent) return sent;
   }
-  return sendViaApi(prisma, client, o);
+  return sendViaApi(prisma, client, o.attachments.length ? await asLinks(prisma, o) : o);
+}
+
+/**
+ * API картинок не возит: вместо них — ссылки в тексте. Запись честно показывает, что ушло: текст со
+ * ссылками и без картинок, иначе лента карточки рисовала бы MMS, которого клиент не получал.
+ */
+async function asLinks(prisma: PrismaClient, o: Outgoing): Promise<Outgoing> {
+  const text = withLinks(o.text, o.attachments);
+  await prisma.orderCommunication.update({ where: { id: o.pendingId }, data: { messageText: text, attachmentsJson: Prisma.DbNull } });
+  quoLog("sms.attachments_as_links", { communicationId: o.pendingId, count: o.attachments.length });
+  return { ...o, text, attachments: [] };
 }
 
 /** Вызов QUO API. Клиент без авто-ретрая: неоднозначную сетевую/5xx ошибку не повторяем автоматически. */
@@ -261,6 +327,7 @@ async function sendViaBrowser(prisma: PrismaClient, send: BrowserSender, o: Outg
       fromPhoneNumberId: o.fromId,
       to: o.to,
       text: o.text,
+      files: o.attachments.map((a) => uploadedFilePath(bouquetMediaName(a.url) ?? "")).filter((f): f is string => !!f),
       // Отметка ДО нажатия: упади воркер сразу после него, повтор задачи второй раз не отправит
       // (`buildQuoSmsSendHandler`), а вебхук найдёт запись по ней.
       beforeSend: async () => {
@@ -282,7 +349,7 @@ async function sendViaBrowser(prisma: PrismaClient, send: BrowserSender, o: Outg
     where: { id: o.pendingId, status: "PENDING" },
     data: { status: "SENT", occurredAt: new Date(), rawMetadata: unconfirmed ? { via: "browser", unconfirmed } : { via: "browser" } },
   });
-  quoLog("sms.sent", { communicationId: o.pendingId, target: o.target, phone: maskPhone(o.to), via: "browser", unconfirmed: !!unconfirmed, textLen: o.text.length, segments: smsSegments(o.text).segments });
+  quoLog("sms.sent", { communicationId: o.pendingId, target: o.target, phone: maskPhone(o.to), via: "browser", unconfirmed: !!unconfirmed, textLen: o.text.length, segments: smsSegments(o.text).segments, attachments: o.attachments.length });
   return { ok: true, communicationId: o.pendingId, status: "SENT", duplicate: false };
 }
 
@@ -332,7 +399,7 @@ export function buildQuoSmsSendHandler(
     if (typeof id !== "string") return;
     const row = await prisma.orderCommunication.findUnique({
       where: { id },
-      select: { id: true, status: true, type: true, direction: true, providerPhoneNumberId: true, externalPhoneNormalized: true, messageText: true, partyRole: true, rawMetadata: true },
+      select: { id: true, status: true, type: true, direction: true, providerPhoneNumberId: true, externalPhoneNormalized: true, messageText: true, partyRole: true, rawMetadata: true, attachmentsJson: true },
     });
     if (!row || row.status !== "PENDING" || row.type !== "SMS" || row.direction !== "OUTBOUND") return;
     // Прошлый заход успел нажать «Отправить» и не дожил до ответа: второй раз не шлём.
@@ -341,7 +408,8 @@ export function buildQuoSmsSendHandler(
       return;
     }
     const client = deps.client();
-    if (!client || !row.providerPhoneNumberId || !row.messageText) {
+    const attachments = storedAttachments(row.attachmentsJson);
+    if (!client || !row.providerPhoneNumberId || (!row.messageText && !attachments.length)) {
       await prisma.orderCommunication.update({ where: { id }, data: { status: "FAILED", rawMetadata: { code: "quo_not_configured" } } });
       return;
     }
@@ -350,8 +418,9 @@ export function buildQuoSmsSendHandler(
       pendingId: row.id,
       fromId: row.providerPhoneNumberId,
       to: row.externalPhoneNormalized,
-      text: row.messageText,
+      text: row.messageText ?? "",
       target: row.partyRole,
+      attachments,
     });
   };
 }

@@ -265,12 +265,17 @@ const BROWSER_MATCH_HOURS = 6;
 
 /**
  * Наша запись об SMS, отправленной браузером, для исходящего из вебхука: тот же номер магазина,
- * тот же получатель, тот же текст (с точностью до пробелов), ещё без id сообщения. Из нескольких
- * одинаковых — самая ранняя: вебхуки приходят в порядке отправки.
+ * тот же получатель, тот же текст (с точностью до пробелов), ещё без id сообщения. Картинка без
+ * текста сверяется по тому, что в записи есть вложение. Из нескольких одинаковых — самая ранняя:
+ * вебхуки приходят в порядке отправки. Вложения записи при этом не трогаем: наши ссылки на файл
+ * живут у нас, а не у Quo.
  */
 async function findBrowserSent(prisma: PrismaClient, event: NormalizedQuoEvent): Promise<{ id: string } | null> {
   const e164 = toE164(event.externalPhone);
-  if (!e164 || !event.messageText || !event.resourceId) return null;
+  const norm = (t: string) => t.replace(/\s+/g, " ").trim();
+  const text = norm(event.messageText ?? "");
+  // Картинка без текста (MMS из карточки) — тоже наше сообщение: сверяем тогда по вложению.
+  if (!e164 || !event.resourceId || (!text && !event.media?.length)) return null;
   const rows = await prisma.orderCommunication.findMany({
     where: {
       provider: "QUO",
@@ -285,9 +290,7 @@ async function findBrowserSent(prisma: PrismaClient, event: NormalizedQuoEvent):
       createdAt: { gte: new Date(Date.now() - BROWSER_MATCH_HOURS * 3_600_000) },
     },
     orderBy: { createdAt: "asc" },
-    select: { id: true, messageText: true },
+    select: { id: true, messageText: true, attachmentsJson: true },
   });
-  const norm = (t: string) => t.replace(/\s+/g, " ").trim();
-  const text = norm(event.messageText);
-  return rows.find((r) => norm(r.messageText ?? "") === text) ?? null;
+  return rows.find((r) => norm(r.messageText ?? "") === text && (!!text || (Array.isArray(r.attachmentsJson) && r.attachmentsJson.length > 0))) ?? null;
 }

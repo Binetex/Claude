@@ -27,9 +27,10 @@ export async function uploadBouquetPhotoAction(orderId: string, photoDataUrl: st
   return { ok: true };
 }
 
-/** Текст клиенту — по-английски, как и всё, что уходит наружу. Не экспортируется: в
- *  "use server"-модуле наружу можно отдавать только async-функции. */
-const bouquetPhotoSms = (url: string) => `Here is your bouquet: ${url}`;
+/** Текст клиенту к фото — по-английски, как и всё, что уходит наружу. Не экспортируется: в
+ *  "use server"-модуле наружу можно отдавать только async-функции. Без браузера Quo вместо
+ *  картинки под ним встанет ссылка на страницу фото. */
+const BOUQUET_PHOTO_SMS = "Here is your bouquet!";
 
 export type SendBouquetPhotoResult = { ok?: true; message?: string; error?: string };
 
@@ -42,14 +43,17 @@ const SEND_ERRORS: Record<string, string> = {
   quo_not_configured: "SMS не настроены на сервере.",
   previous_attempt_failed: "Прошлая отправка этого фото не удалась — замените фото и попробуйте снова.",
   too_long: "Сообщение получилось слишком длинным.",
+  attachment_missing: "Файл фото не найден — загрузите фото заново.",
+  attachment_too_large: "Фото слишком большое — загрузите его заново.",
+  attachment_unsupported: "Этот формат фото не уходит в SMS — загрузите фото заново.",
 };
 
 /**
- * Отправляет заказчику ссылку на фото букета одним нажатием.
+ * Отправляет заказчику фото букета одним нажатием.
  *
- * Именно ссылку, а не картинку: QUO (OpenPhone) по API умеет только текст, MMS у них есть в
- * приложении, но не в API. Ссылка ведёт на публичную страницу `/bouquet/<файл>`, где нет ни
- * номера заказа, ни имён (см. lib/bouquetPage.ts).
+ * Картинкой (MMS) — браузером Quo: в их API вложений нет, а в приложении есть (владелец 07.10.2026).
+ * Браузер недоступен — уходит, как раньше, ссылка на публичную страницу `/bouquet/<файл>`, где нет
+ * ни номера заказа, ни имён (см. lib/bouquetPage.ts).
  *
  * Адресат — ЗАКАЗЧИК: букет заказывают в подарок, и фото ждёт тот, кто платил, а не получатель,
  * для которого это сюрприз. Ключ идемпотентности включает имя файла: двойное нажатие второго
@@ -71,7 +75,8 @@ export async function sendBouquetPhotoLinkAction(orderId: string): Promise<SendB
   const res = await sendOrderSms(prisma, client, {
     orderId,
     target: "CUSTOMER",
-    text: bouquetPhotoSms(url),
+    text: BOUQUET_PHOTO_SMS,
+    attachments: [{ name, fallbackUrl: url }],
     idempotencyKey: `bouquet-photo:${orderId}:${name}`,
     sentByUserId: user.id,
   });
@@ -81,5 +86,5 @@ export async function sendBouquetPhotoLinkAction(orderId: string): Promise<SendB
   if (!res.ok) return { error: SEND_ERRORS[res.code] ?? "Не удалось отправить SMS." };
   // Повторное нажатие: второго SMS нет, и человек должен об этом узнать, а не думать, что ушло второе.
   if (res.duplicate) return { ok: true, message: "Это фото клиенту уже отправляли." };
-  return { ok: true, message: "Ссылка на фото отправлена заказчику." };
+  return { ok: true, message: "Фото отправлено заказчику." };
 }

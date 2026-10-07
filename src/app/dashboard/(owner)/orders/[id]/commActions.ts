@@ -5,7 +5,10 @@ import { prisma } from "@/lib/db";
 import { featureFlags } from "@/lib/featureFlags";
 import { getQuoConfig } from "@/integrations/quo/config";
 import { createQuoClient } from "@/integrations/quo/client";
-import { sendOrderSms, type SendTarget } from "@/integrations/quo/send";
+import { sendOrderSms, type SendTarget, type SmsAttachment } from "@/integrations/quo/send";
+import { imageStorage } from "@/lib/storage";
+import { bouquetMediaName } from "@/lib/bouquetPage";
+import { getAppUrl } from "@/lib/appUrl";
 import { describeSendFailure } from "@/lib/smsFailure";
 import { toE164 } from "@/lib/phone";
 import { suggestReply, type SuggestResult } from "@/modules/assistant/suggest";
@@ -34,7 +37,20 @@ export async function sendOrderSmsAction(_prev: FormState, formData: FormData): 
   // формы запрет обходился бы одним запросом.
   const replyToInbound = target === "RECIPIENT" && (await hasInboundFromRecipient(orderId));
 
-  const res = await sendOrderSms(prisma, client, { orderId, target, text, idempotencyKey, sentByUserId: user.id, replyToInbound });
+  // Скрепка: картинка к SMS (владелец 07.10.2026). Браузер уже ужал её до JPEG (`lib/imageCompress`);
+  // кладём в то же хранилище, что фото букета, — клиенту она уходит картинкой браузером Quo, а без
+  // браузера ссылкой на этот же файл.
+  const attachmentData = String(formData.get("attachment") ?? "");
+  let attachments: SmsAttachment[] | undefined;
+  if (attachmentData) {
+    if (!attachmentData.startsWith("data:image/")) return { error: "Приложить можно только картинку." };
+    const url = await imageStorage.saveImage(attachmentData).catch(() => null);
+    const name = url ? bouquetMediaName(url) : null;
+    if (!url || !name) return { error: "Не удалось сохранить картинку — попробуйте ещё раз." };
+    attachments = [{ name, fallbackUrl: `${getAppUrl()}${url}` }];
+  }
+
+  const res = await sendOrderSms(prisma, client, { orderId, target, text, idempotencyKey, sentByUserId: user.id, replyToInbound, attachments });
   revalidatePath(`/dashboard/orders/${orderId}`);
   if (res.ok) return { ok: true, status: res.status };
   // Подписи общие с Telegram-ботом (`lib/smsFailure`): один и тот же отказ обязан читаться

@@ -1,7 +1,8 @@
 "use client";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { fmtStoreDateTime } from "@/lib/tz";
-import { MessageSquare, Sparkles, Loader2 } from "lucide-react";
+import { MessageSquare, Sparkles, Loader2, Paperclip, X } from "lucide-react";
+import { compressImage } from "@/lib/imageCompress";
 import { Card, CardHeader, CardTitle, CardBody } from "@/components/ui/Card";
 import { Button } from "@/components/ui/button";
 import { sendOrderSmsAction, suggestSmsReplyAction } from "./commActions";
@@ -98,6 +99,11 @@ export function OrderCommunications({
   // ✨: варианты ИИ для этой стороны — следующее нажатие просит другой.
   const [aiPending, setAiPending] = useState(false);
   const [aiTried, setAiTried] = useState<string[]>([]);
+  // Скрепка: картинка к SMS (владелец 07.10.2026). Уходит клиенту картинкой браузером Quo, без
+  // браузера — ссылкой (`quo/send.ts`). Ужимается здесь же до JPEG, как фото букета.
+  const [attachment, setAttachment] = useState<string | null>(null);
+  const [attaching, setAttaching] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
 
   const isEmail = activeKey === "EMAIL";
   const active = tabs.find((t) => t.key === activeKey) ?? tabs[0];
@@ -119,7 +125,23 @@ export function OrderCommunications({
 
   const limit = isEmail ? EMAIL_MAX : SMS_MAX;
   const tooLong = text.length > limit;
-  const disabled = pending || !text.trim() || tooLong || (isEmail ? !canReply : !storeHasQuoNumber);
+  // Картинка без текста — тоже сообщение, но только в SMS: к письму вложений нет.
+  const hasPicture = !isEmail && !!attachment;
+  const disabled = pending || attaching || (!text.trim() && !hasPicture) || tooLong || (isEmail ? !canReply : !storeHasQuoNumber);
+
+  async function pickPicture(file: File | undefined) {
+    if (!file) return;
+    setAttaching(true);
+    setResult(null);
+    try {
+      setAttachment(await compressImage(file));
+    } catch {
+      setResult({ error: "Не удалось открыть картинку — попробуйте другую." });
+    } finally {
+      setAttaching(false);
+      if (fileRef.current) fileRef.current.value = ""; // тот же файл можно выбрать снова
+    }
+  }
 
   async function suggest() {
     setAiPending(true);
@@ -147,6 +169,7 @@ export function OrderCommunications({
     fd.set("target", active.target); // сервер резолвит номер из того же поля заказа
     fd.set("text", text);
     fd.set("idempotencyKey", idem);
+    if (hasPicture) fd.set("attachment", attachment!);
     try {
       // Адресат письма из браузера НЕ передаётся: сервер берёт его из последнего входящего
       // письма заказа, иначе подменой поля можно было бы написать в чужую переписку.
@@ -155,6 +178,7 @@ export function OrderCommunications({
       if (res?.ok) {
         setText("");
         setAiTried([]);
+        setAttachment(null);
       }
       // Ключ одноразовый и меняется ТАКЖЕ после ошибки: сервер уже записал неудачную попытку под
       // этим ключом, и повтор с ним никогда не дошёл бы до QUO — кнопка «Отправить» молча перестала
@@ -198,6 +222,7 @@ export function OrderCommunications({
                 onClick={() => {
                   setActiveKey(t.key);
                   setAiTried([]);
+                  setAttachment(null); // картинка выбиралась для другой стороны
                 }}
                 className={"inline-flex items-center gap-1 rounded-md px-3 py-1 text-xs font-medium " + (isActive ? "bg-sky-600 text-white" : "bg-slate-100 text-slate-700")}
               >
@@ -215,7 +240,10 @@ export function OrderCommunications({
               число входящих за всё время: оно не гасло никогда и поэтому ничего не значило. */}
           <button
             type="button"
-            onClick={() => setActiveKey("EMAIL")}
+            onClick={() => {
+              setActiveKey("EMAIL");
+              setAttachment(null);
+            }}
             className={"inline-flex items-center gap-1 rounded-md px-3 py-1 text-xs font-medium " + (isEmail ? "bg-sky-600 text-white" : "bg-slate-100 text-slate-700")}
           >
             Email
@@ -248,6 +276,22 @@ export function OrderCommunications({
           </div>
           {/* Заготовки — НАД полем: их выбирают до того, как начали печатать, а не после. */}
           <MessageTemplatePicker templates={templates ?? []} onPick={(t) => setText(t)} />
+          {hasPicture && (
+            <div className="flex items-start gap-2">
+              {/* eslint-disable-next-line @next/next/no-img-element -- data URL из браузера, next/image тут не к чему */}
+              <img src={attachment!} alt="Картинка к сообщению" className="h-16 w-16 rounded-md object-cover ring-1 ring-slate-200" />
+              <button
+                type="button"
+                aria-label="Убрать картинку"
+                title="Убрать картинку"
+                disabled={pending}
+                onClick={() => setAttachment(null)}
+                className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-slate-300 text-slate-500 hover:bg-slate-50 disabled:opacity-50"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          )}
           <textarea
             value={text} onChange={(e) => setText(e.target.value)} rows={3}
             placeholder={isEmail ? "Текст письма…" : "Текст сообщения…"} disabled={pending}
@@ -256,6 +300,21 @@ export function OrderCommunications({
           <div className="flex items-center justify-between">
             <span className={"text-[11px] " + (tooLong ? "text-red-600" : "text-slate-400")}>{text.length}/{limit}</span>
             <div className="flex items-center gap-1.5">
+              {!isEmail && (
+                <>
+                  <input ref={fileRef} type="file" accept="image/*,.heic,.heif" className="hidden" onChange={(e) => pickPicture(e.target.files?.[0])} />
+                  <button
+                    type="button"
+                    title="Приложить картинку"
+                    aria-label="Приложить картинку"
+                    disabled={attaching || pending}
+                    onClick={() => fileRef.current?.click()}
+                    className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-300 text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+                  >
+                    {attaching ? <Loader2 className="h-4 w-4 animate-spin" /> : <Paperclip className="h-4 w-4" />}
+                  </button>
+                </>
+              )}
               {!isEmail && (
                 <button
                   type="button"

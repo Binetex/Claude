@@ -31,3 +31,12 @@ class LocalImageStorage implements ImageStorage {
 }
 
 export const imageStorage: ImageStorage = new LocalImageStorage();
+
+/**
+ * Где на диске лежит загруженный файл, отдаваемый как `/api/media/<name>`. Только безопасное
+ * базовое имя — иначе null: путь собирается из того, что пришло снаружи.
+ */
+export function uploadedFilePath(name: string): string | null {
+  if (!/^[A-Za-z0-9._-]+$/.test(name) || name.includes("..")) return null;
+  return path.join(process.cwd(), "public", "uploads", name);
+}

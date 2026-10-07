@@ -3,9 +3,10 @@ import "server-only";
  * Робот отправки SMS через веб-приложение Quo (my.quo.com) — живёт только в воркере.
  *
  * Делает то же, что человек: открывает ящик номера магазина (`/inbox/<PN…>` — тот же id, что у API),
- * «Send a message», вписывает номер получателя, ждёт, пока Quo его примет, набирает текст, нажимает
- * «Send message» и ждёт сообщение в ленте. Проверено 01.10.2026 на проде: с сервера, без повторного
- * входа, вебхук Quo приносит такое сообщение как обычное исходящее.
+ * «Send a message», вписывает номер получателя, ждёт, пока Quo его примет, набирает текст, прикладывает
+ * картинки, если есть (MMS — в API Quo вложений нет вовсе), нажимает «Send message» и ждёт сообщение
+ * в ленте. Проверено 01.10.2026 на проде: с сервера, без повторного входа, вебхук Quo приносит такое
+ * сообщение как обычное исходящее.
  *
  * Правила:
  * - Сообщения строго по одному: браузер один, две отправки в одной вкладке смешали бы поля.
@@ -168,14 +169,31 @@ export function createQuoBrowserSender(opts: QuoBrowserOptions): { send: Browser
         throw new NotSent("composer_mismatch");
       }
 
+      const sendButton = p.getByRole("button", { name: "Send message", exact: true });
+      // Картинки — через то же «Attach a file», что у человека (проверено 07.10.2026: файл в поле
+      // выбора, Quo рисует превью `img[alt=preview]`). Ждём превью КАЖДОЙ: без этого «Отправить»
+      // ушло бы без вложения.
+      const files = input.files ?? [];
+      const composer = p.locator("div").filter({ has: box }).filter({ has: sendButton }).last();
+      if (files.length) {
+        await p.locator("input[type=file]").first().setInputFiles(files);
+        await composer.locator("img[alt='preview']").nth(files.length - 1).waitFor();
+      }
+
+      // Кнопка готова к нажатию — видна и активна (картинки догрузились) — проверяем ДО отметки
+      // «нажато»: не дождались — это ещё «не отправлено», и сообщение спокойно уйдёт через API, а
+      // не пометится отправленным, не уйдя никуда.
+      await sendButton.click({ trial: true });
       await input.beforeSend?.();
       pressed = true;
-      await p.getByRole("button", { name: "Send message", exact: true }).click();
+      await sendButton.click();
 
-      // Ушло: поле очистилось, а в ленте разговора появилось наше сообщение.
+      // Ушло: поле очистилось (и картинки из него ушли), а в ленте разговора появилось наше сообщение.
       await p.waitForFunction(() => (document.querySelector("[aria-label='message input']")?.textContent ?? "").replace(/[\s\u{FEFF}]+/gu, "") === "");
-      const firstLine = lines.find((l) => l.trim()) ?? input.text;
-      await p.getByRole("region", { name: /^Conversation with/ }).getByRole("listitem").filter({ hasText: firstLine.trim() }).last().waitFor();
+      if (files.length) await composer.locator("img[alt='preview']").first().waitFor({ state: "detached" });
+      const firstLine = lines.find((l) => l.trim());
+      // Только картинка, без текста: искать в ленте нечего — подтверждение то, что поле её отпустило.
+      if (firstLine) await p.getByRole("region", { name: /^Conversation with/ }).getByRole("listitem").filter({ hasText: firstLine.trim() }).last().waitFor();
       await saveSession();
       return { outcome: "sent" };
     } catch (err) {
