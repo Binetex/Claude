@@ -16,7 +16,7 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import type { PrismaClient } from "@/generated/prisma/client";
 import { sendReviewLinkAndRecord } from "./sendLink";
-import { recordCustomerReply } from "./requests";
+import { recordCustomerReply, partyPhone } from "./requests";
 import { toE164 } from "@/lib/phone";
 
 export type DeadlineSweep = { checked: number; moved: number; reminded: number };
@@ -46,7 +46,7 @@ export async function processIgnoredRequests(db: PrismaClient, now = new Date())
   const since = new Date(now.getTime() - IGNORE_AFTER_HOURS * 3_600_000);
   const due = await db.orderReviewRequest.findMany({
     where: { status: "LINK_SENT", linkSentAt: { lte: since } },
-    select: { id: true, linkSentAt: true, order: { select: { senderPhone: true } } },
+    select: { id: true, party: true, linkSentAt: true, order: { select: { senderPhone: true, recipientPhone: true } } },
     take: BATCH,
     orderBy: { linkSentAt: "asc" },
   });
@@ -56,11 +56,11 @@ export async function processIgnoredRequests(db: PrismaClient, now = new Date())
   let replied = 0;
 
   for (const r of due) {
-    // Ответ ищем ПО НОМЕРУ ЗАКАЗЧИКА, а не по заказу: приём привязывает входящее к заказу с
+    // Ответ ищем ПО НОМЕРУ того, у кого просим, а не по заказу: приём привязывает входящее к заказу с
     // ближайшей доставкой, и ответ постоянного клиента по старому заказу оказался бы у нового —
     // или ни у какого. По заказу мы бы такого клиента объявили молчащим. Тот же источник, что
     // у строки «клиент ответил» в очереди.
-    const phone = toE164(r.order.senderPhone);
+    const phone = toE164(partyPhone(r.party, r.order));
     const answer = phone
       ? await db.orderCommunication.findFirst({
           where: {

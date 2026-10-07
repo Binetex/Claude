@@ -1,9 +1,10 @@
 "use client";
 import { useState, useTransition } from "react";
+import Link from "next/link";
 import { MessageSquareOff } from "lucide-react";
 import type { OrderMarketingMark } from "@/generated/prisma/enums";
 import { MARKETING_MARK_META } from "@/lib/marketingMark";
-import { setOrderMarketingMarkAction } from "./marketingActions";
+import { setOrderMarketingMarkAction, askRecipientReviewAction } from "./marketingActions";
 
 const OPTIONS: { value: OrderMarketingMark | null; title: string; hint: string }[] = [
   { value: null, title: "Обычный заказ", hint: "Рассылки идут как настроено." },
@@ -27,10 +28,33 @@ const OPTIONS: { value: OrderMarketingMark | null; title: string; hint: string }
  * Варианты взаимоисключающие, поэтому это радио, а не два переключателя: нельзя одновременно
  * молчать и просить отзыв.
  */
-export function MarketingMarkCard({ orderId, mark }: { orderId: string; mark: OrderMarketingMark | null }) {
+export function MarketingMarkCard({
+  orderId,
+  mark,
+  canAskRecipient,
+  recipientReview,
+}: {
+  orderId: string;
+  mark: OrderMarketingMark | null;
+  /** У получателя свой номер — у него можно попросить отзыв отдельно от заказчика. */
+  canAskRecipient: boolean;
+  /** Запрос отзыва у получателя, если уже есть: ссылка на него в очереди и его статус. */
+  recipientReview: { href: string; label: string } | null;
+}) {
   const [value, setValue] = useState<OrderMarketingMark | null>(mark);
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
+  const [askedHref, setAskedHref] = useState<string | null>(null);
+
+  function askRecipient() {
+    setError(null);
+    start(async () => {
+      const res = await askRecipientReviewAction(orderId);
+      if (res.error) setError(res.error);
+      else if (res.href) setAskedHref(res.href);
+    });
+  }
+  const review = recipientReview ?? (askedHref ? { href: askedHref, label: "новый" } : null);
   const meta = value ? MARKETING_MARK_META[value] : null;
 
   function choose(next: OrderMarketingMark | null) {
@@ -55,6 +79,7 @@ export function MarketingMarkCard({ orderId, mark }: { orderId: string; mark: Or
         <MessageSquareOff className="h-3.5 w-3.5" />
         <span>Работа с клиентом</span>
         {meta && <span className={`rounded px-1.5 py-px text-[11px] ${meta.className}`}>{meta.short}</span>}
+        {review && <span className="rounded bg-violet-100 px-1.5 py-px text-[11px] text-violet-800">отзыв получателя</span>}
       </summary>
 
       <div className="mt-3 space-y-2.5">
@@ -77,6 +102,32 @@ export function MarketingMarkCard({ orderId, mark }: { orderId: string; mark: Or
         <p className="text-xs text-slate-400">
           Служебные сообщения (доставка сегодня, заказ доставлен, трек) идут в любом случае.
         </p>
+
+        {/* Отзыв у получателя — отдельно от пометки: пометка про заказчика, а это изредка и по
+            решению владельца (07.10.2026). Дальше — та же очередь «Отзывы», что у заказчика. */}
+        <div className="border-t border-slate-100 pt-2.5">
+          <div className="text-slate-700">Отзыв у получателя</div>
+          {review ? (
+            <p className="mt-0.5 text-xs text-slate-500">
+              Запрос в очереди «Отзывы» ({review.label}):{" "}
+              <Link href={review.href} className="text-sky-700 underline">открыть</Link>
+            </p>
+          ) : canAskRecipient ? (
+            <>
+              <button
+                type="button"
+                disabled={pending}
+                onClick={askRecipient}
+                className="mt-1.5 rounded-md border border-slate-300 px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+              >
+                Попросить отзыв у получателя
+              </button>
+              <span className="mt-1 block text-xs text-slate-500">Колл-центру придёт задача: связаться с получателем букета и попросить отзыв.</span>
+            </>
+          ) : (
+            <p className="mt-0.5 text-xs text-slate-400">У получателя нет своего номера — просить не у кого.</p>
+          )}
+        </div>
       </div>
 
       {error && <p className="mt-2 text-xs text-red-600">{error}</p>}

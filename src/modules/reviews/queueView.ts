@@ -7,7 +7,7 @@ import { fmtDeliveryDate, fmtStoreDayTime } from "@/lib/tz";
  */
 import { prisma } from "@/lib/db";
 import { listToday, listWaiting, listToCheck, listConfirmed, listClosed, queueCounts, type QueueCard } from "./queue";
-import { resolveReviewSettings } from "./requests";
+import { resolveReviewSettings, partyName, partyPhone } from "./requests";
 import { REVIEW_STATUS_LABELS, REVIEW_EVENT_LABELS, reviewStatusText } from "@/lib/reviewStatus";
 import { getOrderItemImages } from "@/modules/orders/images";
 import { toE164 } from "@/lib/phone";
@@ -88,9 +88,9 @@ export async function loadQueueScreen(
   }
 
   // Телефон → часы магазина его заказа: очередь смешивает магазины, и «последнее общение»
-  // каждой карточки должно читаться по часам её магазина.
+  // каждой карточки должно читаться по часам её магазина. Номер — того, у кого просим отзыв.
   const lastContactByPhone = await loadLastContacts(
-    cards.map((c) => ({ phone: c.order.senderPhone, tz: c.order.site.timezone }))
+    cards.map((c) => ({ phone: partyPhone(c.party, c.order), tz: c.order.site.timezone }))
   );
 
   const now = new Date();
@@ -105,7 +105,7 @@ export async function loadQueueScreen(
         orderHref,
         detailHref,
         journalByRequest.get(c.id) ?? [],
-        lastContactByPhone.get(toE164(c.order.senderPhone) ?? "") ?? null
+        lastContactByPhone.get(toE164(partyPhone(c.party, c.order)) ?? "") ?? null
       )
     ),
   };
@@ -253,8 +253,10 @@ function toVM(
     repliedLast: !!lastContact?.inbound,
     orderNumber: c.order.orderNumber,
     siteName: c.order.site.name,
+    askRecipient: c.party === "RECIPIENT",
+    askName: partyName(c.party, c.order),
+    askPhone: partyPhone(c.party, c.order),
     customerName: c.order.senderName,
-    customerPhone: c.order.senderPhone,
     items: items || "без позиций",
     deliveryLabel: fmtDeliveryDate(c.order.deliveryDate).slice(0, 5),
     journal,

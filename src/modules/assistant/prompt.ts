@@ -178,6 +178,8 @@ const COMMON_RULES = `- Reply ONLY in English, whatever language the customer wr
   message, set "needs_human": true so the person who was on the call replies.
 - If the customer asks us to call them or wants to talk by phone, set "intent": "call_request"
   and say we'll call them back shortly, without promising a time.
+- If the message only thanks us or praises the flowers or the delivery and asks for nothing,
+  set "intent": "thanks".
 - "ARE YOU OPEN?" IS A QUESTION ABOUT COMING TO US, and so are "what is your address", "is there
   parking", "how do I find unit 103", "I'm on my way" and "I'm here". Our addresses are working
   spaces where bouquets are made, and opening hours in the knowledge base are the hours we ANSWER
@@ -363,7 +365,7 @@ A time mentioned earlier in the conversation history is already recorded: return
 
 Answer with JSON only:
 {"reply_en": string, "intent": string, "important": boolean, "needs_human": boolean, "ready_time": string|null, "new_delivery_date": string|null, "confirmed_from": string|null, "confirmed_until": string|null}
-"intent" is a short slug such as "tracking", "delivery_time", "photo", "address_change", "refund", "call_request", "other".
+"intent" is a short slug such as "tracking", "delivery_time", "photo", "address_change", "refund", "call_request", "thanks", "other".
 "confirmed_from" / "confirmed_until" are ONLY what your reply promises about the delivery time
 (24-hour HH:MM), otherwise null.`;
 

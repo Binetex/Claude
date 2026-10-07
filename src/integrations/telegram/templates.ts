@@ -17,6 +17,8 @@ export type OrderSnapshot = {
   deliveryDate: Date | null;
   deliveryWindow: string | null;
   recipientName: string | null;
+  /** Телефон получателя — сообщениям про отзыв у получателя: кому звонить. */
+  recipientPhone?: string | null;
   /** Заказчик — нужен только сообщению колл-центру: отзыв просят у того, кто платил. */
   senderName?: string | null;
   senderPhone?: string | null;
@@ -398,13 +400,53 @@ export function renderAskReview(o: OrderSnapshot): string {
 }
 
 /**
+ * Задача оператору: попросить отзыв у ПОЛУЧАТЕЛЯ букета. Ставит владелец своей кнопкой (иногда:
+ * получатель сам благодарил или он постоянный клиент) — обычный запрос отзыва идёт к заказчику.
+ */
+export function renderAskReviewRecipient(o: OrderSnapshot): string {
+  return (
+    `⭐ <b>Попросить отзыв у получателя</b>\n` +
+    `<b>${esc(o.orderNumber)}</b> · ${esc(o.siteName)}\n\n` +
+    line("Получатель", o.recipientName) +
+    line("Телефон", o.recipientPhone ?? null) +
+    line("Заказчик", o.senderName ?? null) +
+    line("Доставка", fmtDate(o.deliveryDate)) +
+    `\nВладелец просит: свяжитесь с ПОЛУЧАТЕЛЕМ букета и попросите оставить отзыв.`
+  ).trimEnd();
+}
+
+/**
+ * Подсказка ИИ владельцу: получатель благодарит после доставки — самое время попросить отзыв.
+ * Решает владелец кнопкой «Попросить отзыв» под сообщением (`assistant/reviewSuggest.ts`).
+ */
+export function renderReviewSuggest(o: OrderSnapshot, quote: string | null, note: string | null): string {
+  return (
+    `💐 <b>${note ? `${esc(note)} · ` : ""}Получатель благодарит — попросить отзыв?</b>\n` +
+    `<b>${esc(o.orderNumber)}</b> · ${esc(o.siteName)}\n\n` +
+    line("Сообщение", quote) +
+    line("Получатель", o.recipientName) +
+    line("Телефон", o.recipientPhone ?? null) +
+    `\n«Попросить отзыв» — запрос встанет в очередь «Отзывы», колл-центру уйдёт задача.`
+  ).trimEnd();
+}
+
+/** Кнопка «Попросить отзыв» у подсказки ИИ: её нажатие разбирает `assistant/telegramReply.ts`. */
+export const REVIEW_ASK_ACTION_PREFIX = "review:ask:";
+
+/**
  * Кнопки под сообщением. Флорист получает «Open Order» + «Google Maps» (если есть адрес):
  * карта открывает адрес получателя. Владелец — только «Open Order».
  */
 export function buttonsFor(type: TelegramEventType, o: OrderSnapshot): TelegramButton[] {
   // Оператор открывает СВОЮ карточку заказа: в кабинет владельца у него нет доступа.
-  if (type === "order.ask_review" || type === "customer.call_request_cc" || type === "order.address_incomplete_cc") {
+  if (type === "order.ask_review" || type === "order.ask_review_recipient" || type === "customer.call_request_cc" || type === "order.address_incomplete_cc") {
     return [{ text: "Open Order", url: callCenterOrderUrl(o.id) }];
+  }
+  if (type === "assistant.review_suggest") {
+    return [
+      { text: "⭐ Попросить отзыв", callbackData: `${REVIEW_ASK_ACTION_PREFIX}${o.id}` },
+      { text: "Open Order", url: ownerOrderUrl(o.id) },
+    ];
   }
   // Флористу — ЕГО карточка заказа: в кабинет владельца у него нет доступа.
   const forFlorist =

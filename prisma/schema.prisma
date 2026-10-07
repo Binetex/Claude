@@ -272,6 +272,12 @@ enum AirwallexNormalizedStatus {
 }
 
 /// Шаг воронки запроса отзыва. Порядок значений — порядок движения по воронке.
+/// Сторона заказа, у которой просим отзыв. Значения совпадают с адресатом SMS (`SendTarget`).
+enum ReviewParty {
+  CUSTOMER
+  RECIPIENT
+}
+
 enum ReviewRequestStatus {
   NEW // владелец пометил заказ, оператор ещё не брался
   CALLING // звонили, не дозвонились — ждём следующей попытки
@@ -392,16 +398,16 @@ model Florist {
 
   /// Выходные по дням недели: 0 = воскресенье … 6 = суббота (как getUTCDay).
   /// Массивом, а не таблицей: значений максимум семь, и join ради них дороже пользы.
-  weekendDays Int[]      @default([])
+  weekendDays     Int[]      @default([])
   /// Отдельные даты недоступности (отпуск, больничный). UTC-полночь БИЗНЕС-дня —
   /// та же конвенция, что у Order.deliveryDate; сравнение идёт день в день, без таймзон.
-  daysOff     DateTime[] @default([])
+  daysOff         DateTime[] @default([])
   /// Сколько работы флорист успевает к 15:00, в баллах: букет до $250 — 1, от $250 — 2
   /// (см. modules/capacity/morning.ts). По нему ассистент решает, обещать ли утро.
-  morningCapacity Int @default(4)
+  morningCapacity Int        @default(4)
   /// Во сколько флорист начинает собирать, минуты от полуночи (Настя 10:00, Ольга 12:00). Нужно
   /// для заказов день в день: раньше этого времени букет не начнут. NULL — 10:00.
-  workStartMin Int?
+  workStartMin    Int?
 
   createdAt DateTime @default(now())
 
@@ -473,34 +479,34 @@ model Site {
   wooWebhooks       WooCommerceWebhook[]
 
   // ── Burq автосоздание черновиков доставки ──
-  burqDraftAutoCreateEnabled     Boolean @default(false)
-  burqDraftCreationLocalTime     String  @default("04:00") // локальное время (HH:mm) утреннего создания черновиков
-  automationDailyLocalTime       String  @default("08:00") // "HH:mm" локального времени ежедневных триггеров автоматизаций (напр. «Доставка сегодня»)
+  burqDraftAutoCreateEnabled Boolean         @default(false)
+  burqDraftCreationLocalTime String          @default("04:00") // локальное время (HH:mm) утреннего создания черновиков
+  automationDailyLocalTime   String          @default("08:00") // "HH:mm" локального времени ежедневных триггеров автоматизаций (напр. «Доставка сегодня»)
   /// УСТАРЕЛО, не читать и не писать: срок ожидания живёт на самом правиле
   /// (`Automation.noReplyAfterMin`) — две настройки для одного и того же только путали. Значения
   /// перенесены в правила миграцией 20260904230000; колонки живы до миграции зачистки.
-  awaitReplyFirstMin             Int     @default(60)
-  awaitReplyNextMin              Int     @default(20)
+  awaitReplyFirstMin         Int             @default(60)
+  awaitReplyNextMin          Int             @default(20)
   /// УСТАРЕЛО, не читать и не писать: заменено полями выше. Колонки живы до отдельной миграции
   /// зачистки — деплой применяет миграции ДО перезапуска, и несколько минут с новой схемой
   /// работает старый код, которому эти колонки нужны. Снести следующим деплоем.
-  recipientRetryAfterMin         Int     @default(60)
-  recipientAlertAfterMin         Int     @default(20)
+  recipientRetryAfterMin     Int             @default(60)
+  recipientAlertAfterMin     Int             @default(20)
   // ── ИИ-ассистент клиентской переписки ──
   /// Режим на этом магазине. Настройка на магазин, а не глобальная: магазины разные и
   /// обкатывается ассистент по одному.
-  aiMode                         AiAssistantMode @default(OFF)
+  aiMode                     AiAssistantMode @default(OFF)
   /// Сухой прогон: ассистент работает и пишет черновики, но НАРУЖУ не уходит ничего — даже в
   /// режиме AUTO_SIMPLE. Первая неделя любого магазина проходит так.
-  aiDryRun                       Boolean         @default(true)
+  aiDryRun                   Boolean         @default(true)
   /// База знаний для клиентов С ЗАКАЗОМ: свободный текст владельца, целиком уезжает в запрос.
-  aiKnowledgeBase                String?
+  aiKnowledgeBase            String?
   /// База знаний для НЕЗНАКОМЫХ номеров — другой бот и другое поведение: заказа нет, данных нет.
-  aiUnknownKnowledgeBase         String?
+  aiUnknownKnowledgeBase     String?
   /// Тексты заготовок на частые вопросы: { "tracking": { "enabled": true, "text": "…" } }.
   /// JSON, а не таблица: заготовок горстка, у каждой ровно два поля, и владелец правит их на том
   /// же экране. Пусто — работают тексты по умолчанию из кода.
-  aiTemplatesJson                Json?
+  aiTemplatesJson            Json?
 
   // Единый текст dropoff-инструкций магазина, автоматически добавляемый во все новые Burq draft.
   // Пусто/NULL → стандартная инструкция выключена (отдельный boolean не нужен).
@@ -552,10 +558,10 @@ model Site {
   financeIssues      FinanceIssue[]
   googleLocations    GoogleLocation[]
   reviewSettings     SiteReviewSettings?
+  aiTurns            AiTurn[]
 
   // Запрет двух активных Site одного платформенного домена (двойное подключение).
   @@unique([platform, normalizedShopDomain])
-  aiTurns          AiTurn[]
 }
 
 // Прогресс фоновой синхронизации по сайту и типу (товары/заказы). Одна актуальная
@@ -1236,7 +1242,7 @@ model Order {
   /// не расставлял, такие идут после расставленных. Порядок ОДИН на день, а не на флориста:
   /// владелец раскладывает весь день, а каждый флорист видит свой срез в той же
   /// последовательности.
-  sortIndex     Int?
+  sortIndex         Int?
   deliveryDate      DateTime
   deliveryWindow    String // напр. "14:00 – 18:00"; при правке пишется из windowFrom/windowTo
   /// Окно доставки строго: минуты от полуночи по часам магазина (lib/deliveryWindow.ts).
@@ -1271,11 +1277,11 @@ model Order {
   zip            String
 
   // Открытка и заметка — с оригиналами, автоматически не меняются
-  cardMessage          String @default("")
-  originalCardMessage  String @default("")
+  cardMessage          String  @default("")
+  originalCardMessage  String  @default("")
   /// ВНУТРЕННЯЯ заметка команды: владелец, колл-центр, флорист. На Woo сюда попадает и то,
   /// что заказчик написал при оформлении. НАРУЖУ НЕ УХОДИТ — курьеру предназначен courierNote.
-  customerNote         String @default("")
+  customerNote         String  @default("")
   /// Выключатель ассистента на КОНКРЕТНОМ заказе: сложный клиент, спорная ситуация, разбор
   /// вручную. Сильнее режима магазина.
   aiDisabled           Boolean @default(false)
@@ -1290,11 +1296,11 @@ model Order {
   ///    роль, иначе запрет заткнул бы переписку с плательщиком);
   ///  · SMS курьерской платформы — Burq шлёт свои уведомления на номер доставки сам.
   recipientMuted       Boolean @default(false)
-  originalCustomerNote String @default("")
+  originalCustomerNote String  @default("")
   /// Инструкция КУРЬЕРУ: единственное поле заказа, уезжающее в Burq (поверх стандартного
   /// текста магазина, Site.burqDefaultDropoffInstructions). Заполняется редко и вручную —
   /// обычно флористом перед вызовом курьера. Пусто — в запрос Burq не попадает вовсе.
-  courierNote          String @default("")
+  courierNote          String  @default("")
 
   // Финансы (раздельно) — доступны только владельцу
   itemsTotal                    Decimal   @db.Decimal(10, 2)
@@ -1375,7 +1381,7 @@ model Order {
   updatedAt DateTime @updatedAt
 
   items              OrderItem[]
-  reviewRequest      OrderReviewRequest?
+  reviewRequests     OrderReviewRequest[]
   assignments        OrderAssignment[]
   messages           Message[]
   communications     OrderCommunication[]
@@ -1395,16 +1401,7 @@ model Order {
   acquiringFee        OrderAcquiringFee?
   financeIssues       FinanceIssue[]
   additionalExpenses  OrderAdditionalExpense[]
-
-  // NULL допустим много раз (Postgres: NULL != NULL) — не мешает заказам без внешнего источника.
-  // Источник истины для идемпотентности вебхуков (см. ingestShopifyOrder) — не полагаемся
-  // только на проверку в коде перед созданием.
-  @@unique([siteId, externalId])
-  @@index([siteId])
-  @@index([deliveryDate])
-  // Ручной порядок дня: выборка «весь день по очереди» идёт ровно по этим двум полям.
-  @@index([deliveryDate, sortIndex])
-  consumableUsages ConsumableUsage[]
+  consumableUsages    ConsumableUsage[]
 
   // ── Предварительная проверка «есть ли курьеры на маршрут» ──
   // Раньше жила на Delivery и запускалась вместе с созданием черновика в 04:00 дня доставки.
@@ -1414,11 +1411,19 @@ model Order {
   // Число читается только вместе со временем: котировки Burq живут минуты.
   couriersCheckedAt DateTime?
   couriersAvailable Int?
+  aiTurns           AiTurn[]
 
+  // NULL допустим много раз (Postgres: NULL != NULL) — не мешает заказам без внешнего источника.
+  // Источник истины для идемпотентности вебхуков (см. ingestShopifyOrder) — не полагаемся
+  // только на проверку в коде перед созданием.
+  @@unique([siteId, externalId])
+  @@index([siteId])
+  @@index([deliveryDate])
+  // Ручной порядок дня: выборка «весь день по очереди» идёт ровно по этим двум полям.
+  @@index([deliveryDate, sortIndex])
   @@index([currentFloristId])
   @@index([orderStatus])
   @@index([isBackfilled])
-  aiTurns              AiTurn[]
 }
 
 model OrderItem {
@@ -1502,12 +1507,12 @@ model Message {
 /// ответа не создаст. Здесь же лежит то, что уходило в модель и что она вернула: без этого на
 /// вопрос «почему он так ответил» нечем отвечать, кроме догадок. Видит только владелец.
 model AiTurn {
-  id     String @id @default(cuid())
-  siteId String
-  site   Site   @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  id              String              @id @default(cuid())
+  siteId          String
+  site            Site                @relation(fields: [siteId], references: [id], onDelete: Cascade)
   /// Заказ, если входящее удалось к нему привязать. Пусто — разговор с незнакомым номером.
-  orderId String?
-  order   Order?  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  orderId         String?
+  order           Order?              @relation(fields: [orderId], references: [id], onDelete: Cascade)
   /// Входящее сообщение, на которое отвечаем. Уникален: одно входящее — один разбор.
   /// Входящее SMS или звонок, на которое отвечает разбор. У разбора письма — пусто (см. emailMessageId).
   communicationId String?             @unique
@@ -1516,15 +1521,15 @@ model AiTurn {
   emailMessageId  String?             @unique
   emailMessage    OrderEmailMessage?  @relation("AiTurnEmail", fields: [emailMessageId], references: [id], onDelete: Cascade)
 
-  status AiTurnStatus @default(DRAFT)
+  status     AiTurnStatus @default(DRAFT)
   /// Откуда взялся ответ: "template" | "model" | "none".
-  source String
+  source     String
   /// Тема обращения по мнению модели или шаблона (трек, время доставки, жалоба…).
   intent     String?
   /// true — тема из списка важных: сигнал уходит независимо от режима.
-  important  Boolean @default(false)
+  important  Boolean      @default(false)
   /// Модель не уверена — ответ обязан пройти через человека.
-  needsHuman Boolean @default(false)
+  needsHuman Boolean      @default(false)
   /// Готовый текст клиенту. ВСЕГДА английский.
   replyText  String?
   /// Почему не ответили (потолок, тишина после автоматического, «спасибо»).
@@ -1537,13 +1542,13 @@ model AiTurn {
   latencyMs    Int?
 
   /// Сообщение в Telegram с черновиком — по нему находим разбор, когда владелец подтверждает.
-  telegramChatId    String?
-  telegramMessageId String?
+  telegramChatId      String?
+  telegramMessageId   String?
   /// Отправленное клиенту сообщение (появляется в момент отправки).
   sentCommunicationId String?
   /// Кто подтвердил отправку или отказ.
-  decidedByUserId String?
-  decidedAt       DateTime?
+  decidedByUserId     String?
+  decidedAt           DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1603,19 +1608,18 @@ model OrderCommunication {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  aiTurn    AiTurn?  @relation("AiTurnIncoming")
 
   @@unique([provider, providerEventId])
   @@index([orderId, occurredAt])
   @@index([externalPhoneNormalized, occurredAt])
   @@index([providerResourceId])
   @@index([orderId, readAt])
-  aiTurn               AiTurn?  @relation("AiTurnIncoming")
 }
 
 /**
  * Дополнительный QUO-номер магазина. Основной живёт полями Site.quo* — он остаётся отправителем
  * по умолчанию и точкой проверки подключения; здесь только «тоже наши» номера.
- *
  * quoPhoneNumberId уникален глобально: один номер не может принадлежать двум магазинам, иначе
  * входящее на него нельзя было бы отнести к магазину однозначно.
  */
@@ -1848,22 +1852,22 @@ model GoogleLocation {
   site   Site   @relation(fields: [siteId], references: [id], onDelete: Cascade)
 
   /// Как точка называется в Google — чтобы владелец узнал её в списке.
-  name String
+  name             String
   /// Идентификатор точки в Business Profile. Пусто, пока обход не подключён (этап 3):
   /// на первом этапе точка нужна ради ссылки, а читать отзывы ещё нечем.
   googleLocationId String?
   /// Короткая ссылка «оставить отзыв» — её и отправляем клиенту.
-  reviewUrl String
+  reviewUrl        String
   /// Почтовый индекс, где точка стоит на карте. Больше от владельца ничего не нужно: какие
   /// адреса относятся к этой точке, система считает сама по расстоянию (см. locationPick.ts).
   /// Пустой индекс допустим у запасной точки — она достаётся не по географии, а по решению.
-  zipCode String?
+  zipCode          String?
   /// Запасная точка магазина: достаётся заказу, чей ZIP не нашёлся ни у одной точки.
   /// Такая точка у магазина ровно одна — частичный уникальный индекс в миграции.
-  isDefault Boolean @default(false)
+  isDefault        Boolean @default(false)
   /// Выключенная точка не предлагается заказам и не обходится сканером. Не удаляем:
   /// на неё уже могут ссылаться отправленные ссылки и подтверждённые отзывы.
-  isActive Boolean @default(true)
+  isActive         Boolean @default(true)
 
   /// Состояние последнего обхода (этап 3). Точка, молчащая дольше суток, — это сигнал.
   lastScanAt        DateTime?
@@ -1884,15 +1888,18 @@ model GoogleLocation {
 /// негде хранить, и вкладка «сегодня» не собралась бы. Пустое поле означает «ждём клиента, сами
 /// ничего не делаем».
 model OrderReviewRequest {
-  id      String @id @default(cuid())
-  orderId String @unique
-  order   Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  id      String      @id @default(cuid())
+  orderId String
+  order   Order       @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  /// У кого просим: обычно у заказчика, по кнопке владельца — у получателя букета (07.10.2026).
+  /// На заказ — не больше одного запроса на каждую сторону.
+  party   ReviewParty @default(CUSTOMER)
 
   /// Точка, на которую просим отзыв. Снимок решения: подставляется по ZIP при создании, но
   /// оператор может сменить, а разметку ZIP владелец может позже поправить — запрос должен
   /// помнить, куда мы отправляли клиента на самом деле.
-  locationId String?
-  location   GoogleLocation? @relation(fields: [locationId], references: [id], onDelete: SetNull)
+  locationId        String?
+  location          GoogleLocation? @relation(fields: [locationId], references: [id], onDelete: SetNull)
   /// Ссылка на момент отправки. Точку могут удалить, а знать, что получил клиент, надо всегда.
   reviewUrlSnapshot String?
 
@@ -1924,6 +1931,7 @@ model OrderReviewRequest {
 
   events ReviewRequestEvent[]
 
+  @@unique([orderId, party])
   @@index([status, nextActionAt])
   @@index([locationId])
 }
@@ -1934,10 +1942,10 @@ model ReviewRequestEvent {
   requestId String
   request   OrderReviewRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
 
-  kind ReviewEventKind
+  kind       ReviewEventKind
   /// Кто сделал. Пусто у автоматики (напоминание, переход по сроку).
-  userId String?
-  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+  userId     String?
+  user       User?           @relation(fields: [userId], references: [id], onDelete: SetNull)
   /// Безопасная деталь: код канала, причина отказа отправки. Без PII сверх нужного.
   detailSafe String?
 
@@ -2251,33 +2259,33 @@ model MessageTemplate {
 }
 
 model TelegramSettings {
-  id                String    @id @default("singleton")
-  botTokenEncrypted String?
-  ownerChatId       String?
-  floristsChatId    String?
-  enabled           Boolean   @default(false)
+  id                      String    @id @default("singleton")
+  botTokenEncrypted       String?
+  ownerChatId             String?
+  floristsChatId          String?
+  enabled                 Boolean   @default(false)
   /// Кому уходят уведомления. Выключенная аудитория молчит целиком — быстрый способ увести
   /// весь поток в свой чат, не выключая ботов по одному и не теряя их настройки.
-  notifyOwner           Boolean @default(true)
-  notifyFlorists        Boolean @default(true)
-  notifyCustomerService Boolean @default(true)
+  notifyOwner             Boolean   @default(true)
+  notifyFlorists          Boolean   @default(true)
+  notifyCustomerService   Boolean   @default(true)
   /// То же самое, но для уведомлений АССИСТЕНТА (ИИ): черновики ответов клиенту, «клиент назвал
   /// время», «клиент просит позвонить». Отдельный набор, потому что выключают их по отдельной
   /// причине: ИИ-поток можно погасить, оставив уведомления о заказах, оплатах и доставке.
-  aiNotifyOwner           Boolean @default(true)
-  aiNotifyFlorists        Boolean @default(true)
-  aiNotifyCustomerService Boolean @default(true)
+  aiNotifyOwner           Boolean   @default(true)
+  aiNotifyFlorists        Boolean   @default(true)
+  aiNotifyCustomerService Boolean   @default(true)
   /// Типы уведомлений, выключенные ПО ОДНОМУ (`TelegramEventType`). Флаги выше гасят адресата
   /// целиком, а это — точечная настройка: «новые заказы не нужны, я вижу их в чате флориста»,
   /// но «нет курьеров на маршрут» и «клиент просит позвонить» приходить обязаны.
   /// Массив строк, а не таблица: событий полтора десятка, у каждого ровно одно состояние,
   /// правятся они на том же экране, и новый тип не должен стоить миграции.
-  mutedEvents             String[] @default([])
-  verifiedAt        DateTime?
-  botUsername       String? // из getMe — показываем владельцу, что подключён нужный бот
-  lastErrorSafe     String? // безопасная причина последней неудачи, без секретов
-  createdAt         DateTime  @default(now())
-  updatedAt         DateTime  @updatedAt
+  mutedEvents             String[]  @default([])
+  verifiedAt              DateTime?
+  botUsername             String? // из getMe — показываем владельцу, что подключён нужный бот
+  lastErrorSafe           String? // безопасная причина последней неудачи, без секретов
+  createdAt               DateTime  @default(now())
+  updatedAt               DateTime  @updatedAt
 }
 
 /**
@@ -2543,8 +2551,8 @@ model Automation {
    */
   brevoTemplateId      Int?
 
-  triggerType    String // валидируется app-registry; строкой — для расширяемости без миграции
-  audience       SmsAudience
+  triggerType             String // валидируется app-registry; строкой — для расширяемости без миграции
+  audience                SmsAudience
   /// «Если на это сообщение не ответят — запустить вот это правило» (modules/automations/replyWait.ts).
   /// Ожидание ответа выражается САМОЙ ссылкой: ждать молча, никого не запуская, смысла нет,
   /// поэтому отдельного флага «ждём ответ» нет. Цепочка любой длины и любой стороны (получателю,
@@ -2562,13 +2570,13 @@ model Automation {
   /// УСТАРЕЛО, не читать и не писать: роль флага играет ссылка выше. Колонка жива до отдельной
   /// миграции зачистки — см. пояснение у Site.recipientRetryAfterMin. Снести следующим деплоем.
   awaitRecipientReply     Boolean      @default(false)
-  delayAmount    Int          @default(0)
-  delayUnit      SmsDelayUnit @default(IMMEDIATE)
-  template       String // текст шаблона inline (отдельная Template-сущность — фаза 2)
-  conditionsJson Json? // расширяемые условия (нормализованные AutomationCondition — фаза 2)
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
-  deletedAt      DateTime? // soft-delete при наличии истории
+  delayAmount             Int          @default(0)
+  delayUnit               SmsDelayUnit @default(IMMEDIATE)
+  template                String // текст шаблона inline (отдельная Template-сущность — фаза 2)
+  conditionsJson          Json? // расширяемые условия (нормализованные AutomationCondition — фаза 2)
+  createdAt               DateTime     @default(now())
+  updatedAt               DateTime     @updatedAt
+  deletedAt               DateTime? // soft-delete при наличии истории
 
   jobs  AutomationJob[]
   // Магазины правила (many-to-many): одно правило — один шаблон на несколько Site.
@@ -2638,21 +2646,19 @@ model AutomationJob {
 
 /**
  * Общее правило ассистента на ВСЕ магазины (singleton, id="singleton").
- *
  * «Сегодня выходной», «заказы принимаем со вторника» — это про магазины разом, а не про один:
  * переписывать базу знаний каждому в такой момент никто не станет. Правило кладётся в запрос
  * ВЫШЕ баз знаний и заготовок и объявлено сильнее их: устаревшая заготовка «привезём сегодня»
  * не должна спорить с «сегодня не работаем».
- *
  * `activeUntil` — последний день действия (UTC-полночь ЛОКАЛЬНОГО дня, как Order.deliveryDate).
  * Пусто — до тех пор, пока владелец не сотрёт. Строка создаётся лениво при первом сохранении.
  */
 model AiAssistantSettings {
-  id              String    @id @default("singleton")
+  id          String    @id @default("singleton")
   /// Текст правила. Пишется на любом языке: это инструкция МОДЕЛИ, а не текст клиенту.
-  globalNote      String?
+  globalNote  String?
   /// Последний день действия включительно; NULL — бессрочно.
-  activeUntil     DateTime?
+  activeUntil DateTime?
 
   // ── Доступ к модели. Пусто во ВСЕХ трёх полях — работают переменные окружения, как раньше ──
   /// Ключ доступа к API модели, зашифрован (secretBox). Наружу не отдаётся никогда.
@@ -2670,7 +2676,7 @@ model AiAssistantSettings {
   checkErrorSafe  String?
 
   updatedByUserId String?
-  updatedAt       DateTime  @updatedAt
+  updatedAt       DateTime @updatedAt
 }
 
 // Глобальный «рубильник» автоматизаций (singleton, id="singleton"). При disableAll=true новые
@@ -3083,8 +3089,8 @@ model OrderEmailMessage {
   /// Когда письмо увидел человек. Пусто у входящего — значок «новое» на вкладке «Email».
   /// Ставится при открытии карточки, тем же движением, что у SMS (readAt в OrderCommunication).
   readAt     DateTime?
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
 
   /**
    * Идемпотентность исходящих — как `sendKey` у OrderCommunication. Строка создаётся ДО вызова

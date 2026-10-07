@@ -24,6 +24,7 @@ const OPERATOR_TURN: ReviewRequestStatus[] = ["NEW", "CALLING", "REPLIED"];
 
 const CARD = {
   id: true,
+  party: true,
   status: true,
   callAttempts: true,
   nextActionAt: true,
@@ -42,6 +43,7 @@ const CARD = {
       senderEmail: true,
       deliveryDate: true,
       recipientName: true,
+      recipientPhone: true,
       site: { select: { id: true, name: true, timezone: true } },
       // Фото букета — то, по чему заказ узнают в лицо; правила выбора картинки в orders/images.
       items: { select: { name: true, quantity: true, image: true, parentImageUrl: true, variantImageUrl: true } },

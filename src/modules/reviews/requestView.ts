@@ -23,6 +23,7 @@ import type { CommunicationCardItem } from "@/integrations/quo/communicationsSer
 import { loadPhoneCommunicationsCard } from "@/integrations/quo/communicationsService";
 import { loadOrderEmailPanel } from "@/integrations/emailFactory/read";
 import { loadReviewReward } from "./reward";
+import { partyPhone } from "./requests";
 
 export type RequestDetailVM = {
   id: string;
@@ -37,6 +38,8 @@ export type RequestDetailVM = {
   nextActionLabel: string | null;
   /** Последним в разговоре высказался клиент — ход за нами. */
   awaitingUs: boolean;
+  /** У кого просим отзыв — с этой стороной и разговор. */
+  party: "CUSTOMER" | "RECIPIENT";
   order: {
     id: string;
     href: string;
@@ -59,7 +62,7 @@ export type RequestDetailVM = {
   locations: { id: string; name: string }[];
   linkSentLabel: string | null;
   journal: { at: string; label: string; by: string | null; detail: string | null }[];
-  /** Переписка и звонки по номеру заказчика — для общего блока «Общение». */
+  /** Переписка и звонки по номеру того, у кого просим, — для общего блока «Общение». */
   comm: { communications: CommunicationCardItem[]; storeHasQuoNumber: boolean; storeTimeZone: string | null };
   emails: Awaited<ReturnType<typeof loadOrderEmailPanel>>;
   coupon: { code: string; sentAt: string | null; sentCode: string | null };
@@ -80,7 +83,7 @@ export async function loadRequestDetail(
   const r = await prisma.orderReviewRequest.findUnique({
     where: { id: requestId },
     select: {
-      id: true, status: true, callAttempts: true, nextActionAt: true, linkSentAt: true, linkChannel: true,
+      id: true, party: true, status: true, callAttempts: true, nextActionAt: true, linkSentAt: true, linkChannel: true,
       reviewUrlSnapshot: true, couponSentAt: true, couponCodeSnapshot: true,
       location: { select: { id: true, name: true } },
       order: {
@@ -111,9 +114,9 @@ export async function loadRequestDetail(
     loadReviewReward(prisma),
   ]);
 
-  // Переписка по НОМЕРУ заказчика: звонок из QUO приходит без привязки к заказу, а разговор
-  // может идти по прошлому заказу того же человека.
-  const phoneE164 = toE164(r.order.senderPhone);
+  // Переписка по НОМЕРУ того, у кого просим: звонок из QUO приходит без привязки к заказу, а
+  // разговор может идти по прошлому заказу того же человека.
+  const phoneE164 = toE164(partyPhone(r.party, r.order));
   const [comm, emails] = await Promise.all([
     phoneE164
       ? loadPhoneCommunicationsCard(prisma, { phoneE164, siteId: r.order.site.id })
@@ -138,6 +141,7 @@ export async function loadRequestDetail(
     overdue: !!r.nextActionAt && operatorTurn && r.nextActionAt.getTime() < startOfToday().getTime(),
     nextActionLabel: r.nextActionAt && operatorTurn ? `вернуться ${fmtStoreDayTime(r.nextActionAt, tz).slice(0, 5)}` : null,
     awaitingUs: awaitingUs(comm.communications),
+    party: r.party,
     order: {
       id: r.order.id,
       href: orderHref(r.order.id),

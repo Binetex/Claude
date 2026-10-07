@@ -75,21 +75,37 @@ export function isTapback(raw: string): boolean {
   return TAPBACK.test(raw.trim());
 }
 
-/** Похоже ли входящее на вежливую точку, а не на вопрос. Лайк нашего сообщения — тоже точка. */
-export function isSmallTalk(raw: string): boolean {
-  if (isTapback(raw)) return true;
-  const text = raw
+/** Слова без эмодзи и знаков препинания: «👍», «ok!», «thanks :)» смысла в них не несут. */
+function plainWords(raw: string): string {
+  return raw
     .toLowerCase()
-    // Эмодзи и знаки препинания сами по себе смысла не несут: «👍», «ok!», «thanks :)».
     .replace(/[\p{Emoji_Presentation}\p{Extended_Pictographic}]/gu, " ")
     .replace(/[^\p{L}\p{N}\s]/gu, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+/** Похоже ли входящее на вежливую точку, а не на вопрос. Лайк нашего сообщения — тоже точка. */
+export function isSmallTalk(raw: string): boolean {
+  if (isTapback(raw)) return true;
+  const text = plainWords(raw);
   if (!text) return true; // одни эмодзи
   if (SMALL_TALK.has(text)) return true;
   // «ok thanks», «thank you very much», «confirmed thank you» — те же слова с хвостом вежливости.
   const words = text.split(" ");
   return words.length <= 5 && words.some((w) => SMALL_TALK.has(w)) && words.every((w) => SMALL_TALK.has(w) || FILLER.has(w));
+}
+
+const THANKS_WORDS = new Set(["thanks", "thank", "thankyou", "thx", "ty", "tnx", "спасибо", "спс"]);
+
+/**
+ * Короткое «спасибо» без вопроса: «Thank you!», «thanks so much ❤️». Модель такие не видит (это
+ * вежливая точка, `isSmallTalk`), а подсказке «попросить отзыв у получателя» оно и нужно:
+ * благодарность после доставки — лучший момент. «Ок» и лайк нашего сообщения — не благодарность.
+ */
+export function isThanks(raw: string): boolean {
+  if (isTapback(raw) || !isSmallTalk(raw)) return false;
+  return plainWords(raw).split(" ").some((w) => THANKS_WORDS.has(w));
 }
 
 /**

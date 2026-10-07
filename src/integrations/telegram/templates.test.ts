@@ -15,6 +15,9 @@ import {
   renderOwnerDeliveryProblem,
   renderOwnerNoCouriers,
   renderCustomerCallRequest,
+  renderAskReviewRecipient,
+  renderReviewSuggest,
+  REVIEW_ASK_ACTION_PREFIX,
   callCenterOrderUrl,
 } from "./templates";
 
@@ -183,5 +186,32 @@ describe("клиент просит позвонить", () => {
     expect(renderCustomerCallRequest(order, null, null, "🧪 Сухой прогон")).toContain("🧪 Сухой прогон · Клиент просит позвонить");
     expect(buttonsFor("customer.call_request_cc", order)).toEqual([{ text: "Open Order", url: callCenterOrderUrl(order.id) }]);
     expect(buttonsFor("customer.call_request", order)).toEqual([{ text: "Open Order", url: ownerOrderUrl(order.id) }]);
+  });
+});
+
+describe("отзыв у получателя", () => {
+  const withPhones = { ...order, recipientPhone: "+13105550111", senderName: "John Buyer", senderPhone: "+13105550100" };
+
+  it("задача оператору называет получателя и его телефон — звонить ему, а не заказчику", () => {
+    const text = renderAskReviewRecipient(withPhones);
+    expect(text).toContain("Попросить отзыв у получателя");
+    expect(text).toContain("Получатель: Ann Recipient");
+    expect(text).toContain("Телефон: +13105550111");
+    expect(buttonsFor("order.ask_review_recipient", withPhones)).toEqual([{ text: "Open Order", url: callCenterOrderUrl(order.id) }]);
+  });
+
+  it("подсказка ИИ владельцу: слова получателя и кнопка «Попросить отзыв» с номером заказа", () => {
+    const text = renderReviewSuggest(withPhones, "Thank you <3", null);
+    expect(text).toContain("Получатель благодарит");
+    expect(text).toContain("Thank you &lt;3");
+    expect(renderReviewSuggest(withPhones, null, "🧪 Сухой прогон")).toContain("🧪 Сухой прогон · Получатель благодарит");
+    expect(buttonsFor("assistant.review_suggest", withPhones)).toEqual([
+      { text: "⭐ Попросить отзыв", callbackData: `${REVIEW_ASK_ACTION_PREFIX}${order.id}` },
+      { text: "Open Order", url: ownerOrderUrl(order.id) },
+    ]);
+  });
+
+  it("данные кнопки влезают в лимит Telegram (64 байта)", () => {
+    expect(Buffer.byteLength(`${REVIEW_ASK_ACTION_PREFIX}cmuyd1qe201gqrmmlht9sziql`)).toBeLessThanOrEqual(64);
   });
 });

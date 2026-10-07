@@ -31,11 +31,13 @@ export const TELEGRAM_EVENTS = [
   "delivery.no_couriers",
   "delivery.no_couriers_florist",
   "order.ask_review",
+  "order.ask_review_recipient",
   "customer.ready_time",
   "customer.ready_time_florist",
   "customer.call_request",
   "customer.call_request_cc",
   "customer.email_reply",
+  "assistant.review_suggest",
 ] as const;
 
 export type TelegramEventType = (typeof TELEGRAM_EVENTS)[number];
@@ -190,6 +192,14 @@ const REGISTRY: Record<TelegramEventType, TelegramEventDef> = {
     dedupeKey: ({ orderId }) => `order:${orderId}:cs.ask_review`,
     description: "Владелец пометил заказ «попросить отзыв» — задача оператору колл-центра.",
   },
+  "order.ask_review_recipient": {
+    type: "order.ask_review_recipient",
+    audience: "CUSTOMER_SERVICE",
+    perFlorist: false,
+    // Своя задача на заказ: запрос получателю — отдельный от запроса заказчику.
+    dedupeKey: ({ orderId }) => `order:${orderId}:cs.ask_review_recipient`,
+    description: "Владелец попросил отзыв у получателя букета — задача оператору колл-центра.",
+  },
   "delivery.no_couriers": {
     type: "delivery.no_couriers",
     audience: "OWNER",
@@ -234,6 +244,15 @@ const REGISTRY: Record<TelegramEventType, TelegramEventDef> = {
     // сообщением, а не правит прошлое. Иначе первое уведомление молча подменилось бы вторым.
     dedupeKey: ({ orderId, occurrence }) => `order:${orderId}:owner.email_reply:${occurrence ?? "-"}`,
     description: "Клиент ответил на письмо — владельцу, с текстом ответа.",
+  },
+  "assistant.review_suggest": {
+    type: "assistant.review_suggest",
+    fromAssistant: true,
+    audience: "OWNER",
+    perFlorist: false,
+    // Одна подсказка на заказ: получатель может поблагодарить и дважды.
+    dedupeKey: ({ orderId }) => `order:${orderId}:owner.review_suggest`,
+    description: "Получатель благодарит после доставки — ИИ предлагает попросить у него отзыв.",
   },
   "customer.call_request": {
     type: "customer.call_request",

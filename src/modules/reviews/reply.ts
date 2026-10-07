@@ -11,12 +11,12 @@ import "server-only";
  * находился вовсе, и запрос уходил в «игнорирует», хотя на той же карточке горело «клиент
  * ответил» (её считает `queueView` — по номеру). Один признак — один источник.
  *
- * По номеру же отсекается и ответ ПОЛУЧАТЕЛЯ букета: отзыв просят у заказчика, и «спасибо,
- * красивые» от получателя не значит, что заказчик отреагировал.
+ * Номер — той стороны, у которой просим (`partyPhone`): у запроса заказчику «спасибо, красивые»
+ * от получателя не значит, что заказчик отреагировал, а у запроса получателю — наоборот.
  */
 import type { PrismaClient } from "@/generated/prisma/client";
 import { toE164 } from "@/lib/phone";
-import { recordCustomerReply, REPLY_REOPENS_FROM } from "./requests";
+import { recordCustomerReply, REPLY_REOPENS_FROM, partyPhone } from "./requests";
 
 /** Насколько старые запросы ещё считаем живыми. Дальше это архив, а не ожидание ответа. */
 const LOOKBACK_DAYS = 90;
@@ -39,12 +39,12 @@ export async function noteReviewReply(db: PrismaClient, communicationId: string)
         status: { in: REPLY_REOPENS_FROM },
         linkSentAt: { gte: new Date(Date.now() - LOOKBACK_DAYS * 86_400_000) },
       },
-      select: { id: true, order: { select: { senderPhone: true } } },
+      select: { id: true, party: true, order: { select: { senderPhone: true, recipientPhone: true } } },
       orderBy: { linkSentAt: "desc" },
       take: 200,
     });
 
-    const hit = waiting.find((r) => toE164(r.order.senderPhone) === phone);
+    const hit = waiting.find((r) => toE164(partyPhone(r.party, r.order)) === phone);
     if (!hit) return false;
 
     return await recordCustomerReply(db, hit.id, c.occurredAt);

@@ -3,6 +3,8 @@ import { loadTemplatesForOrder } from "@/modules/messaging/templates";
 import { localDateStr } from "@/lib/tz";
 import { getForOwner } from "@/modules/orders/queries";
 import { prisma } from "@/lib/db";
+import { toE164 } from "@/lib/phone";
+import { REVIEW_STATUS_LABELS } from "@/lib/reviewStatus";
 import { windowOf } from "@/lib/deliveryWindow";
 import { loadWindowPresets } from "@/modules/orders/windowPresets";
 import { Card, CardHeader, CardTitle, CardBody } from "@/components/ui/Card";
@@ -86,6 +88,15 @@ export default async function OwnerOrderPage({
   const surcharge = await orderSurchargeTotal(order.id).catch(() => 0);
 
   const florists = await prisma.florist.findMany({ include: { user: true }, orderBy: { createdAt: "asc" } });
+
+  // Отзыв у получателя — свой запрос, рядом с пометкой «Работа с клиентом». Просить можно, когда
+  // у получателя свой номер: один номер на двоих — получатель и есть заказчик.
+  const recipientReview = await prisma.orderReviewRequest.findUnique({
+    where: { orderId_party: { orderId: order.id, party: "RECIPIENT" } },
+    select: { id: true, status: true },
+  });
+  const recipientE164 = toE164(order.recipientPhone);
+  const canAskRecipient = !!recipientE164 && recipientE164 !== toE164(order.senderPhone);
 
   // Сводка возвратов — best-effort и только когда есть что показывать: платёж Airwallex.
   // Ошибка или недоступность Airwallex не должна ронять карточку заказа, поэтому catch.
@@ -478,7 +489,12 @@ export default async function OwnerOrderPage({
           <OrderExpensesSection orderId={order.id} hideWhenEmpty />
 
           {/* Редкая настройка — внизу колонки и свёрнутая. */}
-          <MarketingMarkCard orderId={order.id} mark={order.marketingMark} />
+          <MarketingMarkCard
+            orderId={order.id}
+            mark={order.marketingMark}
+            canAskRecipient={canAskRecipient}
+            recipientReview={recipientReview ? { href: `/dashboard/reviews/requests/${recipientReview.id}`, label: REVIEW_STATUS_LABELS[recipientReview.status] } : null}
+          />
         </>
       }
     />

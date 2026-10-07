@@ -19,6 +19,8 @@ import { looksEnglish } from "./prompt";
 import { toSmsText } from "@/lib/smsText";
 import { getSpeechConfig, createTranscriber, type Transcriber } from "@/integrations/speech/transcribe";
 import { describeSendFailure } from "@/lib/smsFailure";
+import { REVIEW_ASK_ACTION_PREFIX } from "@/integrations/telegram/templates";
+import { askRecipientReview } from "@/modules/reviews/recipient";
 
 export const TELEGRAM_UPDATE_EVENT = "assistant.telegram.update";
 
@@ -69,6 +71,37 @@ export async function translateForCustomer(client: DeepseekClient, text: string)
 type Deps = { client?: DeepseekClient | null; transcriber?: Transcriber | null; fetchImpl?: typeof fetch };
 
 /**
+ * Кнопка «Попросить отзыв» (`assistant/reviewSuggest.ts`): запрос отзыва у получателя — в очередь
+ * «Отзывы», колл-центру задача. Только из чата бота ВЛАДЕЛЬЦА: решение его, а кнопка приходит
+ * только ему. Под сообщением остаётся его текст с отметкой, кнопки снимаются — висящая кнопка
+ * после решения звала бы нажать ещё раз.
+ */
+async function askReviewFromButton(
+  prisma: PrismaClient,
+  sender: TelegramSender,
+  botId: string,
+  chatId: string,
+  cb: { id: string; data: string; message?: { message_id?: number; text?: string } }
+): Promise<void> {
+  const bot = await prisma.telegramBot.findUnique({ where: { id: botId }, select: { purpose: true } });
+  if (bot?.purpose !== "OWNER") {
+    await sender.answerCallback(cb.id, "Просить отзыв может только владелец.");
+    return;
+  }
+  const res = await askRecipientReview(prisma, cb.data.slice(REVIEW_ASK_ACTION_PREFIX.length), null);
+  const result = !res.ok
+    ? `⚠️ ${res.error}`
+    : res.created
+      ? "⭐ Запрос отзыва у получателя — в очереди «Отзывы», колл-центру ушла задача."
+      : "Запрос отзыва у получателя уже есть.";
+  await sender.answerCallback(cb.id, result);
+  if (res.ok && cb.message?.message_id != null) {
+    const before = cb.message.text ? `${escapeHtml(cb.message.text)}\n\n` : "";
+    await sender.editMessage(chatId, String(cb.message.message_id), `${before}${result}`);
+  }
+}
+
+/**
  * Разбор одного обновления Telegram. Возвращает ничего: всё, что нужно сказать человеку,
  * говорится ему же в чат.
  */
@@ -81,7 +114,7 @@ export function buildTelegramUpdateHandler(prisma: PrismaClient, deps: Deps = {}
     if (!("bot" in lookup)) return;
     const sender = new TelegramSender(lookup.bot.token);
     const update = p.update as {
-      callback_query?: { id: string; data?: string; message?: { message_id?: number; chat?: { id?: number | string } } };
+      callback_query?: { id: string; data?: string; message?: { message_id?: number; text?: string; chat?: { id?: number | string } } };
       message?: {
         text?: string;
         voice?: { file_id: string; mime_type?: string; file_size?: number };
@@ -100,6 +133,11 @@ export function buildTelegramUpdateHandler(prisma: PrismaClient, deps: Deps = {}
       const chatId = fromChat(cb.message?.chat);
       if (chatId !== lookup.bot.chatId) {
         await sender.answerCallback(cb.id, "Не тот чат.");
+        return;
+      }
+      // «Попросить отзыв» под подсказкой ИИ: получатель благодарит — владелец решает одним нажатием.
+      if (cb.data.startsWith(REVIEW_ASK_ACTION_PREFIX)) {
+        await askReviewFromButton(prisma, sender, p.botId, chatId, cb as typeof cb & { data: string });
         return;
       }
       const isSend = cb.data.startsWith(SEND_ACTION_PREFIX);

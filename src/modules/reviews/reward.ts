@@ -70,7 +70,7 @@ export async function sendReviewCoupon(
 
   const request = await prisma.orderReviewRequest.findUnique({
     where: { id: input.requestId },
-    select: { id: true, orderId: true, couponSentAt: true, couponCodeSnapshot: true },
+    select: { id: true, orderId: true, party: true, couponSentAt: true, couponCodeSnapshot: true },
   });
   if (!request) return { ok: false, error: "Запрос не найден." };
   if (request.couponSentAt && request.couponCodeSnapshot === reward.couponCode) {
@@ -87,7 +87,7 @@ export async function sendReviewCoupon(
   const client = cfg && featureFlags.quo ? createQuoClient({ ...cfg, maxRetries: 0 }) : null;
   const sms = await sendOrderSms(prisma, client, {
     orderId: request.orderId,
-    target: "CUSTOMER",
+    target: request.party, // купон — тому, кто оставил отзыв
     text,
     idempotencyKey: `review-coupon:${request.id}:${reward.couponCode}`,
     sentByUserId: input.actorUserId ?? null,

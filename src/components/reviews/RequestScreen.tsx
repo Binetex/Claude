@@ -15,9 +15,9 @@ import { RequestActions } from "./RequestActions";
  * Своей вёрстки для отзывов здесь нет намеренно. Раньше была — и владелец справедливо спросил,
  * зачем ей отличаться от уже готового и понятного экрана заказа.
  *
- * Блок общения тот же, что в карточке заказа, но лента приходит ПО НОМЕРУ заказчика: звонок из
- * QUO приходит без привязки к заказу, а разговор может идти по прошлому заказу того же человека.
- * Открывается на вкладке заказчика — отзыв просят у него.
+ * Блок общения тот же, что в карточке заказа, но лента приходит ПО НОМЕРУ того, у кого просим
+ * отзыв: звонок из QUO приходит без привязки к заказу, а разговор может идти по прошлому заказу
+ * того же человека. Открывается на его вкладке — заказчика или получателя.
  */
 export function RequestScreen({ vm, backHref }: { vm: RequestDetailVM; backHref: string }) {
   return (
@@ -32,6 +32,9 @@ export function RequestScreen({ vm, backHref }: { vm: RequestDetailVM; backHref:
           <span className={`rounded-md border px-2 py-0.5 text-xs font-medium ${REVIEW_STATUS_BADGE[vm.status] ?? "border-slate-200 bg-slate-100 text-slate-600"}`}>
             {vm.statusText}
           </span>
+          {vm.party === "RECIPIENT" && (
+            <span className="rounded-md border border-violet-200 bg-violet-50 px-2 py-0.5 text-xs font-medium text-violet-800">Отзыв просим у получателя</span>
+          )}
           {vm.overdue && <span className="rounded bg-amber-100 px-1.5 py-px text-[11px] text-amber-900">просрочено</span>}
           {/* Статус REPLIED говорит то же самое — второй раз тем же цветом не повторяем. */}
           {vm.awaitingUs && vm.status !== "REPLIED" && (
@@ -60,7 +63,7 @@ export function RequestScreen({ vm, backHref }: { vm: RequestDetailVM; backHref:
             customerEmail={vm.emails.customerEmail}
             communications={vm.comm.communications}
             storeTimeZone={vm.comm.storeTimeZone}
-            initialSide="CUSTOMER"
+            initialSide={vm.party}
           />
 
           <Card>

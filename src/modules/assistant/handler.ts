@@ -23,7 +23,8 @@ import { readTemplates, templateApplies, renderAssistantTemplate } from "./templ
 import { loadCatalog, looksLikeShopping } from "./catalog";
 import { buildOrderVariables } from "@/modules/messaging/variables";
 import { orderToVariableSource, SMS_ORDER_INCLUDE } from "@/modules/messaging/orderSource";
-import { shouldConsider, decideDelivery, isCallRequest, isSmallTalk, type AssistantMode } from "./policy";
+import { shouldConsider, decideDelivery, isCallRequest, isSmallTalk, isThanks, type AssistantMode } from "./policy";
+import { suggestRecipientReview, logReviewSuggestError } from "./reviewSuggest";
 import { scheduleAssistantNudge, type AssistantIncomingPayload } from "./events";
 import { PrismaOutboxRepository } from "@/outbox/prismaRepository";
 import { sendAssistantReply, notifyDraft, notifyOwnerText, notifyBotText, escapeHtml, pickOrderTarget } from "./deliver";
@@ -125,6 +126,14 @@ export function buildAssistantHandler(prisma: PrismaClient, deps: AssistantDeps 
     // на заказе всё же уважаются: это прямой запрет владельца на всю работу по этому заказу.
     if (callRequested && site.aiMode !== "OFF" && !order?.aiDisabled) {
       await notifyCallRequest(prisma, order, site, incoming, body, now()).catch(logCallRequestError);
+    }
+
+    // Получатель благодарит после доставки — подсказать владельцу попросить у него отзыв. Короткое
+    // «спасибо» до модели не дойдёт (вежливая точка), поэтому узнаётся здесь, правилом; всё
+    // длиннее разбирает модель (`intent: "thanks"`, ниже).
+    const plainThanks = isThanks(body);
+    if (plainThanks && site.aiMode !== "OFF" && !order?.aiDisabled) {
+      await suggestRecipientReview(prisma, order, site, incoming, body).catch(logReviewSuggestError);
     }
 
     // Фото ассистент не комментирует ВООБЩЕ (решение владельца 07.09.2026). Картинку модель не
@@ -398,6 +407,9 @@ export function buildAssistantHandler(prisma: PrismaClient, deps: AssistantDeps 
     // voice»). Своими словами распознанное уже ушло выше; здесь — только добавка модели.
     if (!callRequested && parsed.intent === "call_request") {
       await notifyCallRequest(prisma, linkedOrder, site, incoming, body, now()).catch(logCallRequestError);
+    }
+    if (!plainThanks && parsed.intent === "thanks") {
+      await suggestRecipientReview(prisma, linkedOrder, site, incoming, body).catch(logReviewSuggestError);
     }
     await finishTurn(prisma, turn.id, action, site.aiDryRun, burst);
   };

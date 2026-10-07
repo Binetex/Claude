@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { shouldConsider, decideDelivery, isSmallTalk, isTapback, isCallRequest, DAILY_CAP, ORDER_CAP, AUTOMATED_SILENCE_MIN } from "./policy";
+import { shouldConsider, decideDelivery, isSmallTalk, isTapback, isCallRequest, isThanks, DAILY_CAP, ORDER_CAP, AUTOMATED_SILENCE_MIN } from "./policy";
 
 /**
  * Правила ассистента. Каждая проверка здесь — про живого человека с телефоном: лишний ответ
@@ -165,5 +165,19 @@ describe("просьба позвонить", () => {
     expect(isCallRequest("Please dont email, just call me")).toBe(true);
     // Телефоны подставляют типографский апостроф — это то же слово.
     expect(isCallRequest("Please don\u2019t call me, text only")).toBe(false);
+  });
+});
+
+describe("короткое «спасибо» — повод подсказать про отзыв", () => {
+  it("благодарность в любом виде", () => {
+    for (const t of ["Thank you!", "thanks so much ❤️", "Thank u", "thx", "Many thanks", "спасибо"]) expect(isThanks(t), t).toBe(true);
+  });
+
+  it("«ок», эмодзи и лайк нашего сообщения — не благодарность", () => {
+    for (const t of ["ok", "👍", "❤️", "Loved “Your flowers were delivered”", "got it"]) expect(isThanks(t), t).toBe(false);
+  });
+
+  it("длинное сообщение разбирает модель, а не правило", () => {
+    expect(isThanks("Thank you, the flowers are absolutely gorgeous")).toBe(false);
   });
 });

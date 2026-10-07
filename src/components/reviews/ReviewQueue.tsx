@@ -29,8 +29,11 @@ export type CardVM = {
   repliedLast: boolean;
   orderNumber: string;
   siteName: string;
+  /** У кого просим отзыв: обычно заказчик, по кнопке владельца — получатель букета. */
+  askRecipient: boolean;
+  askName: string | null;
+  askPhone: string | null;
   customerName: string | null;
-  customerPhone: string | null;
   items: string;
   deliveryLabel: string;
   /** Журнал запроса, старые сверху: когда кто связывался и что было сделано. */
@@ -110,12 +113,15 @@ function RequestCard({ card }: { card: CardVM }) {
 
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
-            <span className="font-medium text-slate-900">{card.customerName ?? "без имени"}</span>
-            {card.customerPhone && <span className="font-mono text-xs text-slate-500">{card.customerPhone}</span>}
+            <span className="font-medium text-slate-900">{card.askName ?? "без имени"}</span>
+            {card.askRecipient && <span className="rounded bg-violet-100 px-1.5 py-px text-[11px] text-violet-800">получатель</span>}
+            {card.askPhone && <span className="font-mono text-xs text-slate-500">{card.askPhone}</span>}
           </div>
           <div className="mt-0.5 truncate text-xs text-slate-500">
             {card.orderNumber} · {card.items} · доставка {card.deliveryLabel}
-            {card.recipientName ? ` · получатель ${card.recipientName}` : ""}
+            {card.askRecipient
+              ? card.customerName ? ` · от ${card.customerName}` : ""
+              : card.recipientName ? ` · получатель ${card.recipientName}` : ""}
           </div>
 
           {/* Когда последний раз общались — и ответ клиента, если ход за нами. */}

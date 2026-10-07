@@ -21,6 +21,8 @@ import {
   renderCustomerEmailReply,
   renderOwnerNoCouriers,
   renderAskReview,
+  renderAskReviewRecipient,
+  renderReviewSuggest,
   renderOwnerPaymentProblem,
   renderOwnerPendingTooLong,
   renderOwnerStatusMismatch,
@@ -297,6 +299,10 @@ function renderFor(type: TelegramNotifyPayload["type"], order: OrderSnapshot, ct
       return renderOwnerNoCouriers(order, ctx.checkedAt ?? null);
     case "order.ask_review":
       return renderAskReview(order);
+    case "order.ask_review_recipient":
+      return renderAskReviewRecipient(order);
+    case "assistant.review_suggest":
+      return renderReviewSuggest(order, ctx.quote ?? null, ctx.note ?? null);
     case "customer.ready_time":
     case "customer.ready_time_florist":
       return renderCustomerReadyTime(order, ctx.readyTime ?? "—", ctx.quote ?? null);
@@ -313,7 +319,7 @@ async function loadOrderSnapshot(prisma: PrismaClient, orderId: string): Promise
     where: { id: orderId },
     select: {
       id: true, orderNumber: true, deliveryDate: true, deliveryWindow: true,
-      recipientName: true, senderName: true, senderPhone: true,
+      recipientName: true, recipientPhone: true, senderName: true, senderPhone: true,
       addressLine: true, apartment: true, city: true, zip: true,
       cardMessage: true, deliveryInstructions: true,
       site: { select: { name: true } },
@@ -331,6 +337,7 @@ async function loadOrderSnapshot(prisma: PrismaClient, orderId: string): Promise
     deliveryDate: o.deliveryDate,
     deliveryWindow: o.deliveryWindow,
     recipientName: o.recipientName,
+    recipientPhone: o.recipientPhone,
     // Заказчик — кому звонить: «нет номера дома», «попросить отзыв», «просит позвонить».
     senderName: o.senderName,
     senderPhone: o.senderPhone,

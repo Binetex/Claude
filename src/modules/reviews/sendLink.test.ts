@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { DEFAULT_ASK_SMS, DEFAULT_REMINDER_SMS } from "./sendLink";
+import { DEFAULT_ASK_SMS, DEFAULT_REMINDER_SMS, DEFAULT_RECIPIENT_ASK_SMS, DEFAULT_RECIPIENT_REMINDER_SMS } from "./sendLink";
 import { SMS_VARIABLES } from "@/modules/messaging/variables";
 import { extractVariables, renderTemplate } from "@/modules/messaging/template";
 import { isGsm7 } from "@/lib/smsText";
@@ -15,6 +15,8 @@ describe("шаблоны сообщений клиенту", () => {
   for (const [name, template] of [
     ["просьба об отзыве", DEFAULT_ASK_SMS],
     ["напоминание", DEFAULT_REMINDER_SMS],
+    ["просьба об отзыве получателю", DEFAULT_RECIPIENT_ASK_SMS],
+    ["напоминание получателю", DEFAULT_RECIPIENT_REMINDER_SMS],
   ] as const) {
     it(`${name}: только существующие переменные`, () => {
       const unknown = extractVariables(template).filter((v) => !KNOWN.has(v));
@@ -37,6 +39,7 @@ describe("шаблоны сообщений клиенту", () => {
     it(`${name}: подставляется целиком и влезает в одну SMS`, () => {
       const rendered = renderTemplate(template, {
         sender_name: "Sarah",
+        recipient_name: "Maria",
         store_name: "TheFlow",
         review_url: "https://g.page/r/xxxxxxxxxxxx/review",
       });

@@ -31,7 +31,8 @@ import { buildOrderVariables } from "@/modules/messaging/variables";
 import { renderTemplate } from "@/modules/messaging/template";
 import { SMS_ORDER_INCLUDE, orderToVariableSource } from "@/modules/messaging/orderSource";
 import { resolveCustomerEmail } from "@/modules/messaging/emailAudience";
-import { recordLinkSent, recordLinkFailed, type RequestActor } from "./requests";
+import { toE164 } from "@/lib/phone";
+import { recordLinkSent, recordLinkFailed, partyPhone, type RequestActor } from "./requests";
 
 /**
  * Тексты по умолчанию. Магазин может задать свои в настройках модуля.
@@ -48,6 +49,16 @@ export const DEFAULT_ASK_SMS =
 
 export const DEFAULT_REMINDER_SMS =
   "Hi {{sender_name}}, a gentle reminder about the review you kindly promised. It only takes a minute: {{review_url}}";
+
+/**
+ * Получателю букета — свои тексты: он ничего не заказывал, и «thank you for your order» ему не к
+ * месту. Не настраиваются: тексты магазина в «Отзывы → Сообщения» написаны заказчику.
+ */
+export const DEFAULT_RECIPIENT_ASK_SMS =
+  "Hi {{recipient_name}}, we hope you loved your flowers from {{store_name}}! Would you mind leaving us a quick review? {{review_url}}";
+
+export const DEFAULT_RECIPIENT_REMINDER_SMS =
+  "Hi {{recipient_name}}, a gentle reminder about the review you kindly promised. It only takes a minute: {{review_url}}";
 
 export type SendLinkKind = "ASK" | "REMINDER";
 
@@ -73,6 +84,8 @@ const ERRORS: Record<string, string> = {
   no_review_url: "У заказа нет ссылки на отзыв: заведите точку для этого магазина или задайте запасную.",
   request_not_found: "Запрос не найден.",
   no_customer_contact: "У заказчика нет ни телефона, ни email — отправить нечем.",
+  recipient_muted: "Получателю по этому заказу не пишем (сюрприз) — снимите пометку в карточке заказа.",
+  invalid_target_phone: "У получателя нет пригодного номера — SMS отправить некуда.",
   store_quo_disabled: "SMS у магазина выключены, а письмо отправить нечем: не настроен Email.",
   quo_not_configured: "SMS недоступны, а письмо отправить нечем: не настроен Email.",
   // Коды почтового канала. Без перевода оператор видел «Не удалось отправить
@@ -102,9 +115,10 @@ export async function sendReviewLink(
 ): Promise<SendLinkResult> {
   const request = await db.orderReviewRequest.findUnique({
     where: { id: input.requestId },
-    select: { id: true, orderId: true, reviewUrlSnapshot: true },
+    select: { id: true, orderId: true, party: true, reviewUrlSnapshot: true },
   });
   if (!request) return { ok: false, code: "request_not_found", error: humanize("request_not_found") };
+  const toRecipient = request.party === "RECIPIENT";
   if (!request.reviewUrlSnapshot) return { ok: false, code: "no_review_url", error: humanize("no_review_url") };
 
   const order = await db.order.findUnique({ where: { id: request.orderId }, include: SMS_ORDER_INCLUDE });
@@ -116,7 +130,9 @@ export async function sendReviewLink(
   });
 
   const isAsk = input.kind === "ASK";
-  const template = (isAsk ? settings?.askSmsTemplate : settings?.reminderSmsTemplate) || (isAsk ? DEFAULT_ASK_SMS : DEFAULT_REMINDER_SMS);
+  const template = toRecipient
+    ? isAsk ? DEFAULT_RECIPIENT_ASK_SMS : DEFAULT_RECIPIENT_REMINDER_SMS
+    : (isAsk ? settings?.askSmsTemplate : settings?.reminderSmsTemplate) || (isAsk ? DEFAULT_ASK_SMS : DEFAULT_REMINDER_SMS);
   const brevoTemplateId = (isAsk ? settings?.askBrevoTemplateId : settings?.reminderBrevoTemplateId) ?? null;
 
   // review_url подставляем из снимка: переменная магазина указывала бы на общую ссылку, а не
@@ -128,16 +144,20 @@ export async function sendReviewLink(
   const client = cfg && featureFlags.quo ? createQuoClient({ ...cfg, maxRetries: 0 }) : null;
   const sms = await sendOrderSms(db, client, {
     orderId: request.orderId,
-    target: "CUSTOMER",
+    target: request.party,
     text,
     idempotencyKey: input.sendKey,
     sentByUserId: input.actor?.userId ?? null,
+    // «Сюрприз: получателю не пишем» не держит, если получатель сам нам написал: сюрприз уже
+    // раскрыт, а молчание в ответ хуже (то же правило, что у ручного ответа из карточки).
+    ...(toRecipient ? { replyToInbound: await wroteToUs(db, partyPhone("RECIPIENT", order)) } : {}),
   });
 
   if (sms.ok) return { ok: true, channel: "SMS" };
 
-  // Сломано само сообщение — почта его не спасёт и отправила бы другой текст.
-  if (BROKEN_MESSAGE_CODES.has(sms.code)) {
+  // Сломано само сообщение — почта его не спасёт и отправила бы другой текст. Почты получателя
+  // в заказе нет: ему — только SMS.
+  if (BROKEN_MESSAGE_CODES.has(sms.code) || toRecipient) {
     return { ok: false, code: sms.code, error: humanize(sms.code) };
   }
 
@@ -161,6 +181,13 @@ export async function sendReviewLink(
 
   if (res.ok) return { ok: true, channel: "EMAIL" };
   return { ok: false, code: res.code, error: humanize(res.code) };
+}
+
+/** Писал ли нам этот номер сам (по любому заказу — разговор идёт с человеком, а не с заказом). */
+async function wroteToUs(db: PrismaClient, phone: string | null): Promise<boolean> {
+  const e164 = toE164(phone);
+  if (!e164) return false;
+  return !!(await db.orderCommunication.findFirst({ where: { externalPhoneNormalized: e164, direction: "INBOUND" }, select: { id: true } }));
 }
 
 /**

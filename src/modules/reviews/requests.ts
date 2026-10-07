@@ -18,8 +18,21 @@ import "server-only";
  * (`modules/orders/marketingMark.ts`): пометка и есть решение просить отзыв, и второй способ
  * его выразить только развёл бы правду по двум местам.
  */
-import type { Prisma, PrismaClient, ReviewEventKind, ReviewRequestStatus } from "@/generated/prisma/client";
+import type { Prisma, PrismaClient, ReviewEventKind, ReviewParty, ReviewRequestStatus } from "@/generated/prisma/client";
+import { isP2002 } from "@/lib/prismaErrors";
 import { pickLocation, pickedReviewUrl } from "./locationPick";
+
+/**
+ * Телефон стороны, у которой просим отзыв. Звонки, SMS, «клиент ответил» и «игнорирует» — всё
+ * по этому номеру: у запроса получателю разговор идёт с получателем, а не с заказчиком.
+ */
+export function partyPhone(party: ReviewParty, order: { senderPhone: string | null; recipientPhone: string | null }): string | null {
+  return party === "RECIPIENT" ? order.recipientPhone : order.senderPhone;
+}
+
+export function partyName(party: ReviewParty, order: { senderName: string | null; recipientName: string | null }): string | null {
+  return party === "RECIPIENT" ? order.recipientName : order.senderName;
+}
 
 export type RequestActor = { userId: string } | null;
 
@@ -66,6 +79,8 @@ async function logEvent(
 /**
  * Создать запрос по заказу. Идемпотентно: повторная пометка того же заказа возвращает уже
  * существующий запрос, а не заводит второй — второй означал бы два звонка одному клиенту.
+ * Сторона — у кого просим: заказчик (пометка «Попросить отзыв») или получатель (своя кнопка
+ * владельца); на каждую сторону заказа свой запрос.
  *
  * Заказ без точки и без старой ссылки магазина запрос ВСЁ РАВНО получает: просить отзыв
  * по-прежнему можно голосом, а ссылку владелец добавит позже. Отказать здесь значило бы
@@ -74,9 +89,11 @@ async function logEvent(
 export async function createReviewRequest(
   db: PrismaClient,
   orderId: string,
-  actor: RequestActor
+  actor: RequestActor,
+  party: ReviewParty = "CUSTOMER"
 ): Promise<{ id: string; created: boolean }> {
-  const existing = await db.orderReviewRequest.findUnique({ where: { orderId }, select: { id: true } });
+  const where = { orderId_party: { orderId, party } };
+  const existing = await db.orderReviewRequest.findUnique({ where, select: { id: true } });
   if (existing) return { id: existing.id, created: false };
 
   const order = await db.order.findUnique({
@@ -98,10 +115,13 @@ export async function createReviewRequest(
   const picked = pickLocation(order.zip, order.site.googleLocations, order.site.reviewUrl);
   const locationId = picked.ok && picked.reason !== "site_fallback" ? picked.location.id : null;
 
+  // Двойное нажатие (кнопка в Telegram) успевает между проверкой и созданием — второй запрос
+  // отвергнет индекс, и нажатие вернёт уже созданный.
   const created = await db.$transaction(async (tx) => {
     const row = await tx.orderReviewRequest.create({
       data: {
         orderId,
+        party,
         locationId,
         reviewUrlSnapshot: pickedReviewUrl(picked),
         status: "NEW",
@@ -111,7 +131,15 @@ export async function createReviewRequest(
     });
     await logEvent(tx, row.id, "CREATED", actor, picked.ok ? picked.reason : "no_location");
     return row;
+  }).catch(async (err) => {
+    if (!isP2002(err)) throw err;
+    return null;
   });
+  if (!created) {
+    const again = await db.orderReviewRequest.findUnique({ where, select: { id: true } });
+    if (!again) throw new Error(`review_request_race:${orderId}`);
+    return { id: again.id, created: false };
+  }
 
   return { id: created.id, created: true };
 }
