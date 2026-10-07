@@ -68,6 +68,17 @@ describe("обещание модели — только по словам кл�
     expect(clientConfirmed({ text: "around 5pm", messageDay: "2026-09-30", newDate: null, from: hm(17), until: hm(17, 30) })).toEqual({ newDate: null, from: hm(17), until: hm(17, 30) });
   });
 
+  it("THEFLOW-20925: «between 5-7» при окне 3–7 — окно клиента 5–7", () => {
+    const text = "Yes, can this be delivered between 5-7 instead?";
+    expect(clientConfirmed({ text, messageDay: "2026-10-07", newDate: null, from: hm(17), until: hm(19) })).toEqual({ newDate: null, from: hm(17), until: hm(19) });
+  });
+
+  it("начало промежутка и «not before» — это «не раньше»: ответ «after 5» двигает начало окна", () => {
+    for (const [text, h] of [["Can it be between 5 and 6?", 17], ["5-6 works", 17], ["Please not before 4, I'm at work", 16], ["not until 6pm", 18]] as const) {
+      expect(clientConfirmed({ text, messageDay: "2026-10-07", newDate: null, from: hm(h), until: null }), text).toEqual({ newDate: null, from: hm(h), until: null });
+    }
+  });
+
   it("«5pm» без «после» — открытое окно до вечера не рисуем", () => {
     expect(clientConfirmed({ text: "5pm", messageDay: "2026-09-30", newDate: null, from: hm(17), until: null })).toEqual({ newDate: null, from: null, until: null });
   });

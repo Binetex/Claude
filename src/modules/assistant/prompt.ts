@@ -249,19 +249,27 @@ const PLANNED_ARRIVAL = `For this order the earliest possible delivery
 
 /**
  * Окно заказа — обещание, и держим именно его (владелец 30.09.2026: «оформили 3–7, а хотят до 4 —
- * не критично, если доставим в 5–6; это в угоду новым заказам»). Раньше или уже окна — пожелание:
- * не обещаем, чтобы не нарушить обещание нового, и окно в заказе не ужимается (`laterOnly`).
+ * не критично, если доставим в 5–6; это в угоду новым заказам»). Пожелание — только «РАНЬШЕ»:
+ * конец раньше окна или точный ранний час внутри него; такое не обещаем, и окно в заказе не
+ * ужимается (`laterOnly`). «ПОЗЖЕ» — всегда да (владелец 07.10.2026, THEFLOW-20925: при окне 3–7
+ * получатель попросил «between 5-7», а ИИ ответил «в ваше окно, постараемся пораньше»): более
+ * позднее начало внутри окна — такое же согласие, как вечер, и окно станет 5–7.
  */
 const WINDOW_IS_PROMISE = `
   0. THE ORDER'S DELIVERY WINDOW IS OUR PROMISE, and we keep it: the customer chose it when
-     ordering. A time they name INSIDE the window or before its end ("by 4" for a 3-7 PM window,
-     "can you come at 12?" for 11 AM-3 PM) is only a wish: never promise it and never name a
-     narrower time. Say we deliver within their window and will try to come as early as we can
-     (if the earliest possible delivery is later than the window, say loosely that it will be a
-     bit later, by the part of the day, with no hour); put nothing in "confirmed_from" or "confirmed_until". If they will not be home for part of
-     the window, ask where we can leave the bouquet. Only a time that needs the delivery LATER
-     than the window allows (they are not home until after it starts, or only after it ends) or
-     another day is a change: see the points below.`;
+     ordering. LATER IS ALWAYS FINE: when they want it later than the window starts ("between 5-7"
+     or "after 5" for a 3-7 PM window, "not before 4"), agree right away and
+     never answer "as early as we can". A range that ends with the window or later is confirmed
+     as that range ("Sure, we'll deliver between 5 and 7!"; put its start in "confirmed_from" and
+     its end in "confirmed_until"); one that ends earlier ("5-6" for 3-7 PM) only from its start
+     ("Sure, we'll come after 5!", nothing in "confirmed_until"). A start is point 1 or 3 below. Only an EARLIER wish is not a change:
+     an end before the window's end ("by 4" for a 3-7 PM window) or an exact early hour inside it
+     ("can you come at 12?" for 11 AM-3 PM). Never promise such a wish and never name a narrower
+     time: say we deliver within their window and will try to come as early as we can (if the
+     earliest possible delivery is later than the window, say loosely that it will be a bit later,
+     by the part of the day, with no hour); put nothing in "confirmed_from" or "confirmed_until".
+     If they have to leave before the window ends, ask where we can leave the bouquet. A time
+     after the window or another day is a change too: see the points below.`;
 
 function timingRules(hasOrder: boolean): string {
   const put = (what: string) => (hasOrder ? `; put ${what}` : "");
@@ -286,7 +294,7 @@ function timingRules(hasOrder: boolean): string {
      5 PM on is point 3.) If they already said we can leave it at the door or with someone, there
      is nothing to ask: just confirm that.
   2. AN END: "I'm home until 4", "I have to leave at 1:40", "by 3 please", or the answer to our
-     question. If that time is at or after the earliest possible delivery, confirm we will
+     question${hasOrder ? " (an end before the order's window ends is point 0: never promise it)" : ""}. If that time is at or after the earliest possible delivery, confirm we will
      deliver by then and name it${put('it in "confirmed_until" as 24-hour HH:MM')}. If it is
      earlier, say honestly that we cannot make it by then, ${hasOrder ? `that it will be later, loosely
      by the part of the day with no hour, and ask if someone can take it then` : `without naming our earliest time, and

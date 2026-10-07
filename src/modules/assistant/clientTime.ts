@@ -18,8 +18,11 @@ const WORD_HOURS: Record<string, number> = {
 
 /** Предлоги, после которых число — это час: «by 2», «after five», «between 10 and noon». */
 const PREP = String.raw`(?:by|after|before|until|till|til|around|at|from|past|between|and|to|about|approx(?:imately)?)`;
-/** Предлоги открытого «после»: окно до конца дня — ровно то, что сказал клиент. */
-const OPEN_AFTER = String.raw`(?:after|from|past|later than|no earlier than)`;
+/**
+ * Предлоги открытого «после»: окно до конца дня — ровно то, что сказал клиент. Начало промежутка
+ * («between 5 and 6», «5-6») — тоже «не раньше»: раньше его клиента нет дома (THEFLOW-20925).
+ */
+const OPEN_AFTER = String.raw`(?:after|from|past|later than|no earlier than|not before|not until|no sooner than|between)`;
 const AMPM = String.raw`(a\.?\s?m\.?|p\.?\s?m\.?)`;
 /** Что после числа делает его не часом: «5 mins», «by the 5th», «$5», «5 miles». */
 const NOT_A_HOUR = String.raw`(?!\s*(?:mins?\b|minutes?|hours?|hrs?|miles?|mi\b|days?|weeks?|%|th\b|st\b|nd\b|rd\b|\$|\d))`;
@@ -87,6 +90,10 @@ export function clientOpenAfterTimes(text: string): number[] {
     if (m[1] === "noon") { out.add(12 * 60); continue; }
     const h = hourOf(m[1]);
     if (h != null) hourCandidates(h, Number(m[2] ?? 0), m[3] ?? null).forEach((x) => out.add(x));
+  }
+  // Начало промежутка «5-6», «10 to 12»: am/pm у конца относится и к началу («5-7pm»).
+  for (const m of t.matchAll(new RegExp(String.raw`\b(\d{1,2})(?::([0-5]\d))?\s*(?:-|–|—|to)\s*(\d{1,2})(?::([0-5]\d))?(?:\s*${AMPM}(?![a-z])|\b${NOT_A_HOUR})`, "g"))) {
+    hourCandidates(Number(m[1]), Number(m[2] ?? 0), m[5] ?? null).forEach((x) => out.add(x));
   }
   return [...out].sort((a, b) => a - b);
 }

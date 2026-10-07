@@ -201,10 +201,13 @@ describe("подсказка о заказе от незнакомого ном�
     expect(rules).toContain("never say we are busy or have a lot of deliveries and never refuse");
   });
 
-  it("окно заказа — обещание: раньше или уже окна — пожелание, не обещаем (владелец 30.09.2026)", () => {
+  it("окно заказа — обещание: раньше окна — пожелание, ПОЗЖЕ — всегда да (владелец 30.09 и 07.10.2026)", () => {
     const withOrder = buildMessages({ knowledgeBase: "", order, history: [], incomingText: "by 4 please" })[0].content;
     expect(withOrder).toContain("THE ORDER'S DELIVERY WINDOW IS OUR PROMISE");
-    expect(withOrder).toContain("is only a wish: never promise it");
+    expect(withOrder).toContain("Only an EARLIER wish is not a change");
+    // THEFLOW-20925: «between 5-7» при окне 3–7 — согласие, а не «постараемся пораньше».
+    expect(withOrder).toContain("LATER IS ALWAYS FINE");
+    expect(withOrder).toContain('never answer "as early as we can"');
     const noOrder = buildMessages({ knowledgeBase: "", order: null, history: [], incomingText: "by 4 please" })[0].content;
     expect(noOrder).not.toContain("THE ORDER'S DELIVERY WINDOW IS OUR PROMISE");
   });
