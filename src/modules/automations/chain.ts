@@ -101,6 +101,30 @@ export function chainOccurrenceKey(args: { nextAutomationId: string; orderId: st
   return `${CHAIN_OCCURRENCE_PREFIX}${args.nextAutomationId}:${args.orderId}:${args.senderCase}`;
 }
 
+/**
+ * Следующий шаг цепочки пишет ДРУГОЙ стороне заказа, а это один и тот же человек — шаг не нужен.
+ *
+ * THEFLOW-20937 (владелец 09.10.2026: «когда указан один номер, уходит много спама»): у заказчика и
+ * получателя один номер, лесенка «получатель не ответил → сказать заказчику» дошла до заказчика и
+ * написала ему же «не можем дозвониться до Austin Hollingshead» — самому Austin, а следом письмо.
+ * Переспросить ту же сторону (получатель → получатель) — нормальный шаг лесенки, а перейти на
+ * другую сторону с тем же номером — значит повторить человеку его же вопрос в чужих словах.
+ */
+export function sameSideSwitch(
+  phones: { sender: string | null; recipient: string | null },
+  fromAudience: "CUSTOMER" | "RECIPIENT" | "BOTH",
+  toAudience: "CUSTOMER" | "RECIPIENT" | "BOTH"
+): boolean {
+  if (!phones.sender || phones.sender !== phones.recipient) return false;
+  return fromAudience !== toAudience;
+}
+
+/** «Случай» сообщения, на которое не ответили, — из ключа шага цепочки (`chainOccurrenceKey`). */
+export function chainSenderCase(occurrenceKey: string | null | undefined, automationId: string, orderId: string): string | null {
+  const prefix = `${CHAIN_OCCURRENCE_PREFIX}${automationId}:${orderId}:`;
+  return occurrenceKey && occurrenceKey.startsWith(prefix) ? occurrenceKey.slice(prefix.length) : null;
+}
+
 /** Это сообщение само пришло по цепочке (а не по событию заказа)? */
 export function isChainOccurrence(occurrenceKey: string | null | undefined): boolean {
   return !!occurrenceKey && occurrenceKey.startsWith(CHAIN_OCCURRENCE_PREFIX);

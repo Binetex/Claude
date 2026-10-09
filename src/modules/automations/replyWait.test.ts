@@ -13,7 +13,7 @@ vi.mock("./events", () => ({
   publishAutomationTrigger: (...a: unknown[]) => publishAutomationTrigger(...a),
 }));
 
-import { scheduleReplyWait, buildReplyWaitHandler } from "./replyWait";
+import { scheduleReplyWait, buildReplyWaitHandler, escalateUndeliveredToChain, chainAnsweredMeanwhile } from "./replyWait";
 import { MAX_CHAIN_MESSAGES, chainOccurrenceKey } from "./chain";
 
 /**
@@ -313,5 +313,68 @@ describe("срок ожидания берётся у правила, а не у
     });
 
     expect(enqueue.mock.calls[0][0].availableAt.getTime()).toBe(SENT_AT.getTime() + 5 * 60_000);
+  });
+});
+
+describe("один номер на заказчика и получателя (THEFLOW-20937)", () => {
+  const samePhones = { senderPhone: "+12084200570", recipientPhone: "(208) 420-0570" };
+
+  it("получатель молчит — «сказать заказчику» не запускается: заказчик и есть получатель", async () => {
+    const prisma = prismaWith({
+      order: baseOrder(samePhones),
+      sender: { active: true, deletedAt: null, noReplyNextAutomationId: "a2", audience: "RECIPIENT" },
+      next: { id: "a2", active: true, deletedAt: null, audience: "CUSTOMER", sites: [{ siteId: "s1" }] },
+    });
+    await buildReplyWaitHandler(prisma)(record());
+    expect(publishAutomationTrigger).not.toHaveBeenCalled();
+  });
+
+  it("переспросить ту же сторону при одном номере — шаг идёт", async () => {
+    const prisma = prismaWith({
+      order: baseOrder(samePhones),
+      sender: { active: true, deletedAt: null, noReplyNextAutomationId: "a2", audience: "RECIPIENT" },
+      next: { id: "a2", active: true, deletedAt: null, audience: "RECIPIENT", sites: [{ siteId: "s1" }] },
+    });
+    await buildReplyWaitHandler(prisma)(record());
+    expect(publishAutomationTrigger).toHaveBeenCalledTimes(1);
+  });
+
+  it("SMS не дошла — сразу «сказать заказчику» при одном номере тоже не шлём", async () => {
+    const prisma = prismaWith({
+      order: baseOrder(samePhones),
+      sender: { active: true, deletedAt: null, noReplyNextAutomationId: "a2", audience: "RECIPIENT" },
+      next: { id: "a2", active: true, deletedAt: null, audience: "CUSTOMER", sites: [{ siteId: "s1" }] },
+    });
+    await escalateUndeliveredToChain(prisma, { orderId: "o1", automationId: "a1", jobId: "job1", reason: "quo_client" });
+    expect(publishAutomationTrigger).not.toHaveBeenCalled();
+  });
+});
+
+describe("ответ за время задержки шага (THEFLOW-20937)", () => {
+  const job = { orderId: "o1", automationId: "a2", occurrenceKey: chainOccurrenceKey({ nextAutomationId: "a2", orderId: "o1", senderCase: "o1:2026-10-09" }) };
+  const prismaFor = (asked: { phoneNormalized: string; sentAt: Date | null }[], inbound: boolean) =>
+    ({
+      automationJob: { findMany: vi.fn().mockResolvedValue(asked) },
+      orderCommunication: { findFirst: vi.fn().mockResolvedValue(inbound ? { id: "c1" } : null) },
+    }) as unknown as PrismaClient;
+
+  it("человек ответил на вопрос, пока шаг ждал задержки, — шаг не нужен", async () => {
+    const prisma = prismaFor([{ phoneNormalized: "+12084200570", sentAt: SENT_AT }], true);
+    expect(await chainAnsweredMeanwhile(prisma, job)).toBe(true);
+    const where = (prisma.orderCommunication.findFirst as unknown as { mock: { calls: [{ where: Record<string, unknown> }][] } }).mock.calls[0][0].where;
+    expect(where.externalPhoneNormalized).toEqual({ in: ["+12084200570"] });
+    expect(where.occurredAt).toEqual({ gt: SENT_AT });
+  });
+
+  it("молчит — шаг идёт", async () => {
+    expect(await chainAnsweredMeanwhile(prismaFor([{ phoneNormalized: "+12084200570", sentAt: SENT_AT }], false), job)).toBe(false);
+  });
+
+  it("вопрос не дошёл (шаг запущен из-за сбоя отправки) — ждать ответа неоткуда, шаг идёт", async () => {
+    expect(await chainAnsweredMeanwhile(prismaFor([], true), job)).toBe(false);
+  });
+
+  it("не шаг цепочки — проверка не касается", async () => {
+    expect(await chainAnsweredMeanwhile(prismaFor([{ phoneNormalized: "+1", sentAt: SENT_AT }], true), { ...job, occurrenceKey: "o1:ORDER_PAID" })).toBe(false);
   });
 });

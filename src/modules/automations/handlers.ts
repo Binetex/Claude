@@ -49,7 +49,7 @@ import { logExecution } from "./executionLog";
 import { startFlowsForTrigger, type FlowForStart } from "./flows/engine";
 import type { ChannelSender } from "@/modules/messaging/channels/types";
 import { SMS_UNAVAILABLE_CODES } from "@/modules/messaging/channels/sms";
-import { scheduleReplyWait, escalateUndeliveredToChain } from "./replyWait";
+import { scheduleReplyWait, escalateUndeliveredToChain, chainAnsweredMeanwhile } from "./replyWait";
 import { isChainOccurrence, shouldWaitForReply } from "./chain";
 import { TERMINAL_ORDER_STATUSES } from "@/lib/statuses";
 import { isP2002 } from "@/lib/prismaErrors";
@@ -489,6 +489,11 @@ export function buildAutomationSendHandler(prisma: PrismaClient, deps: Automatio
     // и самой отправкой, и человек получает тревогу о букете, который уже у него на столе.
     if (isChainOccurrence(job.occurrenceKey) && (TERMINAL_ORDER_STATUSES.includes(order.orderStatus) || order.deliveryStatus === "DELIVERED")) {
       return skip("chain_order_closed");
+    }
+    // Тем же окном задержки человек успевает ответить на вопрос, ради которого шаг и затевался
+    // (THEFLOW-20937: ответил в 19:23, а в 19:51 ему ушло «не можем с вами связаться»).
+    if (isChainOccurrence(job.occurrenceKey) && (await chainAnsweredMeanwhile(prisma, job))) {
+      return skip("chain_replied");
     }
 
     // Сюрприз: по этому заказу получателю не пишем. Проверяем здесь, а не при планировании:

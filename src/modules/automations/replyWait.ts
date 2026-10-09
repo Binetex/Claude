@@ -22,7 +22,8 @@ import { PrismaOutboxRepository } from "@/outbox/prismaRepository";
 import { publishAutomationTrigger } from "./events";
 import { TERMINAL_ORDER_STATUSES } from "@/lib/statuses";
 import { CHAINED_TRIGGER } from "./triggers";
-import { CHAIN_OCCURRENCE_PREFIX, MAX_CHAIN_MESSAGES, LEGACY_WAIT_FALLBACK_MIN, chainOccurrenceKey, clampWait, isTooLate } from "./chain";
+import { CHAIN_OCCURRENCE_PREFIX, MAX_CHAIN_MESSAGES, LEGACY_WAIT_FALLBACK_MIN, chainOccurrenceKey, chainSenderCase, clampWait, isTooLate, sameSideSwitch } from "./chain";
+import { toE164 } from "@/lib/phone";
 
 /**
  * Значение eventType сохранено историческим: в очереди на момент перехода могли лежать уже
@@ -175,14 +176,14 @@ export async function escalateUndeliveredToChain(
 ): Promise<void> {
   const order = await prisma.order.findUnique({
     where: { id: input.orderId },
-    select: { id: true, siteId: true, orderStatus: true, deliveryStatus: true },
+    select: { id: true, siteId: true, orderStatus: true, deliveryStatus: true, senderPhone: true, recipientPhone: true },
   });
   if (!order) return;
   if (TERMINAL_ORDER_STATUSES.includes(order.orderStatus) || order.deliveryStatus === "DELIVERED") return;
 
   const sender = await prisma.automation.findUnique({
     where: { id: input.automationId },
-    select: { active: true, deletedAt: true, noReplyNextAutomationId: true },
+    select: { active: true, deletedAt: true, noReplyNextAutomationId: true, audience: true },
   });
   if (!sender || sender.deletedAt || !sender.active) return;
   const nextId = sender.noReplyNextAutomationId;
@@ -198,9 +199,13 @@ export async function escalateUndeliveredToChain(
 
   const next = await prisma.automation.findUnique({
     where: { id: nextId },
-    select: { id: true, active: true, deletedAt: true, sites: { where: { siteId: order.siteId }, select: { siteId: true } } },
+    select: { id: true, active: true, deletedAt: true, audience: true, sites: { where: { siteId: order.siteId }, select: { siteId: true } } },
   });
   if (!next || next.deletedAt || !next.active || next.sites.length === 0) return;
+  // Заказчик и получатель — один номер: сказать «другой стороне» некому, это тот же человек.
+  if (sameSideSwitch(orderPhones(order), sender.audience, next.audience)) {
+    return stop({ orderId: order.id, automationId: input.automationId }, "заказчик и получатель — один номер, другой стороне писать незачем");
+  }
 
   console.info(`[sms] цепочка ответа: заказ ${order.id}, правило ${input.automationId} — сообщение не дошло (${input.reason}), запускаю следующее правило сразу`);
   await publishAutomationTrigger(new PrismaOutboxRepository(prisma), {
@@ -235,7 +240,7 @@ export function buildReplyWaitHandler(prisma: PrismaClient) {
 
     const order = await prisma.order.findUnique({
       where: { id: p.orderId },
-      select: { id: true, siteId: true, orderStatus: true, deliveryStatus: true },
+      select: { id: true, siteId: true, orderStatus: true, deliveryStatus: true, senderPhone: true, recipientPhone: true },
     });
     if (!order) return; // заказ исчез — продолжать нечего
 
@@ -248,7 +253,7 @@ export function buildReplyWaitHandler(prisma: PrismaClient) {
     // само правило уже после отправки. Выключил — значит выключено, включая запущенное.
     const sender = await prisma.automation.findUnique({
       where: { id: p.automationId },
-      select: { active: true, deletedAt: true, noReplyNextAutomationId: true },
+      select: { active: true, deletedAt: true, noReplyNextAutomationId: true, audience: true },
     });
     if (!sender || sender.deletedAt || !sender.active) return stop(p, "правило-отправитель выключено или удалено");
     const nextId = sender.noReplyNextAutomationId;
@@ -275,7 +280,7 @@ export function buildReplyWaitHandler(prisma: PrismaClient) {
 
     const next = await prisma.automation.findUnique({
       where: { id: nextId },
-      select: { id: true, active: true, deletedAt: true, sites: { where: { siteId: order.siteId }, select: { siteId: true } } },
+      select: { id: true, active: true, deletedAt: true, audience: true, sites: { where: { siteId: order.siteId }, select: { siteId: true } } },
     });
     // Правило выключено, удалено или не подключено к магазину заказа — цепочка кончается, как
     // и обычное правило, которое не сработало: сообщение живому человеку важнее «доведём любой
@@ -283,6 +288,11 @@ export function buildReplyWaitHandler(prisma: PrismaClient) {
     if (!next || next.deletedAt) return stop(p, "следующее правило удалено");
     if (!next.active) return stop(p, "следующее правило выключено");
     if (next.sites.length === 0) return stop(p, "следующее правило не подключено к магазину заказа");
+    // Заказчик и получатель — один номер: «сказать заказчику, что получатель молчит» ушло бы
+    // тому же человеку, который молчит (THEFLOW-20937).
+    if (sameSideSwitch(orderPhones(order), sender.audience, next.audience)) {
+      return stop(p, "заказчик и получатель — один номер, другой стороне писать незачем");
+    }
 
     const repo = new PrismaOutboxRepository(prisma);
     // Запуск — обычным путём события заказа, но адресно (одно правило). Отсюда работают
@@ -301,6 +311,43 @@ export function buildReplyWaitHandler(prisma: PrismaClient) {
       automationId: next.id,
     });
   };
+}
+
+function orderPhones(order: { senderPhone: string | null; recipientPhone: string | null }) {
+  return { sender: toE164(order.senderPhone), recipient: toE164(order.recipientPhone) };
+}
+
+/**
+ * Шаг цепочки ждал своей задержки, а человек тем временем ответил на вопрос — шаг не нужен.
+ *
+ * THEFLOW-20937: проверка ответа стояла только в момент решения (18:51), у шага «сказать
+ * заказчику» задержка час, человек ответил в 19:23 — и в 19:51 ему всё равно ушло «не можем
+ * с вами связаться», а следом письмо. Тот же вопрос «ответил ли» задаётся ещё раз перед самой
+ * отправкой — как уже задаётся «не доставлен ли заказ» (`chain_order_closed`).
+ *
+ * Адресаты — те, кому ушло сообщение, на которое не ответили (его «случай» в ключе шага), ответ —
+ * любое входящее после него, как у самого ожидания. Сообщение не дошло (шаг запущен сразу из-за
+ * сбоя, `escalateUndeliveredToChain`) — ответа ждать неоткуда, шаг идёт.
+ */
+export async function chainAnsweredMeanwhile(
+  prisma: PrismaClient,
+  job: { orderId: string; automationId: string; occurrenceKey: string | null }
+): Promise<boolean> {
+  const senderCase = chainSenderCase(job.occurrenceKey, job.automationId, job.orderId);
+  if (!senderCase) return false;
+  const asked = await prisma.automationJob.findMany({
+    where: {
+      orderId: job.orderId,
+      channel: "SMS",
+      status: "SENT",
+      phoneNormalized: { not: null },
+      OR: [{ id: senderCase }, { occurrenceKey: senderCase, automation: { noReplyNextAutomationId: job.automationId } }],
+    },
+    select: { phoneNormalized: true, sentAt: true },
+  });
+  const sentAts = asked.map((a) => a.sentAt?.getTime()).filter((t): t is number => t != null);
+  if (sentAts.length === 0) return false;
+  return repliedSince(prisma, { phones: asked.map((a) => a.phoneNormalized!), since: new Date(Math.min(...sentAts)) });
 }
 
 /**

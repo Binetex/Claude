@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { orderByChain, findChainCycle, chainOccurrenceKey, isChainOccurrence, shouldWaitForReply, splitWait, joinWait, formatWait, clampWait, MIN_WAIT_MIN, MAX_WAIT_MIN, MAX_CHAIN_MESSAGES } from "./chain";
+import { orderByChain, findChainCycle, chainOccurrenceKey, chainSenderCase, sameSideSwitch, isChainOccurrence, shouldWaitForReply, splitWait, joinWait, formatWait, clampWait, MIN_WAIT_MIN, MAX_WAIT_MIN, MAX_CHAIN_MESSAGES } from "./chain";
 
 /**
  * Цепочка «не ответили — следующее правило». Здесь закреплены её предохранители: кольцо в
@@ -157,5 +157,30 @@ describe("подпись срока по-русски", () => {
     expect(formatWait(2880)).toBe("2 дня");
     expect(formatWait(45)).toBe("45 минут");
     expect(formatWait(21 * 60)).toBe("21 час");
+  });
+});
+
+describe("один номер на заказчика и получателя (THEFLOW-20937)", () => {
+  const one = { sender: "+12084200570", recipient: "+12084200570" };
+  const two = { sender: "+12084200570", recipient: "+13105550100" };
+
+  it("шаг к ДРУГОЙ стороне при одном номере не нужен — это тот же человек", () => {
+    expect(sameSideSwitch(one, "RECIPIENT", "CUSTOMER")).toBe(true);
+    expect(sameSideSwitch(one, "CUSTOMER", "RECIPIENT")).toBe(true);
+  });
+
+  it("переспросить ту же сторону — обычный шаг лесенки", () => {
+    expect(sameSideSwitch(one, "RECIPIENT", "RECIPIENT")).toBe(false);
+  });
+
+  it("разные номера — две стороны, лесенка работает как раньше", () => {
+    expect(sameSideSwitch(two, "RECIPIENT", "CUSTOMER")).toBe(false);
+    expect(sameSideSwitch({ sender: null, recipient: null }, "RECIPIENT", "CUSTOMER")).toBe(false);
+  });
+
+  it("случай сообщения, на которое не ответили, достаётся из ключа шага целиком, со своими двоеточиями", () => {
+    const key = chainOccurrenceKey({ nextAutomationId: "a2", orderId: "o1", senderCase: "chain:a1:o1:o1:2026-10-09" });
+    expect(chainSenderCase(key, "a2", "o1")).toBe("chain:a1:o1:o1:2026-10-09");
+    expect(chainSenderCase("o1:2026-10-09", "a2", "o1")).toBeNull();
   });
 });
