@@ -173,6 +173,11 @@ describe("один номер на заказчика и получателя (T
     expect(sameSideSwitch(one, "RECIPIENT", "RECIPIENT")).toBe(false);
   });
 
+  it("«Оба» — не переход на другую сторону: напоминание после него тому же человеку идёт", () => {
+    expect(sameSideSwitch(one, "BOTH", "CUSTOMER")).toBe(false);
+    expect(sameSideSwitch(one, "RECIPIENT", "BOTH")).toBe(false);
+  });
+
   it("разные номера — две стороны, лесенка работает как раньше", () => {
     expect(sameSideSwitch(two, "RECIPIENT", "CUSTOMER")).toBe(false);
     expect(sameSideSwitch({ sender: null, recipient: null }, "RECIPIENT", "CUSTOMER")).toBe(false);

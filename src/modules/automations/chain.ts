@@ -116,7 +116,9 @@ export function sameSideSwitch(
   toAudience: "CUSTOMER" | "RECIPIENT" | "BOTH"
 ): boolean {
   if (!phones.sender || phones.sender !== phones.recipient) return false;
-  return fromAudience !== toAudience;
+  // Только переход между сторонами. «Оба» включает обе — шаг после него к любой стороне это
+  // обычное напоминание тому же человеку, а не «сказать другому про первого».
+  return (fromAudience === "RECIPIENT" && toAudience === "CUSTOMER") || (fromAudience === "CUSTOMER" && toAudience === "RECIPIENT");
 }
 
 /** «Случай» сообщения, на которое не ответили, — из ключа шага цепочки (`chainOccurrenceKey`). */
