@@ -47,6 +47,13 @@ function StatusForm({ orderId, current }: { orderId: string; current: OrderStatu
   const selectable = ACCEPTED_ORDER_STATUSES.includes(current) ? "FLORIST_ACCEPTED" : current;
   const isManual = manualOrderStatuses.includes(selectable);
   const [status, setStatus] = useState<OrderStatus>(selectable);
+  // Статус сменился снаружи (курьер доставил, назначили флориста) — показываем его, а не прежний
+  // выбор: иначе рядом сама появлялась галочка, и один клик откатывал чужое изменение.
+  const [seen, setSeen] = useState(selectable);
+  if (selectable !== seen) {
+    setSeen(selectable);
+    setStatus(selectable);
+  }
   const { pending, save } = useBlockSave(orderId, "status");
   return (
     <div className="space-y-2">

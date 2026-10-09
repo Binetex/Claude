@@ -7,6 +7,7 @@ import { normalizePhone } from "@/lib/phone";
 import { recomputeDaysForOrder } from "@/modules/finance/orderDayHook";
 import { manualOrderStatuses } from "@/lib/statuses";
 import { localDateStr, parseLocalDayToUtcMidnight } from "@/lib/tz";
+import { mergeNoteEdit } from "@/lib/noteMerge";
 
 /**
  * Общий сервис редактирования ОДНОГО блока заказа с аудитом в одной транзакции. Используется
@@ -170,7 +171,14 @@ export async function updateOrderBlock(input: {
     const before = await tx.order.findUnique({ where: { id: input.orderId }, select });
     if (!before) return { status: "notfound" };
 
-    const after = await tx.order.update({ where: { id: input.orderId }, data: built.data, select });
+    // Заметку, пока её правили, система могла дополнить сверху (ИИ, доплата, перенос): присланная
+    // `customerNoteBase` — какой заметка была в начале правки, и дописанное с тех пор остаётся.
+    const data = { ...built.data };
+    const base = input.data.customerNoteBase;
+    if (input.block === "cardNote" && typeof data.customerNote === "string" && typeof base === "string") {
+      data.customerNote = mergeNoteEdit(String((before as { customerNote?: string | null }).customerNote ?? ""), base, data.customerNote);
+    }
+    const after = await tx.order.update({ where: { id: input.orderId }, data, select });
     const afterRest = after as Record<string, unknown>;
     const changed = diffChanged(input.block, before as Record<string, unknown>, afterRest);
 

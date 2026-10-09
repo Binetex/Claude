@@ -74,6 +74,22 @@ describe("без сверки версии заказа", () => {
   });
 });
 
+describe("заметка: дописанное системой во время правки не теряется", () => {
+  it("ИИ дописал строку сверху, пока человек правил, — строка остаётся над правкой", async () => {
+    const o = await makeOrder("note-merge");
+    const base = (await prisma.order.findUniqueOrThrow({ where: { id: o.id }, select: { customerNote: true } })).customerNote;
+    // Человек открыл заметку; тем временем ИИ записал время от клиента сверху.
+    const line = "07.10, 13:32 · Клиент (SMS): готов принять before 5pm";
+    await prisma.order.update({ where: { id: o.id }, data: { customerNote: base ? `${line}\n———\n${base}` : line } });
+
+    const res = await updateOrderBlock({ orderId: o.id, block: "cardNote", data: { customerNote: "Код домофона 1408", customerNoteBase: base }, actor: { userId, role: "CALL_CENTER" } });
+    expect(res.status).toBe("ok");
+    const db = await prisma.order.findUniqueOrThrow({ where: { id: o.id }, select: { customerNote: true } });
+    expect(db.customerNote.startsWith(line)).toBe(true);
+    expect(db.customerNote.endsWith("Код домофона 1408")).toBe(true);
+  });
+});
+
 describe("изоляция полей блока", () => {
   it("сохранение блока contacts не трогает cardMessage/orderStatus/deliveryWindow", async () => {
     const o = await makeOrder("iso");
