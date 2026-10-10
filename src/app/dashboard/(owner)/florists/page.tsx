@@ -4,6 +4,7 @@ import { Card } from "@/components/ui/Card";
 import { FinanceVisibilityToggle } from "./FinanceVisibilityToggle";
 import { WorkStartEditor } from "./WorkStartEditor";
 import { BouquetShareEditor } from "./BouquetShareEditor";
+import { TelegramHandleEditor } from "./TelegramHandleEditor";
 import { PickupLocationsEditor } from "./PickupLocationsEditor";
 import { AvailabilityEditor } from "./AvailabilityEditor";
 import { ownerSetFloristWeekends, ownerAddFloristDayOff, ownerRemoveFloristDayOff } from "./floristActions";
@@ -46,6 +47,7 @@ export default async function FloristsPage() {
             <FinanceVisibilityToggle floristId={f.id} current={f.financeVisibility} />
             <WorkStartEditor floristId={f.id} workStartMin={f.workStartMin} />
             <BouquetShareEditor floristId={f.id} sharePercentBp={f.bouquetSharePercentBp} />
+            <TelegramHandleEditor floristId={f.id} handle={f.user.telegramId} />
             <AvailabilityEditor
               floristId={f.id}
               weekendDays={f.weekendDays}

@@ -329,6 +329,7 @@ async function loadOrderSnapshot(prisma: PrismaClient, orderId: string): Promise
       cardMessage: true, deliveryInstructions: true,
       site: { select: { name: true } },
       items: { select: { name: true, variantName: true, quantity: true, floristCompositionSnapshot: true, image: true, parentImageUrl: true, variantImageUrl: true } },
+      currentFlorist: { select: { user: { select: { telegramId: true } } } },
     },
   });
   if (!o) return null;
@@ -358,5 +359,6 @@ async function loadOrderSnapshot(prisma: PrismaClient, orderId: string): Promise
     imageUrl: photos.length === 1 ? photos[0] : null,
     albumUrls: photos.length > 1 ? photos : [],
     items: o.items.map((i) => ({ name: i.name, variantName: i.variantName, quantity: i.quantity, composition: i.floristCompositionSnapshot })),
+    floristTag: o.currentFlorist?.user.telegramId ?? null,
   };
 }

@@ -41,6 +41,8 @@ export type OrderSnapshot = {
    */
   albumUrls: string[];
   items: { name: string; variantName: string | null; quantity: number; composition: string | null }[];
+  /** Ник флориста заказа («@arina») — отметить её в срочном сообщении. Нет — не отмечаем. */
+  floristTag?: string | null;
 };
 
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -359,7 +361,8 @@ export function renderOwnerDeliveryProblem(o: OrderSnapshot, status: string, saf
       `🚨 <b>СРОЧНО позвоните курьеру</b>\n` +
       `<b>${esc(o.orderNumber)}</b> · ${esc(o.siteName)}\n\n` +
       `Что случилось: ${esc(what)}.\n` +
-      `<b>Позвоните курьеру по заказу ${esc(o.orderNumber)} и уточните, где он оставил букет.</b>\n` +
+      // Отметка флориста: в группе Telegram пиликает лично ей, даже если чат заглушён.
+      `<b>${o.floristTag ? `${esc(o.floristTag)}, п` : "П"}озвоните курьеру по заказу ${esc(o.orderNumber)} и уточните, где он оставил букет.</b>\n` +
       line("Курьер", who || "номер не пришёл — он в Burq у этой доставки") +
       line("Трекинг", courier.trackingUrl) +
       line("Причина от службы доставки", safeReason) +
@@ -373,6 +376,7 @@ export function renderOwnerDeliveryProblem(o: OrderSnapshot, status: string, saf
     `🚨 <b>Проблема с доставкой</b>\n` +
     `<b>${esc(o.orderNumber)}</b> · ${esc(o.siteName)}\n\n` +
     `Что случилось: ${esc(deliveryProblemLabel(status))}.\n` +
+    line("Флорист", o.floristTag) +
     line("Причина от службы доставки", safeReason) +
     `\n` +
     line("Получатель", o.recipientName) +

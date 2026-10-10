@@ -531,6 +531,19 @@ describe("уведомления владельца", () => {
     expect(bodyOfCall(1).text).toContain("СРОЧНО позвоните курьеру");
   });
 
+  it("у флориста заказа задан ник — срочное сообщение отмечает её", async () => {
+    await makeOwnerBot();
+    const site = await makeSite();
+    const order = await makeOrder(site.id);
+    const florist = await makeFlorist("Tagged", { withBot: false });
+    await prisma.user.update({ where: { id: florist.userId }, data: { telegramId: "@arina_fl" } });
+    await prisma.order.update({ where: { id: order.id }, data: { currentFloristId: florist.id } });
+    fetchMock.mockResolvedValueOnce(okSend(1301));
+
+    await handler(rec({ type: "delivery.problem", orderId: order.id, context: { status: "CANCELLED", occurrence: "d9:CANCELLED", withCourier: "yes" } }));
+    expect(bodyOfCall(0).text).toContain("@arina_fl, позвоните курьеру по заказу");
+  });
+
   it("адрес без номера дома — с именем и телефоном заказчика: сообщение о том, кому звонить", async () => {
     await makeOwnerBot();
     const site = await makeSite();

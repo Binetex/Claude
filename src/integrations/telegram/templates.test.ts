@@ -168,6 +168,11 @@ describe("проблемы доставки", () => {
     expect(t).not.toContain("проверьте доставку в Burq");
   });
 
+  it("ник флориста есть — отмечаем её прямо в просьбе позвонить", () => {
+    const t = renderOwnerDeliveryProblem({ ...order, floristTag: "@arina_fl" }, "CANCELLED", null, { withCourier: true, courierName: null, courierPhone: null, trackingUrl: null });
+    expect(t).toContain("@arina_fl, позвоните курьеру по заказу");
+  });
+
   it("номера курьера нет — сказано, где его взять", () => {
     const t = renderOwnerDeliveryProblem(order, "RETURNING", null, { withCourier: true, courierName: null, courierPhone: null, trackingUrl: null });
     expect(t).toContain("курьер не смог вручить букет и везёт его обратно");

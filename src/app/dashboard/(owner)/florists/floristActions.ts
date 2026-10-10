@@ -4,6 +4,7 @@ import { requireRole } from "@/lib/rbac";
 import { prisma } from "@/lib/db";
 import { imageStorage } from "@/lib/storage";
 import { createFlorist, updateFlorist, FloristValidationError } from "@/modules/florists/service";
+import { normalizeTelegramHandle } from "@/lib/telegramHandle";
 
 type FormState = { error?: string; success?: true } | null;
 
@@ -163,4 +164,16 @@ export async function ownerSetFloristBouquetShare(floristId: string, percent: nu
   await prisma.florist.update({ where: { id: floristId }, data: { bouquetSharePercentBp: percent == null ? null : percent * 100 } });
   revalidatePath("/dashboard/florists");
   return {};
+}
+
+/** Ник флориста в Telegram — им её отмечают в срочных уведомлениях о доставке. Пусто — убрать. */
+export async function ownerSetFloristTelegram(floristId: string, raw: string): Promise<{ error?: string; value?: string | null }> {
+  await requireRole("OWNER");
+  const handle = normalizeTelegramHandle(raw);
+  if (handle === undefined) return { error: "Ник — латиница, цифры и «_», от 5 символов (например @arina_flowers)." };
+  const florist = await prisma.florist.findUnique({ where: { id: floristId }, select: { userId: true } });
+  if (!florist) return { error: "Флорист не найден." };
+  await prisma.user.update({ where: { id: florist.userId }, data: { telegramId: handle } });
+  revalidatePath("/dashboard/florists");
+  return { value: handle };
 }
