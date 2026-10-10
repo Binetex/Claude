@@ -157,6 +157,22 @@ export async function upsertBot(prisma: PrismaClient, input: UpsertBotInput): Pr
   return created;
 }
 
+/**
+ * Сохранённый токен бота для экрана настройки (поиск чата): тот же поиск бота, что у `upsertBot`.
+ * null — бота или токена нет, или токен не расшифровывается.
+ */
+export async function savedBotToken(prisma: PrismaClient, purpose: BotPurpose, floristId: string | null): Promise<string | null> {
+  const b = floristId
+    ? await prisma.telegramBot.findUnique({ where: { floristId }, select: { tokenEncrypted: true } })
+    : await prisma.telegramBot.findFirst({ where: { purpose }, select: { tokenEncrypted: true } });
+  if (!b?.tokenEncrypted) return null;
+  try {
+    return decryptSecret(b.tokenEncrypted);
+  } catch {
+    return null;
+  }
+}
+
 export async function deleteBotToken(prisma: PrismaClient, botId: string): Promise<void> {
   await prisma.telegramBot.update({
     where: { id: botId },

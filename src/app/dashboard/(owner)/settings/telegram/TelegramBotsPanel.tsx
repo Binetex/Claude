@@ -3,7 +3,8 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Card, CardBody } from "@/components/ui/Card";
 import { Button } from "@/components/ui/button";
-import { saveBot, removeBotToken, verifyBotAction, toggleBot, toggleGlobal, setAudiences, setAiAudiences, enableBotRepliesAction, disableBotRepliesAction } from "./actions";
+import { saveBot, connectBotChat, removeBotToken, verifyBotAction, toggleBot, toggleGlobal, setAudiences, setAiAudiences, enableBotRepliesAction, disableBotRepliesAction } from "./actions";
+import type { FoundChat } from "@/integrations/telegram/findChatParse";
 import type { BotRow, BotPurpose } from "@/integrations/telegram/bots";
 import type { RepliesStatus } from "@/integrations/telegram/replies";
 import type { VerifyResult } from "@/integrations/telegram/verify";
@@ -90,8 +91,28 @@ function BotCard({
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [verify, setVerify] = useState<VerifyResult | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  // «Найти чат»: боту писали несколько чатов — выбор; не писал никто — подсказка, куда написать.
+  const [choices, setChoices] = useState<FoundChat[] | null>(null);
+  const [waiting, setWaiting] = useState<{ botUsername: string | null } | null>(null);
 
   const verified = !!bot?.verifiedAt;
+
+  function connect(pickedChatId?: string) {
+    setMsg(null);
+    setChoices(null);
+    setWaiting(null);
+    start(async () => {
+      const r = await connectBotChat({ purpose, floristId, label: title, token, chatId: pickedChatId });
+      if ("choose" in r) setChoices(r.choose);
+      else if ("waiting" in r) setWaiting({ botUsername: r.botUsername });
+      else if ("error" in r) setMsg({ ok: false, text: r.error });
+      else {
+        setMsg({ ok: true, text: r.message });
+        setToken("");
+      }
+      onDone();
+    });
+  }
 
   function run(fn: () => Promise<{ ok?: true; message?: string; error?: string }>) {
     setMsg(null);
@@ -147,10 +168,49 @@ function BotCard({
         <input
           value={chatId}
           onChange={(e) => setChatId(e.target.value)}
-          placeholder="Chat ID (например 123456789)"
+          placeholder="Chat ID — найдётся сам кнопкой ниже"
           className="rounded-md border border-slate-300 px-2 py-1.5 text-sm"
         />
       </div>
+
+      {/* Chat ID руками больше искать не нужно: человек пишет боту, кнопка находит чат сама. */}
+      <div className="flex flex-wrap items-center gap-2 rounded-md border border-sky-200 bg-sky-50/60 p-2 text-xs text-slate-700">
+        <span>
+          Вставьте токен, напишите боту в Telegram любое сообщение (например /start) — с того телефона, куда должны приходить
+          уведомления, — и нажмите:
+        </span>
+        <Button type="button" size="sm" className="ml-auto" disabled={pending || (!token.trim() && !bot?.tokenConfigured)} onClick={() => connect()}>
+          Найти чат и подключить
+        </Button>
+      </div>
+      {waiting && (
+        <p className="text-xs text-amber-800">
+          Боту ещё никто не писал.{" "}
+          {waiting.botUsername ? (
+            <>
+              Откройте{" "}
+              <a href={`https://t.me/${waiting.botUsername}`} target="_blank" rel="noreferrer" className="text-sky-700 underline">
+                @{waiting.botUsername}
+              </a>
+              , нажмите Start
+            </>
+          ) : (
+            "Откройте бота в Telegram, нажмите Start"
+          )}{" "}
+          и нажмите кнопку ещё раз.
+        </p>
+      )}
+      {choices && (
+        <div className="flex flex-wrap items-center gap-2 text-xs text-slate-700">
+          <span>Боту писали несколько чатов — какой подключить?</span>
+          {choices.map((c) => (
+            <Button key={c.chatId} type="button" size="sm" variant="outline" disabled={pending} onClick={() => connect(c.chatId)}>
+              {c.name}
+              {c.isGroup ? " (группа)" : ""}
+            </Button>
+          ))}
+        </div>
+      )}
 
       <div className="flex flex-wrap items-center gap-2">
         <Button size="sm" disabled={pending} onClick={() => run(() => saveBot({ purpose, floristId, label: title, token, chatId }))}>

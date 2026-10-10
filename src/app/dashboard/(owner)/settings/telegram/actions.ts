@@ -3,7 +3,9 @@ import { revalidatePath } from "next/cache";
 import { requireRole } from "@/lib/rbac";
 import { prisma } from "@/lib/db";
 import { enableReplies, disableReplies } from "@/integrations/telegram/replies";
-import { upsertBot, deleteBotToken, setBotEnabled, type BotPurpose } from "@/integrations/telegram/bots";
+import { upsertBot, deleteBotToken, setBotEnabled, savedBotToken, type BotPurpose } from "@/integrations/telegram/bots";
+import { findBotChats } from "@/integrations/telegram/findChat";
+import type { FoundChat } from "@/integrations/telegram/findChatParse";
 import { setTelegramGlobalEnabled, setTelegramAudiences, setTelegramAiAudiences, setTelegramEventMuted, type TelegramAudiences } from "@/integrations/telegram/settings";
 import { isTelegramEventType } from "@/integrations/telegram/registry";
 import { verifyBot, type VerifyResult } from "@/integrations/telegram/verify";
@@ -37,6 +39,49 @@ export async function saveBot(input: {
   revalidatePath(PATH);
   // Прямо называем последствие: до проверки бот ничего не отправит, хотя галочка не снята.
   return { ok: true, message: "Сохранено. До успешной проверки бот не отправляет — нажмите «Проверить»." };
+}
+
+export type ConnectResult =
+  | { ok: true; message: string }
+  | { error: string }
+  /** Боту писали несколько чатов — владелец выбирает, какой подключить. */
+  | { choose: FoundChat[] }
+  /** Боту ещё никто не писал — подсказываем, куда написать. */
+  | { waiting: true; botUsername: string | null };
+
+/**
+ * «Найти чат и подключить» одной кнопкой: кто писал боту — тот чат и подключаем, сразу с проверкой
+ * (тестовое сообщение) и включением. Нажатие кнопки и есть решение владельца включить бота; кому
+ * подключили, он видит по имени в ответе и по тестовому сообщению. Несколько чатов — выбор за ним.
+ */
+export async function connectBotChat(input: {
+  purpose: BotPurpose;
+  floristId?: string | null;
+  label: string;
+  token: string;
+  /** Выбранный из списка чат; пусто — найти самим. */
+  chatId?: string;
+}): Promise<ConnectResult> {
+  await requireRole("OWNER");
+  const floristId = input.floristId ?? null;
+  const token = input.token.trim() || (await savedBotToken(prisma, input.purpose, floristId));
+  if (!token) return { error: "Сначала вставьте токен бота." };
+
+  const found = await findBotChats(token);
+  if (!found.ok) return { error: found.error };
+  const picked = input.chatId ? found.chats.find((c) => c.chatId === input.chatId) : found.chats.length === 1 ? found.chats[0] : null;
+  if (!picked) {
+    if (found.chats.length === 0) return { waiting: true, botUsername: found.botUsername };
+    return { choose: found.chats };
+  }
+
+  const { id } = await upsertBot(prisma, { purpose: input.purpose, floristId, label: input.label, token: input.token, chatId: picked.chatId });
+  const check = await verifyBot(prisma, id);
+  revalidatePath(PATH);
+  if (!check.ok) return { error: `Чат «${picked.name}» найден и сохранён, но проверка не прошла: ${check.steps.find((s) => !s.ok)?.detail ?? "ошибка"}` };
+  await setBotEnabled(prisma, id, true);
+  revalidatePath(PATH);
+  return { ok: true, message: `Подключено: ${picked.name}. Туда ушло проверочное сообщение, бот включён.` };
 }
 
 export async function removeBotToken(botId: string): Promise<ActionResult> {
