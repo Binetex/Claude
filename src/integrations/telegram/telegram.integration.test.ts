@@ -518,6 +518,19 @@ describe("уведомления владельца", () => {
     expect(tokenOfCall(0)).toBe("token-owner");
   });
 
+  it("вторая проблема доставки того же заказа — НОВОЕ сообщение, а не правка первого", async () => {
+    await makeOwnerBot();
+    const site = await makeSite();
+    const order = await makeOrder(site.id);
+    fetchMock.mockResolvedValueOnce(okSend(1201)).mockResolvedValueOnce(okSend(1202));
+
+    await handler(rec({ type: "delivery.problem", orderId: order.id, context: { status: "CANCELLED", occurrence: "d1:CANCELLED" } }));
+    await handler(rec({ type: "delivery.problem", orderId: order.id, context: { status: "CANCELLED", occurrence: "d2:CANCELLED", withCourier: "yes" } }));
+
+    expect(await tgMessages(order.id)).toHaveLength(2);
+    expect(bodyOfCall(1).text).toContain("СРОЧНО позвоните курьеру");
+  });
+
   it("адрес без номера дома — с именем и телефоном заказчика: сообщение о том, кому звонить", async () => {
     await makeOwnerBot();
     const site = await makeSite();

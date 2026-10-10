@@ -205,6 +205,8 @@ const DELIVERY_PROBLEM_LABEL: Record<string, string> = {
   FAILED: "курьер не смог доставить заказ",
   CANCELLED: "доставка отменена",
   PROBLEM: "у курьера возникла проблема с доставкой",
+  RETURNING: "курьер не смог вручить букет и везёт его обратно",
+  RETURNED: "курьер вернул букет обратно",
 };
 
 function deliveryProblemLabel(status: string): string {
@@ -342,7 +344,31 @@ export function renderOwnerDeliveryChanged(o: OrderSnapshot, by: string | null =
   ).trimEnd();
 }
 
-export function renderOwnerDeliveryProblem(o: OrderSnapshot, status: string, safeReason: string | null): string {
+/** Букет у курьера, а доставка сорвалась: кому звонить и где смотреть. */
+export type CourierContact = { withCourier: boolean; courierName: string | null; courierPhone: string | null; trackingUrl: string | null };
+
+export function renderOwnerDeliveryProblem(o: OrderSnapshot, status: string, safeReason: string | null, courier?: CourierContact): string {
+  // Букет уже у курьера — где он сейчас, знает только курьер. Владелец 10.10.2026: «прям надо
+  // писать СРОЧНО позвоните курьеру по заказу такому-то, чтобы уточнить, где он оставил букет».
+  if (courier?.withCourier) {
+    const who = [courier.courierName, courier.courierPhone].filter(Boolean).join(" · ");
+    // Как это бывает на деле (владелец 10.10.2026): курьер стоит на адресе, пытается вручить, ждёт —
+    // и Burq отменяет доставку. Букет при этом у курьера или оставлен им где-то.
+    const what = status === "CANCELLED" ? "курьер не смог вручить букет, и доставку отменили" : deliveryProblemLabel(status);
+    return (
+      `🚨 <b>СРОЧНО позвоните курьеру</b>\n` +
+      `<b>${esc(o.orderNumber)}</b> · ${esc(o.siteName)}\n\n` +
+      `Что случилось: ${esc(what)}.\n` +
+      `<b>Позвоните курьеру по заказу ${esc(o.orderNumber)} и уточните, где он оставил букет.</b>\n` +
+      line("Курьер", who || "номер не пришёл — он в Burq у этой доставки") +
+      line("Трекинг", courier.trackingUrl) +
+      line("Причина от службы доставки", safeReason) +
+      `\n` +
+      line("Получатель", o.recipientName) +
+      line("Адрес", addressText(o)) +
+      line("Доставка", [fmtDate(o.deliveryDate), fmtTimeWindow(o.deliveryWindow)].filter(Boolean).join(", "))
+    ).trimEnd();
+  }
   return (
     `🚨 <b>Проблема с доставкой</b>\n` +
     `<b>${esc(o.orderNumber)}</b> · ${esc(o.siteName)}\n\n` +

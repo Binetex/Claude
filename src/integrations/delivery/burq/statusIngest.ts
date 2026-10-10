@@ -56,8 +56,21 @@ export type StatusUpdateResult =
  *  по конкретной Delivery (`order.delivery.completed:{deliveryId}`). */
 export type PublishCompleted = (args: { orderId: string; deliveryId: string }) => Promise<void>;
 
-/** Статусы, о которых владелец должен узнать немедленно. */
-const PROBLEM_DELIVERY_STATUSES = new Set(["FAILED", "CANCELLED", "PROBLEM"]);
+/**
+ * Статусы, о которых владелец и флорист должны узнать немедленно. RETURNING/RETURNED — курьер не
+ * смог вручить букет и везёт его обратно (до 10.10.2026 об этом не говорилось никому).
+ */
+const PROBLEM_DELIVERY_STATUSES = new Set(["FAILED", "CANCELLED", "PROBLEM", "RETURNING", "RETURNED"]);
+
+/**
+ * Букет ещё НЕ у курьера: доставка сорвалась до забора (или отмену запросили мы сами). Из любого
+ * другого состояния — букет у курьера, и где он, знает только курьер: уведомление становится
+ * «СРОЧНО позвоните курьеру» (владелец 10.10.2026). Неизвестное прошлое считаем «у курьера»:
+ * лишний звонок дешевле потерянного букета.
+ */
+const BOUQUET_NOT_WITH_COURIER = new Set([
+  "DRAFT_PENDING", "DRAFT_CREATED", "SCHEDULED", "COURIER_ASSIGNED", "COURIER_EN_ROUTE_TO_PICKUP", "AT_PICKUP", "CANCEL_REQUESTED", "DELIVERED",
+]);
 
 export async function applyDeliveryStatusUpdate(
   prisma: PrismaClient,
@@ -151,7 +164,14 @@ export async function applyDeliveryStatusUpdate(
   // О проблеме доставки — владельцу И флористу заказа (если назначен): букет, скорее всего,
   // вернётся к флористу, и узнать он должен сразу, а не от владельца задним числом.
   if (becameProblem) {
-    const context = { status: normalized, safeReason: input.safeReason ?? input.rawStatus ?? null };
+    const context = {
+      status: normalized,
+      safeReason: input.safeReason ?? input.rawStatus ?? null,
+      withCourier: BOUQUET_NOT_WITH_COURIER.has(delivery.status) ? null : "yes",
+      courierName: input.courierName ?? delivery.courierName ?? null,
+      courierPhone: input.courierPhone ?? delivery.courierPhone ?? null,
+      trackingUrl: input.trackingUrl ?? delivery.trackingUrl ?? null,
+    };
     await publishTelegramNotification(prisma, {
       type: "delivery.problem",
       orderId: delivery.orderId,

@@ -171,6 +171,49 @@ describe("Burq status ingestion (anti-rollback, order status, completed)", () =>
   });
 });
 
+describe("уведомление о сорванной доставке (владелец 10.10.2026)", () => {
+  const problemEvents = (orderId: string) =>
+    prisma.outboxEvent.findMany({
+      where: { aggregateId: orderId, idempotencyKey: { startsWith: "telegram:delivery.problem" } },
+      select: { payload: true },
+      orderBy: { createdAt: "asc" },
+    });
+  const ctxOf = (e: { payload: unknown }) => (e.payload as { context: Record<string, string | null> }).context;
+
+  it("курьер забрал букет и везёт обратно — владельцу и флористу «позвоните курьеру», с номером", async () => {
+    __resetMockBurqStore();
+    const orderId = await makeOrder(floristAId);
+    await handleBurqDraftCreate({ client: createMockBurqClient(), port: createPrismaDraftPort(prisma) }, { orderId, scheduleVersion: 0 });
+    const delivery = await prisma.delivery.findFirst({ where: { orderId, isCurrentAttempt: true } });
+
+    await applyDeliveryStatusUpdate(prisma, vi.fn(), { deliveryId: delivery!.id, rawStatus: "pickup_complete", providerEventId: "w1", occurredAt: at("18:30:00"), source: "BURQ_WEBHOOK", courierName: "Mike", courierPhone: "+13105557777" });
+    expect(await problemEvents(orderId)).toHaveLength(0);
+    await applyDeliveryStatusUpdate(prisma, vi.fn(), { deliveryId: delivery!.id, rawStatus: "enroute_to_return", providerEventId: "w2", occurredAt: at("18:50:00"), source: "BURQ_WEBHOOK" });
+
+    const events = await problemEvents(orderId);
+    expect(events.map((e) => (e.payload as { type: string }).type).sort()).toEqual(["delivery.problem", "delivery.problem_florist"]);
+    expect(ctxOf(events[0])).toMatchObject({ status: "RETURNING", withCourier: "yes", courierName: "Mike", courierPhone: "+13105557777" });
+
+    // Вернул букет — это ещё одна проблема и ещё одно уведомление, а не правка первого.
+    await applyDeliveryStatusUpdate(prisma, vi.fn(), { deliveryId: delivery!.id, rawStatus: "returned", providerEventId: "w3", occurredAt: at("19:10:00"), source: "BURQ_WEBHOOK" });
+    expect(await problemEvents(orderId)).toHaveLength(4);
+  });
+
+  it("курьер отменил до забора — уведомление без «позвоните курьеру»: букет у флориста", async () => {
+    __resetMockBurqStore();
+    const orderId = await makeOrder(floristAId);
+    await handleBurqDraftCreate({ client: createMockBurqClient(), port: createPrismaDraftPort(prisma) }, { orderId, scheduleVersion: 0 });
+    const delivery = await prisma.delivery.findFirst({ where: { orderId, isCurrentAttempt: true } });
+
+    await applyDeliveryStatusUpdate(prisma, vi.fn(), { deliveryId: delivery!.id, rawStatus: "enroute_pickup", providerEventId: "b1", occurredAt: at("18:00:00"), source: "BURQ_WEBHOOK" });
+    await applyDeliveryStatusUpdate(prisma, vi.fn(), { deliveryId: delivery!.id, rawStatus: "provider_canceled", providerEventId: "b2", occurredAt: at("18:10:00"), source: "BURQ_WEBHOOK" });
+
+    const events = await problemEvents(orderId);
+    expect(events).toHaveLength(2);
+    expect(ctxOf(events[0])).toMatchObject({ status: "CANCELLED", withCourier: null });
+  });
+});
+
 describe("Manual resolution", () => {
   it("mark_delivered → Delivery+Order DELIVERED, userId сохранён, событие в outbox (key по deliveryId)", async () => {
     __resetMockBurqStore();

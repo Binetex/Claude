@@ -158,6 +158,28 @@ describe("проблемы доставки", () => {
     expect(t).toContain("recipient unavailable");
   });
 
+  it("букет у курьера — СРОЧНО позвонить курьеру по заказу, с его номером и трекингом", () => {
+    const t = renderOwnerDeliveryProblem(order, "CANCELLED", null, { withCourier: true, courierName: "Mike", courierPhone: "+13105557777", trackingUrl: "https://track.example/1" });
+    expect(t).toContain("СРОЧНО позвоните курьеру");
+    expect(t).toContain("курьер не смог вручить букет, и доставку отменили");
+    expect(t).toContain(`Позвоните курьеру по заказу ${order.orderNumber} и уточните, где он оставил букет`);
+    expect(t).toContain("Курьер: Mike · +13105557777");
+    expect(t).toContain("https://track.example/1");
+    expect(t).not.toContain("проверьте доставку в Burq");
+  });
+
+  it("номера курьера нет — сказано, где его взять", () => {
+    const t = renderOwnerDeliveryProblem(order, "RETURNING", null, { withCourier: true, courierName: null, courierPhone: null, trackingUrl: null });
+    expect(t).toContain("курьер не смог вручить букет и везёт его обратно");
+    expect(t).toContain("номер не пришёл — он в Burq");
+  });
+
+  it("сорвалось до забора — прежний текст, звонить курьеру незачем", () => {
+    const t = renderOwnerDeliveryProblem(order, "CANCELLED", null, { withCourier: false, courierName: null, courierPhone: null, trackingUrl: null });
+    expect(t).not.toContain("СРОЧНО");
+    expect(t).toContain("проверьте доставку в Burq");
+  });
+
   it("неизвестный статус не роняет текст и виден как есть", () => {
     expect(renderOwnerDeliveryProblem(order, "WEIRD_STATE", null)).toContain("WEIRD_STATE");
   });

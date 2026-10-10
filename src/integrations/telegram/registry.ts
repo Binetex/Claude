@@ -172,15 +172,17 @@ const REGISTRY: Record<TelegramEventType, TelegramEventDef> = {
     type: "delivery.problem",
     audience: "OWNER",
     perFlorist: false,
-    dedupeKey: ({ orderId }) => `order:${orderId}:owner.delivery`,
-    description: "Доставка перешла в FAILED / CANCELLED / PROBLEM — владельцу.",
+    // Каждая проблема — НОВОЕ сообщение (случай = доставка + статус): правку Telegram не озвучивает,
+    // и вторая проблема того же заказа (новый курьер тоже не довёз) тихо переписывала первую.
+    dedupeKey: ({ orderId, occurrence }) => `order:${orderId}:owner.delivery_problem:${occurrence ?? "0"}`,
+    description: "Доставка сорвалась (не довёз, отменена, везёт обратно, вернул) — владельцу.",
   },
   "delivery.problem_florist": {
     type: "delivery.problem_florist",
     audience: "FLORIST",
     perFlorist: true,
     // Зеркало owner-события: та же проблема, но личным ботом флориста в его чат.
-    dedupeKey: ({ orderId, floristId }) => `order:${orderId}:florist:${floristId}:delivery`,
+    dedupeKey: ({ orderId, floristId, occurrence }) => `order:${orderId}:florist:${floristId}:delivery_problem:${occurrence ?? "0"}`,
     description: "Проблема доставки — флористу заказа его личным ботом.",
   },
   "order.ask_review": {
