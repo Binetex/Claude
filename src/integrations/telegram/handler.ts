@@ -27,6 +27,8 @@ import {
   renderOwnerPendingTooLong,
   renderOwnerStatusMismatch,
   renderOwnerPaymentNotFound,
+  withBouquet,
+  capForPhoto,
   type OrderSnapshot,
 } from "./templates";
 import { orderPhotoUrls } from "@/modules/orders/images";
@@ -115,7 +117,6 @@ export function buildTelegramNotifyHandler(prisma: PrismaClient): OutboxHandler 
     }
 
     const bot: ResolvedBot = lookup.bot;
-    const text = renderFor(p.type, order, ctx);
     const buttons = buttonsFor(p.type, order);
     // Фото — только у сообщений флористу. Одно фото прикрепляется к самой карточке,
     // несколько уходят альбомом отдельным сообщением ПЕРЕД ней (см. sendAlbumOnce).
@@ -126,6 +127,8 @@ export function buildTelegramNotifyHandler(prisma: PrismaClient): OutboxHandler 
     const withPhotos = def.audience === "FLORIST" && (p.type === "order.assigned" || p.type === "order.handed_over" || p.type === "order.item_replaced");
     const wantPhoto = withPhotos && !!order.imageUrl;
     const wantAlbum = withPhotos && order.albumUrls.length > 0;
+    // Название букета — в каждом уведомлении (владелец 10.10.2026); подпись к фото — в своём лимите.
+    const text = capForPhoto(withBouquet(renderFor(p.type, order, ctx), order), wantPhoto);
     const sender = new TelegramSender(bot.token);
 
     /**

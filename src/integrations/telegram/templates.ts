@@ -3,6 +3,7 @@ import { fmtTimeWindow } from "@/lib/format";
 import { CAPTION_LIMIT, type TelegramButton } from "./sender";
 import type { TelegramEventType } from "./registry";
 import { recipientMapsUrl } from "@/components/orders/address";
+import { isTipItem } from "@/modules/pricing/serviceItems";
 
 /**
  * Тексты внутренних уведомлений. Чистые функции — тестируются без сети и БД.
@@ -139,7 +140,7 @@ export function renderFloristHandedOver(o: OrderSnapshot, toName: string | null)
 }
 
 /** У фото подпись ограничена 1024 символами; текст без фото — нет. Обрезаем аккуратно. */
-function capForPhoto(text: string, isPhoto: boolean): string {
+export function capForPhoto(text: string, isPhoto: boolean): string {
   if (!isPhoto || text.length <= CAPTION_LIMIT) return text;
   return text.slice(0, CAPTION_LIMIT - 1).trimEnd() + "…";
 }
@@ -308,6 +309,27 @@ export function renderAddressIncomplete(o: OrderSnapshot, issue: string | null):
     line("Доставка", [fmtDate(o.deliveryDate), fmtTimeWindow(o.deliveryWindow)].filter(Boolean).join(", ")) +
     `\nВ Burq заказ не уйдёт, пока адрес не исправят. Уточните у заказчика и поправьте адрес в заказе.`
   ).trimEnd();
+}
+
+/** Позиции заказа, за которые работает флорист: чаевые — служебная строка, не букет. */
+function bouquetItems(o: OrderSnapshot) {
+  return o.items.filter((i) => i.name.trim() && !isTipItem({ name: i.name }));
+}
+
+/**
+ * Название букета — в КАЖДОМ уведомлении (владелец 10.10.2026: «всегда в уведомлениях названия
+ * букета в тг пиши, это важно»): без него по номеру заказа не понять, о каком букете речь.
+ * Строка встаёт сразу под строкой с номером заказа. Если текст уже называет все букеты (карточка
+ * флориста с составом, «Изменение … (букет)») — второй раз не пишем.
+ */
+export function withBouquet(text: string, o: OrderSnapshot): string {
+  const items = bouquetItems(o);
+  if (items.length === 0 || items.every((i) => text.includes(esc(i.name.trim())))) return text;
+  const label = items.map((i) => `${i.name.trim()}${i.variantName?.trim() ? ` (${i.variantName.trim()})` : ""}${i.quantity > 1 ? ` × ${i.quantity}` : ""}`).join(", ");
+  const lines = text.split("\n");
+  const at = lines.findIndex((l) => l.includes(esc(o.orderNumber)));
+  lines.splice(at >= 0 ? at + 1 : 1, 0, `🌷 <b>${esc(label)}</b>`);
+  return lines.join("\n");
 }
 
 /** Букеты заказа через запятую, без повторов: «Red Roses & Vase, Balloons». */

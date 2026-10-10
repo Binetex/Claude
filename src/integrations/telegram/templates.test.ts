@@ -4,6 +4,8 @@
  */
 import { describe, it, expect } from "vitest";
 import {
+  withBouquet,
+  renderCustomerReadyTime,
   renderFloristMessage,
   renderFloristHandedOver,
   renderOwnerCreated,
@@ -240,5 +242,33 @@ describe("отзыв у получателя", () => {
 
   it("данные кнопки влезают в лимит Telegram (64 байта)", () => {
     expect(Buffer.byteLength(`${REVIEW_ASK_ACTION_PREFIX}cmuyd1qe201gqrmmlht9sziql`)).toBeLessThanOrEqual(64);
+  });
+});
+
+describe("название букета в каждом уведомлении (владелец 10.10.2026)", () => {
+  it("«Клиент назвал время» — строка с букетом сразу под номером заказа", () => {
+    const t = withBouquet(renderCustomerReadyTime(order, "11am – 1pm", "I'll be home"), order);
+    const lines = t.split("\n");
+    const at = lines.findIndex((l) => l.includes(order.orderNumber));
+    expect(lines[at + 1]).toBe("🌷 <b>Petal Poetry (Standard)</b>");
+  });
+
+  it("несколько позиций, количество; чаевые — не букет", () => {
+    const o = { ...order, items: [
+      { name: "Red Roses", variantName: null, quantity: 2, composition: null },
+      { name: "Tip", variantName: null, quantity: 1, composition: null },
+      { name: "Balloon", variantName: "Pink", quantity: 1, composition: null },
+    ] };
+    expect(withBouquet(renderOwnerDeliveryProblem(o, "FAILED", null), o)).toContain("🌷 <b>Red Roses × 2, Balloon (Pink)</b>");
+  });
+
+  it("карточка флориста уже называет букет — второй раз не пишем", () => {
+    const card = renderFloristMessage(order);
+    expect(withBouquet(card, order)).toBe(card);
+  });
+
+  it("позиций нет — текст как есть", () => {
+    const t = renderOwnerDeliveryProblem({ ...order, items: [] }, "FAILED", null);
+    expect(withBouquet(t, { ...order, items: [] })).toBe(t);
   });
 });
