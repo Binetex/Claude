@@ -151,3 +151,16 @@ export async function ownerSetFloristWorkStart(floristId: string, workStartMin: 
   revalidatePath("/dashboard/schedule");
   return {};
 }
+
+/**
+ * Доля флориста от цены букета на сайте, в процентах (владелец 10.10.2026: Арине — 60%). null —
+ * цена из каталога, как у всех. Действует на заказы, назначенные ПОСЛЕ изменения: цена флориста
+ * записывается в заказ при назначении, уже назначенные не пересчитываются.
+ */
+export async function ownerSetFloristBouquetShare(floristId: string, percent: number | null): Promise<{ error?: string }> {
+  await requireRole("OWNER");
+  if (percent != null && (!Number.isInteger(percent) || percent < 1 || percent > 100)) return { error: "Доля — целое число от 1 до 100." };
+  await prisma.florist.update({ where: { id: floristId }, data: { bouquetSharePercentBp: percent == null ? null : percent * 100 } });
+  revalidatePath("/dashboard/florists");
+  return {};
+}

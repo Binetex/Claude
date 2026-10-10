@@ -1,5 +1,6 @@
 import "server-only";
 import { Prisma } from "@/generated/prisma/client";
+import type { FinancialItemType } from "@/generated/prisma/enums";
 import { toNumber } from "@/lib/money";
 import { computeEstimatedProfit } from "./profit";
 import { compensableItems, effectiveFloristTotal, isTipItem } from "./serviceItems";
@@ -11,22 +12,35 @@ type ItemForPricing = {
   variantId: string | null;
   quantity: number;
   externalPrice: Prisma.Decimal; // цена клиента за единицу — fallback «полная стоимость»
+  financialTypeSnapshot: FinancialItemType | null; // тип позиции, если в каталоге его нет
 };
 
 // Поля, по которым позиция резолвится в цену. name нужен, чтобы отсечь служебные строки
 // (чаевые) до того, как сработает фолбэк «цена не задана → полная стоимость клиента».
-const PRICING_SELECT = { id: true, name: true, productId: true, variantId: true, quantity: true, externalPrice: true } as const;
+const PRICING_SELECT = { id: true, name: true, productId: true, variantId: true, quantity: true, externalPrice: true, financialTypeSnapshot: true } as const;
 
 const ZERO = new Prisma.Decimal(0);
+
+/** Букет — позиция без пометки в каталоге или помеченная цветами; ваза, подарок, открытка — добавки. */
+export function isBouquetType(type: FinancialItemType | null | undefined): boolean {
+  return type == null || type === "FLOWER_PRODUCT";
+}
 
 /**
  * Резолвит цену изготовления за ЕДИНИЦУ по каждой позиции для конкретного флориста.
  * Приоритет (см. требования владельца):
  *   1) индивидуальный override флориста для варианта (FloristProductPrice + variantId);
- *   2) ProductVariant.floristPrice (не NULL);
- *   3) индивидуальный override флориста для товара (FloristProductPrice, variantId = null);
- *   4) Product.floristPrice (не NULL);
- *   5) если нигде не задано (везде NULL) — НОЛЬ, признак «цена не задана».
+ *   2) у флориста задана доля от цены букета (`Florist.bouquetSharePercentBp`) и позиция — букет:
+ *      цена варианта на сайте × доля;
+ *   3) ProductVariant.floristPrice (не NULL);
+ *   4) индивидуальный override флориста для товара (FloristProductPrice, variantId = null);
+ *   5) Product.floristPrice (не NULL);
+ *   6) если нигде не задано (везде NULL) — НОЛЬ, признак «цена не задана».
+ *
+ * Доля (владелец 10.10.2026, новый флорист Арина — 60% от цены букета на сайте). Букет — всё, что
+ * в каталоге НЕ помечено добавкой: у букетов тип не заполнен, помечены только вазы, подарки и
+ * открытки. Добавки и при доле идут по цене каталога — той же, что у Ольги. У флориста без доли
+ * (Ольга, Настя) путь ровно прежний.
  *
  * NULL означает «цена флориста не задана». Явный 0 — валидная цена (флорист бесплатно).
  * Различить эти два случая по результату нельзя, и это осознанно: оба означают «платить
@@ -40,12 +54,15 @@ async function resolveUnitPrices(
   const productIds = [...new Set(items.map((i) => i.productId).filter((x): x is string => !!x))];
   const variantIds = [...new Set(items.map((i) => i.variantId).filter((x): x is string => !!x))];
 
-  const [products, variants, overrides] = await Promise.all([
+  const [products, variants, overrides, florist] = await Promise.all([
     productIds.length
-      ? client.product.findMany({ where: { id: { in: productIds } }, select: { id: true, floristPrice: true } })
+      ? client.product.findMany({ where: { id: { in: productIds } }, select: { id: true, floristPrice: true, financialType: true } })
       : Promise.resolve([]),
     variantIds.length
-      ? client.productVariant.findMany({ where: { id: { in: variantIds } }, select: { id: true, floristPrice: true } })
+      ? client.productVariant.findMany({
+          where: { id: { in: variantIds } },
+          select: { id: true, floristPrice: true, financialType: true, listPrice: true },
+        })
       : Promise.resolve([]),
     productIds.length || variantIds.length
       ? client.floristProductPrice.findMany({
@@ -59,7 +76,20 @@ async function resolveUnitPrices(
           select: { productId: true, variantId: true, makeCost: true },
         })
       : Promise.resolve([]),
+    client.florist.findUnique({ where: { id: floristId }, select: { bouquetSharePercentBp: true } }),
   ]);
+  const shareBp = florist?.bouquetSharePercentBp ?? null;
+  const productById = new Map(products.map((p) => [p.id, p]));
+  const variantById = new Map(variants.map((v) => [v.id, v]));
+  /** Цена на сайте × доля флориста — только у букета и только когда цена варианта известна. */
+  const shareUnit = (item: ItemForPricing): Prisma.Decimal | null => {
+    if (shareBp == null || !item.variantId) return null;
+    const variant = variantById.get(item.variantId);
+    if (!variant || !variant.listPrice.gt(0)) return null;
+    const type = variant.financialType ?? (item.productId ? productById.get(item.productId)?.financialType : null) ?? item.financialTypeSnapshot;
+    if (!isBouquetType(type)) return null;
+    return variant.listPrice.mul(shareBp).div(10000).toDecimalPlaces(2);
+  };
 
   const productBase = new Map(products.map((p) => [p.id, p.floristPrice]));
   const variantBase = new Map(variants.map((v) => [v.id, v.floristPrice]));
@@ -73,8 +103,11 @@ async function resolveUnitPrices(
   const unitById = new Map<string, Prisma.Decimal>();
   for (const item of items) {
     let unit: Prisma.Decimal | null = null;
+    const share = shareUnit(item);
     if (item.variantId && overrideByVariant.has(item.variantId)) {
       unit = overrideByVariant.get(item.variantId)!;
+    } else if (share) {
+      unit = share;
     } else if (item.variantId && variantBase.get(item.variantId) != null) {
       unit = variantBase.get(item.variantId)!;
     } else if (item.productId && overrideByProduct.has(item.productId)) {

@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { Card } from "@/components/ui/Card";
 import { FinanceVisibilityToggle } from "./FinanceVisibilityToggle";
 import { WorkStartEditor } from "./WorkStartEditor";
+import { BouquetShareEditor } from "./BouquetShareEditor";
 import { PickupLocationsEditor } from "./PickupLocationsEditor";
 import { AvailabilityEditor } from "./AvailabilityEditor";
 import { ownerSetFloristWeekends, ownerAddFloristDayOff, ownerRemoveFloristDayOff } from "./floristActions";
@@ -44,6 +45,7 @@ export default async function FloristsPage() {
             <div className="mt-2 text-sm text-slate-600">Активных заказов: {f._count.currentOrders}</div>
             <FinanceVisibilityToggle floristId={f.id} current={f.financeVisibility} />
             <WorkStartEditor floristId={f.id} workStartMin={f.workStartMin} />
+            <BouquetShareEditor floristId={f.id} sharePercentBp={f.bouquetSharePercentBp} />
             <AvailabilityEditor
               floristId={f.id}
               weekendDays={f.weekendDays}
