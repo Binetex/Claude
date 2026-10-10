@@ -314,7 +314,7 @@ describe("удаление", () => {
 });
 
 describe("налоговая политика", () => {
-  it("предпросмотр честно говорит, что на долю флориста она не влияет", async () => {
+  it("предпросмотр считает ваш налоговый расход, а доля флориста не двигается", async () => {
     const policy = await prisma.ownerTaxPolicy.findFirstOrThrow({ where: { siteId: null } });
     const p = await previewSettingChange({
       entity: "TAX_POLICY",
@@ -326,7 +326,10 @@ describe("налоговая политика", () => {
 
     expect(p.shareDeltaCents).toBe(0);
     expect(p.daysChanged).toBe(0);
-    expect(p.warnings.join(" ")).toMatch(/на долю флориста не влияет/);
+    // 20% → 30%: налоговый расход по доставленным заказам с налогом растёт, доход владельца падает.
+    expect(p.ownerTax!.orders).toBeGreaterThan(0);
+    expect(p.ownerTax!.afterCents).toBeGreaterThan(p.ownerTax!.beforeCents);
+    expect(p.ownerTax!.deltaCents).toBe(p.ownerTax!.afterCents - p.ownerTax!.beforeCents);
   });
 
   it("исправление налоговой политики не трогает деньги флориста", async () => {

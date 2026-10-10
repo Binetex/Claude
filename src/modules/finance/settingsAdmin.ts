@@ -25,7 +25,7 @@ import { dayShareCents } from "./dayCalc";
 import { recalculateAffectedFinance, type FixResult } from "./fix";
 import { setConsumablesRate, setFeeModel, setOwnerTaxPolicy } from "./settings";
 import { primaryShareStartDate } from "./config";
-import { taxTotalsByPolicy, type TaxPolicyTotals } from "./taxPolicyPeriods";
+import { ownerTaxChange, taxTotalsByPolicy, type OwnerTaxChange, type TaxPolicyRow, type TaxPolicyTotals } from "./taxPolicyPeriods";
 
 export class SettingsAdminError extends Error {
   constructor(
@@ -169,11 +169,8 @@ export async function listSettingRecords(): Promise<SettingRecord[]> {
   return rows;
 }
 
-/**
- * Налог по периодам политики: сколько клиенты заплатили и сколько вычтено из дохода владельца.
- * Доставленные заказы с начала расчёта (`FINANCE_PRIMARY_SHARE_START_DATE`) — как в «Финансах».
- */
-export async function taxPolicyTotals(): Promise<Map<string, TaxPolicyTotals>> {
+/** Ставки и доставленные заказы с налогом с начала расчёта — вход для сумм и предпросмотра налога. */
+async function loadTaxInputs() {
   const start = primaryShareStartDate();
   const [rows, orders] = await Promise.all([
     prisma.ownerTaxPolicy.findMany({ select: { id: true, siteId: true, actualShareBp: true, effectiveFrom: true } }),
@@ -182,10 +179,36 @@ export async function taxPolicyTotals(): Promise<Map<string, TaxPolicyTotals>> {
       select: { siteId: true, deliveryDate: true, tax: true },
     }),
   ]);
-  return taxTotalsByPolicy(
-    rows,
-    orders.map((o) => ({ siteId: o.siteId, deliveryDate: o.deliveryDate, taxCents: Math.round(Number(o.tax) * 100) }))
-  );
+  return { rows, orders: orders.map((o) => ({ siteId: o.siteId, deliveryDate: o.deliveryDate, taxCents: Math.round(Number(o.tax) * 100) })) };
+}
+
+/**
+ * Налог по периодам политики: сколько клиенты заплатили и сколько вычтено из дохода владельца.
+ * Доставленные заказы с начала расчёта (`FINANCE_PRIMARY_SHARE_START_DATE`) — как в «Финансах».
+ */
+export async function taxPolicyTotals(): Promise<Map<string, TaxPolicyTotals>> {
+  const { rows, orders } = await loadTaxInputs();
+  return taxTotalsByPolicy(rows, orders);
+}
+
+export type TaxPolicyChange =
+  | { kind: "CORRECT"; id: string; actualShareBp: number }
+  | { kind: "DELETE"; id: string }
+  | { kind: "NEW"; siteId: string | null; actualShareBp: number; effectiveFrom: Date };
+
+/** Предварительный расчёт налогового расхода владельца для правки ставки. Ничего не пишет. */
+export async function previewOwnerTax(change: TaxPolicyChange): Promise<OwnerTaxChange> {
+  if (change.kind !== "DELETE") assertBp(change.actualShareBp, "Доля налогового расхода");
+  const { rows, orders } = await loadTaxInputs();
+  let after: TaxPolicyRow[];
+  if (change.kind === "CORRECT") after = rows.map((r) => (r.id === change.id ? { ...r, actualShareBp: change.actualShareBp } : r));
+  else if (change.kind === "DELETE") after = rows.filter((r) => r.id !== change.id);
+  else {
+    // Ставка той же области на ту же дату заменяется — так же поступит и запись.
+    const same = (r: TaxPolicyRow) => r.siteId === change.siteId && r.effectiveFrom.getTime() === change.effectiveFrom.getTime();
+    after = [...rows.filter((r) => !same(r)), { siteId: change.siteId, actualShareBp: change.actualShareBp, effectiveFrom: change.effectiveFrom }];
+  }
+  return ownerTaxChange(rows, after, orders);
 }
 
 /** Одна запись по id. Бросает, если её нет: править нечего. */
@@ -218,6 +241,8 @@ export type SettingPreview = {
   daysChanged: number;
   days: SettingPreviewDay[];
   warnings: string[];
+  /** Только у налоговой политики: что станет с налоговым расходом владельца. */
+  ownerTax?: OwnerTaxChange;
 };
 
 function emptyPreview(entity: SettingEntity, op: "CORRECT" | "DELETE", warnings: string[]): SettingPreview {
@@ -292,6 +317,17 @@ export async function previewSettingChange(args: {
   const record = await loadRecord(args.entity, args.id);
   if (args.values) assertValues(args.values);
 
+  // Налог влияет только на доход владельца (в базе флориста он всегда 100%): предпросмотр считает
+  // его налоговый расход — сколько вычиталось и сколько станет, — а не долю флориста.
+  if (!affectsShare(args.entity)) {
+    const ownerTax = await previewOwnerTax(
+      args.op === "DELETE"
+        ? { kind: "DELETE", id: record.id }
+        : { kind: "CORRECT", id: record.id, actualShareBp: args.values?.entity === "TAX_POLICY" ? args.values.actualShareBp : 0 }
+    );
+    return { ...emptyPreview(args.entity, args.op, []), ownerTax };
+  }
+
   const warnings: string[] = [];
   const profile = await activeProfile();
   if (!profile) {
@@ -306,12 +342,6 @@ export async function previewSettingChange(args: {
     );
   }
 
-  if (!affectsShare(args.entity)) {
-    warnings.push(
-      "Налоговая политика на долю флориста не влияет: в её базе налог вычитается полностью. Правка меняет только владельческую отчётность."
-    );
-    return { ...emptyPreview(args.entity, args.op, warnings), affectedDays: days.length };
-  }
 
   const overrides = await overridesFor(args.entity, record, args.op === "DELETE" ? null : (args.values ?? record.values));
 

@@ -17,6 +17,9 @@ import {
   applyOwnerTaxPolicy,
   type SetupResult,
 } from "@/app/dashboard/(owner)/finance/setup/setupActions";
+import { previewNewTaxRateAction } from "./settingsAdminActions";
+import { OwnerTaxPreviewPanel } from "@/components/finance/SettingRowActions";
+import type { OwnerTaxChange } from "@/modules/finance/taxPolicyPeriods";
 
 const today = () => new Date().toISOString().slice(0, 10);
 
@@ -209,11 +212,53 @@ export function TaxPolicyForm({
       <Field label="Комментарий">
         <Input name="comment" />
       </Field>
+      <NewTaxRatePreview />
       <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">
         Ставка действует с этого дня и до следующей ставки; дни раньше считаются по прежней. Меняет только ваш доход в
         «Финансах» — флористам налог вычитается на 100% всегда.
       </p>
     </SettingDialog>
+  );
+}
+
+/**
+ * «Предварительный расчёт» новой ставки: берёт магазин, процент и дату из формы и показывает, как
+ * изменится ваш налоговый расход. Ничего не сохраняет.
+ */
+function NewTaxRatePreview() {
+  const [pending, start] = useTransition();
+  const [result, setResult] = useState<OwnerTaxChange | null>(null);
+
+  return (
+    <div className="space-y-2">
+      <Button
+        type="button"
+        size="sm"
+        variant="outline"
+        disabled={pending}
+        onClick={(e) => {
+          const form = e.currentTarget.form;
+          if (!form) return;
+          const fd = new FormData(form);
+          start(async () => {
+            const r = await previewNewTaxRateAction({
+              siteId: String(fd.get("siteId") ?? ""),
+              percent: String(fd.get("percent") ?? ""),
+              effectiveFrom: String(fd.get("effectiveFrom") ?? ""),
+            });
+            if (r.error) {
+              setResult(null);
+              toast.error(r.error);
+              return;
+            }
+            setResult(r.preview ?? null);
+          });
+        }}
+      >
+        {pending ? "Считаю…" : "Предварительный расчёт"}
+      </Button>
+      {result && <OwnerTaxPreviewPanel t={result} />}
+    </div>
   );
 }
 

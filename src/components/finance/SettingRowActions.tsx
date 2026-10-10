@@ -19,6 +19,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { formatCents } from "@/lib/cents";
+import type { OwnerTaxChange } from "@/modules/finance/taxPolicyPeriods";
 
 export type SettingEntityDto = "CONSUMABLES_RATE" | "FEE_MODEL" | "TAX_POLICY";
 
@@ -40,6 +41,8 @@ export type SettingPreviewDto = {
     shareAfterCents: number | null;
   }>;
   warnings: string[];
+  /** Только у налога: что станет с налоговым расходом владельца. */
+  ownerTax?: OwnerTaxChange;
 };
 
 export type SettingActions = {
@@ -75,8 +78,48 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
   );
 }
 
+const dmy = (day: string) => day.split("-").reverse().join(".");
+
+/**
+ * Предварительный расчёт налогового расхода владельца (владелец 10.10.2026: «чтобы я видел, так
+ * как я постфактум иногда делаю»): сколько вычиталось из дохода, сколько станет, на сколько
+ * изменится доход в «Финансах» и какие заказы задеты.
+ */
+export function OwnerTaxPreviewPanel({ t }: { t: OwnerTaxChange }) {
+  if (t.orders === 0) {
+    return (
+      <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-600">
+        Ни один доставленный заказ не задет — ваш налоговый расход не изменится.
+      </div>
+    );
+  }
+  const d = t.deltaCents;
+  return (
+    <div className="space-y-1.5 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm">
+      <div className="text-xs text-slate-500">Ваш налоговый расход за задетые дни</div>
+      <div className="tabular-nums">
+        {formatCents(t.beforeCents)} → <span className="font-semibold">{formatCents(t.afterCents)}</span>{" "}
+        <span className={d > 0 ? "text-red-700" : "text-emerald-700"}>
+          ({d > 0 ? "+" : "−"}
+          {formatCents(Math.abs(d))})
+        </span>
+      </div>
+      <div className={`text-xs font-medium ${d > 0 ? "text-red-700" : "text-emerald-700"}`}>
+        Ваш доход в «Финансах» станет {d > 0 ? "меньше" : "больше"} на {formatCents(Math.abs(d))}.
+      </div>
+      <div className="text-xs text-slate-500">
+        Заказов: {t.orders} · налог по ним {formatCents(t.collectedCents)}
+        {t.fromDay && t.toDay ? ` · ${t.fromDay === t.toDay ? dmy(t.fromDay) : `${dmy(t.fromDay)} – ${dmy(t.toDay)}`}` : ""}
+      </div>
+      <div className="text-xs text-slate-400">Флористов не касается: в их расчёте налог вычитается полностью.</div>
+    </div>
+  );
+}
+
 function PreviewPanel({ p }: { p: SettingPreviewDto }) {
   const delta = (c: number) => `${c > 0 ? "+" : c < 0 ? "−" : ""}${formatCents(Math.abs(c))}`;
+  // Налог: доля флориста от него не зависит, показываем ваш расход.
+  if (p.ownerTax) return <OwnerTaxPreviewPanel t={p.ownerTax} />;
 
   return (
     <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm">

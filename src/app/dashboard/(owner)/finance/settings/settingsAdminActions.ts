@@ -7,11 +7,13 @@
  * период и оставляет прошлое как было, другая переписывает уже посчитанное.
  */
 import { revalidatePath } from "next/cache";
+import type { OwnerTaxChange } from "@/modules/finance/taxPolicyPeriods";
 import { requireRole } from "@/lib/rbac";
 import {
   correctSetting,
   deleteSetting,
   previewSettingChange,
+  previewOwnerTax,
   SettingsAdminError,
   type SettingEntity,
   type SettingPreview,
@@ -130,5 +132,31 @@ export async function previewSettingAction(input: {
   } catch (e) {
     const r = fail(e);
     return { error: r.error };
+  }
+}
+
+/**
+ * Предварительный расчёт НОВОЙ ставки налога с даты: сколько вычиталось и сколько станет. Ничего не
+ * пишет — владелец ставит ставки задним числом и должен видеть, что сдвинется, до сохранения.
+ */
+export async function previewNewTaxRateAction(input: {
+  siteId: string;
+  percent: string;
+  effectiveFrom: string;
+}): Promise<{ error?: string; preview?: OwnerTaxChange }> {
+  await requireRole("OWNER");
+  try {
+    const day = input.effectiveFrom.trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) throw new SettingsAdminError("bad_date", "Укажите дату начала ставки.");
+    return {
+      preview: await previewOwnerTax({
+        kind: "NEW",
+        siteId: input.siteId.trim() || null,
+        actualShareBp: bp(input.percent, "процент"),
+        effectiveFrom: new Date(`${day}T00:00:00.000Z`),
+      }),
+    };
+  } catch (e) {
+    return { error: fail(e).error };
   }
 }

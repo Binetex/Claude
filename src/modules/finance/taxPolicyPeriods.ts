@@ -65,3 +65,43 @@ export function taxTotalsByPolicy<T extends TaxPolicyRow & { id: string }>(
   }
   return out;
 }
+
+/** Что станет с налоговым расходом владельца, если заменить ставки `before` на `after`. */
+export type OwnerTaxChange = {
+  /** Заказы, у которых меняется вычет. */
+  orders: number;
+  collectedCents: number;
+  beforeCents: number;
+  afterCents: number;
+  /** after − before: плюс — расход растёт и доход в «Финансах» становится меньше. */
+  deltaCents: number;
+  /** Первый и последний день доставки задетых заказов — YYYY-MM-DD; null, если не задет никто. */
+  fromDay: string | null;
+  toDay: string | null;
+};
+
+/**
+ * Предварительный расчёт правки ставки (владелец 10.10.2026: «чтобы я видел, так как я постфактум
+ * иногда делаю»). Тот же разбор по дням и то же округление по заказу, что в «Финансах».
+ */
+export function ownerTaxChange(
+  before: TaxPolicyRow[],
+  after: TaxPolicyRow[],
+  orders: { siteId: string; deliveryDate: Date; taxCents: number }[]
+): OwnerTaxChange {
+  const out: OwnerTaxChange = { orders: 0, collectedCents: 0, beforeCents: 0, afterCents: 0, deltaCents: 0, fromDay: null, toDay: null };
+  for (const o of orders) {
+    const b = Math.round((o.taxCents * taxShareOn(before, o.siteId, o.deliveryDate)) / 10000);
+    const a = Math.round((o.taxCents * taxShareOn(after, o.siteId, o.deliveryDate)) / 10000);
+    if (a === b) continue;
+    const day = o.deliveryDate.toISOString().slice(0, 10);
+    out.orders += 1;
+    out.collectedCents += o.taxCents;
+    out.beforeCents += b;
+    out.afterCents += a;
+    if (!out.fromDay || day < out.fromDay) out.fromDay = day;
+    if (!out.toDay || day > out.toDay) out.toDay = day;
+  }
+  out.deltaCents = out.afterCents - out.beforeCents;
+  return out;
+}

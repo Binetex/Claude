@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { TAX_POLICY_ALWAYS, taxShareOn, taxPolicyUntil, taxTotalsByPolicy, type TaxPolicyRow } from "./taxPolicyPeriods";
+import { TAX_POLICY_ALWAYS, ownerTaxChange, taxShareOn, taxPolicyUntil, taxTotalsByPolicy, type TaxPolicyRow } from "./taxPolicyPeriods";
 
 const d = (s: string) => new Date(`${s}T00:00:00.000Z`);
 const rows: TaxPolicyRow[] = [
@@ -42,5 +42,24 @@ describe("налог по периодам в долларах", () => {
     expect(totals.get("p0")).toEqual({ orders: 1, collectedCents: 1999, deductedCents: 240 });
     expect(totals.get("p1")).toEqual({ orders: 1, collectedCents: 1000, deductedCents: 200 });
     expect(totals.get("p2")).toEqual({ orders: 1, collectedCents: 1000, deductedCents: 50 });
+  });
+});
+
+describe("предварительный расчёт налогового расхода", () => {
+  const orders = [
+    { siteId: "theflow", deliveryDate: d("2026-08-10"), taxCents: 1000 },
+    { siteId: "theflow", deliveryDate: d("2026-09-10"), taxCents: 2000 },
+    { siteId: "theflow", deliveryDate: d("2026-10-03"), taxCents: 500 },
+  ];
+
+  it("новая ставка задним числом с 1 сентября: задеты сентябрь, но не август и не октябрь со своей ставкой", () => {
+    const after = [...rows, { siteId: null, actualShareBp: 2000, effectiveFrom: d("2026-09-01") }];
+    expect(ownerTaxChange(rows, after, orders)).toEqual({
+      orders: 1, collectedCents: 2000, beforeCents: 240, afterCents: 400, deltaCents: 160, fromDay: "2026-09-10", toDay: "2026-09-10",
+    });
+  });
+
+  it("ничего не меняется — ни одного задетого заказа", () => {
+    expect(ownerTaxChange(rows, rows, orders)).toMatchObject({ orders: 0, deltaCents: 0, fromDay: null });
   });
 });
