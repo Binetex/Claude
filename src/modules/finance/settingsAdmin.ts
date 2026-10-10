@@ -8,6 +8,10 @@ import "server-only";
  * меняет текущее значение и пересчитывает затронутые дни. История значений живёт в
  * `FinanceAudit` — с автором, временем и причиной.
  *
+ * Исключение — налоговая политика владельца: у неё есть дата начала (владелец 10.10.2026).
+ * Правка строки здесь меняет значение ЭТОГО периода; новая ставка с даты — отдельная запись
+ * через форму настроек. На долю флориста налог не влияет, поэтому периоды не задевают выплат.
+ *
  * Размен сознательный. Датированные ставки позволяли считать прошлое по старым цифрам,
  * но за это платили интервальной арифметикой, запретом пересечений, симуляцией цепочки
  * периодов и подневной подстановкой значений в предпросмотре — ради вопроса, который в
@@ -21,6 +25,7 @@ import { dayShareCents } from "./dayCalc";
 import { recalculateAffectedFinance, type FixResult } from "./fix";
 import { setConsumablesRate, setFeeModel, setOwnerTaxPolicy } from "./settings";
 import { primaryShareStartDate } from "./config";
+import { taxTotalsByPolicy, type TaxPolicyTotals } from "./taxPolicyPeriods";
 
 export class SettingsAdminError extends Error {
   constructor(
@@ -48,6 +53,8 @@ export type SettingRecord = {
   siteId: string | null;
   siteShortName: string | null;
   values: SettingValues;
+  /** Только у налоговой политики: с какого дня действует запись. */
+  effectiveFrom: Date | null;
   comment: string | null;
   createdBy: string;
   createdByName: string | null;
@@ -120,6 +127,7 @@ export async function listSettingRecords(): Promise<SettingRecord[]> {
       siteId: r.siteId,
       siteShortName: r.site?.shortName ?? null,
       values: { entity: "CONSUMABLES_RATE" as const, amountCents: r.amountCents },
+      effectiveFrom: null,
       comment: r.comment,
       createdBy: r.createdBy,
       createdByName: null as string | null,
@@ -131,6 +139,7 @@ export async function listSettingRecords(): Promise<SettingRecord[]> {
       siteId: m.siteId,
       siteShortName: m.site.shortName,
       values: { entity: "FEE_MODEL" as const, percentBp: m.percentBp, fixedCents: m.fixedCents },
+      effectiveFrom: null,
       comment: m.comment,
       createdBy: m.createdBy,
       createdByName: null as string | null,
@@ -142,6 +151,7 @@ export async function listSettingRecords(): Promise<SettingRecord[]> {
       siteId: p.siteId,
       siteShortName: p.site?.shortName ?? null,
       values: { entity: "TAX_POLICY" as const, actualShareBp: p.actualShareBp },
+      effectiveFrom: p.effectiveFrom,
       comment: p.comment,
       createdBy: p.createdBy,
       createdByName: null as string | null,
@@ -157,6 +167,25 @@ export async function listSettingRecords(): Promise<SettingRecord[]> {
   for (const r of rows) r.createdByName = nameById.get(r.createdBy) ?? null;
 
   return rows;
+}
+
+/**
+ * Налог по периодам политики: сколько клиенты заплатили и сколько вычтено из дохода владельца.
+ * Доставленные заказы с начала расчёта (`FINANCE_PRIMARY_SHARE_START_DATE`) — как в «Финансах».
+ */
+export async function taxPolicyTotals(): Promise<Map<string, TaxPolicyTotals>> {
+  const start = primaryShareStartDate();
+  const [rows, orders] = await Promise.all([
+    prisma.ownerTaxPolicy.findMany({ select: { id: true, siteId: true, actualShareBp: true, effectiveFrom: true } }),
+    prisma.order.findMany({
+      where: { orderStatus: "DELIVERED", ...(start ? { deliveryDate: { gte: start } } : {}) },
+      select: { siteId: true, deliveryDate: true, tax: true },
+    }),
+  ]);
+  return taxTotalsByPolicy(
+    rows,
+    orders.map((o) => ({ siteId: o.siteId, deliveryDate: o.deliveryDate, taxCents: Math.round(Number(o.tax) * 100) }))
+  );
 }
 
 /** Одна запись по id. Бросает, если её нет: править нечего. */
@@ -381,9 +410,11 @@ export async function correctSetting(args: {
       actor: args.actor,
     });
   } else {
+    // Правка строки — значение ЭТОГО периода: дата начала остаётся прежней.
     await setOwnerTaxPolicy({
       siteId: record.siteId,
       actualShareBp: args.values.actualShareBp,
+      effectiveFrom: record.effectiveFrom ?? undefined,
       comment: reason,
       actor: args.actor,
     });

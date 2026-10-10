@@ -337,6 +337,8 @@ export async function fixConsumablesRate(args: {
 export async function fixOwnerTaxPolicy(args: {
   siteId: string | null;
   actualShareBp: number;
+  /** С какого дня действует ставка. Не задано — «всегда» (так закрывается «политика не задана»). */
+  effectiveFrom?: Date;
   issueId?: string | null;
   comment?: string | null;
   actor: FixActor;
@@ -349,6 +351,7 @@ export async function fixOwnerTaxPolicy(args: {
   await setOwnerTaxPolicy({
     siteId: args.siteId,
     actualShareBp: args.actualShareBp,
+    effectiveFrom: args.effectiveFrom,
     comment: args.comment ?? null,
     actor: args.actor,
   });

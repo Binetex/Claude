@@ -12,26 +12,25 @@ import "server-only";
 import { prisma } from "@/lib/db";
 import type { ResolvedConsumables, ResolvedFeeModel } from "./settings";
 import type { FinanceSettingsBySite } from "./orderInput";
+import { taxShareOn } from "./taxPolicyPeriods";
 
 /**
- * Доля Order.tax, которая для владельца является РЕАЛЬНЫМ расходом.
+ * Доля Order.tax, которая для владельца является РЕАЛЬНЫМ расходом, — на КАЖДЫЙ день: у налоговой
+ * политики есть дата начала (`taxPolicyPeriods.ts`). Одним запросом на период, дальше — в памяти.
  *
  * Политики нет — считаем, что налог уплачивается полностью (10000 bp). Это осторожная
  * сторона: занизить расход значило бы показать прибыль, которой нет.
  */
-export async function loadTaxPolicies(siteIds: string[]): Promise<Map<string, number>> {
-  const out = new Map<string, number>();
-  if (siteIds.length === 0) return out;
-  const rows = await prisma.ownerTaxPolicy.findMany({
-    where: { OR: [{ siteId: { in: siteIds } }, { siteId: null }] },
-    select: { siteId: true, actualShareBp: true },
-  });
-  const global = rows.find((r) => r.siteId === null);
-  for (const siteId of siteIds) {
-    const own = rows.find((r) => r.siteId === siteId);
-    out.set(siteId, (own ?? global)?.actualShareBp ?? 10000);
-  }
-  return out;
+export type TaxSharesByDay = (day: Date) => Map<string, number>;
+
+export async function loadTaxPolicies(siteIds: string[]): Promise<TaxSharesByDay> {
+  const rows = siteIds.length
+    ? await prisma.ownerTaxPolicy.findMany({
+        where: { OR: [{ siteId: { in: siteIds } }, { siteId: null }] },
+        select: { siteId: true, actualShareBp: true, effectiveFrom: true },
+      })
+    : [];
+  return (day) => new Map(siteIds.map((siteId) => [siteId, taxShareOn(rows, siteId, day)]));
 }
 
 export async function loadFinanceSettings(siteIds: string[]): Promise<FinanceSettingsBySite> {

@@ -160,7 +160,7 @@ export async function getOwnerMonth(from: Date, to: Date): Promise<OwnerMonth> {
     const flowerCents = flowerByDay.get(key) ?? (hasPrimary ? null : 0);
 
     // Налог здесь сразу по доле владельца: формула одна, вход у неё другой.
-    const inputs = toDayOrderInputs(dayOrders, { additionalByOrder, itemFinance, settings, taxShareBp: taxPolicies });
+    const inputs = toDayOrderInputs(dayOrders, { additionalByOrder, itemFinance, settings, taxShareBp: taxPolicies(new Date(`${key}T00:00:00.000Z`)) });
     const calc = computeDayFinance(inputs, flowerCents);
 
     // Фиксированные цены второстепенных — их заработок за этот день.
@@ -316,7 +316,7 @@ export async function getOwnerDay(day: Date): Promise<OwnerDayDetail | null> {
   }
   const taxPolicies = await loadTaxPolicies([...new Set(orders.map((o) => o.siteId))]);
   const calc = computeDayFinance(
-    toDayOrderInputs(orders, { additionalByOrder, itemFinance, settings, taxShareBp: taxPolicies }),
+    toDayOrderInputs(orders, { additionalByOrder, itemFinance, settings, taxShareBp: taxPolicies(day) }),
     flowerExpense?.amountCents ?? null
   );
   // Сколько налога собрали с клиентов — это уже не расход, а пояснение к нему.

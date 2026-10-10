@@ -1032,17 +1032,24 @@ model OrderAcquiringFee {
 
 /// Доля Order.tax, являющаяся РЕАЛЬНЫМ расходом владельца.
 /// Флористам не отдаётся никогда: в их базе налог вычитается на 100%.
+///
+/// Единственная настройка расчёта С ДАТОЙ НАЧАЛА (владелец 10.10.2026: «пересчитывался только
+/// период, который я указываю»): она влияет лишь на картину дохода владельца, а ставка налога
+/// у него менялась. Запись действует с `effectiveFrom` до следующей записи той же области.
 model OwnerTaxPolicy {
   id            String   @id @default(cuid())
   siteId        String? // NULL = глобальная политика
   site          Site?    @relation(fields: [siteId], references: [id], onDelete: Restrict)
   /// Базисные пункты от Order.tax: 20% = 2000.
   actualShareBp Int
+  /// С какого дня доставки действует — UTC-полночь локального дня, как `Order.deliveryDate`.
+  /// 2000-01-01 — «всегда»: так стоят записи, заведённые до появления даты.
+  effectiveFrom DateTime @default(dbgenerated("'2000-01-01 00:00:00'::timestamp without time zone"))
   comment       String?
   createdBy     String
   createdAt     DateTime @default(now())
 
-  @@unique([siteId])
+  @@unique([siteId, effectiveFrom])
 }
 
 /// Дополнительный расход по заказу: повторная доставка, переделка букета, компенсация.

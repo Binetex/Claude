@@ -5,12 +5,23 @@ import { PageHeader } from "@/components/ui/misc";
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/Card";
 import { EmptyState } from "@/components/ui/states";
 import { formatCents } from "@/lib/cents";
-import { listSettingRecords, type SettingRecord } from "@/modules/finance/settingsAdmin";
+import { listSettingRecords, taxPolicyTotals, type SettingRecord } from "@/modules/finance/settingsAdmin";
+import { TAX_POLICY_ALWAYS, taxPolicyUntil } from "@/modules/finance/taxPolicyPeriods";
 import { CorrectSettingDialog, DeleteSettingDialog, type SettingRowDto } from "@/components/finance/SettingRowActions";
 import { ConsumablesForm, FeeModelForm, FlowerExpenseForm, TaxPolicyForm } from "./SettingsForms";
 import { correctSettingAction, deleteSettingAction, previewSettingAction } from "./settingsAdminActions";
 
 export const dynamic = "force-dynamic";
+
+/** Дата периода налога: «01.10.2026». Читаем UTC-части — это UTC-полночь дня, как у даты доставки. */
+const dmy = (d: Date) => `${String(d.getUTCDate()).padStart(2, "0")}.${String(d.getUTCMonth() + 1).padStart(2, "0")}.${d.getUTCFullYear()}`;
+
+function periodLabel(row: { effectiveFrom: Date }, until: Date | null): string {
+  const from = row.effectiveFrom.getTime() <= TAX_POLICY_ALWAYS.getTime() ? null : dmy(row.effectiveFrom);
+  if (!from && !until) return "всегда";
+  if (!from) return `по ${dmy(until!)}`;
+  return until ? `${from} – ${dmy(until)}` : `с ${from}`;
+}
 
 
 const th = "px-3 py-2 text-left text-[11px] font-medium tracking-wide text-slate-400 uppercase";
@@ -27,18 +38,27 @@ const td = "px-3 py-2";
 export default async function FinanceSettingsPage() {
   await requireRole("OWNER");
 
-  const [sites, records, profile] = await Promise.all([
+  const [sites, records, profile, taxTotals] = await Promise.all([
     prisma.site.findMany({ select: { id: true, shortName: true }, orderBy: { shortName: "asc" } }),
     listSettingRecords(),
     prisma.floristFinanceProfile.findFirst({
       where: { model: "PRIMARY", active: true, effectiveTo: null },
       include: { florist: { select: { user: { select: { name: true } } } } },
     }),
+    taxPolicyTotals(),
   ]);
 
   const rates = records.filter((r) => r.entity === "CONSUMABLES_RATE");
   const feeModels = records.filter((r) => r.entity === "FEE_MODEL");
-  const taxPolicies = records.filter((r) => r.entity === "TAX_POLICY");
+  // Налог — с датами: общая ставка первой, внутри области — по дате начала.
+  const taxPolicies = records
+    .filter((r) => r.entity === "TAX_POLICY")
+    .sort((a, b) => (a.siteShortName ?? "").localeCompare(b.siteShortName ?? "") || (a.effectiveFrom?.getTime() ?? 0) - (b.effectiveFrom?.getTime() ?? 0));
+  const taxRows = taxPolicies.map((p) => ({
+    siteId: p.siteId,
+    actualShareBp: p.values.entity === "TAX_POLICY" ? p.values.actualShareBp : 0,
+    effectiveFrom: p.effectiveFrom ?? TAX_POLICY_ALWAYS,
+  }));
   const actions = { correct: correctSettingAction, remove: deleteSettingAction, preview: previewSettingAction };
 
   return (
@@ -138,7 +158,7 @@ export default async function FinanceSettingsPage() {
 
       <Card>
         <CardHeader className="flex items-center justify-between gap-2">
-          <CardTitle>Налоговая политика владельца</CardTitle>
+          <CardTitle>Налог в вашем доходе</CardTitle>
           <TaxPolicyForm sites={sites} hasRecords={taxPolicies.length > 0} />
         </CardHeader>
         {/* Таблица настроек шире телефона по существу — в ней пять колонок с датами и
@@ -147,7 +167,8 @@ export default async function FinanceSettingsPage() {
         <CardBody className="overflow-x-auto p-0">
           <div className="px-3 pt-2 text-xs text-slate-500">
             Флористы видят 100% собранного налога как расход бизнеса всегда. Этот процент влияет только на вашу
-            картину прибыли, наружу не отдаётся и на долю флориста не действует.
+            картину прибыли, наружу не отдаётся и на долю флориста не действует. Ставка действует с указанного дня
+            до следующей: новая ставка с даты прошлое до неё не меняет, «Изменить» у строки — правит её период.
           </div>
           {taxPolicies.length === 0 ? (
             <EmptyState title="Политика не задана" description="Начисление флористу считается и без неё." />
@@ -156,16 +177,33 @@ export default async function FinanceSettingsPage() {
               <thead>
                 <tr className="border-b border-slate-100">
                   <th className={th}>Область</th>
+                  <th className={th}>Действует</th>
                   <th className={th}>Реальный расход</th>
+                  <th className={th}>Вычтено за период</th>
                   <th className={`${th} text-right`}>Действия</th>
                 </tr>
               </thead>
               <tbody>
-                {taxPolicies.map((p) => (
+                {taxPolicies.map((p, i) => (
                   <tr key={p.id} className="border-b border-slate-50 last:border-0">
                     <td className={td}>{p.siteShortName ?? "Все магазины"}</td>
+                    <td className={`${td} whitespace-nowrap tabular-nums`}>{periodLabel(taxRows[i], taxPolicyUntil(taxRows, taxRows[i]))}</td>
                     <td className={`${td} tabular-nums`}>
                       {p.values.entity === "TAX_POLICY" ? `${(p.values.actualShareBp / 100).toFixed(2)}%` : "—"}
+                    </td>
+                    {/* Сколько из дохода ушло налогом в этом периоде — и из какого собранного налога. */}
+                    <td className={`${td} tabular-nums`}>
+                      {taxTotals.get(p.id) ? (
+                        <>
+                          <span className="font-medium text-slate-800">{formatCents(taxTotals.get(p.id)!.deductedCents)}</span>
+                          <span className="text-xs text-slate-400">
+                            {" "}
+                            из {formatCents(taxTotals.get(p.id)!.collectedCents)} · заказов {taxTotals.get(p.id)!.orders}
+                          </span>
+                        </>
+                      ) : (
+                        <span className="text-xs text-slate-400">заказов нет</span>
+                      )}
                     </td>
                     <RowActions record={p} />
                   </tr>
@@ -192,8 +230,8 @@ export default async function FinanceSettingsPage() {
       </Card>
 
       <p className="text-xs text-slate-400">
-        У настройки одно значение, и оно действует всегда. Правка пересчитывает все дни расчёта: прежняя сумма
-        остаётся в истории правок, но заказы считаются по текущей.
+        У расходников и комиссии одно значение, и оно действует всегда: правка пересчитывает все дни расчёта, прежняя
+        сумма остаётся в истории правок. Налог в вашем доходе — со своей датой начала.
       </p>
     </div>
   );

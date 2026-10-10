@@ -134,11 +134,13 @@ export async function applyOwnerTaxPolicy(formData: FormData): Promise<SetupResu
     const r = await fixOwnerTaxPolicy({
       siteId: String(formData.get("siteId") ?? "").trim() || null,
       actualShareBp: percentToBp(formData.get("percent"), "Доля налогового расхода"),
+      // Форма настроек присылает дату начала ставки; «Требует заполнения» — нет: там ставка «всегда».
+      ...(formData.has("effectiveFrom") ? { effectiveFrom: parseDay(String(formData.get("effectiveFrom") ?? "")) } : {}),
       issueId: String(formData.get("issueId") ?? "") || null,
       comment: String(formData.get("comment") ?? "").trim() || null,
       actor: { userId: user.id, role: user.role },
     });
-    return done("Налоговая политика сохранена.", r);
+    return done("Налоговая ставка сохранена.", r);
   } catch (err) {
     return toError(err);
   }

@@ -17,6 +17,7 @@ import { fixConsumablesRate, fixDailyFlowerExpense, fixDeliveryActualCost, fixSi
 import { recomputeDay, computeDayShare } from "./dayFinance";
 import { dayShareCents } from "./dayCalc";
 import { getOwnerMonth } from "./ownerDashboard";
+import { setOwnerTaxPolicy } from "./settings";
 
 const RUN = `own${crypto.randomBytes(3).toString("hex")}`;
 const OWNER = { userId: "", role: "OWNER" as const };
@@ -207,6 +208,25 @@ describe("дашборд владельца", () => {
     // База флориста при этом не сдвинулась ни на цент.
     const share = await computeDayShare(primaryProfileId, DAY);
     expect(dayWith.floristEarningsCents).toBe(share!.shareCents + 4500);
+  });
+
+  it("ставка с даты: прошлые дни остаются по прежней, с её дня — по новой", async () => {
+    try {
+      await setOwnerTaxPolicy({ siteId, actualShareBp: 2500, actor: OWNER });
+      // Новая ставка на следующий день — день заказа (28.07) её не видит.
+      await setOwnerTaxPolicy({ siteId, actualShareBp: 5000, effectiveFrom: new Date("2026-07-29T00:00:00.000Z"), actor: OWNER });
+      let day = (await getOwnerMonth(FROM, TO)).days.find((d) => d.day === "2026-07-28")!;
+      expect(day.ownerTaxCents).toBe(500);
+
+      // Ставка с самого дня заказа — действует; повтор с той же датой правит её, а не плодит вторую.
+      await setOwnerTaxPolicy({ siteId, actualShareBp: 4000, effectiveFrom: DAY, actor: OWNER });
+      await setOwnerTaxPolicy({ siteId, actualShareBp: 5000, effectiveFrom: DAY, actor: OWNER });
+      day = (await getOwnerMonth(FROM, TO)).days.find((d) => d.day === "2026-07-28")!;
+      expect(day.ownerTaxCents).toBe(1000);
+      expect(await prisma.ownerTaxPolicy.count({ where: { siteId } })).toBe(3);
+    } finally {
+      await prisma.ownerTaxPolicy.deleteMany({ where: { siteId } });
+    }
   });
 
   it("неготовый день не даёт числа и не входит в итог месяца", async () => {

@@ -195,19 +195,23 @@ export function TaxPolicyForm({
 }) {
   return (
     <SettingDialog
-      trigger={hasRecords ? "Изменить политику" : "Задать политику"}
-      title="Налоговая политика владельца"
+      trigger={hasRecords ? "Новая ставка с даты" : "Задать ставку"}
+      title="Налог в вашем доходе"
       action={applyOwnerTaxPolicy}
     >
       <SiteSelect sites={sites} allowGlobal />
       <Field label="Реальный налоговый расход, % от собранного">
         <Input name="percent" inputMode="decimal" placeholder="20" required />
       </Field>
+      <Field label="Действует с">
+        <Input name="effectiveFrom" type="date" defaultValue={today()} required />
+      </Field>
       <Field label="Комментарий">
         <Input name="comment" />
       </Field>
       <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">
-        Флористам этот процент не показывается: в их базе налог вычитается на 100%.
+        Ставка действует с этого дня и до следующей ставки; дни раньше считаются по прежней. Меняет только ваш доход в
+        «Финансах» — флористам налог вычитается на 100% всегда.
       </p>
     </SettingDialog>
   );

@@ -13,6 +13,7 @@ import "server-only";
 import { Prisma } from "@/generated/prisma/client";
 import type { Role } from "@/generated/prisma/enums";
 import { prisma } from "@/lib/db";
+import { TAX_POLICY_ALWAYS, taxPolicyOn } from "./taxPolicyPeriods";
 
 
 export class FinanceSettingsError extends Error {
@@ -184,31 +185,37 @@ export async function setFeeModel(args: {
 export type ResolvedTaxPolicy = { policyId: string; actualShareBp: number };
 
 /**
- * Доля Order.tax, считающаяся реальным расходом владельца.
+ * Доля Order.tax, считающаяся реальным расходом владельца, действующая на день `day` (по
+ * умолчанию — сегодня). У политики есть дата начала (`taxPolicyPeriods.ts`).
  * ФЛОРИСТАМ не отдаётся никогда: в их базе налог вычитается на 100% независимо от политики.
  */
-export async function resolveOwnerTaxPolicy(siteId: string): Promise<ResolvedTaxPolicy | null> {
+export async function resolveOwnerTaxPolicy(siteId: string, day: Date = new Date()): Promise<ResolvedTaxPolicy | null> {
   const rows = await prisma.ownerTaxPolicy.findMany({
     where: { OR: [{ siteId }, { siteId: null }] },
-    select: { id: true, siteId: true, actualShareBp: true },
+    select: { id: true, siteId: true, actualShareBp: true, effectiveFrom: true },
   });
-  const site = rows.find((r) => r.siteId === siteId);
-  if (site) return { policyId: site.id, actualShareBp: site.actualShareBp };
-  const global = rows.find((r) => r.siteId === null);
-  return global ? { policyId: global.id, actualShareBp: global.actualShareBp } : null;
+  const hit = taxPolicyOn(rows, siteId, day);
+  return hit ? { policyId: hit.id, actualShareBp: hit.actualShareBp } : null;
 }
 
+/**
+ * Ставка с даты. Та же область и та же дата — исправление значения этого периода; другая дата —
+ * новый период: с неё и до следующей записи, а дни раньше считаются по прежней ставке.
+ */
 export async function setOwnerTaxPolicy(args: {
   siteId: string | null;
   actualShareBp: number;
+  /** С какого дня доставки действует (UTC-полночь дня). Не задано — «всегда». */
+  effectiveFrom?: Date;
   comment?: string | null;
   actor: SettingsActor;
 }): Promise<{ id: string; previousBp: number | null }> {
   assertOwner(args.actor);
   assertBp(args.actualShareBp, "Доля налогового расхода");
+  const effectiveFrom = args.effectiveFrom ?? TAX_POLICY_ALWAYS;
 
   return prisma.$transaction(async (tx) => {
-    const existing = await tx.ownerTaxPolicy.findFirst({ where: { siteId: args.siteId } });
+    const existing = await tx.ownerTaxPolicy.findFirst({ where: { siteId: args.siteId, effectiveFrom } });
 
     const row = existing
       ? await tx.ownerTaxPolicy.update({
@@ -220,6 +227,7 @@ export async function setOwnerTaxPolicy(args: {
           data: {
             siteId: args.siteId,
             actualShareBp: args.actualShareBp,
+            effectiveFrom,
             comment: args.comment ?? null,
             createdBy: args.actor.userId,
           },
@@ -230,8 +238,8 @@ export async function setOwnerTaxPolicy(args: {
       tx,
       "OwnerTaxPolicy",
       row.id,
-      existing ? { actualShareBp: existing.actualShareBp } : null,
-      { actualShareBp: args.actualShareBp, siteId: args.siteId },
+      existing ? { actualShareBp: existing.actualShareBp, effectiveFrom: effectiveFrom.toISOString().slice(0, 10) } : null,
+      { actualShareBp: args.actualShareBp, siteId: args.siteId, effectiveFrom: effectiveFrom.toISOString().slice(0, 10) },
       args.actor,
       args.comment ?? null
     );
