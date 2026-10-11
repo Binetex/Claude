@@ -6,6 +6,13 @@ import "server-only";
 import type { Prisma } from "@/generated/prisma/client";
 import { resolveSupportEmail, type OrderVariableSource } from "./variables";
 import { pickLocation, pickedReviewUrl } from "@/modules/reviews/locationPick";
+import { isTipItem } from "@/modules/pricing/serviceItems";
+
+/** Названия букетов заказа через запятую, без повторов и без чаевых: «Peony Bloom, Balloon». */
+export function bouquetNamesOf(items: { name: string; productId: string | null; variantId: string | null }[] | undefined): string | null {
+  const names = [...new Set((items ?? []).filter((i) => !isTipItem(i)).map((i) => i.name.trim()).filter(Boolean))];
+  return names.length ? names.join(", ") : null;
+}
 
 // emailSettings нужны ради {{support_email}} (reply-to магазина, иначе адрес отправителя).
 // googleLocations — ради {{review_url}}: ссылка на отзыв больше не одна на магазин, её решает
@@ -14,6 +21,8 @@ import { pickLocation, pickedReviewUrl } from "@/modules/reviews/locationPick";
 // отправка ссылок на отзыв.
 export const SMS_ORDER_INCLUDE = {
   site: { include: { emailSettings: true, googleLocations: true } },
+  // Ради {{bouquet_name}}: «оплата не прошла за …» обязано назвать букет.
+  items: { select: { name: true, productId: true, variantId: true } },
 } as const;
 export type OrderWithSite = Prisma.OrderGetPayload<{ include: typeof SMS_ORDER_INCLUDE }>;
 
@@ -42,6 +51,7 @@ export function orderToVariableSource(order: OrderWithSite): OrderVariableSource
     // Клиенту уходит страница, а не сырой файл: картинку в SMS не вложить, а ссылка на
     // страницу открывается с подписью магазина и нормальным превью.
     bouquetPhotoUrl: bouquetPageUrl(order.bouquetPhotoUrl),
+    bouquetName: bouquetNamesOf(order.items),
     timezone: order.site.timezone,
     supportEmail: resolveSupportEmail(order.site.emailSettings),
   };

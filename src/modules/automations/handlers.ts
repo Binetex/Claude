@@ -441,6 +441,33 @@ export type AutomationSendDeps = {
   channels: Record<string, ChannelSender>;
 };
 
+const PAID = new Set(["PAID", "PAY_LATER_APPROVED"]);
+
+/**
+ * Оплата после «не прошла» всё-таки случилась: этот заказ оплачен, или тот же человек (телефон или
+ * почта заказчика) оплатил другой заказ этого магазина, оформленный не раньше этого. null — не платил.
+ */
+export async function paymentRecovered(
+  prisma: PrismaClient,
+  order: { id: string; siteId: string; paymentStatus: string; senderPhone: string | null; senderEmail: string | null; externalCreatedAt: Date }
+): Promise<"paid_meanwhile" | "paid_in_new_order" | null> {
+  if (PAID.has(order.paymentStatus)) return "paid_meanwhile";
+  const phone = toE164(order.senderPhone);
+  const email = order.senderEmail?.trim().toLowerCase() || null;
+  if (!phone && !email) return null;
+  const other = await prisma.order.findFirst({
+    where: {
+      id: { not: order.id },
+      siteId: order.siteId,
+      paymentStatus: { in: [...PAID] as ("PAID" | "PAY_LATER_APPROVED")[] },
+      externalCreatedAt: { gte: order.externalCreatedAt },
+      OR: [...(phone ? [{ senderPhone: { in: [...new Set([phone, order.senderPhone!.trim()])] } }] : []), ...(email ? [{ senderEmail: { equals: email, mode: "insensitive" as const } }] : [])],
+    },
+    select: { id: true },
+  });
+  return other ? "paid_in_new_order" : null;
+}
+
 export function buildAutomationSendHandler(prisma: PrismaClient, deps: AutomationSendDeps): OutboxHandler {
   const repo = new PrismaOutboxRepository(prisma);
 
@@ -504,6 +531,14 @@ export function buildAutomationSendHandler(prisma: PrismaClient, deps: Automatio
     // reviveSibling=false: запрет накрывает и погашенное дедупом правило, будить его незачем.
     if (job.recipientType === "RECIPIENT" && order.recipientMuted && toE164(order.recipientPhone) !== toE164(order.senderPhone)) {
       return skip(RECIPIENT_MUTED_CODE, { reviveSibling: false });
+    }
+
+    // «Оплата не прошла» уходит с задержкой (владелец 11.10.2026: «через 10 минут, если статус не
+    // изменился»). За это время клиент мог заплатить — этот же заказ или новый: на WooCommerce
+    // повторная попытка часто оформляется НОВЫМ заказом. Тогда «оплата не прошла» — неправда.
+    if (automation.triggerType === "PAYMENT_FAILED") {
+      const recovered = await paymentRecovered(prisma, order);
+      if (recovered) return skip(recovered);
     }
 
     const cond = evaluateConditions(automation.conditionsJson as SmsConditions | null, {
