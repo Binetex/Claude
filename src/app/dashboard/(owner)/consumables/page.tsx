@@ -139,7 +139,7 @@ export default async function ConsumablesJournalPage({ searchParams }: { searchP
                     return (
                       <tr key={day} className="border-b border-slate-100 hover:bg-slate-50">
                         <td className="sticky left-0 z-10 bg-white px-3 py-1.5">
-                          <Link href={`/dashboard/consumables/${day}`} className="font-medium text-sky-700 hover:underline">
+                          <Link href={`/dashboard/consumables/${day}${floristId ? `?florist=${floristId}` : ""}`} className="font-medium text-sky-700 hover:underline">
                             {day.split("-").reverse().join(".")}
                           </Link>
                         </td>

@@ -96,7 +96,7 @@ export async function loadOrdersWithConsumables(
   );
 
   return orders.map((o) => {
-    const branded = input.items.some((i) => i.siteId === o.siteId && i.autoRule === "BRANDED_ENVELOPE");
+    const branded = storeHasBranding(input.items, o.siteId);
     const calc = consumablesForOrder({
       storeHasBranding: branded,
       items: o.items.map((i) => ({
@@ -126,6 +126,16 @@ export async function loadOrdersWithConsumables(
       unknownVases: calc.vasesByType.get("UNKNOWN") ?? 0,
     };
   });
+}
+
+/**
+ * Своя упаковка у магазина — есть ли у него собственные позиции записок или конверта. Признак не
+ * привязан к ОДНОМУ правилу: конверт THEFLOW владелец перевёл на ручной учёт (10.10.2026), и записки
+ * Care Guide от этого пропадать не должны.
+ */
+const BRANDING_RULES = new Set(["BRANDED_ENVELOPE", "CARE_GUIDE_VASE", "CARE_GUIDE_BOUQUET"]);
+export function storeHasBranding(items: Pick<ConsumableItemRow, "siteId" | "autoRule">[], siteId: string): boolean {
+  return items.some((i) => i.siteId === siteId && !!i.autoRule && BRANDING_RULES.has(i.autoRule));
 }
 
 function autoQuantityFor(item: ConsumableItemRow, calc: ReturnType<typeof consumablesForOrder>): number {

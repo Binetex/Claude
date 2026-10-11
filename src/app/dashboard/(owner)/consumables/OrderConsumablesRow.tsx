@@ -1,6 +1,7 @@
 "use client";
 import { useState, useTransition } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -23,14 +24,15 @@ export type RowOrder = {
 /**
  * Одна строка дня: фото букета, чем заказ отличается от соседнего, и что в него положили.
  *
- * Посчитанное правилом показано плашками — их не надо трогать. Руками отмечается только то,
- * что система не выводит (коробки, обычный конверт); всё остальное правится по кнопке
- * «поправить», чтобы четырнадцать полей не висели перед глазами каждый день.
+ * Посчитанное правилом показано плашками — их не надо трогать. Ручные позиции (коробки, конверты)
+ * — кнопки в одно нажатие: нажал — положили одну, нажал ещё раз — снял (владелец 10.10.2026: «чтобы
+ * всё было удобно»). Больше одной и любое другое число — по кнопке «поправить».
  */
 export function OrderConsumablesRow({ order, items }: { order: RowOrder; items: RowItem[] }) {
   const [manual, setManual] = useState<Record<string, number>>(order.manual);
   const [openAll, setOpenAll] = useState(false);
   const [pending, start] = useTransition();
+  const router = useRouter();
 
   const valueOf = (id: string) => manual[id] ?? order.auto[id] ?? 0;
   const isManual = (id: string) => Object.prototype.hasOwnProperty.call(manual, id);
@@ -47,14 +49,17 @@ export function OrderConsumablesRow({ order, items }: { order: RowOrder; items: 
         else next[itemId] = quantity;
         return next;
       });
+      // Итог дня и «не отмечено» сверху считает сервер — перечитываем страницу.
+      router.refresh();
     });
   }
 
   const manualItems = items.filter((i) => !i.isAuto);
   const autoWithValue = items.filter((i) => i.isAuto && valueOf(i.id) > 0);
+  const nothingMarked = manualItems.length > 0 && manualItems.every((i) => valueOf(i.id) === 0);
 
   return (
-    <Card>
+    <Card className={nothingMarked ? "border-amber-200" : undefined}>
       <CardBody className="flex flex-wrap items-start gap-3 py-3">
         {/* Обычный <img>: карточка не ссылка целиком, лайтбокс здесь только мешал бы. */}
         {order.photoUrl ? (
@@ -73,6 +78,7 @@ export function OrderConsumablesRow({ order, items }: { order: RowOrder; items: 
             </Link>
             <Badge className="border-slate-200 bg-slate-50 text-slate-600">{order.siteName}</Badge>
             {order.floristName && <span className="text-[11px] text-slate-400">{order.floristName}</span>}
+            {nothingMarked && <Badge className="border-amber-200 bg-amber-50 text-amber-800">не отмечено</Badge>}
             {order.unknownVases > 0 && (
               <Badge className="border-amber-200 bg-amber-50 text-amber-700">ваза без типа</Badge>
             )}
@@ -102,21 +108,29 @@ export function OrderConsumablesRow({ order, items }: { order: RowOrder; items: 
           )}
         </div>
 
-        <div className="flex flex-wrap items-end gap-2">
-          {manualItems.map((i) => (
-            <label key={i.id} className="flex flex-col gap-0.5 text-[11px] text-slate-500">
-              {i.name}
-              <Input
-                inputMode="numeric"
-                defaultValue={isManual(i.id) ? String(manual[i.id]) : ""}
-                placeholder="—"
+        <div className="flex flex-wrap items-center gap-1.5">
+          {manualItems.map((i) => {
+            const n = valueOf(i.id);
+            return (
+              <button
+                key={i.id}
+                type="button"
                 disabled={pending}
-                onBlur={(e) => save(i.id, e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
-                className="h-8 w-16 text-right text-xs tabular-nums"
-              />
-            </label>
-          ))}
+                onClick={() => save(i.id, n > 0 ? "" : "1")}
+                className={`flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] transition disabled:opacity-50 ${
+                  n > 0 ? "border-sky-300 bg-sky-50 font-medium text-sky-800" : "border-slate-200 text-slate-500 hover:bg-slate-50"
+                }`}
+              >
+                {i.imageUrl && (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={i.imageUrl} alt="" className="size-4 rounded object-cover" />
+                )}
+                {n > 0 ? "✓ " : ""}
+                {i.name}
+                {n > 1 ? ` ×${n}` : ""}
+              </button>
+            );
+          })}
           <Button type="button" size="sm" variant="ghost" onClick={() => setOpenAll((v) => !v)}>
             {openAll ? "свернуть" : "поправить"}
           </Button>
@@ -138,6 +152,8 @@ export function OrderConsumablesRow({ order, items }: { order: RowOrder; items: 
                     {i.name}
                   </span>
                   <Input
+                    // Ключ по значению: кнопка сверху поменяла число — поле показывает новое, а не старое.
+                    key={`${i.id}:${manual[i.id] ?? ""}`}
                     inputMode="numeric"
                     defaultValue={isManual(i.id) ? String(manual[i.id]) : ""}
                     placeholder={order.auto[i.id] ? String(order.auto[i.id]) : "—"}
