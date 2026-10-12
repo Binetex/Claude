@@ -96,6 +96,7 @@ export default async function OwnerOrderPage({
     select: { id: true, status: true },
   });
   const recipientE164 = toE164(order.recipientPhone);
+  const recipientQuiet = recipientE164 ? !!(await prisma.quietRecipient.findUnique({ where: { phone: recipientE164 }, select: { phone: true } })) : false;
   const canAskRecipient = !!recipientE164 && recipientE164 !== toE164(order.senderPhone);
 
   // Сводка возвратов — best-effort и только когда есть что показывать: платёж Airwallex.
@@ -378,6 +379,7 @@ export default async function OwnerOrderPage({
             storeTimeZone={storeTimeZone}
             unread={commUnread}
             recipientMuted={order.recipientMuted}
+            recipientQuiet={recipientQuiet}
             canEditRecipientMute
           />
 

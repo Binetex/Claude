@@ -57,6 +57,7 @@ export function OrderCommunications({
   unread,
   templates,
   recipientMuted,
+  recipientQuiet,
   canEditRecipientMute,
   initialSide,
 }: {
@@ -76,6 +77,8 @@ export function OrderCommunications({
   templates?: TemplateChoice[];
   /** «Сюрприз: получателю не пишем» — состояние выключателя на заказе. */
   recipientMuted?: boolean;
+  /** Номер получателя в списке «не писать никогда». */
+  recipientQuiet?: boolean;
   /**
    * Можно ли этот выключатель ТРОГАТЬ. Ставит и снимает только владелец, но ВИДЕТЬ пометку
    * обязаны и флорист, и оператор: иначе они гадают, почему получателю ничего не ушло.
@@ -205,7 +208,7 @@ export function OrderCommunications({
             и запрещать писать самому себе нечего. */}
         {recipientMuted !== undefined && tabs.some((t) => t.key === "RECIPIENT") && (
           canEditRecipientMute ? (
-            <RecipientMuteToggle orderId={orderId} muted={recipientMuted} />
+            <RecipientMuteToggle orderId={orderId} muted={recipientMuted} quiet={recipientQuiet} />
           ) : recipientMuted ? (
             <div className="text-xs text-amber-700">
               Сюрприз: получателю не пишем. Автосообщения ему молчат, снять пометку может владелец.

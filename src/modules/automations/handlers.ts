@@ -39,6 +39,7 @@ import { isDeliveryToday } from "./dailySchedule";
 import { planSmsRecipients, DUPLICATE_PHONE_REASON, DUPLICATE_EMAIL_REASON, type SmsAudience, type SmsRecipientType } from "./audience";
 import { RECIPIENT_MUTED_CODE } from "@/integrations/quo/send";
 import { toE164 } from "@/lib/phone";
+import { isQuietRecipient } from "./quietRecipients";
 import { resolveCustomerEmail } from "@/modules/messaging/emailAudience";
 import { computeScheduledAt, type SmsDelayUnit } from "./delay";
 import { buildOrderVariables } from "@/modules/messaging/variables";
@@ -531,6 +532,14 @@ export function buildAutomationSendHandler(prisma: PrismaClient, deps: Automatio
     // reviveSibling=false: запрет накрывает и погашенное дедупом правило, будить его незачем.
     if (job.recipientType === "RECIPIENT" && order.recipientMuted && toE164(order.recipientPhone) !== toE164(order.senderPhone)) {
       return skip(RECIPIENT_MUTED_CODE, { reviveSibling: false });
+    }
+
+    // «Этому получателю не писать никогда» — по номеру, во всех заказах. Глушит и сообщения ему,
+    // и шаги цепочки по заказу: цепочка — это «получатель не ответил → …», а молчит он не потому,
+    // что недоступен (владелец 12.10.2026, THEFLOW-21118). При одном номере на двоих не действует.
+    const recipientIsSeparate = toE164(order.recipientPhone) !== toE164(order.senderPhone);
+    if (recipientIsSeparate && (job.recipientType === "RECIPIENT" || isChainOccurrence(job.occurrenceKey)) && (await isQuietRecipient(prisma, order.recipientPhone))) {
+      return skip("recipient_quiet", { reviveSibling: false });
     }
 
     // «Оплата не прошла» уходит с задержкой (владелец 11.10.2026: «через 10 минут, если статус не

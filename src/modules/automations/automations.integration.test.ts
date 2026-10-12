@@ -8,6 +8,7 @@ import { buildAutomationTriggerHandler, buildAutomationSendHandler } from "./han
 import { createSmsChannelSender } from "@/modules/messaging/channels/sms";
 import { setAutomationsGloballyDisabled } from "./settings";
 import { todayStrInTz, DEFAULT_STORE_TZ } from "@/lib/tz";
+import { setQuietRecipient } from "./quietRecipients";
 
 /**
  * Интеграция Automation Engine на реальной БД (throwaway prisma dev). Прогоняем handler'ы напрямую
@@ -665,6 +666,28 @@ describe("Global kill switch + Execution Log", () => {
     // Порядок ключевых этапов сохранён.
     expect(stages.indexOf("picked")).toBeLessThan(stages.indexOf("rendered"));
     expect(stages.indexOf("rendered")).toBeLessThan(stages.indexOf("sent"));
+  });
+});
+
+describe("«этому получателю не писать никогда» — QuietRecipient", () => {
+  it("номер в списке — сообщение получателю не уходит в любом его заказе, заказчику — уходит", async () => {
+    const site = await makeSite();
+    const order = await makeOrder(site.id);
+    const toRecipient = await makeAutomation(site.id, { audience: "RECIPIENT" });
+    const toCustomer = await makeAutomation(site.id, { audience: "CUSTOMER" });
+    const phone = (await prisma.order.findUniqueOrThrow({ where: { id: order.id }, select: { recipientPhone: true } })).recipientPhone!;
+    await setQuietRecipient(prisma, phone, true, null);
+    try {
+      await fireTrigger(order, "ORDER_CREATED");
+      const [rj] = await jobsFor(toRecipient.id, order.id);
+      const [cj] = await jobsFor(toCustomer.id, order.id);
+      await sendHandler(rec({ jobId: rj.id, orderId: order.id }));
+      await sendHandler(rec({ jobId: cj.id, orderId: order.id }));
+      expect(await prisma.automationJob.findUnique({ where: { id: rj.id } })).toMatchObject({ status: "SKIPPED", lastErrorSafe: "recipient_quiet" });
+      expect(await prisma.automationJob.findUnique({ where: { id: cj.id } })).toMatchObject({ status: "SENT" });
+    } finally {
+      await setQuietRecipient(prisma, phone, false, null);
+    }
   });
 });
 
