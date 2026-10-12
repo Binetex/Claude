@@ -38,6 +38,11 @@ export type SendSmsInput = {
    * прямой вопрос хуже любого сюрприза. Ставится только там, где входящее действительно есть.
    */
   replyToInbound?: boolean;
+  /**
+   * Букет уже доставлен: сюрприз состоялся, и сообщение «доставлен» получателю уходит и при пометке
+   * «не пишем получателю» (владелец 12.10.2026). Ставит только правило на событие доставки.
+   */
+  surpriseOver?: boolean;
   /** Картинки к сообщению (MMS): фото букета, вложение из переписки карточки. Текст тогда может быть пустым. */
   attachments?: SmsAttachment[];
 };
@@ -122,7 +127,7 @@ export async function sendOrderSms(prisma: PrismaClient, client: QuoClient | nul
   // Сверяем НОМЕР, а не роль. Когда заказчик указал свой телефон и в billing, и в доставке,
   // «получатель» — это он сам, и запрет заткнул бы переписку с плательщиком (ту же поправку
   // делает resolveRecipients в автоматизациях).
-  if (order.recipientMuted && input.target === "RECIPIENT" && !input.replyToInbound && e164 !== toE164(order.senderPhone)) {
+  if (order.recipientMuted && input.target === "RECIPIENT" && !input.replyToInbound && !input.surpriseOver && e164 !== toE164(order.senderPhone)) {
     quoLog("sms.recipient_muted", { orderId: order.id, phone: maskPhone(e164) });
     return { ok: false, code: RECIPIENT_MUTED_CODE };
   }

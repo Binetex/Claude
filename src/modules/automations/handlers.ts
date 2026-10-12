@@ -530,7 +530,14 @@ export function buildAutomationSendHandler(prisma: PrismaClient, deps: Automatio
     // окно). Сверяем НОМЕР, а не роль job'а: телефон получателя могли исправить на телефон
     // заказчика, и тогда это сообщение плательщику — ровно та же поправка, что в sendOrderSms.
     // reviveSibling=false: запрет накрывает и погашенное дедупом правило, будить его незачем.
-    if (job.recipientType === "RECIPIENT" && order.recipientMuted && toE164(order.recipientPhone) !== toE164(order.senderPhone)) {
+    // «Доставлен» сюрприз уже не раскрывает: букет у получателя, и сообщение о доставке ему уходит
+    // и при пометке (владелец 12.10.2026). Молчит всё, что было ДО доставки.
+    if (
+      job.recipientType === "RECIPIENT" &&
+      order.recipientMuted &&
+      automation.triggerType !== "ORDER_DELIVERED" &&
+      toE164(order.recipientPhone) !== toE164(order.senderPhone)
+    ) {
       return skip(RECIPIENT_MUTED_CODE, { reviveSibling: false });
     }
 

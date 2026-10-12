@@ -711,6 +711,16 @@ describe("«сюрприз: получателю не пишем» — Order.rec
     expect(await prisma.orderCommunication.count({ where: { orderId: order.id, direction: "OUTBOUND" } })).toBe(0);
   });
 
+  it("«доставлен» получателю уходит и при сюрпризе — букет уже у него", async () => {
+    const site = await makeSite();
+    const order = await makeOrder(site.id, { recipientMuted: true });
+    const rule = await makeAutomation(site.id, { audience: "RECIPIENT", triggerType: "ORDER_DELIVERED" });
+    await fireTrigger(order, "ORDER_DELIVERED");
+    const [job] = await jobsFor(rule.id, order.id);
+    await sendHandler(rec({ jobId: job.id, orderId: order.id }));
+    expect(await prisma.automationJob.findUnique({ where: { id: job.id } })).toMatchObject({ status: "SENT" });
+  });
+
   it("галочку сняли до отправки — сообщение уходит, а не теряется навсегда", async () => {
     const site = await makeSite();
     const order = await makeOrder(site.id, { recipientMuted: true });

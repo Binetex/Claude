@@ -120,6 +120,13 @@ describe("sendOrderSms — «сюрприз: получателю не пише�
     expect(r).toMatchObject({ ok: true, status: "SENT" });
   });
 
+  it("«доставлен» получателю уходит и при сюрпризе — букет уже у него", async () => {
+    const orderId = await makeOrder(siteWithNumber);
+    await prisma.order.update({ where: { id: orderId }, data: { recipientMuted: true } });
+    const r = await sendOrderSms(prisma, okClient("AC_mute_delivered"), { orderId, target: "RECIPIENT", text: "Delivered!", idempotencyKey: `mute-${orderId}-d`, surpriseOver: true });
+    expect(r).toMatchObject({ ok: true, status: "SENT" });
+  });
+
   it("один телефон на заказчика и получателя — запрет НЕ затыкает плательщика", async () => {
     const orderId = await makeOrder(siteWithNumber);
     // Заказчик указал свой номер и в billing, и в доставке: «получатель» — это он сам.

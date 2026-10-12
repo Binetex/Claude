@@ -62,6 +62,8 @@ export function createSmsChannelSender(getClient: () => QuoClient | null): Chann
         text: ctx.text,
         idempotencyKey: ctx.idempotencyKey,
         sentByUserId: null,
+        // «Доставлен» сюрприз уже не раскрывает — см. SendSmsInput.surpriseOver.
+        surpriseOver: ctx.triggerType === "ORDER_DELIVERED",
       });
       if (res.ok) {
         let providerMessageId: string | null = null;
