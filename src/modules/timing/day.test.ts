@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isBigOrder, readyTimeWishes, clockLabelEn, fmtDuration, withClosure, sameDayFallback, isPriorityShop, asClosureLevel, morningOverload } from "./day";
+import { isBigOrder, readyTimeWishes, clockLabelEn, fmtDuration, withClosure, sameDayFallback, isPriorityShop, asClosureLevel, morningOverload, morningFull } from "./day";
 
 describe("помощники времени", () => {
   it("большой букет — от $250", () => {
@@ -88,5 +88,21 @@ describe("автозамок утра (владелец 01.10.2026)", () => {
     expect(morningOverload([o("eve", 21 * 60, { promised: { from: 15 * 60, to: 19 * 60 } })])).toBeNull();
     expect(morningOverload([o("ready", null)])).toBeNull();
     expect(morningOverload([o("nowin", 20 * 60, { promised: null })])).toBeNull();
+  });
+});
+
+describe("утро забито — новый утренний заказ никто не успевает (владелец 12.10.2026)", () => {
+  it("единственный флорист успевает новый заказ только к 16:30 — закрываем", () => {
+    expect(morningFull([16 * 60 + 30])).toBe(true);
+  });
+  it("хоть один успевает до 15:00 — открыто", () => {
+    expect(morningFull([16 * 60 + 30, 13 * 60])).toBe(false);
+  });
+  it("ровно 15:00 — уже не утро; без цифры (после 13:00 сегодня) — тоже закрыто", () => {
+    expect(morningFull([15 * 60])).toBe(true);
+    expect(morningFull([null])).toBe(true);
+  });
+  it("никто не работает — автозамок не решает, это решает замок владельца", () => {
+    expect(morningFull([])).toBe(false);
   });
 });

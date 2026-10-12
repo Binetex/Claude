@@ -24,8 +24,8 @@ import { loadTimeModel } from "./stats";
 import { driveMin, prepMin, setupMin, DEFAULT_WORK_START_MIN, type TimeModel } from "./model";
 import { planDay, earliestBy, type PlanJob, type PlanParams } from "./planner";
 import {
-  isBigOrder, readyTimeWishes, isPriorityShop, withClosure, sameDayFallback, asClosureLevel, morningOverload,
-  NERVOUS_MIN_INBOUND, LATE_TOLERANCE_MIN, BIG_BOUQUET_PRICE, BOUQUET_MIN_PRICE, SAME_DAY_CUTOFF_MIN, CLOSURE_OPEN_FROM, type ClosureLevel,
+  isBigOrder, readyTimeWishes, isPriorityShop, withClosure, sameDayFallback, asClosureLevel, morningOverload, morningFull,
+  NERVOUS_MIN_INBOUND, LATE_TOLERANCE_MIN, BIG_BOUQUET_PRICE, BOUQUET_MIN_PRICE, SAME_DAY_CUTOFF_MIN, CLOSURE_OPEN_FROM, type ClosureLevel, type AutoClose,
 } from "./day";
 
 /** Неоплаченные попытки и отменённые — не заказы: места у флориста они не занимают. */
@@ -257,7 +257,7 @@ export type DaySchedule = {
    * Автозамок утра: замка владельца нет, а утренний заказ TheFlow по графику не успеваем на час и
    * больше — сайты закрывают утро сами (`siteDayClosures`). Самый опаздывающий заказ; иначе null.
    */
-  autoClose: { id: string; orderNumber: string; lateMin: number } | null;
+  autoClose: AutoClose | null;
   /** Сегодня после 13:00: новый заказ на сегодня — только после проверки человеком. */
   sameDayCheck: boolean;
   florists: FloristDay[];
@@ -350,11 +350,24 @@ export async function loadDaySchedule(prisma: PrismaClient, day: string, now: Da
   return {
     day,
     closure: closure && level ? { note: closure.note, level } : null,
-    autoClose: level ? null : morningOverload(floristDays.flatMap((f) => f.orders)),
+    autoClose: level ? null : autoCloseOf(floristDays),
     sameDayCheck: sameDayNeedsCheck(day, now),
     florists: floristDays,
     unassigned: orders.filter((o) => !o.currentFloristId).map((o) => toScheduleOrder(o, null)),
   };
+}
+
+/**
+ * Автозамок утра: утренний заказ TheFlow опаздывает на час — или новый утренний заказ уже не успеть
+ * ни одному работающему флористу (`day.ts::morningFull`).
+ */
+function autoCloseOf(florists: FloristDay[]): AutoClose | null {
+  const late = morningOverload(florists.flatMap((f) => f.orders));
+  if (late) return { kind: "late", ...late };
+  const working = florists.filter((f) => !f.dayOff);
+  if (!morningFull(working.map((f) => f.newClientEarliest))) return null;
+  const known = working.map((f) => f.newClientEarliest).filter((e): e is number => e != null);
+  return { kind: "full", earliest: known.length ? Math.min(...known) : null };
 }
 
 /** Автозамок считается на те же три дня, что показывает «График доставки». */

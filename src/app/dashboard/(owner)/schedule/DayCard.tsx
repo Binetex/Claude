@@ -74,8 +74,11 @@ export function DayCard({
       )}
       {mode === "plan" && s.autoClose && (
         <div className="mx-6 mt-4 rounded-lg bg-rose-50 px-4 py-2.5 text-sm text-rose-700">
-          Утро закрыто автоматически: {s.autoClose.orderNumber} не успеваем на {fmtDuration(s.autoClose.lateMin)} — сайты не
-          принимают доставку раньше 15:00, пока график не разгрузится
+          Утро закрыто автоматически:{" "}
+          {s.autoClose.kind === "late"
+            ? `${s.autoClose.orderNumber} не успеваем на ${fmtDuration(s.autoClose.lateMin)}`
+            : "новый утренний заказ уже не успеть до 15:00"}{" "}
+          — сайты не принимают доставку раньше 15:00, пока график не разгрузится
         </div>
       )}
       {mode === "plan" && s.unassigned.length > 0 && (

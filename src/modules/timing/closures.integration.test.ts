@@ -73,12 +73,18 @@ describe("замки дней для сайтов", () => {
 
     // В графике видно, из-за какого заказа; в БД автозамок не пишется.
     const day = await loadDaySchedule(prisma, BUSY, NOW);
-    expect(day.autoClose?.orderNumber).toMatch(/^THEFLOW-2031-03-04-/);
-    expect(day.autoClose!.lateMin).toBeGreaterThanOrEqual(60);
+    expect(day.autoClose).toMatchObject({ kind: "late", orderNumber: expect.stringMatching(/^THEFLOW-2031-03-04-/) });
+    expect(day.autoClose?.kind === "late" && day.autoClose.lateMin).toBeGreaterThanOrEqual(60);
     expect(await prisma.morningClosure.findUnique({ where: { day: BUSY } })).toBeNull();
 
-    // Пять из восьми отменили — график успевает, и утро открыто без чьих-либо действий.
+    // Пять из восьми отменили — опоздания уже нет, но и четвёртый утренний заказ один флорист до
+    // 15:00 не успеет: утро закрыто как «забито» (владелец 12.10.2026).
     await prisma.order.updateMany({ where: { id: { in: ids.orders.slice(0, 5) } }, data: { orderStatus: "CANCELLED" } });
+    expect((await siteDayClosures(prisma, NOW))[BUSY]).toBe(15 * 60);
+    expect((await loadDaySchedule(prisma, BUSY, NOW)).autoClose).toMatchObject({ kind: "full" });
+
+    // Осталось два — новый заказ до 15:00 влезает, и утро открыто без чьих-либо действий.
+    await prisma.order.updateMany({ where: { id: { in: ids.orders.slice(5, 6) } }, data: { orderStatus: "CANCELLED" } });
     expect(BUSY in (await siteDayClosures(prisma, NOW))).toBe(false);
   });
 });

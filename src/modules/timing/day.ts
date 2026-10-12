@@ -112,6 +112,21 @@ export function morningOverload(orders: PlannedOrderLike[]): { id: string; order
 }
 
 /**
+ * Утро забито: ни один работающий в этот день флорист уже не успевает сделать НОВЫЙ заказ TheFlow
+ * до конца утреннего слота (15:00) — то самое время, что ИИ называет новым клиентам. Владелец
+ * 12.10.2026: «один флорист, куча заказов, не успеваем — а сайт продаёт утро»; прежний порог (утренний
+ * заказ опаздывает на час) сработал бы на минуту позже. null — никто не работает или день не считается.
+ */
+export function morningFull(earliestByFlorist: (number | null)[]): boolean {
+  if (earliestByFlorist.length === 0) return false;
+  return earliestByFlorist.every((e) => e == null || e >= MORNING_END_HOUR * 60);
+}
+
+export type AutoClose =
+  | { kind: "late"; id: string; orderNumber: string; lateMin: number }
+  | { kind: "full"; earliest: number | null };
+
+/**
  * Самое раннее время с учётом замка дня. Весь день закрыт — новых заказов нет, а уже принятые
  * возим как обычно: отказывать им из-за замка значило бы перенести чужую оплаченную доставку.
  */
