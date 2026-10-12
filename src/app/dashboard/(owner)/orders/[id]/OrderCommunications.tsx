@@ -59,6 +59,7 @@ export function OrderCommunications({
   recipientMuted,
   recipientQuiet,
   canEditRecipientMute,
+  extraControls,
   initialSide,
 }: {
   orderId: string;
@@ -79,6 +80,8 @@ export function OrderCommunications({
   recipientMuted?: boolean;
   /** Номер получателя в списке «не писать никогда». */
   recipientQuiet?: boolean;
+  /** Доп. выключатели над вкладками (выключатель ИИ на заказе). */
+  extraControls?: React.ReactNode;
   /**
    * Можно ли этот выключатель ТРОГАТЬ. Ставит и снимает только владелец, но ВИДЕТЬ пометку
    * обязаны и флорист, и оператор: иначе они гадают, почему получателю ничего не ушло.
@@ -215,6 +218,7 @@ export function OrderCommunications({
             </div>
           ) : null
         )}
+        {extraControls}
         {/* Вкладки по стороне: Получатель слева (по умолчанию), Заказчик справа. */}
         <div className="flex gap-2">
           {tabs.map((t) => {

@@ -35,7 +35,7 @@ import { OrderStatusCard } from "./OrderStatusCard";
 import { DeliveryStatusCard } from "./DeliveryStatusCard";
 import { OrderPickupCard } from "./OrderPickupCard";
 import { OrderCommunications, type CommItem } from "./OrderCommunications";
-import { OrderAssistantCard, type AssistantTurn } from "./OrderAssistantCard";
+import { AssistantOrderToggle } from "./AssistantOrderToggle";
 import { collapseSendAttempts } from "@/integrations/quo/collapseAttempts";
 import { OrderExpensesSection } from "@/components/finance/OrderExpensesSection";
 import {
@@ -53,7 +53,6 @@ import { orderSurchargeTotal } from "@/modules/orders/surcharge";
 import { MarketingMarkCard } from "./MarketingMarkCard";
 import { BouquetPhotoButton } from "@/components/orders/BouquetPhotoButton";
 import { backToList } from "@/lib/backLink";
-import { emailNewText } from "@/integrations/emailFactory/ingest";
 
 export const dynamic = "force-dynamic";
 
@@ -183,43 +182,6 @@ export default async function OwnerOrderPage({
     // QUO-таблицы недоступны — блок общения просто не покажет историю.
   }
 
-  // Что ассистент сделал с входящими по этому заказу. Экран владельца, поэтому показываем и то,
-  // чего клиент никогда не увидит: запрос к модели и её сырой ответ. Сбой не должен ронять
-  // карточку заказа — ассистент здесь гость.
-  const assistantTurns: AssistantTurn[] = await prisma.aiTurn
-    .findMany({
-      // И разборы, сделанные, пока сообщение ещё не было привязано к заказу: разбор помнит «незнакомый
-      // номер», а само сообщение уже здесь (перепривязка 01.10.2026, THEFLOW-20891).
-      where: { OR: [{ orderId: id }, { communication: { orderId: id } }] },
-      orderBy: { createdAt: "desc" },
-      take: 20,
-      select: {
-        id: true, status: true, source: true, intent: true, important: true, needsHuman: true,
-        replyText: true, skipReason: true, promptText: true, responseText: true, modelName: true,
-        latencyMs: true, createdAt: true,
-        communication: { select: { messageText: true, transcript: true } },
-        emailMessage: { select: { text: true } },
-      },
-    })
-    .then((rows) =>
-      rows.map((t) => ({
-        id: t.id,
-        status: t.status,
-        source: t.source,
-        intent: t.intent,
-        important: t.important,
-        needsHuman: t.needsHuman,
-        replyText: t.replyText,
-        skipReason: t.skipReason,
-        promptText: t.promptText,
-        responseText: t.responseText,
-        modelName: t.modelName,
-        latencyMs: t.latencyMs,
-        createdAt: t.createdAt.toISOString(),
-        incomingText: t.communication?.messageText ?? t.communication?.transcript ?? (t.emailMessage ? emailNewText(t.emailMessage.text) : null),
-      }))
-    )
-    .catch(() => []);
   // Настройки ассистента читаем отдельным запросом: сериализованный заказ про ассистента ничего
   // не знает, а тащить поля через общую сериализацию ради одной карточки не стоит.
   const assistant = await prisma.order
@@ -381,10 +343,11 @@ export default async function OwnerOrderPage({
             recipientMuted={order.recipientMuted}
             recipientQuiet={recipientQuiet}
             canEditRecipientMute
+            // Блок «Ассистент» владелец убрал (13.10.2026: «не нужен, только мешает»); выключатель ИИ
+            // на заказе остался — здесь, рядом с остальными «не писать».
+            extraControls={assistant.enabled ? <AssistantOrderToggle orderId={order.id} disabled={assistant.disabledOnOrder} /> : null}
           />
 
-          {/* Разборы ассистента: единственное место, где видно его работу во время сухого прогона. */}
-          <OrderAssistantCard storeTimeZone={storeTimeZone} orderId={order.id} turns={assistantTurns} dryRun={assistant.dryRun} enabled={assistant.enabled} disabledOnOrder={assistant.disabledOnOrder} />
 
           {/* Доставка целиком: курьер, Burq и точка забора. Раньше владелец имел собственную
               копию этого блока вместе с копией трёх запросов Burq — теперь блок один. */}
