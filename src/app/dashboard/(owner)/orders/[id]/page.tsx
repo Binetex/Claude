@@ -240,7 +240,8 @@ export default async function OwnerOrderPage({
               floristComposition: it.floristComposition,
               prices: [
                 { value: it.externalPrice, label: "заказчику" },
-                { value: it.floristItemPrice, label: "флористу", missing: it.floristPriceMissing },
+                // null — ручная цена флористу на весь заказ из нескольких позиций: итог в раскладке.
+                ...(it.floristItemPrice == null ? [] : [{ value: it.floristItemPrice, label: "флористу", missing: it.floristPriceMissing }]),
               ],
               action: (
                 <div className="flex items-center gap-3">

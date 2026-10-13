@@ -192,6 +192,17 @@ describe("ручная цена флористу — одна цифра, а н�
   it("авто-цена — как раньше, по позиции", () => {
     expect(serializeForFlorist(makeOrder("MAKER_ONLY")).items[0].floristItemPrice).toBe(70);
   });
+
+  it("в карточке владельца — та же одна цифра: строка «флористу» равна итогу", () => {
+    // Сначала правило было только у флориста, и владелец видел $109.85 в строке при $118 итогом.
+    const base = makeOrder("MAKER_ONLY");
+    const one = serializeForOwner({ ...base, priceMode: "MANUAL", floristTotal: D(118) } as OrderWithRelations);
+    expect(one.items[0].floristItemPrice).toBe(118);
+    expect(one.items[0].floristPriceMissing).toBe(false);
+    const second = { ...base.items[0], id: "it2", name: "Vase" };
+    const two = serializeForOwner({ ...base, priceMode: "MANUAL", floristTotal: D(118), items: [base.items[0], second] } as OrderWithRelations);
+    expect(two.items.map((i) => i.floristItemPrice)).toEqual([null, null]);
+  });
 });
 
 describe("serializeForFlorist (FULL) — расширенная раскладка, но без секретов владельца", () => {
