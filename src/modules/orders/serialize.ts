@@ -319,6 +319,11 @@ export type CallCenterOrder = ReturnType<typeof serializeForCallCenter>;
 export function serializeForFlorist(o: OrderWithRelations) {
   const isFull = o.currentFlorist?.financeVisibility === "FULL";
   const florist = floristMoney(o);
+  // Ручная цена флористу задаётся на ВЕСЬ заказ, а снимки позиций остаются от прежнего расчёта —
+  // флорист видел две разные цифры (OHARA-1078: «$109.85 вам» в строке и «$118.00» итогом). При
+  // ручной цене позиция показывает итог, если она одна, а при нескольких — без цены.
+  const paid = compensableItems(o.items);
+  const manual = o.priceMode === "MANUAL";
   return {
     ...baseFields(o),
     // Данные заказчика (senderName/senderPhone) — флористу нужны, чтобы позвонить по
@@ -326,7 +331,7 @@ export function serializeForFlorist(o: OrderWithRelations) {
     senderName: o.senderName,
     senderPhone: o.senderPhone,
     // Служебная строка «Tip» скрыта — см. пояснение у serializeForOwner.
-    items: compensableItems(o.items).map((i) => ({
+    items: paid.map((i) => ({
       id: i.id,
       name: i.name,
       variantName: i.variantName,
@@ -337,8 +342,8 @@ export function serializeForFlorist(o: OrderWithRelations) {
       floristComposition: i.floristCompositionSnapshot,
       quantity: i.quantity,
       options: i.options,
-      floristItemPrice: florist.itemPrice(i), // его цена за позицию (чаевые — ноль)
-      floristPriceMissing: florist.priceMissing(i),
+      floristItemPrice: manual ? (paid.length === 1 ? florist.total : null) : florist.itemPrice(i), // его цена за позицию (чаевые — ноль)
+      floristPriceMissing: manual ? false : florist.priceMissing(i),
       // Цена клиента — ТОЛЬКО при FULL. У MAKER_ONLY её нет по определению режима, и
       // null здесь означает «не положено видеть», а не «ноль».
       externalPrice: isFull ? toNumber(i.externalPrice) : null,

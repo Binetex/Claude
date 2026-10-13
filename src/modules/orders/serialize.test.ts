@@ -174,6 +174,26 @@ describe("serializeForFlorist (MAKER_ONLY) — только своя цена", 
   });
 });
 
+describe("ручная цена флористу — одна цифра, а не две (OHARA-1078)", () => {
+  it("одна позиция — в строке тот же итог, что «ваша цена изготовления»", () => {
+    const base = makeOrder("MAKER_ONLY");
+    const o = serializeForFlorist({ ...base, priceMode: "MANUAL", floristTotal: D(118) } as OrderWithRelations);
+    expect(o.floristTotal).toBe(118);
+    expect(o.items[0].floristItemPrice).toBe(118);
+  });
+
+  it("несколько позиций — у позиций цены нет, только итог", () => {
+    const base = makeOrder("MAKER_ONLY");
+    const second = { ...base.items[0], id: "it2", name: "Vase" };
+    const o = serializeForFlorist({ ...base, priceMode: "MANUAL", floristTotal: D(118), items: [base.items[0], second] } as OrderWithRelations);
+    expect(o.items.map((i) => i.floristItemPrice)).toEqual([null, null]);
+  });
+
+  it("авто-цена — как раньше, по позиции", () => {
+    expect(serializeForFlorist(makeOrder("MAKER_ONLY")).items[0].floristItemPrice).toBe(70);
+  });
+});
+
 describe("serializeForFlorist (FULL) — расширенная раскладка, но без секретов владельца", () => {
   const o = serializeForFlorist(makeOrder("FULL"));
   it("получает клиентскую раскладку (налог/доставка/итог клиента)", () => {

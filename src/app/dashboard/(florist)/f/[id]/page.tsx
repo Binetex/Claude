@@ -114,11 +114,11 @@ export default async function FloristOrderPage({
               variantImage: it.variantImage,
               variantName: it.variantName,
               floristComposition: it.floristComposition,
-              prices: [
-                showsCustomerPrice
-                  ? { value: it.externalPrice ?? 0, label: "клиенту" }
-                  : { value: it.floristItemPrice, label: "вам", missing: it.floristPriceMissing },
-              ],
+              prices: showsCustomerPrice
+                ? [{ value: it.externalPrice ?? 0, label: "клиенту" }]
+                : it.floristItemPrice == null
+                  ? [] // ручная цена на весь заказ — цена позиции не своя, итог ниже
+                  : [{ value: it.floristItemPrice, label: "вам", missing: it.floristPriceMissing }],
             }))}
           />
 
