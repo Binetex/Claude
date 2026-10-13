@@ -21,6 +21,15 @@ const UNINITIATED = new Set<DeliveryProviderStatus>(["DRAFT_PENDING", "DRAFT_CRE
 
 const TERMINAL = new Set<DeliveryProviderStatus>(["DELIVERED", "CANCELLED", "RETURNED", "FAILED"]);
 
+/**
+ * Стадия доставки: черновик (курьер не вызван, черновик можно снять), оформлена (курьер ищется,
+ * едет или везёт — трогать нельзя) или закончилась.
+ */
+export function deliveryStage(status: DeliveryProviderStatus): "draft" | "dispatched" | "finished" {
+  if (UNINITIATED.has(status)) return "draft";
+  return TERMINAL.has(status) ? "finished" : "dispatched";
+}
+
 export function decideReassignment(currentStatus: DeliveryProviderStatus): ReassignmentDecision {
   if (UNINITIATED.has(currentStatus)) return { action: "DELETE_AND_RECREATE" };
   if (TERMINAL.has(currentStatus)) return { action: "FLAG_PROBLEM", reason: "terminal" };

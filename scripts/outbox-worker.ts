@@ -41,6 +41,8 @@ import { REPLY_WAIT_EVENT, buildReplyWaitHandler } from "@/modules/automations/r
 import { ASSISTANT_INCOMING_EVENT, buildAssistantHandler, ASSISTANT_EMAIL_EVENT, buildAssistantEmailHandler } from "@/modules/assistant/handler.registration";
 import { TELEGRAM_UPDATE_EVENT, buildTelegramUpdateHandler } from "@/modules/assistant/telegramReply";
 import { ASSISTANT_NUDGE_EVENT } from "@/modules/assistant/events";
+import { COURIER_NOTE_EVENT, COURIER_NOTE_PUSH_EVENT } from "@/modules/courierNote/events";
+import { buildCourierNoteHandler, buildCourierNotePushHandler } from "@/modules/courierNote/handler";
 import { buildAssistantNudgeHandler } from "@/modules/assistant/deliver";
 import { buildFlowStepHandler } from "@/modules/automations/flows/handler";
 import { FLOW_STEP_EVENT } from "@/modules/automations/flows/events";
@@ -162,6 +164,10 @@ async function main() {
     [TELEGRAM_UPDATE_EVENT]: buildTelegramUpdateHandler(prisma),
     // «Одну минуту» клиенту, если человек не успел подтвердить черновик за 20 минут.
     [ASSISTANT_NUDGE_EVENT]: buildAssistantNudgeHandler(prisma),
+    // Инструкция курьеру из слов клиента: ИИ оставляет только нужное курьеру и довозит до Burq.
+    [COURIER_NOTE_EVENT]: buildCourierNoteHandler(prisma),
+    // …и довезти её до Burq: пересоздать неоформленный черновик или сказать людям передать курьеру.
+    [COURIER_NOTE_PUSH_EVENT]: buildCourierNotePushHandler(prisma),
     // Внутренние Telegram-уведомления сотрудникам: один обработчик на все типы событий.
     [TELEGRAM_NOTIFY_EVENT]: buildTelegramNotifyHandler(prisma),
     // Сверка платежа с Airwallex (режим наблюдения: business status заказа не меняется).

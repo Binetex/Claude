@@ -119,6 +119,8 @@ function buildUpdateData(block: OrderBlock, data: BlockFormData): { data: Prisma
       if (has("courierNote")) {
         const v = str("courierNote").trim();
         if (v.length > COURIER_NOTE_MAX) return { error: `Инструкция курьеру длиннее ${COURIER_NOTE_MAX} символов` };
+        // Текст уходит курьеру в Burq как есть — наружу пишем только по-английски.
+        if (/[\u0400-\u04FF]/.test(v)) return { error: "Инструкция курьеру уходит в Burq как есть — напишите её по-английски." };
         out.courierNote = v;
       }
       return { data: out };
@@ -177,6 +179,16 @@ export async function updateOrderBlock(input: {
     const base = input.data.customerNoteBase;
     if (input.block === "cardNote" && typeof data.customerNote === "string" && typeof base === "string") {
       data.customerNote = mergeNoteEdit(String((before as { customerNote?: string | null }).customerNote ?? ""), base, data.customerNote);
+    }
+    // Инструкцию курьеру пишет и ИИ (`modules/courierNote`): правка из открытой давно карточки
+    // молча затёрла бы код ворот, который ИИ вписал после её открытия. Форма присылает, с какого
+    // текста начинала правку; не совпал — пусть человек увидит свежий текст.
+    const courierBase = input.data.courierNoteBase;
+    if (input.block === "courierNote" && typeof courierBase === "string") {
+      const stored = String((before as { courierNote?: string | null }).courierNote ?? "");
+      if (stored.trim() !== courierBase.trim()) {
+        return { status: "invalid", error: "Инструкцию курьеру только что изменили (например, ИИ по словам клиента). Обновите страницу и поправьте ещё раз." };
+      }
     }
     const after = await tx.order.update({ where: { id: input.orderId }, data, select });
     const afterRest = after as Record<string, unknown>;

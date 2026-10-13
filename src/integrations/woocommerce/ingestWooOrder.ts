@@ -21,6 +21,7 @@ import { resolveMappedOrderFields, type OrderMetaMapping } from "./orderMeta";
 import { cleanCardMessage } from "@/integrations/cardMessageTail";
 import { utcMidnightOfLocalDay, parseLocalDayToUtcMidnight } from "@/lib/tz";
 import { scheduleDeliveryForNewOrder } from "@/integrations/delivery/burq/scheduleService";
+import { requestCourierNoteForNewOrder } from "@/modules/courierNote/events";
 import { isHistoricalOrder } from "@/modules/orders/historical";
 import { assignInitial } from "@/modules/assignments/service";
 import {
@@ -368,6 +369,9 @@ export async function ingestWooOrder(
   }
   // Авто-назначение основного флориста для нового оплаченного заказа (как в Shopify-ingest).
   await autoAssignWooIfConfirmed(created.id, null, incomingState);
+  // Покупатель мог написать курьеру в заметке заказа — собрать инструкцию курьеру. ДО черновика
+  // Burq, чтобы черновик на сегодня ушёл уже с ней (см. Shopify-приём).
+  await requestCourierNoteForNewOrder(prisma, created.id);
   // Единый вызов планировщика доставки после сохранения заказа (best-effort — не ломаем импорт).
   try {
     await scheduleDeliveryForNewOrder(prisma, created.id);

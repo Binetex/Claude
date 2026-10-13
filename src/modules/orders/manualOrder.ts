@@ -19,6 +19,7 @@ import type { FinancialItemType } from "@/generated/prisma/enums";
 import { prisma } from "@/lib/db";
 import { assignAndActivateFlorist } from "@/modules/assignments/service";
 import { rescheduleDeliveryForOrder } from "@/integrations/delivery/burq/scheduleService";
+import { requestCourierNoteForNewOrder } from "@/modules/courierNote/events";
 
 export class ManualOrderError extends Error {
   constructor(
@@ -296,6 +297,9 @@ export async function createManualOrder(input: CreateManualOrderInput): Promise<
       // Заказ уже создан и виден; назначение можно повторить из карточки.
     });
   }
+  // Инструкции доставки и заметка из формы — собрать из них инструкцию курьеру. ДО черновика Burq,
+  // чтобы черновик на сегодня ушёл уже с ней.
+  await requestCourierNoteForNewOrder(prisma, created.id);
   await rescheduleDeliveryForOrder(prisma, created.id).catch(() => {
     // Burq выключен или недоступен — карточка заказа покажет это сама.
   });

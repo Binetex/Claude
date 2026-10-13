@@ -1,6 +1,6 @@
 "use client";
 import { useState } from "react";
-import { Truck, Pencil } from "lucide-react";
+import { Truck, Pencil, Sparkles } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { COURIER_NOTE_MAX } from "@/lib/courierNote";
@@ -9,8 +9,11 @@ import { useBlockSave } from "./orderEditShared";
 /**
  * Инструкция КУРЬЕРУ — единственное поле заказа, которое уезжает в Burq.
  *
- * Заводится редко и вручную: обычно флорист перед вызовом курьера дописывает то, чего нет в
- * адресе («ворота со стороны Sunset», «код 3262»). К стандартному тексту магазина
+ * Пишется САМА (владелец 13.10.2026, `modules/courierNote`): ИИ берёт из инструкций покупателя
+ * на сайте, его SMS и заметки команды только то, что нужно курьеру («код 3262», «оставить у
+ * консьержа»), и черновик Burq, пока курьер не вызван, пересоздаётся с новым текстом. Человек
+ * может поправить — после правки ИИ его текст не переписывает, только дописывает новое строкой
+ * ниже; стёр человек — ИИ больше не пишет. К стандартному тексту магазина
  * (Site.burqDefaultDropoffInstructions, там просьба сфотографировать букет) она ДОБАВЛЯЕТСЯ,
  * а не заменяет его.
  *
@@ -22,12 +25,15 @@ import { useBlockSave } from "./orderEditShared";
 export function CourierNoteCard({
   orderId,
   courierNote,
-  deliveryAlreadyCreated,
+  byAi,
+  courierCalled,
 }: {
   orderId: string;
   courierNote: string;
-  /** У созданного черновика Burq инструкцию уже не изменить — предупреждаем честно. */
-  deliveryAlreadyCreated: boolean;
+  /** Текст собрал ИИ, человек его не правил. */
+  byAi: boolean;
+  /** Курьер уже вызван: в Burq инструкцию не изменить — предупреждаем честно. */
+  courierCalled: boolean;
 }) {
   const [note, setNote] = useState(courierNote);
   const [draft, setDraft] = useState(courierNote);
@@ -47,7 +53,9 @@ export function CourierNoteCard({
 
   function submit() {
     save(
-      { courierNote: draft },
+      // С какого текста начиналась правка: ИИ мог обновить инструкцию после открытия страницы, и
+      // сервер не даст молча затереть его текст.
+      { courierNote: draft, courierNoteBase: note },
       {
         successMessage: draft.trim() === "" ? "Инструкция курьеру убрана" : "Инструкция курьеру сохранена",
         onOk: () => {
@@ -58,10 +66,10 @@ export function CourierNoteCard({
     );
   }
 
-  const warning = deliveryAlreadyCreated && (
+  const warning = courierCalled && (
     <p className="text-xs text-slate-500">
       Курьер уже вызван — он видит инструкцию, которая была на момент вызова. Новый текст
-      уйдёт только со следующей доставкой; чтобы передать сейчас, свяжитесь с курьером.
+      передайте ему сами.
     </p>
   );
 
@@ -79,11 +87,12 @@ export function CourierNoteCard({
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           rows={2}
-          placeholder="Например: ворота со стороны Sunset, код 3262"
+          placeholder="Gate on Sunset side, code 3262. Leave at front door."
         />
         <p className="text-xs text-slate-500">
-          Уйдёт курьеру вместе со стандартным текстом магазина. Пусто — курьер получит только
-          стандартный текст.
+          Уйдёт курьеру как есть, по-английски, вместе со стандартным текстом магазина. После
+          вашей правки ИИ этот текст не переписывает, только дописывает новое от клиента; пусто —
+          ИИ больше не пишет.
         </p>
         {warning}
         <div className="flex justify-end gap-2">
@@ -115,7 +124,15 @@ export function CourierNoteCard({
     <div className="rounded-md border border-sky-200 bg-sky-50/50 p-2">
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <div className="text-xs font-semibold text-sky-900">Инструкция курьеру</div>
+          <div className="flex items-center gap-1.5 text-xs font-semibold text-sky-900">
+            Инструкция курьеру
+            {byAi && (
+              <span className="inline-flex items-center gap-0.5 font-normal text-sky-700" title="Собрал ИИ из слов клиента">
+                <Sparkles className="size-3" aria-hidden />
+                ИИ
+              </span>
+            )}
+          </div>
           <div className="mt-0.5 max-h-32 overflow-y-auto break-words whitespace-pre-wrap text-slate-800">{note}</div>
         </div>
         <Button size="sm" variant="outline" className="shrink-0" onClick={() => setEditing(true)}>

@@ -9,6 +9,7 @@ import type { OutboxHandler } from "@/outbox/worker";
 import type { OutboxRecord } from "@/outbox/types";
 import { ingestQuoEvent, type QuoIngestDeps } from "./ingest";
 import { publishAssistantIncoming } from "@/modules/assistant/events";
+import { requestCourierNote } from "@/modules/courierNote/events";
 import { noteReviewReply } from "@/modules/reviews/reply";
 import { PrismaOutboxRepository } from "@/outbox/prismaRepository";
 import { getQuoConfig } from "./config";
@@ -39,6 +40,10 @@ export function buildQuoWebhookHandler(prisma: PrismaClient): OutboxHandler {
       // Ответ клиента возвращает запрос отзыва человеку. Прямо здесь, а не событием: это одна
       // запись в БД, и терять её в очереди незачем; сбой проглатывается внутри.
       await noteReviewReply(prisma, res.communicationId);
+      // Клиент мог прислать код ворот или «оставьте у двери» — пересобрать инструкцию курьеру.
+      if (res.orderId && (record.payload as NormalizedQuoEvent).kind === "message") {
+        await requestCourierNote(prisma, res.orderId, { kind: "message", communicationId: res.communicationId });
+      }
     }
     // Расшифровка звонка приходит отдельным событием и позже самого звонка: для ассистента это
     // и есть «клиент что-то сказал». Свой ключ, иначе дедуп по входящему её проглотит.

@@ -3,6 +3,7 @@ import { loadTemplatesForOrder } from "@/modules/messaging/templates";
 import { localDateStr } from "@/lib/tz";
 import { getForOwner } from "@/modules/orders/queries";
 import { prisma } from "@/lib/db";
+import { loadCourierNoteView } from "@/modules/courierNote/view";
 import { toE164 } from "@/lib/phone";
 import { REVIEW_STATUS_LABELS } from "@/lib/reviewStatus";
 import { windowOf } from "@/lib/deliveryWindow";
@@ -83,6 +84,8 @@ export default async function OwnerOrderPage({
   if (!order) notFound();
   // Частые окна магазина — кнопки в выборе времени доставки.
   const windowPresets = await loadWindowPresets(prisma, order.siteId).catch(() => []);
+  // Инструкция курьеру: собрал ли её ИИ и видит ли её уже вызванный курьер.
+  const courierNoteView = await loadCourierNoteView(prisma, order.id, order.courierNote).catch(() => ({ byAi: false, courierCalled: false }));
   // Сколько из суммы товаров — доплата клиента (журнал правок): раскладка пишет «в т.ч.».
   const surcharge = await orderSurchargeTotal(order.id).catch(() => 0);
 
@@ -371,7 +374,8 @@ export default async function OwnerOrderPage({
 
                 courierNote={order.courierNote}
 
-                deliveryAlreadyCreated={order.deliveryStatus !== "PENDING"}
+                byAi={courierNoteView.byAi}
+                courierCalled={courierNoteView.courierCalled}
 
               />
 

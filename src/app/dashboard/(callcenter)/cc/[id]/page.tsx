@@ -3,6 +3,7 @@ import { loadTemplatesForOrder } from "@/modules/messaging/templates";
 import { localDateStr } from "@/lib/tz";
 import { getForCallCenter } from "@/modules/orders/queries";
 import { prisma } from "@/lib/db";
+import { loadCourierNoteView } from "@/modules/courierNote/view";
 import { windowOf } from "@/lib/deliveryWindow";
 import { loadWindowPresets } from "@/modules/orders/windowPresets";
 import { loadOrderCommunicationsCard } from "@/integrations/quo/communicationsService";
@@ -58,6 +59,8 @@ export default async function CallCenterOrderPage({
   if (!order) notFound();
   // Частые окна магазина — кнопки в выборе времени доставки.
   const windowPresets = await loadWindowPresets(prisma, order.siteId).catch(() => []);
+  // Инструкция курьеру: собрал ли её ИИ и видит ли её уже вызванный курьер.
+  const courierNoteView = await loadCourierNoteView(prisma, order.id, order.courierNote).catch(() => ({ byAi: false, courierCalled: false }));
 
   const emailPanel = await loadOrderEmailPanel(prisma, id).catch(() => ({ emails: [], unread: 0, customerEmail: null }));
   // Карточку открыли — ответы клиента по почте считаются увиденными. Панель уже загружена ВЫШЕ,
@@ -196,7 +199,8 @@ export default async function CallCenterOrderPage({
 
                 courierNote={order.courierNote}
 
-                deliveryAlreadyCreated={order.deliveryStatus !== "PENDING"}
+                byAi={courierNoteView.byAi}
+                courierCalled={courierNoteView.courierCalled}
 
               />
 

@@ -62,7 +62,12 @@ function toRecord(row: Row): OutboxRecord {
 }
 
 export class PrismaOutboxRepository implements OutboxRepository {
-  constructor(private readonly prisma: PrismaClient) {}
+  /**
+   * Принимает и клиент транзакции: тогда событие ставится атомарно с записью, ради которой оно
+   * нужно (запись прошла — событие точно есть). Повтор ключа внутри транзакции её обрывает,
+   * поэтому ключ такого события должен быть уникален сам по себе.
+   */
+  constructor(private readonly prisma: PrismaClient | Prisma.TransactionClient) {}
 
   async enqueue(event: NewOutboxEvent): Promise<{ record: OutboxRecord; created: boolean }> {
     try {

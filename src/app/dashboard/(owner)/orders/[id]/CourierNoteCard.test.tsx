@@ -9,12 +9,13 @@ import { CourierNoteCard } from "./CourierNoteCard";
  * внутренней записью — курьер читал «Просит пораньше» и «Тест». Эти тесты закрепляют
  * границу: здесь пишут ДЛЯ курьера и знают, что текст уйдёт наружу.
  */
-const render = (courierNote: string, deliveryAlreadyCreated = false) =>
+const render = (courierNote: string, courierCalled = false, byAi = false) =>
   renderToStaticMarkup(
     <CourierNoteCard
       orderId="o1"
       courierNote={courierNote}
-      deliveryAlreadyCreated={deliveryAlreadyCreated}
+      byAi={byAi}
+      courierCalled={courierCalled}
     />
   );
 
@@ -33,13 +34,18 @@ describe("инструкция курьеру", () => {
   });
 
   it("когда курьер уже вызван — честно предупреждает, что текст до него не дойдёт", () => {
-    // Инструкцию созданного черновика Burq изменить нельзя, а пересоздавать доставку
-    // из-за правки текста значило бы отменить вызванного курьера.
+    // Оформленную доставку Burq не пересоздаём: это отменило бы вызванного курьера.
+    // Неоформленный черновик пересоздаётся сам, поэтому до вызова предупреждения нет.
     expect(render("Код 3262", true)).toContain("Курьер уже вызван");
   });
 
   it("пока курьер не вызван — предупреждения нет", () => {
     expect(render("Код 3262", false)).not.toContain("Курьер уже вызван");
+  });
+
+  it("текст, собранный ИИ, помечен — человек видит, что его никто не писал руками", () => {
+    expect(render("Gate code #0711", false, true)).toContain("Собрал ИИ из слов клиента");
+    expect(render("Gate code #0711", false, false)).not.toContain("Собрал ИИ");
   });
 
   it("переносы строк сохраняются", () => {

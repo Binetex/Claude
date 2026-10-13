@@ -4,6 +4,7 @@ import { requireOrderEditor } from "@/lib/rbac";
 import { prisma } from "@/lib/db";
 import { syncOrderToShopify } from "@/integrations/shopify/pushUpdate";
 import { onOrderDeliveryChangeSafe } from "@/integrations/delivery/burq/scheduleService";
+import { enqueueCourierNotePush, requestCourierNote } from "@/modules/courierNote/events";
 import { notifyDeliveryChanged } from "@/integrations/notifications/telegram";
 import { fmtDate, fmtTimeWindow } from "@/lib/format";
 import { scheduleDeliveryTodayTrigger } from "@/modules/automations/lifecycle";
@@ -48,10 +49,16 @@ async function runPostSave(block: OrderBlock, orderId: string, changed: Record<s
       }
     } else if (block === "cardNote") {
       await syncOrderToShopify(orderId); // cardMessage уходит в Shopify note
+      // В заметку переписывают слова клиента («Gate code 1408, leave at door») — пересобрать из
+      // неё инструкцию курьеру. Русские пометки команды модель не увидит: они внутренние.
+      const note = changed.customerNote?.to;
+      if (typeof note === "string") await requestCourierNote(prisma, orderId, { kind: "text", text: note });
+    } else if (block === "courierNote" && "courierNote" in changed) {
+      // Довезти до Burq той же задачей, что и текст ИИ: неоформленный черновик пересоздастся,
+      // курьер уже вызван — доставку не трогаем, карточка предупреждает передать самим.
+      const note = changed.courierNote?.to;
+      await enqueueCourierNotePush(prisma, { orderId, note: typeof note === "string" ? note : "", notify: false, key: `human:${Date.now()}` });
     }
-    // courierNote наружу не синхронизируется и доставку не перепланирует: у созданного
-    // черновика Burq инструкцию уже не изменить, а пересоздавать доставку из-за правки
-    // текста значило бы отменить вызванного курьера.
   } catch (e) {
     console.error(`[saveOrderBlock] post-save hook failed (block=${block}, order=${orderId})`, e);
   }

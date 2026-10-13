@@ -409,6 +409,29 @@ export function renderOwnerDeliveryProblem(o: OrderSnapshot, status: string, saf
 }
 
 /**
+ * Новая инструкция курьеру, а курьер уже вызван (или Burq не ответил): в приложении курьера
+ * остался старый текст. Текст один владельцу и флористу; флориста отмечаем ником — в группе
+ * Telegram пиликает лично ему, даже в заглушённом чате.
+ */
+export function renderCourierNoteLate(o: OrderSnapshot, note: string, reason: string | null): string {
+  const why: Record<string, string> = {
+    courier_called: "Курьер уже вызван и её не видит.",
+    kept: "Доставку в Burq не обновить автоматически (заведена вручную или новый черновик сейчас не создать) — курьер её не видит.",
+    lost: "Прежний черновик Burq снят, а новый не создался — пересоздайте доставку в карточке заказа.",
+    burq_error: "Burq не ответил — проверьте доставку в карточке заказа.",
+  };
+  return (
+    `🚪 <b>Новая инструкция курьеру</b>\n` +
+    `<b>${esc(o.orderNumber)}</b> · ${esc(o.siteName)}\n\n` +
+    `${why[reason ?? ""] ?? why.courier_called} <b>${o.floristTag ? `${esc(o.floristTag)}, п` : "П"}ередайте курьеру:</b>\n` +
+    `${esc(note)}\n\n` +
+    line("Получатель", o.recipientName) +
+    line("Адрес", addressText(o)) +
+    line("Доставка", [fmtDate(o.deliveryDate), fmtTimeWindow(o.deliveryWindow)].filter(Boolean).join(", "))
+  ).trimEnd();
+}
+
+/**
  * Курьеров на маршрут не нашлось. Сообщение адресное: владельцу нужно решить, что делать с
  * КОНКРЕТНЫМ заказом — передать другому флористу, сменить точку забора или везти самим.
  *
@@ -509,6 +532,7 @@ export function buttonsFor(type: TelegramEventType, o: OrderSnapshot): TelegramB
     type === "order.florist_note" ||
     type === "delivery.problem_florist" ||
     type === "delivery.no_couriers_florist" ||
+    type === "delivery.courier_note_florist" ||
     type === "customer.ready_time_florist";
   if (!forFlorist) return [{ text: "Open Order", url: ownerOrderUrl(o.id) }];
   const buttons: TelegramButton[] = [{ text: "🧾 Open Order", url: floristOrderUrl(o.id) }];

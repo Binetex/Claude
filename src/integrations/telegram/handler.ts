@@ -20,6 +20,7 @@ import {
   renderCustomerCallRequest,
   renderCustomerEmailReply,
   renderOwnerNoCouriers,
+  renderCourierNoteLate,
   renderAskReview,
   renderAskReviewRecipient,
   renderReviewSuggest,
@@ -305,6 +306,9 @@ function renderFor(type: TelegramNotifyPayload["type"], order: OrderSnapshot, ct
     case "delivery.no_couriers":
     case "delivery.no_couriers_florist":
       return renderOwnerNoCouriers(order, ctx.checkedAt ?? null);
+    case "delivery.courier_note":
+    case "delivery.courier_note_florist":
+      return renderCourierNoteLate(order, ctx.note ?? "—", ctx.reason ?? null);
     case "order.ask_review":
       return renderAskReview(order);
     case "order.ask_review_recipient":

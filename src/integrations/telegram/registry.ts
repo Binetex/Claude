@@ -30,6 +30,8 @@ export const TELEGRAM_EVENTS = [
   "delivery.problem_florist",
   "delivery.no_couriers",
   "delivery.no_couriers_florist",
+  "delivery.courier_note",
+  "delivery.courier_note_florist",
   "order.ask_review",
   "order.ask_review_recipient",
   "customer.ready_time",
@@ -217,6 +219,23 @@ const REGISTRY: Record<TelegramEventType, TelegramEventDef> = {
     perFlorist: true,
     dedupeKey: ({ orderId, floristId }) => `order:${orderId}:florist:${floristId}:no_couriers`,
     description: "Курьеров на маршрут не нашлось — флористу заказа: букет остаётся у него.",
+  },
+  // Клиент прислал новое для курьера (код ворот, где оставить), а курьер уже вызван: в Burq его
+  // инструкцию не изменить, передать должны люди. Ключ — сам текст: новая инструкция — новое
+  // сообщение, а не правка прошлого (правку Telegram не озвучивает).
+  "delivery.courier_note": {
+    type: "delivery.courier_note",
+    audience: "OWNER",
+    perFlorist: false,
+    dedupeKey: ({ orderId, occurrence }) => `order:${orderId}:owner.courier_note:${occurrence ?? "-"}`,
+    description: "Новая инструкция курьеру, а курьер уже вызван — передать ему самим (владельцу).",
+  },
+  "delivery.courier_note_florist": {
+    type: "delivery.courier_note_florist",
+    audience: "FLORIST",
+    perFlorist: true,
+    dedupeKey: ({ orderId, floristId, occurrence }) => `order:${orderId}:florist:${floristId}:courier_note:${occurrence ?? "-"}`,
+    description: "Новая инструкция курьеру, а курьер уже вызван — флористу заказа: передать курьеру.",
   },
   // Клиент ответил, когда готов принять букет. Ключ включает само сообщение (occurrenceKey из
   // публикации): назвал время дважды — два уведомления, а не правка первого.

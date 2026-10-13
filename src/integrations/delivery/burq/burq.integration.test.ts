@@ -13,6 +13,7 @@ import { linkBurqOrder } from "./linkService";
 import { refetchPodForDelivery, BURQ_POD_REFETCH_EVENT } from "./podService";
 import { buildBurqWebhookHandler } from "./webhookHandler";
 import { createMockBurqClient, __resetMockBurqStore, __setMockBurqStatus, __setMockBurqCost } from "./client";
+import { pushCourierNoteToBurq } from "./courierNoteBurq";
 
 /**
  * Интеграционные тесты Burq на реальной БД (DATABASE_URL из .env). Требуют применённой
@@ -690,6 +691,76 @@ describe("Uber cost capture (Path A)", () => {
     expect(dump).not.toContain("Recipient"); // имя получателя
     expect(dump).not.toContain("1 A St"); // адрес
     expect(dump).not.toContain("+13105550198"); // телефон
+  });
+});
+
+/**
+ * Новая инструкция курьеру (`courierNoteBurq.ts`). Главное правило: черновик снимается, только
+ * когда новый ТОЧНО создастся, — иначе ИИ, прочитав в SMS код ворот, оставил бы заказ без доставки.
+ */
+describe("инструкция курьеру → Burq", () => {
+  async function orderWithDraft(): Promise<{ orderId: string; draftId: string }> {
+    __resetMockBurqStore();
+    const orderId = await makeOrder(floristAId);
+    await handleBurqDraftCreate({ client: createMockBurqClient(), port: createPrismaDraftPort(prisma) }, { orderId, scheduleVersion: 0 });
+    const draft = await prisma.delivery.findFirst({ where: { orderId, isCurrentAttempt: true } });
+    return { orderId, draftId: draft!.id };
+  }
+  // Инструкция записана ПОСЛЕ создания черновика — его надо обновить.
+  const later = () => new Date(Date.now() + 1000);
+
+  it("неоформленный наш черновик — пересоздаётся, проблемой не помечается", async () => {
+    const { orderId, draftId } = await orderWithDraft();
+    expect(await pushCourierNoteToBurq(prisma, orderId, later())).toBe("recreated");
+    const current = await prisma.delivery.findFirst({ where: { orderId, isCurrentAttempt: true } });
+    expect(current!.id).not.toBe(draftId);
+    expect(current!.status).toBe("DRAFT_CREATED");
+  });
+
+  it("черновик создан уже после записи инструкции — не трогаем, она в нём есть", async () => {
+    const { orderId, draftId } = await orderWithDraft();
+    expect(await pushCourierNoteToBurq(prisma, orderId, later())).toBe("recreated");
+    const fresh = await prisma.delivery.findFirst({ where: { orderId, isCurrentAttempt: true } });
+    expect(fresh!.id).not.toBe(draftId);
+    expect(await pushCourierNoteToBurq(prisma, orderId, new Date(fresh!.createdAt.getTime() - 1000))).toBe("up_to_date");
+  });
+
+  it("новый черновик не создался бы (адрес без номера дома) — старый остаётся на месте", async () => {
+    const { orderId, draftId } = await orderWithDraft();
+    await prisma.order.update({ where: { id: orderId }, data: { addressLine: "Steddom Drive" } });
+    expect(await pushCourierNoteToBurq(prisma, orderId, later())).toBe("kept");
+    const current = await prisma.delivery.findFirst({ where: { orderId, isCurrentAttempt: true } });
+    expect(current!.id).toBe(draftId);
+    expect(current!.status).toBe("DRAFT_CREATED");
+  });
+
+  it("автосоздание у магазина выключено — черновик не снимаем", async () => {
+    const { orderId, draftId } = await orderWithDraft();
+    await prisma.site.update({ where: { id: siteId }, data: { burqDraftAutoCreateEnabled: false } });
+    try {
+      expect(await pushCourierNoteToBurq(prisma, orderId, later())).toBe("kept");
+      expect((await prisma.delivery.findFirst({ where: { orderId, isCurrentAttempt: true } }))!.id).toBe(draftId);
+    } finally {
+      await prisma.site.update({ where: { id: siteId }, data: { burqDraftAutoCreateEnabled: true } });
+    }
+  });
+
+  it("доставка, привязанная вручную из кабинета Burq, не пересобирается из наших данных", async () => {
+    const { orderId, draftId } = await orderWithDraft();
+    await prisma.delivery.update({ where: { id: draftId }, data: { idempotencyKey: `burq:link:${orderId}:a1` } });
+    expect(await pushCourierNoteToBurq(prisma, orderId, later())).toBe("kept");
+    expect((await prisma.delivery.findFirst({ where: { orderId, isCurrentAttempt: true } }))!.id).toBe(draftId);
+  });
+
+  it("курьер уже вызван (у нас черновик, в Burq назначен курьер) — доставку не трогаем и проблемой НЕ помечаем", async () => {
+    const { orderId, draftId } = await orderWithDraft();
+    const draft = await prisma.delivery.findUnique({ where: { id: draftId } });
+    __setMockBurqStatus(draft!.externalDeliveryId!, "driver_assigned");
+    expect(await pushCourierNoteToBurq(prisma, orderId, later())).toBe("courier_called");
+    const after = await prisma.delivery.findUnique({ where: { id: draftId } });
+    expect(after!.isCurrentAttempt).toBe(true);
+    expect(after!.status).not.toBe("PROBLEM");
+    expect(await prisma.delivery.count({ where: { orderId } })).toBe(1);
   });
 });
 

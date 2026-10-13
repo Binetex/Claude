@@ -25,6 +25,7 @@ import { displayVariantName } from "@/lib/variantName";
 import { parseWindowText } from "@/lib/deliveryWindow";
 import { withCountryCode } from "@/lib/phoneCountry";
 import { isHistoricalOrder } from "@/modules/orders/historical";
+import { requestCourierNote, requestCourierNoteForNewOrder } from "@/modules/courierNote/events";
 
 /** Планирование доставки, безопасное для импорта: ошибка логируется, но не роняет приём заказа. */
 async function scheduleDeliverySafe(orderId: string): Promise<void> {
@@ -214,6 +215,9 @@ async function applyUpdateFromShopify(
   if (wasUnpaid && paymentStatus === "PAID") {
     await assignInitial(existing.id);
   }
+  // Инструкции могли появиться позже (scope выдали после приёма) или поменяться. Тот же текст
+  // второго разбора не даёт — ключ задачи по тексту.
+  if (deliveryInstructions) await requestCourierNote(prisma, existing.id, { kind: "text", text: deliveryInstructions });
   if (becameRefunded) {
     await publishPaymentStateTrigger(prisma, { orderId: existing.id, siteId: site.id, triggerType: "ORDER_REFUNDED" });
   }
@@ -291,6 +295,10 @@ export async function ingestShopifyOrder(
     if (order.orderStatus === "CONFIRMED") {
       await assignInitial(order.id);
     }
+    // Покупатель мог написать курьеру в поле инструкций — собрать инструкцию курьеру. ДО черновика
+    // Burq: задача встанет в очередь раньше, и черновик на сегодня сразу уйдёт с инструкцией, а не
+    // будет создан и через секунды пересоздан.
+    await requestCourierNoteForNewOrder(prisma, order.id);
     // Единый вызов планировщика доставки после сохранения заказа (best-effort — не ломаем приём).
     await scheduleDeliverySafe(order.id);
     // Авто-SMS: триггер ORDER_CREATED только для НОВОГО заказа (не update/resync/backfill).

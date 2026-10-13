@@ -24,7 +24,9 @@ export type ReassignmentResult =
   | { outcome: "recreated"; newDeliveryId: string }
   | { outcome: "flagged_problem"; reason: string }
   | { outcome: "waiting"; reason: string }
-  | { outcome: "no_current_draft" };
+  | { outcome: "no_current_draft" }
+  /** Черновик уже оформлен (курьер ищется или едет) — оставлен как есть, проблема НЕ ставится. */
+  | { outcome: "kept_initiated"; reason: string };
 
 /**
  * Помечает ДОСТАВКУ проблемной (красная плашка + ручное решение). Order.orderStatus НЕ трогаем:
@@ -42,8 +44,18 @@ async function flagProblem(prisma: PrismaClient, deliveryId: string, _orderId: s
 export async function handleFloristReassignment(
   prisma: PrismaClient,
   orderId: string,
-  cancellationReason: DeliveryCancellationReason = "FLORIST_REASSIGNED"
+  cancellationReason: DeliveryCancellationReason = "FLORIST_REASSIGNED",
+  opts: {
+    /**
+     * Что делать, если черновик уже оформлен. Флорист, адрес, точка забора — новые данные
+     * курьеру обязательны, поэтому доставка становится проблемой и её решает человек. Новая
+     * инструкция курьеру (`courierNoteBurq.ts`) — не повод ломать идущую доставку: её оставляем,
+     * а людям говорим отдельно.
+     */
+    flagIfInitiated?: boolean;
+  } = {}
 ): Promise<ReassignmentResult> {
+  const flagIfInitiated = opts.flagIfInitiated ?? true;
   const current = await prisma.delivery.findFirst({
     where: { orderId, isCurrentAttempt: true, externalDeliveryId: { not: null } },
     select: { id: true, externalDeliveryId: true, status: true },
@@ -67,6 +79,7 @@ export async function handleFloristReassignment(
 
   const decision = decideReassignment(liveStatus);
   if (decision.action === "FLAG_PROBLEM") {
+    if (!flagIfInitiated) return { outcome: "kept_initiated", reason: decision.reason };
     await flagProblem(prisma, current.id, orderId, decision.reason);
     return { outcome: "flagged_problem", reason: decision.reason };
   }
@@ -76,6 +89,7 @@ export async function handleFloristReassignment(
     await client.deleteOrder(current.externalDeliveryId);
   } catch (err) {
     if (!(err instanceof BurqApiError && err.status === 404)) {
+      if (!flagIfInitiated) return { outcome: "kept_initiated", reason: "delete_failed" };
       // 409 (уже инициирован) или иная ошибка → безопасно уходим в PROBLEM.
       await flagProblem(prisma, current.id, orderId, "delete_failed");
       return { outcome: "flagged_problem", reason: "delete_failed" };
