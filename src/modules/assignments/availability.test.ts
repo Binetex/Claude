@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isFloristAvailable, businessDayKey } from "./availability";
+import { isFloristAvailable, businessDayKey, takesSameDayNow } from "./availability";
 
 /** deliveryDate хранится как UTC-полночь локального дня — так его и строим. */
 const day = (iso: string) => new Date(`${iso}T00:00:00.000Z`);
@@ -43,5 +43,19 @@ describe("доступность флориста", () => {
 
   it("ключ дня — календарная дата в UTC", () => {
     expect(businessDayKey(new Date("2026-08-20T23:59:00.000Z"))).toBe("2026-08-20");
+  });
+});
+
+describe("заказы на сегодня — до часа флориста (владелец 14.10.2026: Арине — до 13:00)", () => {
+  const TODAY = "2026-10-15";
+  it("заказ на сегодня до отсечки — берёт, с отсечки — нет", () => {
+    expect(takesSameDayNow(13 * 60, TODAY, TODAY, 12 * 60 + 59)).toBe(true);
+    expect(takesSameDayNow(13 * 60, TODAY, TODAY, 13 * 60)).toBe(false);
+  });
+  it("заказ на другой день отсечка не трогает", () => {
+    expect(takesSameDayNow(13 * 60, "2026-10-16", TODAY, 18 * 60)).toBe(true);
+  });
+  it("без отсечки — берёт всегда", () => {
+    expect(takesSameDayNow(null, TODAY, TODAY, 23 * 60)).toBe(true);
   });
 });

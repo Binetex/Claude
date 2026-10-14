@@ -170,7 +170,7 @@ export async function orderPlanned(prisma: PrismaClient, orderId: string, now: D
   if (!found) return undefined;
   const [order] = await withInbound(prisma, [found], now);
   const day = order.deliveryDate.toISOString().slice(0, 10);
-  const floristId = order.currentFloristId ?? (await getAvailableFloristIds(order.siteId, order.deliveryDate))[0] ?? null;
+  const floristId = order.currentFloristId ?? (await getAvailableFloristIds(order.siteId, order.deliveryDate, now))[0] ?? null;
   if (!floristId) return undefined;
   const [model, florist, zips, others] = await Promise.all([
     loadTimeModel(prisma, now),
@@ -195,7 +195,9 @@ export async function orderPlanned(prisma: PrismaClient, orderId: string, now: D
  * Что после 13:00 сегодняшний заказ решает человек, говорит ассистент — здесь только время.
  */
 export async function siteEarliest(prisma: PrismaClient, siteId: string, day: string, now: Date = new Date()): Promise<number | null | undefined> {
-  const floristId = (await getAvailableFloristIds(siteId, dayDate(day)))[0] ?? null;
+  // Тот же выбор, что у автоназначения, с отсечкой заказов на сегодня: после 13:00 новый заказ
+  // на сегодня достанется Ольге, а не Арине, — и время новому клиенту по её графику.
+  const floristId = (await getAvailableFloristIds(siteId, dayDate(day), now))[0] ?? null;
   if (!floristId) return undefined;
   const [model, florist, zips, dayOrders, closure, site] = await Promise.all([
     loadTimeModel(prisma, now),

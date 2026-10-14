@@ -34,6 +34,17 @@ export function isFloristAvailable(florist: FloristAvailability, deliveryDate: D
   return !florist.daysOff.some((d) => businessDayKey(d) === key);
 }
 
+/**
+ * Берёт ли флорист заказ прямо сейчас с учётом отсечки заказов НА СЕГОДНЯ (`Florist.sameDayUntilMin`;
+ * владелец 14.10.2026: Арине заказы на сегодня — только до 13:00, позже — Ольге). Заказы на другие
+ * дни отсечка не трогает. Дни и минуты — по часам магазина: `deliveryDay` — бизнес-день заказа,
+ * `today` и `nowMin` — «сейчас» в таймзоне магазина.
+ */
+export function takesSameDayNow(sameDayUntilMin: number | null | undefined, deliveryDay: string, today: string, nowMin: number): boolean {
+  if (sameDayUntilMin == null || deliveryDay !== today) return true;
+  return nowMin < sameDayUntilMin;
+}
+
 export const WEEKDAYS: { value: number; label: string }[] = [
   { value: 1, label: "Понедельник" },
   { value: 2, label: "Вторник" },

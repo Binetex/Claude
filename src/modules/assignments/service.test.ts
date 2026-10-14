@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { Prisma } from "@/generated/prisma/client";
 import {
   assignInitial,
+  getAvailableFloristIds,
   declineOrder,
   reassignManual,
   setManualFloristPrice,
@@ -312,5 +313,34 @@ describe("handoffOrder (флорист передаёт выбранному, а
     expect((await prisma.order.findUniqueOrThrow({ where: { id: order.id } })).currentFloristId).toBe(floristAId);
     expect(await activeAssignmentCount(order.id)).toBe(1);
     await prisma.florist.update({ where: { id: floristBId }, data: { active: true } }); // восстановить
+  });
+});
+
+describe("заказы на сегодня — до часа флориста (владелец 14.10.2026)", () => {
+  // 15.10.2026 по Лос-Анджелесу (PDT, UTC−7); сайт без таймзоны — часы магазина по умолчанию (LA).
+  const DAY = new Date("2026-10-15T00:00:00Z");
+  const at = (hhmm: string) => new Date(`2026-10-15T${hhmm}:00-07:00`);
+
+  it("первый в очереди с отсечкой 13:00: до неё заказ на сегодня его, после — следующего", async () => {
+    await prisma.florist.update({ where: { id: floristAId }, data: { sameDayUntilMin: 13 * 60 } });
+    try {
+      expect((await getAvailableFloristIds(siteId, DAY, at("12:30")))[0]).toBe(floristAId);
+      expect((await getAvailableFloristIds(siteId, DAY, at("13:05")))[0]).toBe(floristBId);
+      // Заказ на завтра отсечка не трогает.
+      expect((await getAvailableFloristIds(siteId, new Date("2026-10-16T00:00:00Z"), at("18:00")))[0]).toBe(floristAId);
+      // Без момента назначения — только выходные, как раньше.
+      expect((await getAvailableFloristIds(siteId, DAY))[0]).toBe(floristAId);
+    } finally {
+      await prisma.florist.update({ where: { id: floristAId }, data: { sameDayUntilMin: null } });
+    }
+  });
+
+  it("отсечка у всех — заказ всё равно достаётся флористу, а не висит без исполнителя", async () => {
+    await prisma.florist.updateMany({ where: { id: { in: [floristAId, floristBId] } }, data: { sameDayUntilMin: 13 * 60 } });
+    try {
+      expect(await getAvailableFloristIds(siteId, DAY, at("15:00"))).toEqual([floristAId, floristBId]);
+    } finally {
+      await prisma.florist.updateMany({ where: { id: { in: [floristAId, floristBId] } }, data: { sameDayUntilMin: null } });
+    }
   });
 });

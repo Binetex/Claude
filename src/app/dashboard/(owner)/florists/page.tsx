@@ -4,6 +4,7 @@ import { Card } from "@/components/ui/Card";
 import { FinanceVisibilityToggle } from "./FinanceVisibilityToggle";
 import { WorkStartEditor } from "./WorkStartEditor";
 import { BouquetShareEditor } from "./BouquetShareEditor";
+import { SameDayUntilEditor } from "./SameDayUntilEditor";
 import { TelegramHandleEditor } from "./TelegramHandleEditor";
 import { PickupLocationsEditor } from "./PickupLocationsEditor";
 import { AvailabilityEditor } from "./AvailabilityEditor";
@@ -46,6 +47,7 @@ export default async function FloristsPage() {
             <div className="mt-2 text-sm text-slate-600">Активных заказов: {f._count.currentOrders}</div>
             <FinanceVisibilityToggle floristId={f.id} current={f.financeVisibility} />
             <WorkStartEditor floristId={f.id} workStartMin={f.workStartMin} />
+            <SameDayUntilEditor floristId={f.id} sameDayUntilMin={f.sameDayUntilMin} />
             <BouquetShareEditor floristId={f.id} sharePercentBp={f.bouquetSharePercentBp} />
             <TelegramHandleEditor floristId={f.id} handle={f.user.telegramId} />
             <AvailabilityEditor

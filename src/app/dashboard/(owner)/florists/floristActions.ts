@@ -166,6 +166,22 @@ export async function ownerSetFloristBouquetShare(floristId: string, percent: nu
   return {};
 }
 
+/**
+ * До какого часа флорист получает заказы на сегодня, минуты от полуночи по часам магазина
+ * (владелец 14.10.2026: Арине — до 13:00, после — Ольге). null — без ограничения. Действует на
+ * заказы, назначаемые после изменения; уже назначенные не трогает.
+ */
+export async function ownerSetFloristSameDayUntil(floristId: string, minutes: number | null): Promise<{ error?: string }> {
+  await requireRole("OWNER");
+  if (minutes != null && (!Number.isInteger(minutes) || minutes < 6 * 60 || minutes > 20 * 60 || minutes % 30)) {
+    return { error: "С 6:00 до 20:00 по получасу." };
+  }
+  await prisma.florist.update({ where: { id: floristId }, data: { sameDayUntilMin: minutes } });
+  revalidatePath("/dashboard/florists");
+  revalidatePath("/dashboard/schedule");
+  return {};
+}
+
 /** Ник флориста в Telegram — им её отмечают в срочных уведомлениях о доставке. Пусто — убрать. */
 export async function ownerSetFloristTelegram(floristId: string, raw: string): Promise<{ error?: string; value?: string | null }> {
   await requireRole("OWNER");

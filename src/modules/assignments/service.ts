@@ -2,7 +2,8 @@ import "server-only";
 import { prisma } from "@/lib/db";
 import { Prisma } from "@/generated/prisma/client";
 import { applyAutoPriceSnapshot, clearServiceItemFloristPrices, recomputeEstimatedProfit } from "@/modules/pricing/service";
-import { isFloristAvailable } from "./availability";
+import { isFloristAvailable, takesSameDayNow, businessDayKey } from "./availability";
+import { localClock, DEFAULT_STORE_TZ } from "@/lib/tz";
 import { notifyFloristAssigned } from "@/integrations/notifications/telegram";
 import { TERMINAL_ORDER_STATUSES } from "@/lib/statuses";
 import { onOrderDeliveryChangeSafe } from "@/integrations/delivery/burq/scheduleService";
@@ -18,19 +19,38 @@ import { recomputeDayForOrder } from "@/modules/finance/orderDayHook";
  * Ручные пути — передача заказа и переназначение владельцем — этим НЕ пользуются: там
  * выбирает человек, и недоступность не должна мешать назначить кого угодно.
  */
-export async function getAvailableFloristIds(siteId: string, deliveryDate: Date): Promise<string[]> {
+export async function getAvailableFloristIds(
+  siteId: string,
+  deliveryDate: Date,
+  /**
+   * Момент назначения. Задан — учитывается и отсечка заказов на сегодня (`Florist.sameDayUntilMin`):
+   * заказ на сегодня после неё уходит следующему в очереди. Не задан — только выходные, как было.
+   */
+  now?: Date
+): Promise<string[]> {
   const priority = await getSitePriorityFloristIds(siteId);
   if (priority.length === 0) return [];
 
-  const florists = await prisma.florist.findMany({
-    where: { id: { in: priority } },
-    select: { id: true, weekendDays: true, daysOff: true },
-  });
+  const [florists, site] = await Promise.all([
+    prisma.florist.findMany({
+      where: { id: { in: priority } },
+      select: { id: true, weekendDays: true, daysOff: true, sameDayUntilMin: true },
+    }),
+    now ? prisma.site.findUnique({ where: { id: siteId }, select: { timezone: true } }) : null,
+  ]);
   const byId = new Map(florists.map((f) => [f.id, f]));
-  return priority.filter((id) => {
+  const available = priority.filter((id) => {
     const f = byId.get(id);
     return f ? isFloristAvailable(f, deliveryDate) : false;
   });
+  if (!now) return available;
+
+  const clock = localClock(site?.timezone ?? DEFAULT_STORE_TZ, now);
+  const [h, m] = clock.timeStr.split(":").map(Number);
+  const inTime = available.filter((id) => takesSameDayNow(byId.get(id)?.sameDayUntilMin, businessDayKey(deliveryDate), clock.dateStr, h * 60 + m));
+  // Отсечка у всех, кто работает, — пусть заказ лучше достанется флористу после её часа, чем
+  // повиснет без исполнителя: «без флориста» владелец увидит позже, чем флорист — заказ.
+  return inTime.length ? inTime : available;
 }
 
 export async function getSitePriorityFloristIds(siteId: string): Promise<string[]> {
@@ -165,8 +185,9 @@ export async function assignInitial(orderId: string): Promise<void> {
   // Идемпотентность: не переназначаем, если уже назначен/принят.
   if (order.currentFloristId || order.assignmentStatus !== "UNASSIGNED") return;
 
-  // Недоступные в этот день пропускаются, дальше — прежняя очерёдность.
-  const priority = await getAvailableFloristIds(order.siteId, order.deliveryDate);
+  // Недоступные в этот день и те, у кого прошла отсечка заказов на сегодня, пропускаются, дальше —
+  // прежняя очерёдность.
+  const priority = await getAvailableFloristIds(order.siteId, order.deliveryDate, new Date());
   const nextFloristId = priority[0];
 
   if (!nextFloristId) {
@@ -258,8 +279,12 @@ export async function declineOrder(orderId: string, floristId: string): Promise<
   });
   const excluded = new Set(declined.map((d) => d.floristId));
 
-  const priority = await getAvailableFloristIds(order.siteId, order.deliveryDate);
-  const nextFloristId = priority.find((id) => !excluded.has(id));
+  // Сначала — с отсечкой заказов на сегодня, как при первом назначении; никого — без неё: лучше
+  // флорист после своего часа, чем заказ без исполнителя.
+  const pick = (ids: string[]) => ids.find((id) => !excluded.has(id));
+  const nextFloristId =
+    pick(await getAvailableFloristIds(order.siteId, order.deliveryDate, new Date())) ??
+    pick(await getAvailableFloristIds(order.siteId, order.deliveryDate));
 
   if (!nextFloristId) {
     // Все доступные отказались — оставляем без флориста, не гоняем по кругу.
