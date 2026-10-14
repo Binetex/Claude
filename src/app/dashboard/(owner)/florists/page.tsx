@@ -12,6 +12,8 @@ import { ownerSetFloristWeekends, ownerAddFloristDayOff, ownerRemoveFloristDayOf
 import { AddFloristForm } from "./AddFloristForm";
 import { FloristEditForm } from "./FloristEditForm";
 import { FloristAvatar } from "@/components/FloristAvatar";
+import { SitePriorityEditor } from "./SitePriorityEditor";
+import { TERMINAL_ORDER_STATUSES } from "@/lib/statuses";
 
 export const dynamic = "force-dynamic";
 
@@ -27,11 +29,53 @@ export default async function FloristsPage() {
     orderBy: { createdAt: "asc" },
   });
 
+  // Очередь всех магазинов — здесь же, рядом с выходными и «Заказами на сегодня»: распределение
+  // складывается из всего этого вместе (владелец 14.10.2026: «все настройки выведи»). Редактор тот
+  // же, что во вкладке магазина, — один компонент, а не копия.
+  const [sites, unassigned] = await Promise.all([
+    prisma.site.findMany({
+      orderBy: { name: "asc" },
+      select: {
+        id: true, name: true,
+        floristPriorities: { orderBy: { position: "asc" }, select: { floristId: true, position: true, florist: { select: { user: { select: { name: true } } } } } },
+      },
+    }),
+    // Тот же критерий «требуют назначения», что во вкладке магазина.
+    prisma.order.groupBy({
+      by: ["siteId"],
+      where: { assignmentStatus: "UNASSIGNED", paymentStatus: "PAID", orderStatus: { notIn: TERMINAL_ORDER_STATUSES } },
+      _count: { _all: true },
+    }),
+  ]);
+  const unassignedBySite = new Map(unassigned.map((u) => [u.siteId, u._count._all]));
+  const activeFlorists = florists.filter((f) => f.active && f.user.active).map((f) => ({ id: f.id, name: f.user.name }));
+
   return (
     <div className="space-y-6">
       <h1 className="text-lg font-semibold text-slate-900">Флористы и распределение</h1>
 
       <AddFloristForm />
+
+      <section className="space-y-2">
+        <h2 className="text-sm font-semibold text-slate-800">Очередь по магазинам</h2>
+        <p className="text-xs text-slate-500">
+          Новый заказ получает первый в очереди магазина, кто в этот день работает. Выходные и даты
+          отпуска — у флориста ниже; заказ на сегодня после часа из «Заказы на сегодня» уходит следующему.
+        </p>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {sites.map((site) => (
+            <Card key={site.id} className="p-3">
+              <div className="mb-2 text-sm font-medium text-slate-800">{site.name}</div>
+              <SitePriorityEditor
+                siteId={site.id}
+                priorities={site.floristPriorities.map((p) => ({ floristId: p.floristId, name: p.florist.user.name, position: p.position }))}
+                allFlorists={activeFlorists}
+                unassignedCount={unassignedBySite.get(site.id) ?? 0}
+              />
+            </Card>
+          ))}
+        </div>
+      </section>
 
       <div className="grid gap-4 md:grid-cols-2">
         {florists.map((f) => (
@@ -83,8 +127,8 @@ export default async function FloristsPage() {
       </div>
 
       <p className="text-xs text-slate-400">
-        Приоритет флористов задаётся у каждого магазина — <Link href="/dashboard/sites" className="text-sky-600 underline">Магазины</Link>, вкладка «Флористы».
-        Держать один и тот же редактор в двух местах значит однажды поправить один из них.
+        Та же очередь — во вкладке «Приоритет флористов» каждого магазина (<Link href="/dashboard/sites" className="text-sky-600 underline">Магазины</Link>):
+        редактор один и тот же, правка видна в обоих местах.
       </p>
     </div>
   );
