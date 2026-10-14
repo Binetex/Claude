@@ -1,6 +1,6 @@
 "use client";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 
 const TABS = [
   { href: "/dashboard/consumables", label: "Журнал" },
@@ -10,6 +10,8 @@ const TABS = [
 
 export function ConsumablesTabs() {
   const pathname = usePathname() ?? "";
+  // Выбранный флорист едет с вкладкой: переключились на «Приход и остаток» — видим того же флориста.
+  const florist = useSearchParams()?.get("florist");
   // Активна самая ДЛИННАЯ подходящая вкладка: страница дня (/consumables/2026-09-06) относится
   // к «Журналу», а не к вкладкам, чьи адреса тоже начинаются с корня раздела.
   const active = [...TABS]
@@ -22,7 +24,7 @@ export function ConsumablesTabs() {
       {TABS.map((t) => (
         <Link
           key={t.href}
-          href={t.href}
+          href={florist && t.href !== "/dashboard/consumables/items" ? `${t.href}?florist=${florist}` : t.href}
           className={
             t.href === active
               ? "-mb-px border-b-2 border-slate-800 px-3 py-2 text-sm font-medium text-slate-800"

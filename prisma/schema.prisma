@@ -421,6 +421,7 @@ model Florist {
 
   sitePriorities  SiteFloristPriority[]
   productPrices   FloristProductPrice[]
+  consumableReceipts ConsumableReceipt[]
   currentOrders   Order[]                 @relation("CurrentFlorist")
   assignments     OrderAssignment[]
   pickupLocations FloristPickupLocation[]
@@ -1718,14 +1719,25 @@ model ConsumableUsage {
   @@index([itemId])
 }
 
-/// Поступление расходников на склад: купили N штук такого-то числа.
+/// Поступление расходников: купили N штук такого-то числа — и у КОГО из флористов они лежат.
 ///
 /// Нужно ради остатка: владелец ведёт вазы в инвентаре, и без прихода остаток всегда уходил бы
-/// в минус. Расход берётся из заказов, приход — отсюда.
+/// в минус. Расход берётся из заказов (их делает назначенный флорист), приход — отсюда.
+///
+/// Остаток по флористу (владелец 14.10.2026: «500 коробок из Китая пришли Ольге, потом она
+/// передала 200 Насте») = его приход ± передачи − расход его заказов. Передача — ДВЕ строки этой
+/// же таблицы с общим `transferId`: минус у отдавшего, плюс у получившего. Отдельной таблицы под
+/// неё нет: передача — это тот же приход, только с другого склада.
 model ConsumableReceipt {
   id     String         @id @default(cuid())
   itemId String
   item   ConsumableItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+
+  /// У кого лежит. NULL — не распределено: записи, сделанные до разделения по флористам.
+  floristId String?
+  florist   Florist? @relation(fields: [floristId], references: [id], onDelete: SetNull)
+  /// Общий id двух строк одной передачи между флористами. NULL — обычный приход.
+  transferId String?
 
   /// UTC-полночь локального дня — конвенция Order.deliveryDate.
   day      DateTime
@@ -1737,6 +1749,8 @@ model ConsumableReceipt {
 
   @@index([itemId, day])
   @@index([day])
+  @@index([floristId])
+  @@index([transferId])
 }
 
 // Зарегистрированные Shopify webhook-подписки по Site — чтобы не создавать дубли и

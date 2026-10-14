@@ -8,6 +8,7 @@ import "server-only";
 import type { PrismaClient, Prisma } from "@/generated/prisma/client";
 import { consumablesForOrder, VASE_LABEL, type VaseKey } from "./rules";
 import { getOrderItemImages } from "@/modules/orders/images";
+import type { StockUsage } from "./stock";
 
 export type ConsumableItemRow = {
   id: string;
@@ -23,6 +24,10 @@ export type OrderConsumableRow = {
   orderId: string;
   orderNumber: string;
   siteName: string;
+  /** День доставки «YYYY-MM-DD» (UTC-полночь локального дня). */
+  day: string;
+  /** Чей это расход: заказ делает назначенный флорист. null — заказ без флориста. */
+  floristId: string | null;
   floristName: string | null;
   productSummary: string;
   /** Фото букета — то же, что в очереди отзывов: строку узнают по картинке, а не по номеру. */
@@ -79,6 +84,7 @@ export async function loadOrdersWithConsumables(
       deliveryDate: true,
       siteId: true,
       site: { select: { name: true, shortName: true } },
+      currentFloristId: true,
       currentFlorist: { select: { user: { select: { name: true } } } },
       items: {
         select: {
@@ -118,6 +124,8 @@ export async function loadOrdersWithConsumables(
       orderId: o.id,
       orderNumber: o.orderNumber,
       siteName: o.site?.shortName || o.site?.name || "—",
+      day: o.deliveryDate.toISOString().slice(0, 10),
+      floristId: o.currentFloristId,
       floristName: o.currentFlorist?.user.name ?? null,
       productSummary: o.items.map((i) => i.name).join(", "),
       photoUrl: o.items.map((i) => getOrderItemImages(i).primary).find((u) => !!u) ?? null,
@@ -212,6 +220,18 @@ export function totalsFor(orders: OrderConsumableRow[], items: ConsumableItemRow
     if (sum) totals.set(item.id, sum);
   }
   return totals;
+}
+
+/** Расход по заказам для остатка: кто, когда и сколько (ручная правка перебивает расчёт). */
+export function usagesOf(orders: OrderConsumableRow[], items: ConsumableItemRow[]): StockUsage[] {
+  const out: StockUsage[] = [];
+  for (const o of orders) {
+    for (const item of items) {
+      const quantity = o.manual.get(item.id) ?? o.auto.get(item.id) ?? 0;
+      if (quantity) out.push({ itemId: item.id, floristId: o.floristId, day: o.day, quantity });
+    }
+  }
+  return out;
 }
 
 export function groupByDay(orders: OrderConsumableRow[], byOrderDay: Map<string, Date>, items: ConsumableItemRow[]): DaySummary[] {

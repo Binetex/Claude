@@ -4,7 +4,6 @@ import { PageHeader } from "@/components/ui/misc";
 import { Card, CardBody } from "@/components/ui/Card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Select } from "@/components/ui/select";
 import { EmptyState } from "@/components/ui/states";
 import { DEFAULT_STORE_TZ, localDateStr, zonedLocalTimeToUtc } from "@/lib/tz";
 import { loadConsumableItems, loadOrdersWithConsumables, totalsFor, type OrderConsumableRow } from "@/modules/consumables/service";
@@ -33,9 +32,8 @@ export default async function ConsumablesJournalPage({ searchParams }: { searchP
   const { from, to, month } = monthRange(sp.month, tz);
   const floristId = sp.florist || undefined;
 
-  const [items, florists, sites] = await Promise.all([
+  const [items, sites] = await Promise.all([
     loadConsumableItems(prisma),
-    prisma.florist.findMany({ where: { active: true }, select: { id: true, user: { select: { name: true } } }, orderBy: { user: { name: "asc" } } }),
     prisma.site.findMany({ select: { id: true, name: true, shortName: true }, orderBy: { name: "asc" } }),
   ]);
 
@@ -83,15 +81,8 @@ export default async function ConsumablesJournalPage({ searchParams }: { searchP
               <span className="text-slate-500">Месяц</span>
               <Input type="month" name="month" defaultValue={month} className="h-9 w-40" />
             </label>
-            <label className="flex flex-col gap-1">
-              <span className="text-slate-500">Флорист</span>
-              <Select name="florist" defaultValue={floristId ?? ""} wrapperClassName="w-44">
-                <option value="">все флористы</option>
-                {florists.map((f) => (
-                  <option key={f.id} value={f.id}>{f.user.name}</option>
-                ))}
-              </Select>
-            </label>
+            {/* Флорист — переключателем раздела над страницей; смена месяца его не сбрасывает. */}
+            {floristId && <input type="hidden" name="florist" value={floristId} />}
             <Button type="submit" size="sm">Показать</Button>
             <Button asChild size="sm" variant="outline">
               <a href={`/dashboard/consumables/export?month=${month}${floristId ? `&florist=${floristId}` : ""}`}>

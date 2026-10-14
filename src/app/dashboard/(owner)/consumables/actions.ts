@@ -2,6 +2,7 @@
 import { revalidatePath } from "next/cache";
 import { requireRole } from "@/lib/rbac";
 import { prisma } from "@/lib/db";
+import { randomUUID } from "node:crypto";
 import { createDefaultItems } from "./defaults";
 
 type Result = { ok?: true; message?: string; error?: string };
@@ -82,16 +83,27 @@ export async function ownerArchiveConsumableItem(id: string, archived: boolean):
   return { ok: true };
 }
 
-/** Приход на склад: купили N штук. Нужен, чтобы остаток не уходил в минус. */
-export async function ownerAddConsumableReceipt(input: { itemId: string; day: string; quantity: number; note: string }): Promise<Result> {
+const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+async function floristExists(floristId: string): Promise<boolean> {
+  return !!(floristId && (await prisma.florist.findUnique({ where: { id: floristId }, select: { id: true } })));
+}
+
+/**
+ * Приход: купили N штук — и у кого из флористов они лежат (владелец 14.10.2026: «коробки из Китая
+ * сначала пришли Ольге»). Без флориста остаток не разложить, поэтому он обязателен.
+ */
+export async function ownerAddConsumableReceipt(input: { itemId: string; floristId: string; day: string; quantity: number; note: string }): Promise<Result> {
   const user = await requireRole("OWNER");
   if (!input.itemId) return { error: "Выберите позицию." };
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(input.day)) return { error: "Укажите дату." };
+  if (!(await floristExists(input.floristId))) return { error: "Выберите, кому пришло." };
+  if (!DAY_RE.test(input.day)) return { error: "Укажите дату." };
   if (!Number.isInteger(input.quantity) || input.quantity === 0) return { error: "Количество должно быть целым и не нулевым." };
 
   await prisma.consumableReceipt.create({
     data: {
       itemId: input.itemId,
+      floristId: input.floristId,
       day: new Date(`${input.day}T00:00:00.000Z`),
       quantity: input.quantity,
       note: input.note.trim() || null,
@@ -102,10 +114,15 @@ export async function ownerAddConsumableReceipt(input: { itemId: string; day: st
   return { ok: true, message: "Приход записан." };
 }
 
-/** Правка записи прихода: ошиблись в количестве или дате — не надо удалять и заводить заново. */
+/**
+ * Правка записи прихода: ошиблись в количестве, дате или флористе — не надо удалять и заводить
+ * заново. Так же раскладываются по флористам записи, сделанные до разделения. Передачу правкой не
+ * трогаем: у неё две строки, и правка одной сломала бы равенство — её удаляют и записывают заново.
+ */
 export async function ownerUpdateConsumableReceipt(input: {
   id: string;
   itemId: string;
+  floristId: string;
   day: string;
   quantity: number;
   note: string;
@@ -113,13 +130,18 @@ export async function ownerUpdateConsumableReceipt(input: {
   await requireRole("OWNER");
   if (!input.id) return { error: "Не указана запись." };
   if (!input.itemId) return { error: "Выберите позицию." };
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(input.day)) return { error: "Укажите дату." };
+  if (!(await floristExists(input.floristId))) return { error: "Выберите, кому пришло." };
+  if (!DAY_RE.test(input.day)) return { error: "Укажите дату." };
   if (!Number.isInteger(input.quantity) || input.quantity === 0) return { error: "Количество должно быть целым и не нулевым." };
+  const row = await prisma.consumableReceipt.findUnique({ where: { id: input.id }, select: { transferId: true } });
+  if (!row) return { error: "Запись не найдена." };
+  if (row.transferId) return { error: "Передачу можно только удалить и записать заново." };
 
   await prisma.consumableReceipt.update({
     where: { id: input.id },
     data: {
       itemId: input.itemId,
+      floristId: input.floristId,
       day: new Date(`${input.day}T00:00:00.000Z`),
       quantity: input.quantity,
       note: input.note.trim() || null,
@@ -131,7 +153,55 @@ export async function ownerUpdateConsumableReceipt(input: {
 
 export async function ownerDeleteConsumableReceipt(id: string): Promise<Result> {
   await requireRole("OWNER");
-  await prisma.consumableReceipt.deleteMany({ where: { id } });
+  await prisma.consumableReceipt.deleteMany({ where: { id, transferId: null } });
+  revalidatePath(`${PATH}/receipts`);
+  return { ok: true };
+}
+
+/**
+ * Передача между флористами: «Ольга передала Насте 200 коробок». Две строки в одной транзакции —
+ * минус у отдавшего, плюс у получившего, с общим `transferId`: в общем остатке они гасятся, а
+ * остаток каждой меняется. Больше, чем числится у отдающего, передать можно: остаток бывает неточен
+ * (приход записан не весь), а запрет мешал бы записать то, что уже случилось.
+ */
+export async function ownerAddConsumableTransfer(input: {
+  itemId: string;
+  fromFloristId: string;
+  toFloristId: string;
+  day: string;
+  quantity: number;
+  note: string;
+}): Promise<Result> {
+  const user = await requireRole("OWNER");
+  if (!input.itemId) return { error: "Выберите позицию." };
+  if (!(await floristExists(input.fromFloristId)) || !(await floristExists(input.toFloristId))) return { error: "Выберите, кто передал и кому." };
+  if (input.fromFloristId === input.toFloristId) return { error: "Передать можно только другому флористу." };
+  if (!DAY_RE.test(input.day)) return { error: "Укажите дату." };
+  if (!Number.isInteger(input.quantity) || input.quantity <= 0) return { error: "Количество — целое больше нуля." };
+
+  const transferId = randomUUID();
+  const base = {
+    itemId: input.itemId,
+    day: new Date(`${input.day}T00:00:00.000Z`),
+    note: input.note.trim() || null,
+    transferId,
+    createdByUserId: user.id,
+  };
+  await prisma.consumableReceipt.createMany({
+    data: [
+      { ...base, floristId: input.fromFloristId, quantity: -input.quantity },
+      { ...base, floristId: input.toFloristId, quantity: input.quantity },
+    ],
+  });
+  revalidatePath(`${PATH}/receipts`);
+  return { ok: true, message: "Передача записана." };
+}
+
+/** Удалить передачу целиком — обе строки, иначе у одной из сторон остался бы лишний плюс или минус. */
+export async function ownerDeleteConsumableTransfer(transferId: string): Promise<Result> {
+  await requireRole("OWNER");
+  if (!transferId) return { error: "Не указана передача." };
+  await prisma.consumableReceipt.deleteMany({ where: { transferId } });
   revalidatePath(`${PATH}/receipts`);
   return { ok: true };
 }
