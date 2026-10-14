@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isBigOrder, readyTimeWishes, clockLabelEn, fmtDuration, withClosure, sameDayFallback, isPriorityShop, asClosureLevel, morningOverload, morningFull } from "./day";
+import { isBigOrder, readyTimeWishes, clockLabelEn, fmtDuration, withClosure, sameDayFallback, isPriorityShop, asClosureLevel, morningOverload, morningFull, morningSoldOut } from "./day";
 
 describe("помощники времени", () => {
   it("большой букет — от $250", () => {
@@ -104,5 +104,33 @@ describe("утро забито — новый утренний заказ ни�
   });
   it("никто не работает — автозамок не решает, это решает замок владельца", () => {
     expect(morningFull([])).toBe(false);
+  });
+});
+
+describe("лимит утра: 2,5 утренних заказа TheFlow на флориста (владелец 14.10.2026)", () => {
+  const order = (floristId: string | null, extra: Partial<{ site: string; windowFrom: number | null }> = {}) => ({
+    site: "THEFLOW", windowFrom: 11 * 60, floristId, ...extra,
+  });
+
+  it("один флорист: два заказа — открыто, третий — утро закрыто", () => {
+    expect(morningSoldOut([order("olga"), order("olga")])).toBeNull();
+    expect(morningSoldOut([order("olga"), order("olga"), order("olga")])).toEqual({ count: 3, florists: 1 });
+  });
+
+  it("два флориста делают TheFlow: четыре — открыто, пятый — закрыто", () => {
+    const four = [order("olga"), order("olga"), order("nastya"), order("nastya")];
+    expect(morningSoldOut(four)).toBeNull();
+    expect(morningSoldOut([...four, order("nastya")])).toEqual({ count: 5, florists: 2 });
+  });
+
+  it("флорист без заказов TheFlow лимит не поднимает: свободная Арина утро Ольги не разгружает", () => {
+    // Флористы считаются по самим заказам, а не по тем, кто работает.
+    expect(morningSoldOut([order("olga"), order("olga"), order("olga")])).toEqual({ count: 3, florists: 1 });
+  });
+
+  it("не утро, не TheFlow и без окна — не считаются; без флориста — всё равно один флорист", () => {
+    const noise = [order("olga", { windowFrom: 15 * 60 }), order("olga", { site: "PAR" }), order("olga", { windowFrom: null })];
+    expect(morningSoldOut([...noise, order("olga"), order("olga")])).toBeNull();
+    expect(morningSoldOut([order(null), order(null), order(null)])).toEqual({ count: 3, florists: 1 });
   });
 });

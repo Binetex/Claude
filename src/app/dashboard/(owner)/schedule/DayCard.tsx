@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { cn } from "@/lib/cn";
 import type { DaySchedule, FloristDay, ScheduleOrder } from "@/modules/timing/load";
-import { fmtDuration, EARLIEST_DELIVERY_MIN, NERVOUS_MIN_INBOUND, type ClosureLevel } from "@/modules/timing/day";
+import { fmtDuration, EARLIEST_DELIVERY_MIN, NERVOUS_MIN_INBOUND, MORNING_ORDERS_PER_FLORIST, type ClosureLevel, type AutoClose } from "@/modules/timing/day";
+import { pluralRu } from "@/lib/plural";
 import { DayLock } from "./ScheduleControls";
 
 /**
@@ -74,11 +75,8 @@ export function DayCard({
       )}
       {mode === "plan" && s.autoClose && (
         <div className="mx-6 mt-4 rounded-lg bg-rose-50 px-4 py-2.5 text-sm text-rose-700">
-          Утро закрыто автоматически:{" "}
-          {s.autoClose.kind === "late"
-            ? `${s.autoClose.orderNumber} не успеваем на ${fmtDuration(s.autoClose.lateMin)}`
-            : "новый утренний заказ уже не успеть до 15:00"}{" "}
-          — сайты не принимают доставку раньше 15:00, пока график не разгрузится
+          Утро закрыто автоматически: {autoCloseReason(s.autoClose)} — сайты и ИИ не предлагают
+          доставку раньше 15:00, пока утро не разгрузится
         </div>
       )}
       {mode === "plan" && s.unassigned.length > 0 && (
@@ -98,6 +96,16 @@ export function DayCard({
       )}
     </section>
   );
+}
+
+/** Почему утро закрылось само. */
+function autoCloseReason(a: AutoClose): string {
+  if (a.kind === "limit") {
+    const limit = String(MORNING_ORDERS_PER_FLORIST * a.florists).replace(".", ",");
+    return `${a.count} ${pluralRu(a.count, "утренний заказ", "утренних заказа", "утренних заказов")} TheFlow на ${a.florists} ${pluralRu(a.florists, "флориста", "флористов", "флористов")} (лимит ${limit})`;
+  }
+  if (a.kind === "late") return `${a.orderNumber} не успеваем на ${fmtDuration(a.lateMin)}`;
+  return "новый утренний заказ уже не успеть до 15:00";
 }
 
 /** Что значит замок дня — для ИИ и для сайтов. */

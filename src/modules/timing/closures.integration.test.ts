@@ -8,7 +8,7 @@
 import { describe, it, expect, afterAll } from "vitest";
 import { prisma } from "@/lib/db";
 import { Prisma } from "@/generated/prisma/client";
-import { siteDayClosures, loadDaySchedule } from "./load";
+import { siteDayClosures, loadDaySchedule, siteEarliest } from "./load";
 
 const suffix = `closures-${Date.now()}`;
 // 04.03.2031, 10:00 в Лос-Анджелесе (PST, UTC−8): «сегодня» — 04.03, автозамок — 04.03–06.03.
@@ -30,6 +30,8 @@ async function setup() {
   ids.users.push(user.id);
   const florist = await prisma.florist.create({ data: { userId: user.id, workStartMin: 10 * 60 } });
   ids.florists.push(florist.id);
+  // Флорист в очереди магазина — по ней ИИ выбирает, о чьём графике говорить новому клиенту.
+  await prisma.siteFloristPriority.create({ data: { siteId: site.id, floristId: florist.id, position: 0 } });
 
   // Восемь утренних букетов TheFlow на одного флориста: с 10 утра к 15:00 их не собрать.
   for (const day of [BUSY, OWNER_LOCKED]) {
@@ -71,20 +73,22 @@ describe("замки дней для сайтов", () => {
     expect(closed[OWNER_LOCKED]).toBe(18 * 60); // «только вечер» владельца, а не утро автозамка
     expect(EMPTY in closed).toBe(false);
 
-    // В графике видно, из-за какого заказа; в БД автозамок не пишется.
+    // В графике видно, почему; в БД автозамок не пишется. Восемь утренних TheFlow на одного
+    // флориста — сверх лимита 2,5 (владелец 14.10.2026), он срабатывает раньше правил графика.
     const day = await loadDaySchedule(prisma, BUSY, NOW);
-    expect(day.autoClose).toMatchObject({ kind: "late", orderNumber: expect.stringMatching(/^THEFLOW-2031-03-04-/) });
-    expect(day.autoClose?.kind === "late" && day.autoClose.lateMin).toBeGreaterThanOrEqual(60);
+    expect(day.autoClose).toEqual({ kind: "limit", count: 8, florists: 1 });
     expect(await prisma.morningClosure.findUnique({ where: { day: BUSY } })).toBeNull();
+    // ИИ утро тоже не обещает: новому клиенту — не раньше 15:00, как и на сайте.
+    expect(await siteEarliest(prisma, ids.sites[0], BUSY, NOW)).toBeGreaterThanOrEqual(15 * 60);
 
-    // Пять из восьми отменили — опоздания уже нет, но и четвёртый утренний заказ один флорист до
-    // 15:00 не успеет: утро закрыто как «забито» (владелец 12.10.2026).
+    // Пять из восьми отменили — осталось три: на одного флориста это всё ещё сверх лимита.
     await prisma.order.updateMany({ where: { id: { in: ids.orders.slice(0, 5) } }, data: { orderStatus: "CANCELLED" } });
     expect((await siteDayClosures(prisma, NOW))[BUSY]).toBe(15 * 60);
-    expect((await loadDaySchedule(prisma, BUSY, NOW)).autoClose).toMatchObject({ kind: "full" });
+    expect((await loadDaySchedule(prisma, BUSY, NOW)).autoClose).toEqual({ kind: "limit", count: 3, florists: 1 });
 
-    // Осталось два — новый заказ до 15:00 влезает, и утро открыто без чьих-либо действий.
+    // Осталось два — меньше 2,5: утро открыто без чьих-либо действий, и ИИ снова предлагает утро.
     await prisma.order.updateMany({ where: { id: { in: ids.orders.slice(5, 6) } }, data: { orderStatus: "CANCELLED" } });
     expect(BUSY in (await siteDayClosures(prisma, NOW))).toBe(false);
+    expect(await siteEarliest(prisma, ids.sites[0], BUSY, NOW)).toBeLessThan(15 * 60);
   });
 });

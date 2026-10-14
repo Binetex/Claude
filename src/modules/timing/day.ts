@@ -122,7 +122,37 @@ export function morningFull(earliestByFlorist: (number | null)[]): boolean {
   return earliestByFlorist.every((e) => e == null || e >= MORNING_END_HOUR * 60);
 }
 
+/**
+ * Лимит утра: столько утренних заказов TheFlow на одного флориста, делающего TheFlow в этот день
+ * (владелец 14.10.2026). Цветы на утро закупаются накануне до 12 дня, и всё, что продано сверх
+ * закупки, делать не из чего; плюс флорист один — «график успевает» на завтра врёт: он считает,
+ * что флорист выйдет хоть в 6 утра (14.10 у Ольги с началом в 12:00 продали шесть утренних).
+ * Один флорист — утро закрывается на третьем заказе, два — на пятом.
+ */
+export const MORNING_ORDERS_PER_FLORIST = 2.5;
+
+export type MorningOrderLike = {
+  site: string;
+  /** Начало окна, минуты; null — окно неизвестно, утренним не считается. */
+  windowFrom: number | null;
+  floristId: string | null;
+};
+
+/**
+ * Утро продано: утренних (окно начинается до 15:00) заказов TheFlow уже не меньше лимита на
+ * каждого флориста, у которого они есть. Флористов считаем по самим заказам: автоназначение
+ * отдаёт TheFlow первому свободному в очереди, и свободный второй флорист без её заказов
+ * утро не разгружает (13.10: Арина была свободна, а все утренние ушли Ольге). Без назначения —
+ * всё равно один флорист. null — лимит не достигнут.
+ */
+export function morningSoldOut(orders: MorningOrderLike[]): { count: number; florists: number } | null {
+  const morning = orders.filter((o) => isPriorityShop(o.site) && o.windowFrom != null && o.windowFrom < MORNING_END_HOUR * 60);
+  const florists = Math.max(1, new Set(morning.map((o) => o.floristId).filter(Boolean)).size);
+  return morning.length >= MORNING_ORDERS_PER_FLORIST * florists ? { count: morning.length, florists } : null;
+}
+
 export type AutoClose =
+  | { kind: "limit"; count: number; florists: number }
   | { kind: "late"; id: string; orderNumber: string; lateMin: number }
   | { kind: "full"; earliest: number | null };
 

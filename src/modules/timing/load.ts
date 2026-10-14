@@ -24,7 +24,7 @@ import { loadTimeModel } from "./stats";
 import { driveMin, prepMin, setupMin, DEFAULT_WORK_START_MIN, type TimeModel } from "./model";
 import { planDay, earliestBy, type PlanJob, type PlanParams } from "./planner";
 import {
-  isBigOrder, readyTimeWishes, isPriorityShop, withClosure, sameDayFallback, asClosureLevel, morningOverload, morningFull,
+  isBigOrder, readyTimeWishes, isPriorityShop, withClosure, sameDayFallback, asClosureLevel, morningOverload, morningFull, morningSoldOut,
   NERVOUS_MIN_INBOUND, LATE_TOLERANCE_MIN, BIG_BOUQUET_PRICE, BOUQUET_MIN_PRICE, SAME_DAY_CUTOFF_MIN, CLOSURE_OPEN_FROM, type ClosureLevel, type AutoClose,
 } from "./day";
 
@@ -144,6 +144,19 @@ async function closureOf(prisma: PrismaClient, day: string): Promise<ClosureLeve
   return row ? asClosureLevel(row.level) ?? "MORNING" : null;
 }
 
+/** Лимит утра по заказам дня (`day.ts::morningSoldOut`). */
+function soldOutOf(orders: DayOrder[]): { count: number; florists: number } | null {
+  return morningSoldOut(orders.map((o) => ({ site: o.site.shortName ?? "", windowFrom: windowOf(o)?.from ?? null, floristId: o.currentFloristId })));
+}
+
+/**
+ * Замок дня для НОВОГО заказа: замок владельца, а без него — утро, если лимит утра достигнут.
+ * Новому клиенту ИИ называет время отсюда же: сайт утро уже не продаёт — и ИИ его не обещает.
+ */
+function newOrderClosure(owner: ClosureLevel | null, soldOut: unknown): ClosureLevel | null {
+  return owner ?? (soldOut ? "MORNING" : null);
+}
+
 /**
  * Плановое время доставки ЭТОГО заказа по графику флориста (минуты) — ровно то, что «График
  * доставки» показывает у заказа (`plannedAt`): место в очереди, сборка, курьер и дорога, не раньше
@@ -184,20 +197,21 @@ export async function orderPlanned(prisma: PrismaClient, orderId: string, now: D
 export async function siteEarliest(prisma: PrismaClient, siteId: string, day: string, now: Date = new Date()): Promise<number | null | undefined> {
   const floristId = (await getAvailableFloristIds(siteId, dayDate(day)))[0] ?? null;
   if (!floristId) return undefined;
-  const [model, florist, zips, orders, closure, site] = await Promise.all([
+  const [model, florist, zips, dayOrders, closure, site] = await Promise.all([
     loadTimeModel(prisma, now),
     prisma.florist.findUnique({ where: { id: floristId }, select: { id: true, workStartMin: true } }),
     floristZips(prisma),
-    loadOrders(prisma, { deliveryDate: dayDate(day), currentFloristId: floristId }, now),
+    // Все заказы дня, а не только флориста: по ним считается лимит утра.
+    loadOrders(prisma, { deliveryDate: dayDate(day) }, now),
     closureOf(prisma, day),
     prisma.site.findUnique({ where: { id: siteId }, select: { shortName: true } }),
   ]);
   if (!florist) return undefined;
-  const jobs = orders.map((o) => toJob(o, model, zips.get(floristId)));
+  const jobs = dayOrders.filter((o) => o.currentFloristId === floristId).map((o) => toJob(o, model, zips.get(floristId)));
   const fresh = { id: "__new__", big: false, windowFrom: 0, driveMin: model.unknownDriveMin, priority: isPriorityShop(site?.shortName) };
   const planned = earliestBy(jobs, fresh, lineParams(model, florist, day, now));
   const n = nowParts(now);
-  return withClosure(day === n.day ? sameDayFallback(planned, n.min) : planned, closure, true);
+  return withClosure(day === n.day ? sameDayFallback(planned, n.min) : planned, newOrderClosure(closure, soldOutOf(dayOrders)), true);
 }
 
 /** Сегодня после 13:00: новый заказ на сегодня не обещаем и не отклоняем сами — решает человек. */
@@ -319,6 +333,8 @@ export async function loadDaySchedule(prisma: PrismaClient, day: string, now: Da
   ]);
 
   const level = closure ? asClosureLevel(closure.level) ?? "MORNING" : null;
+  const soldOut = soldOutOf(orders);
+  const newOrderLevel = newOrderClosure(level, soldOut);
   const n = nowParts(now);
   const floristDays: FloristDay[] = florists
     .map((f) => {
@@ -335,7 +351,7 @@ export async function loadDaySchedule(prisma: PrismaClient, day: string, now: Da
         workStartMin: f.workStartMin ?? DEFAULT_WORK_START_MIN,
         earlyStartMin: plan.lineStart < params.lineStart ? plan.lineStart : null,
         dayOff: !isFloristAvailable(f, dayDate(day)),
-        newClientEarliest: withClosure(day === n.day ? sameDayFallback(first, n.min) : first, level, true),
+        newClientEarliest: withClosure(day === n.day ? sameDayFallback(first, n.min) : first, newOrderLevel, true),
         orders: mine
           .map((o) => {
             const it = byId.get(o.id);
@@ -350,7 +366,7 @@ export async function loadDaySchedule(prisma: PrismaClient, day: string, now: Da
   return {
     day,
     closure: closure && level ? { note: closure.note, level } : null,
-    autoClose: level ? null : autoCloseOf(floristDays),
+    autoClose: level ? null : soldOut ? { kind: "limit", ...soldOut } : autoCloseOf(floristDays),
     sameDayCheck: sameDayNeedsCheck(day, now),
     florists: floristDays,
     unassigned: orders.filter((o) => !o.currentFloristId).map((o) => toScheduleOrder(o, null)),
@@ -358,8 +374,9 @@ export async function loadDaySchedule(prisma: PrismaClient, day: string, now: Da
 }
 
 /**
- * Автозамок утра: утренний заказ TheFlow опаздывает на час — или новый утренний заказ уже не успеть
- * ни одному работающему флористу (`day.ts::morningFull`).
+ * Автозамок утра по графику (сверх лимита утра, который проверяется раньше): утренний заказ
+ * TheFlow опаздывает на час — или новый утренний заказ уже не успеть ни одному работающему
+ * флористу (`day.ts::morningFull`).
  */
 function autoCloseOf(florists: FloristDay[]): AutoClose | null {
   const late = morningOverload(florists.flatMap((f) => f.orders));
@@ -386,8 +403,9 @@ function addDays(day: string, n: number): string {
  * закрывал утренний слот — когда уже прям точно не успеваем на 1–2 часа»).
  *
  * Автозамок нигде не хранится, а считается в момент запроса сайта: разгрузится график (перенесли,
- * отменили, собрали) — утро откроется само. ИИ его отдельно не читает: новому клиенту он и так
- * называет время по тому же графику, а перегруженное утро там уже занято.
+ * отменили, собрали) — утро откроется само. Лимит утра (`day.ts::morningSoldOut`) видит и ИИ —
+ * через `newOrderClosure`; правила графика он отдельно не читает: время новому клиенту и так из
+ * того же графика.
  */
 export async function siteDayClosures(prisma: PrismaClient, now: Date = new Date()): Promise<Record<string, number | null>> {
   const today = nowParts(now).day;
