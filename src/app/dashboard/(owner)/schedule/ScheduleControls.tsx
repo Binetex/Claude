@@ -7,8 +7,8 @@ import { setDayClosure } from "./actions";
 
 const OPTIONS: { level: ClosureLevel | null; label: string; done: string }[] = [
   { level: null, label: "Открыт", done: "День открыт" },
-  { level: "MORNING", label: "Утро закрыто", done: "Утро закрыто — раньше 15:00 не предлагаем" },
-  { level: "DAY", label: "Только вечер", done: "Открыт только вечер — раньше 18:00 не предлагаем" },
+  { level: "MORNING", label: "Утро закрыто", done: "Утро закрыто — раньше 3 PM не предлагаем" },
+  { level: "DAY", label: "Только вечер", done: "Открыт только вечер — раньше 6 PM не предлагаем" },
   { level: "FULL", label: "Закрыт", done: "День закрыт — новых заказов на него не берём" },
 ];
 

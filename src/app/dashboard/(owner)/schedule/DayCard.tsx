@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { cn } from "@/lib/cn";
 import type { DaySchedule, FloristDay, ScheduleOrder } from "@/modules/timing/load";
-import { fmtDuration, EARLIEST_DELIVERY_MIN, NERVOUS_MIN_INBOUND, MORNING_ORDERS_PER_FLORIST, type ClosureLevel, type AutoClose } from "@/modules/timing/day";
+import { fmtDuration, clockLabelEn, EARLIEST_DELIVERY_MIN, NERVOUS_MIN_INBOUND, MORNING_ORDERS_PER_FLORIST, type ClosureLevel, type AutoClose } from "@/modules/timing/day";
 import { pluralRu } from "@/lib/plural";
 import { DayLock } from "./ScheduleControls";
 
@@ -14,14 +14,13 @@ import { DayLock } from "./ScheduleControls";
 const WEEKDAY = ["воскресенье", "понедельник", "вторник", "среда", "четверг", "пятница", "суббота"];
 const MONTH = ["января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа", "сентября", "октября", "ноября", "декабря"];
 
-/** Шкала времени: весь день доставки, с 9:00 до 21:00. */
+/** Шкала времени: весь день доставки, с 9 AM до 9 PM. */
 const AXIS_FROM = 9 * 60;
 const AXIS_TO = 21 * 60;
 const HOURS = [9, 11, 13, 15, 17, 19, 21];
 
-function hm(min: number): string {
-  return `${Math.floor(min / 60)}:${String(min % 60).padStart(2, "0")}`;
-}
+/** Время на графике — в американском формате (владелец 15.10.2026: «AM PM мне так удобнее»). */
+const hm = clockLabelEn;
 function pct(min: number): number {
   return Math.min(100, Math.max(0, ((min - AXIS_FROM) / (AXIS_TO - AXIS_FROM)) * 100));
 }
@@ -76,7 +75,7 @@ export function DayCard({
       {mode === "plan" && s.autoClose && (
         <div className="mx-6 mt-4 rounded-lg bg-rose-50 px-4 py-2.5 text-sm text-rose-700">
           Утро закрыто автоматически: {autoCloseReason(s.autoClose)} — сайты и ИИ не предлагают
-          доставку раньше 15:00, пока утро не разгрузится
+          доставку раньше 3 PM, пока утро не разгрузится
         </div>
       )}
       {mode === "plan" && s.unassigned.length > 0 && (
@@ -105,13 +104,13 @@ function autoCloseReason(a: AutoClose): string {
     return `${a.count} ${pluralRu(a.count, "утренний заказ", "утренних заказа", "утренних заказов")} TheFlow на ${a.florists} ${pluralRu(a.florists, "флориста", "флористов", "флористов")} (лимит ${limit})`;
   }
   if (a.kind === "late") return `${a.orderNumber} не успеваем на ${fmtDuration(a.lateMin)}`;
-  return "новый утренний заказ уже не успеть до 15:00";
+  return "новый утренний заказ уже не успеть до 3 PM";
 }
 
 /** Что значит замок дня — для ИИ и для сайтов. */
 const CLOSURE_NOTE: Record<ClosureLevel, string> = {
-  MORNING: "Утро закрыто вручную — ИИ и сайты не предлагают доставку раньше 15:00",
-  DAY: "Открыт только вечер — ИИ и сайты не предлагают доставку раньше 18:00",
+  MORNING: "Утро закрыто вручную — ИИ и сайты не предлагают доставку раньше 3 PM",
+  DAY: "Открыт только вечер — ИИ и сайты не предлагают доставку раньше 6 PM",
   FULL: "День закрыт — новых заказов на него ИИ и сайты не берут; принятые возим как обычно",
 };
 
@@ -171,7 +170,7 @@ function Axis() {
     <div className="relative h-4 text-[11px] text-slate-400">
       {HOURS.map((h) => (
         <span key={h} className="absolute -translate-x-1/2" style={{ left: `${pct(h * 60)}%` }}>
-          {h}:00
+          {hm(h * 60)}
         </span>
       ))}
     </div>
@@ -226,7 +225,7 @@ function OrderRow({ o }: { o: ScheduleOrder }) {
         {o.inbound >= NERVOUS_MIN_INBOUND && <span className="font-medium text-amber-700">клиент пишет: {o.inbound} за сутки — собираем раньше</span>}
         {o.deliveredAt ? (
           <span className={o.late ? "font-medium text-rose-600" : "text-emerald-600"}>
-            привезли {o.deliveredAt}
+            привезли {o.deliveredMin != null ? hm(o.deliveredMin) : o.deliveredAt}
             {o.late ? ` · опоздали на ${fmtDuration(o.lateMin)}` : o.lateMin > 0 ? ` · на ${fmtDuration(o.lateMin)} позже, нормально` : ""}
           </span>
         ) : o.plannedAt != null ? (

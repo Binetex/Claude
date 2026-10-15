@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/db";
 import { todayStrInTz, DEFAULT_STORE_TZ } from "@/lib/tz";
 import { loadDaySchedule, loadTimeModel, type FloristDay } from "@/modules/timing/load";
-import { fmtDuration } from "@/modules/timing/day";
+import { fmtDuration, clockLabelEn } from "@/modules/timing/day";
 import type { TimeModel } from "@/modules/timing/model";
 import { DayCard } from "./DayCard";
 import { loadShopsOf } from "./shops";
@@ -31,7 +31,8 @@ export default async function SchedulePage() {
   );
 }
 
-const hm = (m: number) => `${Math.floor(m / 60)}:${String(m % 60).padStart(2, "0")}`;
+/** Время — в американском формате, как на всём графике. */
+const hm = clockLabelEn;
 const MONTH = ["января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа", "сентября", "октября", "ноября", "декабря"];
 
 /**
