@@ -38,3 +38,20 @@ describe("что уходит в заказ Woo", () => {
     ]);
   });
 });
+
+import { piDrift } from "./deliveryPush";
+
+describe("сайт разошёлся с Floremart по дню или слоту (THEFLOW-21248)", () => {
+  it("другой день на сайте — расхождение", () => {
+    expect(piDrift({ day: "2026-10-16", window: "11:00 - 15:00" }, { systemDate: "2026/10/15", slot: "11:00 - 15:00" })).toBe(true);
+  });
+  it("другой слот — расхождение", () => {
+    expect(piDrift({ day: "2026-10-16", window: "15:00 - 19:00" }, { systemDate: "2026/10/16", slot: "11:00 - 15:00" })).toBe(true);
+  });
+  it("окно Floremart уже слота — не расхождение: на сайт ушёл бы тот же слот", () => {
+    expect(piDrift({ day: "2026-10-16", window: "12:00 - 13:00" }, { systemDate: "2026/10/16", slot: "11:00 - 15:00" })).toBe(false);
+  });
+  it("полей плагина нет — сверять не с чем", () => {
+    expect(piDrift({ day: "2026-10-16", window: "11:00 - 15:00" }, { systemDate: null, slot: null })).toBe(false);
+  });
+});

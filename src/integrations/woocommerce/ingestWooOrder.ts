@@ -19,9 +19,11 @@ import { classifyWooPayment, type WooPaymentConfig, type WooOrderForPayment } fr
 import { deriveWooOrderState, reconcileOrderState, type OrderState } from "./orderState";
 import { resolveMappedOrderFields, type OrderMetaMapping } from "./orderMeta";
 import { cleanCardMessage } from "@/integrations/cardMessageTail";
-import { utcMidnightOfLocalDay, parseLocalDayToUtcMidnight } from "@/lib/tz";
+import { utcMidnightOfLocalDay, parseLocalDayToUtcMidnight, todayStrInTz } from "@/lib/tz";
 import { scheduleDeliveryForNewOrder } from "@/integrations/delivery/burq/scheduleService";
 import { requestCourierNoteForNewOrder } from "@/modules/courierNote/events";
+import { piDrift, PI_WINDOW_META } from "./deliveryPush";
+import { publishWooDeliveryResync } from "./deliveryPushEvents";
 import { isHistoricalOrder } from "@/modules/orders/historical";
 import { assignInitial } from "@/modules/assignments/service";
 import {
@@ -34,7 +36,7 @@ import { paymentTriggerFor } from "@/modules/automations/paymentTriggers";
 import { publishTelegramNotification } from "@/integrations/telegram/events";
 import { onWooOrderIngestedForAirwallex } from "@/integrations/airwallex/reconcile";
 import { adoptOrphanCommunicationsForNewOrder } from "@/integrations/quo/adoptOrphans";
-import { parseWindowText } from "@/lib/deliveryWindow";
+import { parseWindowText, windowOf } from "@/lib/deliveryWindow";
 
 /**
  * Авто-назначение основного флориста при переходе заказа в CONFIRMED (оплачен / в работу) —
@@ -168,7 +170,10 @@ export async function ingestWooOrder(
 
   const existing = await prisma.order.findFirst({
     where: { siteId: site.id, externalId },
-    select: { id: true, orderStatus: true, paymentStatus: true, externalUpdatedAt: true, paymentClassification: true, deliveryDate: true },
+    select: {
+      id: true, orderStatus: true, paymentStatus: true, externalUpdatedAt: true, paymentClassification: true,
+      deliveryDate: true, deliveryWindow: true, windowFrom: true, windowTo: true,
+    },
   });
 
   // Out-of-order guard: пришедшее событие старше уже применённого — пропускаем.
@@ -206,6 +211,21 @@ export async function ingestWooOrder(
   if (existing) {
     const prev: OrderState = { orderStatus: existing.orderStatus, paymentStatus: existing.paymentStatus };
     const reconciled = await applyUpdate(existing.id, prev);
+    // День и слот на сайте разошлись с нашими — Floremart главнее: пишем наши обратно, иначе плагин
+    // доставки считает слот не того дня (THEFLOW-21248: повторная оплата подставила сегодняшнюю дату).
+    // Дату и окно заказа приём по-прежнему не трогает. Прошедшие дни и закрытые заказы не сверяем.
+    if ((config.orderMetaMapping as Record<string, unknown> | null)?.deliveryWindow === PI_WINDOW_META) {
+      const day = existing.deliveryDate.toISOString().slice(0, 10);
+      const active = !["DELIVERED", "CANCELLED"].includes(reconciled.orderStatus);
+      const meta = (k: string) => {
+        const v = wooOrder.meta_data?.find((m) => m.key === k)?.value;
+        return typeof v === "string" ? v : null;
+      };
+      const siteState = { systemDate: meta("pi_system_delivery_date"), slot: meta("pi_delivery_time") };
+      if (active && day >= todayStrInTz(site.timezone) && piDrift({ day, window: windowOf(existing) }, siteState)) {
+        await publishWooDeliveryResync(prisma, existing.id, `${siteState.systemDate ?? "-"}|${siteState.slot ?? "-"}`);
+      }
+    }
     await autoAssignWooIfConfirmed(existing.id, prev, reconciled);
     // Airwallex-мониторинг: держим intent id свежим и на update (новая попытка оплаты).
     await onWooOrderIngestedForAirwallex(prisma, {

@@ -65,6 +65,21 @@ export function piMetaFor(day: string, window: WindowRange | string | null): { m
   return { meta, slot: slot?.slot ?? null };
 }
 
+/**
+ * Разошёлся ли заказ на сайте с Floremart по дню или слоту — по тем полям, по которым плагин
+ * считает занятые слоты. THEFLOW-21248 (15.10.2026): клиент выбрал 16-е, первая оплата не прошла,
+ * повторная отправка формы подставила в заказ сегодняшнее 15-е — и плагин держал утро не того дня
+ * («1 из 4» при пустом утре в графике). Сравниваем с тем, что записали бы сами (`piMetaFor`): окно
+ * Floremart может быть уже слота, и это не расхождение.
+ */
+export function piDrift(ours: { day: string; window: WindowRange | string | null }, site: { systemDate: string | null; slot: string | null }): boolean {
+  const want = piMetaFor(ours.day, ours.window);
+  const wantDate = want.meta.find((m) => m.key === "pi_system_delivery_date")!.value;
+  if (site.systemDate && site.systemDate.trim() !== wantDate) return true;
+  const squash = (v: string) => v.replace(/\s+/g, "");
+  return !!(want.slot && site.slot && squash(site.slot) !== squash(want.slot));
+}
+
 export async function pushWooDelivery(creds: WooCredentials, externalId: string, day: string, window: WindowRange | string | null): Promise<{ slot: string | null }> {
   const { meta, slot } = piMetaFor(day, window);
   await wooRequest(creds, `/orders/${encodeURIComponent(externalId)}`, { method: "PUT", body: { meta_data: meta } });
