@@ -18,12 +18,12 @@ import { parseWooOrder, type WooOrder } from "./orderAdapter";
 import { classifyWooPayment, type WooPaymentConfig, type WooOrderForPayment } from "./payment";
 import { deriveWooOrderState, reconcileOrderState, type OrderState } from "./orderState";
 import { resolveMappedOrderFields, type OrderMetaMapping } from "./orderMeta";
-import { cleanCardMessage } from "@/integrations/cardMessageTail";
-import { utcMidnightOfLocalDay, parseLocalDayToUtcMidnight, todayStrInTz } from "@/lib/tz";
-import { scheduleDeliveryForNewOrder } from "@/integrations/delivery/burq/scheduleService";
+import { utcMidnightOfLocalDay, storeDateTimeFormat } from "@/lib/tz";
+import { scheduleDeliveryForNewOrder, onOrderDeliveryChangeSafe } from "@/integrations/delivery/burq/scheduleService";
+import { checkoutFieldsOf, retakeOnPaid } from "./checkoutFields";
+import { recomputeDaysForOrder } from "@/modules/finance/orderDayHook";
+import { notifyDeliveryChanged } from "@/integrations/notifications/telegram";
 import { requestCourierNoteForNewOrder } from "@/modules/courierNote/events";
-import { piDrift, PI_WINDOW_META } from "./deliveryPush";
-import { publishWooDeliveryResync } from "./deliveryPushEvents";
 import { isHistoricalOrder } from "@/modules/orders/historical";
 import { assignInitial } from "@/modules/assignments/service";
 import {
@@ -36,7 +36,6 @@ import { paymentTriggerFor } from "@/modules/automations/paymentTriggers";
 import { publishTelegramNotification } from "@/integrations/telegram/events";
 import { onWooOrderIngestedForAirwallex } from "@/integrations/airwallex/reconcile";
 import { adoptOrphanCommunicationsForNewOrder } from "@/integrations/quo/adoptOrphans";
-import { parseWindowText, windowOf } from "@/lib/deliveryWindow";
 
 /**
  * Авто-назначение основного флориста при переходе заказа в CONFIRMED (оплачен / в работу) —
@@ -173,6 +172,8 @@ export async function ingestWooOrder(
     select: {
       id: true, orderStatus: true, paymentStatus: true, externalUpdatedAt: true, paymentClassification: true,
       deliveryDate: true, deliveryWindow: true, windowFrom: true, windowTo: true,
+      recipientName: true, recipientPhone: true, addressLine: true, apartment: true, city: true, zip: true,
+      cardMessage: true, customerNote: true,
     },
   });
 
@@ -210,22 +211,12 @@ export async function ingestWooOrder(
   // ── UPDATE существующего.
   if (existing) {
     const prev: OrderState = { orderStatus: existing.orderStatus, paymentStatus: existing.paymentStatus };
+    // Оплата пришла — день, окно, получатель и открытка становятся такими, как в оплаченной форме.
+    // ДО записи статуса: упади запись формы, повтор вебхука снова увидит переход в «оплачен». И до
+    // назначения флориста: оно смотрит на день (выходные), карточка уйдёт уже с верными данными.
+    const becomesPaid = prev.paymentStatus !== "PAID" && reconcileOrderState(prev, incomingState, wooOrder.status ?? "pending").paymentStatus === "PAID";
+    if (becomesPaid) await retakeCheckoutOnPaid(existing, checkoutFieldsOf(mapped, normalized), site.timezone ?? null);
     const reconciled = await applyUpdate(existing.id, prev);
-    // День и слот на сайте разошлись с нашими — Floremart главнее: пишем наши обратно, иначе плагин
-    // доставки считает слот не того дня (THEFLOW-21248: повторная оплата подставила сегодняшнюю дату).
-    // Дату и окно заказа приём по-прежнему не трогает. Прошедшие дни и закрытые заказы не сверяем.
-    if ((config.orderMetaMapping as Record<string, unknown> | null)?.deliveryWindow === PI_WINDOW_META) {
-      const day = existing.deliveryDate.toISOString().slice(0, 10);
-      const active = !["DELIVERED", "CANCELLED"].includes(reconciled.orderStatus);
-      const meta = (k: string) => {
-        const v = wooOrder.meta_data?.find((m) => m.key === k)?.value;
-        return typeof v === "string" ? v : null;
-      };
-      const siteState = { systemDate: meta("pi_system_delivery_date"), slot: meta("pi_delivery_time") };
-      if (active && day >= todayStrInTz(site.timezone) && piDrift({ day, window: windowOf(existing) }, siteState)) {
-        await publishWooDeliveryResync(prisma, existing.id, `${siteState.systemDate ?? "-"}|${siteState.slot ?? "-"}`);
-      }
-    }
     await autoAssignWooIfConfirmed(existing.id, prev, reconciled);
     // Airwallex-мониторинг: держим intent id свежим и на update (новая попытка оплаты).
     await onWooOrderIngestedForAirwallex(prisma, {
@@ -279,10 +270,8 @@ export async function ingestWooOrder(
   // поле хранится именно так. Сырой timestamp сдвигал вечерние заказы на сутки вперёд (полночь
   // UTC наступает в Лос-Анджелесе в 17:00), и «доставка сегодня», списки дня и финансовый день
   // считали такой заказ завтрашним.
-  const deliveryDate =
-    parseLocalDayToUtcMidnight(mapped.deliveryDate) ??
-    parseLocalDayToUtcMidnight(normalized.deliveryDate) ??
-    utcMidnightOfLocalDay(new Date(normalized.createdAt), site.timezone);
+  const form = checkoutFieldsOf(mapped, normalized);
+  const deliveryDate = form.deliveryDate ?? utcMidnightOfLocalDay(new Date(normalized.createdAt), site.timezone);
   // Заказ из прошлого, которого у нас не было: клиент завёл на сайте аккаунт, WooCommerce
   // пересохранил его старые гостевые заказы и разослал «заказ обновлён» (THEFLOW-15339, 30.09.2026).
   // С живого пути (вебхук, свежий синк) такой не заводим вовсе: иначе он становился новым оплаченным
@@ -292,13 +281,6 @@ export async function ingestWooOrder(
     console.info(`[woo] заказ ${externalId} из прошлого (доставка ${deliveryDate.toISOString().slice(0, 10)}) — не заводим`);
     return { status: "skipped_historical", orderId: null, classification: payment.classification };
   }
-  // Тот же мусор магазина, что и у Shopify: служебный хвост приложения доставки и
-  // HTML-сущности. См. cardMessageTail.ts. Сырой текст остаётся в originalCardMessage.
-  const rawCardMessage = mapped.cardMessage ?? normalized.cardMessage ?? "";
-  const cardMessage = cleanCardMessage(rawCardMessage);
-  const recipientName = mapped.recipientName ?? normalized.recipient.name;
-  const recipientPhone = mapped.recipientPhone ?? normalized.recipient.phone ?? "";
-  const addr = normalized.shippingAddress;
   const items: WooLineItem[] = (wooOrder.line_items ?? []) as WooLineItem[];
 
   let created: { id: string };
@@ -313,23 +295,22 @@ export async function ingestWooOrder(
       externalCreatedAt: new Date(normalized.createdAt),
       externalUpdatedAt: externalUpdatedAt ?? undefined,
       deliveryDate,
-      deliveryWindow: mapped.deliveryWindow ?? normalized.deliveryWindow ?? "",
-      // Окно строго «с — до»: слоты плагина («11:00 - 15:00») разбираются надёжно.
-      windowFrom: parseWindowText(mapped.deliveryWindow ?? normalized.deliveryWindow)?.from ?? null,
-      windowTo: parseWindowText(mapped.deliveryWindow ?? normalized.deliveryWindow)?.to ?? null,
+      deliveryWindow: form.deliveryWindow,
+      windowFrom: form.windowFrom,
+      windowTo: form.windowTo,
       senderName: mapped.senderName ?? normalized.sender.name,
       senderPhone: normalized.sender.phone ?? "",
       senderEmail: normalized.sender.email,
       ...wooSenderAddressFields(wooOrder.billing),
-      recipientName,
-      recipientPhone,
+      recipientName: form.recipientName,
+      recipientPhone: form.recipientPhone,
       recipientEmail: normalized.recipient.email,
-      addressLine: addr?.line1 ?? "",
-      apartment: mapped.apartment ?? addr?.line2 ?? null,
-      city: addr?.city ?? "",
-      zip: addr?.zip ?? "",
-      cardMessage,
-      originalCardMessage: rawCardMessage,
+      addressLine: form.addressLine,
+      apartment: form.apartment,
+      city: form.city,
+      zip: form.zip,
+      cardMessage: form.cardMessage,
+      originalCardMessage: form.originalCardMessage,
       customerNote: mapped.deliveryInstructions ?? "",
       originalCustomerNote: mapped.deliveryInstructions ?? "",
       itemsTotal: dec(normalized.money.itemsTotal),
@@ -424,6 +405,42 @@ export async function ingestWooOrder(
     await publishOrderLifecycleTriggers(prisma, { orderId: created.id, siteId: site.id, prev: null, next: incomingState });
   }
   return { status: "created", orderId: created.id, classification: payment.classification };
+}
+
+/**
+ * Повторная оплата с другой формой (THEFLOW-21248, `checkoutFields.ts`): ставим в заказ то, что
+ * клиент подтвердил оплатой, и делаем всё, что делает перенос в карточке — финансы обоих дней, Burq,
+ * флористу и владельцу сообщение «кто перенёс». Строка в заметке — журнала правок от имени клиента нет.
+ * В заказ Woo не пишем: там и так стоит это.
+ */
+async function retakeCheckoutOnPaid(
+  ours: Parameters<typeof retakeOnPaid>[0] & { id: string; customerNote: string },
+  form: ReturnType<typeof checkoutFieldsOf>,
+  tz: string | null
+): Promise<void> {
+  const audits = await prisma.orderAudit.findMany({ where: { orderId: ours.id }, select: { block: true }, distinct: ["block"] });
+  const take = retakeOnPaid(ours, form, new Set(audits.map((a) => a.block)));
+  if (Object.keys(take.data).length === 0) return;
+
+  const label = (d: Date, w: string) => `${d.toISOString().slice(8, 10)}.${d.toISOString().slice(5, 7)} ${w}`.trim();
+  const fromText = label(ours.deliveryDate, ours.deliveryWindow);
+  const toText = label(take.data.deliveryDate ?? ours.deliveryDate, take.data.deliveryWindow ?? ours.deliveryWindow);
+  const what = [
+    take.deliveryChanged ? `доставка ${fromText} → ${toText}` : null,
+    take.contactsChanged ? "получатель/адрес" : null,
+    "cardMessage" in take.data ? "открытка" : null,
+  ].filter(Boolean).join(", ");
+  const stamp = storeDateTimeFormat(tz, { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }).format(new Date());
+  const line = `${stamp} · Клиент оплатил с другими данными в форме, взяли из оплаченной: ${what}`;
+  await prisma.order.update({
+    where: { id: ours.id },
+    data: { ...take.data, customerNote: ours.customerNote.trim() ? `${line}\n${ours.customerNote}` : line },
+  });
+  console.info(`[woo] заказ ${ours.id}: при оплате взяты данные формы — ${what}`);
+
+  if (take.dateChanged) await recomputeDaysForOrder(prisma, ours.id, [ours.deliveryDate, take.data.deliveryDate!]);
+  if (take.deliveryChanged || take.contactsChanged) await onOrderDeliveryChangeSafe(prisma, ours.id);
+  if (take.deliveryChanged) await notifyDeliveryChanged(ours.id, { fromText, toText, by: "клиент при оплате на сайте" });
 }
 
 /** Мягкая архивация заказа при order.deleted / trash: физически НЕ удаляем. */

@@ -40,26 +40,6 @@ export async function publishWooDeliveryPush(prisma: PrismaClient, orderId: stri
   }
 }
 
-/**
- * Заказ на сайте разошёлся с Floremart по дню или слоту (`deliveryPush.ts::piDrift`) — записать туда
- * наши: Floremart главнее, плагин обязан считать слот того дня, что у нас. Ключ — то, что сейчас
- * стоит на сайте: повторный вебхук с тем же второй задачи не создаст, и если сайт упорно
- * возвращает своё, записи по кругу не будет.
- */
-export async function publishWooDeliveryResync(prisma: PrismaClient, orderId: string, siteState: string): Promise<void> {
-  try {
-    await new PrismaOutboxRepository(prisma).enqueue({
-      eventType: WOO_DELIVERY_PUSH_EVENT,
-      aggregateType: "order",
-      aggregateId: orderId,
-      payload: { orderId } satisfies WooDeliveryPushPayload,
-      idempotencyKey: `woo:delivery:${orderId}:resync:${siteState}`,
-    });
-  } catch (err) {
-    console.error(`[woo] сверка доставки ${orderId} не поставлена в очередь:`, err instanceof Error ? err.message : String(err));
-  }
-}
-
 export function buildWooDeliveryPushHandler(prisma: PrismaClient): OutboxHandler {
   return async (record: OutboxRecord) => {
     const p = record.payload as WooDeliveryPushPayload;

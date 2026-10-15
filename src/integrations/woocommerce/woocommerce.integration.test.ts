@@ -187,17 +187,16 @@ describe("заказ из прошлого из вебхука не оживае
   });
 });
 
-describe("день и слот на сайте разошлись с Floremart — пишем наши обратно (15.10.2026, THEFLOW-21248)", () => {
-  // Клиент выбрал 16-е, первая оплата не прошла, повторная отправка формы подставила 15-е: плагин
-  // держал утро 15-го («1 из 4»), а у нас заказ правильно стоял на 16-м.
+describe("повторная оплата с другой формой — берём оплаченную (15.10.2026, THEFLOW-21248)", () => {
+  // Первая оплата не прошла, Woo всё равно создал заказ — с 16-м. Клиент оплатил тот же заказ уже
+  // с 15-м и получил письмо «October 15»; у нас заказ остался на 16-м.
   const piConfig: WooIngestConfig = { ...ingestConfig, orderMetaMapping: { deliveryDate: "pi_delivery_date", deliveryWindow: "pi_delivery_time" } };
-  const meta = (system: string, display: string) => [
-    { key: "pi_system_delivery_date", value: system },
+  const meta = (display: string) => [
     { key: "pi_delivery_date", value: display },
     { key: "pi_delivery_time", value: "11:00 - 15:00" },
   ];
-  const order = (over: Record<string, unknown>) => ({
-    id: 9921248, number: "9921248", status: "processing",
+  const order = (n: number, over: Record<string, unknown>) => ({
+    id: n, number: String(n),
     billing: { first_name: "A", last_name: "B", phone: "+13105550000", email: "a@x.com" },
     shipping: { first_name: "C", last_name: "D", phone: "+13105550001", address_1: "1 Main St", city: "LA", postcode: "90001" },
     line_items: [{ id: 1, name: "Pure Love", product_id: 100, quantity: 1, price: "200" }],
@@ -205,29 +204,38 @@ describe("день и слот на сайте разошлись с Floremart �
     ...over,
   });
   const site = () => ({ id: siteId, shortName: SHORT, timezone: "America/Los_Angeles" });
-  const resyncs = async (orderId: string) =>
-    prisma.outboxEvent.count({ where: { eventType: "woo.delivery.push", aggregateId: orderId, idempotencyKey: { contains: ":resync:" } } });
+  const at = (agoMs: number) => new Date(Date.now() - agoMs).toISOString().slice(0, 19);
 
-  it("у нас остаётся 16-е, на сайт уходит задача вернуть 16-е; тот же вебхук второй не даёт", async () => {
-    const created = new Date(Date.now() - 120_000).toISOString().slice(0, 19);
-    const r = await ingestWooOrder(site(), order({ date_created_gmt: created, date_modified_gmt: created, meta_data: meta("2031/10/16", "October 16, 2031") }) as never, piConfig);
+  it("отказ с 16-м → оплата с 15-м и новым адресом: заказ на 15-м, адрес новый, строка в заметке", async () => {
+    const created = at(180_000);
+    const r = await ingestWooOrder(site(), order(9921248, { status: "failed", date_created_gmt: created, date_modified_gmt: created, meta_data: meta("October 16, 2031") }) as never, piConfig);
     expect(r.status).toBe("created");
     const id = r.orderId!;
     try {
-      const later = new Date(Date.now() - 60_000).toISOString().slice(0, 19);
-      const drifted = order({ date_created_gmt: created, date_modified_gmt: later, meta_data: meta("2031/10/15", "October 15, 2031") });
-      await ingestWooOrder(site(), drifted as never, piConfig);
+      const paid = order(9921248, {
+        status: "processing", date_created_gmt: created, date_modified_gmt: at(60_000), meta_data: meta("October 15, 2031"),
+        shipping: { first_name: "C", last_name: "D", phone: "+13105550001", address_1: "9 Oak Ave", city: "LA", postcode: "90046" },
+      });
+      await ingestWooOrder(site(), paid as never, piConfig);
+      const o = await prisma.order.findUnique({ where: { id }, select: { deliveryDate: true, paymentStatus: true, addressLine: true, zip: true, customerNote: true } });
+      expect(o!.paymentStatus).toBe("PAID");
+      expect(o!.deliveryDate.toISOString().slice(0, 10)).toBe("2031-10-15");
+      expect(o!.addressLine).toBe("9 Oak Ave");
+      expect(o!.zip).toBe("90046");
+      expect(o!.customerNote).toContain("взяли из оплаченной");
+    } finally {
+      await prisma.outboxEvent.deleteMany({ where: { aggregateId: id } });
+    }
+  });
+
+  it("уже оплаченный заказ сайт не двигает: перенос у нас главнее", async () => {
+    const created = at(180_000);
+    const r = await ingestWooOrder(site(), order(9921249, { status: "processing", date_created_gmt: created, date_modified_gmt: created, meta_data: meta("October 16, 2031") }) as never, piConfig);
+    const id = r.orderId!;
+    try {
+      await ingestWooOrder(site(), order(9921249, { status: "processing", date_created_gmt: created, date_modified_gmt: at(60_000), meta_data: meta("October 15, 2031") }) as never, piConfig);
       const o = await prisma.order.findUnique({ where: { id }, select: { deliveryDate: true } });
       expect(o!.deliveryDate.toISOString().slice(0, 10)).toBe("2031-10-16");
-      expect(await resyncs(id)).toBe(1);
-
-      await ingestWooOrder(site(), drifted as never, piConfig);
-      expect(await resyncs(id)).toBe(1);
-
-      // Сайт исправлен (наша запись дошла) — сверка молчит.
-      const fixed = new Date().toISOString().slice(0, 19);
-      await ingestWooOrder(site(), order({ date_created_gmt: created, date_modified_gmt: fixed, meta_data: meta("2031/10/16", "October 16, 2031") }) as never, piConfig);
-      expect(await resyncs(id)).toBe(1);
     } finally {
       await prisma.outboxEvent.deleteMany({ where: { aggregateId: id } });
     }
