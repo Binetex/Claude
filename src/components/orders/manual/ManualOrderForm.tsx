@@ -16,12 +16,14 @@ import { CatalogPicker } from "@/components/orders/CatalogPicker";
 import type { CatalogHit } from "@/modules/catalog/searchActions";
 import { ItemDialog } from "./ItemDialog";
 import { emptyCustomItem, lineCustomer, lineFlorist, type DraftItem } from "./itemTypes";
-import { ownerCreateManualOrder } from "./actions";
+import { createManualOrderAction } from "@/modules/orders/manualOrderActions";
 import { WindowPicker } from "@/components/orders/WindowPicker";
 import { formatWindowText, type WindowRange } from "@/lib/deliveryWindow";
 
 /**
- * Форма ручного заказа: три блока на одной странице, без мастера и без автосохранения.
+ * Форма ручного заказа: три блока на одной странице, без мастера и без автосохранения. Одна на
+ * владельца и колл-центр (владелец 15.10.2026); оператор не видит денег флориста — ни цен флориста,
+ * ни закупки (`floristMoney`), цены флориста по каталогу ставит сервер.
  *
  * Всё собрано из компонентов, которые уже есть в проекте: Popover вместо DropdownMenu и
  * вместо Command, Dialog вместо Sheet, <details> вместо Collapsible. Новых зависимостей
@@ -31,11 +33,17 @@ export function ManualOrderForm({
   sites,
   windowPresets,
   florists,
+  floristMoney,
+  orderBasePath,
 }: {
   sites: { id: string; name: string }[];
   /** Частые окна каждого магазина: siteId → кнопки в выборе времени. */
   windowPresets: Record<string, WindowRange[]>;
   florists: { id: string; name: string }[];
+  /** Цены флориста, суммы флориста и закупка — только у владельца. */
+  floristMoney: boolean;
+  /** Куда вести после создания: `/dashboard/orders` у владельца, `/dashboard/cc` у оператора. */
+  orderBasePath: string;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -135,7 +143,7 @@ export function ManualOrderForm({
 
   function submit() {
     start(async () => {
-      const res = await ownerCreateManualOrder({
+      const res = await createManualOrderAction({
         siteId,
         deliveryDate,
         deliveryWindow: deliveryWindow ? formatWindowText(deliveryWindow) : "—",
@@ -187,7 +195,7 @@ export function ManualOrderForm({
         return;
       }
       toast.success(`Заказ ${res.orderNumber} создан`);
-      router.push(`/dashboard/orders/${res.orderId}`);
+      router.push(`${orderBasePath}/${res.orderId}`);
     });
   }
 
@@ -249,7 +257,7 @@ export function ManualOrderForm({
                       <div className="text-slate-800 tabular-nums">
                         {formatMoney(lineCustomer(i))} <span className="text-xs text-slate-400">× {i.quantity}</span>
                       </div>
-                      <div className="text-xs text-slate-500 tabular-nums">{formatMoney(lineFlorist(i))} флористу</div>
+                      {floristMoney && <div className="text-xs text-slate-500 tabular-nums">{formatMoney(lineFlorist(i))} флористу</div>}
                     </div>
                     <div className="ml-auto flex shrink-0 items-center gap-0.5">
                       <Button variant="ghost" size="iconSm" aria-label="Выше" disabled={idx === 0} onClick={() => move(idx, -1)}>
@@ -289,10 +297,12 @@ export function ManualOrderForm({
                 <span className="text-slate-500">Сумма клиента</span>
                 <span className="font-semibold text-slate-900 tabular-nums">{formatMoney(totals.customerItems)}</span>
               </div>
-              <div className="flex items-center justify-between">
-                <span className="text-slate-500">Сумма флориста</span>
-                <span className="text-slate-700 tabular-nums">{formatMoney(totals.florist)}</span>
-              </div>
+              {floristMoney && (
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-500">Сумма флориста</span>
+                  <span className="text-slate-700 tabular-nums">{formatMoney(totals.florist)}</span>
+                </div>
+              )}
             </div>
           )}
         </Card>
@@ -419,10 +429,12 @@ export function ManualOrderForm({
                 <span className="text-sm font-medium text-slate-800">Итого с клиента</span>
                 <span className="text-xl font-bold text-slate-900 tabular-nums">{formatMoney(totals.total)}</span>
               </div>
-              <div className="flex items-baseline justify-between">
-                <span className="text-sm text-slate-500">Флористу</span>
-                <span className="text-slate-700 tabular-nums">{formatMoney(totals.florist)}</span>
-              </div>
+              {floristMoney && (
+                <div className="flex items-baseline justify-between">
+                  <span className="text-sm text-slate-500">Флористу</span>
+                  <span className="text-slate-700 tabular-nums">{formatMoney(totals.florist)}</span>
+                </div>
+              )}
 
               <Button className="w-full" disabled={!canSubmit || pending} onClick={submit}>
                 {pending ? "Создаю…" : "Создать заказ"}
@@ -444,6 +456,7 @@ export function ManualOrderForm({
       {editing && (
         <ItemDialog
           item={editing}
+          floristMoney={floristMoney}
           open
           onOpenChange={(v) => { if (!v) setEditing(null); }}
           onSave={(i) => { upsert(i); setEditing(null); }}

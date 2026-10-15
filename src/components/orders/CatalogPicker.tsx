@@ -5,7 +5,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { formatMoney } from "@/lib/money";
-import { ownerSearchCatalog, type CatalogHit } from "@/modules/catalog/searchActions";
+import { searchCatalog, type CatalogHit } from "@/modules/catalog/searchActions";
 
 /**
  * Выбор товара из каталога — Dialog + Input + список, без сторонних библиотек.
@@ -46,7 +46,7 @@ export function CatalogPicker({
     if (!open) return;
     const t = setTimeout(() => {
       start(async () => {
-        setHits(await ownerSearchCatalog(query, siteId || null));
+        setHits(await searchCatalog(query, siteId || null));
       });
     }, 250);
     return () => clearTimeout(t);

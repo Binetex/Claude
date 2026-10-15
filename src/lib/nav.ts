@@ -74,6 +74,8 @@ function callCenterNav(): NavItem[] {
     { href: "/dashboard/communications", label: "Другие сообщения" },
     // Счёт клиенту, который решил доплатить, выставляет сам оператор (владелец 29.09.2026).
     { href: "/dashboard/cc/payment-links", label: "Ссылки на оплату" },
+    // Заказ по телефону оператор вносит сам (владелец 15.10.2026).
+    { href: "/dashboard/cc/new-order", label: "Создать заказ" },
   ];
 }
 

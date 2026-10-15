@@ -96,6 +96,33 @@ export type CreateManualOrderInput = {
 
 const money = (v: number) => new Prisma.Decimal(v.toFixed(2));
 
+/**
+ * Заказ вносит колл-центр (владелец 15.10.2026): денег флориста оператор не видит и не задаёт.
+ * Цена флориста позиции из каталога — по каталогу (вариант, иначе товар), у своей позиции — ноль,
+ * то есть «не задана»: её ставит владелец «Ценой флористу» в карточке. Финансового типа и
+ * закупки у оператора нет. Что прислала форма — не важно: этих полей у оператора нет.
+ */
+export async function withCatalogFloristPrices(input: CreateManualOrderInput): Promise<CreateManualOrderInput> {
+  const catalog = input.items.filter((i): i is ManualCatalogItem => i.kind === "catalog");
+  const [products, variants] = await Promise.all([
+    prisma.product.findMany({ where: { id: { in: catalog.map((i) => i.productId) } }, select: { id: true, floristPrice: true } }),
+    prisma.productVariant.findMany({
+      where: { id: { in: catalog.flatMap((i) => (i.variantId ? [i.variantId] : [])) } },
+      select: { id: true, floristPrice: true },
+    }),
+  ]);
+  const productPrice = new Map(products.map((p) => [p.id, p.floristPrice]));
+  const variantPrice = new Map(variants.map((v) => [v.id, v.floristPrice]));
+  return {
+    ...input,
+    items: input.items.map((it) => {
+      if (it.kind === "custom") return { ...it, floristPrice: 0, financialType: null, purchaseCostCents: null };
+      const price = (it.variantId ? variantPrice.get(it.variantId) : null) ?? productPrice.get(it.productId) ?? null;
+      return { ...it, floristPrice: price == null ? 0 : Number(price) };
+    }),
+  };
+}
+
 /** UTC-полночь локального дня: Order.deliveryDate хранится именно так (см. CLAUDE.md). */
 function deliveryDateToUtcMidnight(day: string): Date {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) throw new ManualOrderError("bad_date", "Дата доставки должна быть в формате ГГГГ-ММ-ДД.");

@@ -2,7 +2,7 @@ import Link from "next/link";
 import { requireRole } from "@/lib/rbac";
 import { prisma } from "@/lib/db";
 import { PageHeader } from "@/components/ui/misc";
-import { ManualOrderForm } from "./ManualOrderForm";
+import { ManualOrderForm } from "@/components/orders/manual/ManualOrderForm";
 import { loadWindowPresets } from "@/modules/orders/windowPresets";
 
 export const dynamic = "force-dynamic";
@@ -43,6 +43,8 @@ export default async function NewOrderPage() {
         sites={sites}
         windowPresets={presets}
         florists={florists.map((f) => ({ id: f.id, name: f.user.name }))}
+        floristMoney
+        orderBasePath="/dashboard/orders"
       />
     </div>
   );

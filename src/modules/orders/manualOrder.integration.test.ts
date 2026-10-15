@@ -7,7 +7,7 @@
  */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { prisma } from "@/lib/db";
-import { createManualOrder, ManualOrderError } from "./manualOrder";
+import { createManualOrder, withCatalogFloristPrices, ManualOrderError } from "./manualOrder";
 import { resolveItemsFinance } from "@/modules/finance/itemFinance";
 
 const RUN = `man-${Date.now()}`;
@@ -222,6 +222,28 @@ describe("смешанный заказ и деньги", () => {
     expect(Number(order!.itemsTotal)).toBe(170);
     // 170 + 20 + 10 + 5 − 15 = 190
     expect(Number(order!.customerTotal)).toBe(190);
+  });
+});
+
+describe("заказ вносит колл-центр — денег флориста он не задаёт (15.10.2026)", () => {
+  it("каталог — цена флориста по каталогу, своя позиция — «не задана», закупки нет; присланное формой не в счёт", async () => {
+    const input = await withCatalogFloristPrices({
+      ...baseInput(),
+      items: [
+        { kind: "catalog", productId, variantId, quantity: 1, customerPrice: 150, floristPrice: 999, composition: null },
+        {
+          kind: "custom", name: "Пионы по фото", quantity: 1, customerPrice: 200, floristPrice: 555, composition: null,
+          imageUrl: null, financialType: "VASE", purchaseCostCents: 1200,
+        },
+      ],
+    });
+    const { orderId } = await create(input);
+
+    const items = await prisma.orderItem.findMany({ where: { orderId }, orderBy: { externalPrice: "asc" } });
+    expect(Number(items[0].floristItemPrice)).toBe(80);
+    expect(Number(items[1].floristItemPrice)).toBe(0);
+    expect(items[1].financialTypeSnapshot).toBeNull();
+    expect(items[1].purchaseCostSnapshotCents).toBeNull();
   });
 });
 

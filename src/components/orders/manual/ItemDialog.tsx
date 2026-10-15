@@ -21,11 +21,14 @@ import type { DraftItem } from "./itemTypes";
  */
 export function ItemDialog({
   item,
+  floristMoney,
   open,
   onOpenChange,
   onSave,
 }: {
   item: DraftItem;
+  /** Цена флориста и закупка — только у владельца (колл-центр денег флориста не видит). */
+  floristMoney: boolean;
   open: boolean;
   onOpenChange: (v: boolean) => void;
   onSave: (item: DraftItem) => void;
@@ -74,7 +77,7 @@ export function ItemDialog({
             </div>
           )}
 
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <div className={`grid grid-cols-1 gap-3 ${floristMoney ? "sm:grid-cols-3" : "sm:grid-cols-2"}`}>
             <div className="space-y-1.5">
               <Label htmlFor="item-qty">Количество</Label>
               <Input
@@ -95,15 +98,17 @@ export function ItemDialog({
                 onChange={(e) => set("customerPrice", num(e.target.value))}
               />
             </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="item-florist">Цена флориста</Label>
-              <Input
-                id="item-florist"
-                inputMode="decimal"
-                value={String(draft.floristPrice)}
-                onChange={(e) => set("floristPrice", num(e.target.value))}
-              />
-            </div>
+            {floristMoney && (
+              <div className="space-y-1.5">
+                <Label htmlFor="item-florist">Цена флориста</Label>
+                <Input
+                  id="item-florist"
+                  inputMode="decimal"
+                  value={String(draft.floristPrice)}
+                  onChange={(e) => set("floristPrice", num(e.target.value))}
+                />
+              </div>
+            )}
           </div>
 
           <div className="space-y-1.5">
@@ -131,6 +136,7 @@ export function ItemDialog({
 
               {/* Редкое — под раскрывашкой. <details> вместо Collapsible: он уже используется
                   в открытке и панели Burq, новой зависимости ради него не нужно. */}
+              {floristMoney && (
               <details className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
                 <summary className="cursor-pointer text-sm font-medium text-slate-700">Дополнительно</summary>
                 <div className="mt-3 space-y-3">
@@ -166,6 +172,7 @@ export function ItemDialog({
                   </div>
                 </div>
               </details>
+              )}
             </>
           )}
 

@@ -33,8 +33,10 @@ export type CatalogHit = {
  * Архивные (remoteDeleted) не показываются: положить в новый заказ то, чего уже нет на
  * витрине, — почти всегда ошибка.
  */
-export async function ownerSearchCatalog(query: string, siteId: string | null): Promise<CatalogHit[]> {
-  await requireRole("OWNER");
+export async function searchCatalog(query: string, siteId: string | null): Promise<CatalogHit[]> {
+  // Колл-центр ищет для ручного заказа (владелец 15.10.2026), но денег флориста не видит.
+  const user = await requireRole("OWNER", "CALL_CENTER");
+  const floristMoney = user.role === "OWNER";
   const q = query.trim();
 
   const products = await prisma.product.findMany({
@@ -73,7 +75,7 @@ export async function ownerSearchCatalog(query: string, siteId: string | null): 
         siteName: p.site.name,
         image: p.image,
         customerPrice: 0,
-        floristPrice: toNumber(p.floristPrice ?? 0),
+        floristPrice: floristMoney ? toNumber(p.floristPrice ?? 0) : 0,
         composition: null,
       });
       continue;
@@ -88,7 +90,7 @@ export async function ownerSearchCatalog(query: string, siteId: string | null): 
         siteName: p.site.name,
         image: v.image ?? p.image,
         customerPrice: toNumber(v.listPrice),
-        floristPrice: toNumber(v.floristPrice ?? p.floristPrice ?? 0),
+        floristPrice: floristMoney ? toNumber(v.floristPrice ?? p.floristPrice ?? 0) : 0,
         composition: v.floristComposition,
       });
     }
