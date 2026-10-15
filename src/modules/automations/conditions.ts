@@ -7,12 +7,14 @@
  * сумма, платформа, новый/повторный клиент и т.д.) — без изменения схемы БД.
  */
 
+import { hasUnit } from "@/lib/addressCheck";
+
 export type SmsConditions = {
   /** Исключать отменённые/возвращённые заказы (по умолчанию ВКЛ, даже если не задано). */
   excludeCancelledRefunded?: boolean;
   /** Требовать оплату (PAID или BNPL-approved). */
   requirePaid?: boolean;
-  /** Указан номер квартиры/юнита. */
+  /** Указан номер квартиры/юнита — не просто район во второй строке адреса (`lib/addressCheck.ts::hasUnit`). */
   apartmentPresent?: boolean;
 };
 
@@ -50,7 +52,7 @@ export function evaluateConditions(conditions: SmsConditions | null | undefined,
     return { ok: false, skipReason: "not_paid" };
   }
 
-  if (c.apartmentPresent && !(ctx.apartment && ctx.apartment.trim().length > 0)) {
+  if (c.apartmentPresent && !hasUnit(ctx.apartment)) {
     return { ok: false, skipReason: "no_apartment" };
   }
 

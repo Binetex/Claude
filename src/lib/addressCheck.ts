@@ -15,6 +15,19 @@ export function deliveryAddressIssue(addressLine: string | null | undefined): Ad
   return /\d/.test(street) ? null : "no_house_number";
 }
 
+/**
+ * Указана ли во второй строке адреса квартира, офис или юнит — а не просто район. Чекаут TheFlow сам
+ * кладёт туда район из автоподстановки адреса («Central LA», «Mar Vista», «Venice»; 15.10.2026,
+ * THEFLOW-21254), и правило «Апартаменты» спрашивало у частного дома, как курьеру войти внутрь.
+ * Квартира — это номер («Central LA apt 7», «1a», «#402», «Room 802») или слово юнита без номера
+ * («Unit B», «Suite A»). Район, «Frnt», «The Roxy» — нет.
+ */
+export function hasUnit(apartment: string | null | undefined): boolean {
+  const s = (apartment ?? "").trim();
+  if (!s) return false;
+  return /[\d#]/.test(s) || /\b(apt|apto|apartments?|unit|suite|ste|room|rm|ph|penthouse|floor|bldg|building)\b/i.test(s);
+}
+
 /** Пометка у адреса в карточке заказа. Пустой адрес карточка и так подписывает «не указан». */
 export function addressWarning(addressLine: string | null | undefined): string | null {
   return deliveryAddressIssue(addressLine) === "no_house_number"

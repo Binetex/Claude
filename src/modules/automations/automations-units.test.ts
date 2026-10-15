@@ -36,6 +36,9 @@ describe("conditions.evaluateConditions", () => {
   it("apartmentPresent требует непустой номер квартиры", () => {
     expect(evaluateConditions({ apartmentPresent: true }, { ...base, apartment: null })).toMatchObject({ ok: false, skipReason: "no_apartment" });
     expect(evaluateConditions({ apartmentPresent: true }, base)).toEqual({ ok: true });
+    // Район во второй строке адреса (чекаут TheFlow) — не квартира: вопрос «как войти внутрь» дому не шлём.
+    expect(evaluateConditions({ apartmentPresent: true }, { ...base, apartment: "Central LA" })).toMatchObject({ ok: false, skipReason: "no_apartment" });
+    expect(evaluateConditions({ apartmentPresent: true }, { ...base, apartment: "Central LA apt 7" })).toEqual({ ok: true });
   });
 });
 
