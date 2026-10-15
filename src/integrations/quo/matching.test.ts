@@ -106,6 +106,28 @@ describe("matchCommunicationToOrder", () => {
     expect(matchCommunicationToOrder(CUST, now, cands)).toEqual({ matched: false, reason: "ambiguous" });
   });
 
+  it("ничья двух заказов на один день → к тому, по которому мы писали последними (THEFLOW-21254)", () => {
+    // Один номер: заказ, где он и заказчик, и получатель, и второй заказ того же человека на тот же день.
+    const cands: CommOrderCandidate[] = [
+      { orderId: "21254", senderPhoneE164: CUST, recipientPhoneE164: CUST, deliveryDate: day("2026-10-15"), orderStatus: "FLORIST_ACCEPTED" },
+      { orderId: "21256", senderPhoneE164: CUST, recipientPhoneE164: RECIP, deliveryDate: day("2026-10-15"), orderStatus: "FLORIST_ACCEPTED" },
+    ];
+    const at = new Date("2026-10-15T19:01:33Z");
+    expect(matchCommunicationToOrder(CUST, at, cands)).toEqual({ matched: false, reason: "ambiguous" });
+    expect(matchCommunicationToOrder(CUST, at, cands, "21254")).toEqual({ matched: true, orderId: "21254", partyRole: "CUSTOMER" });
+    // Последнее исходящее — по заказу не из ничьей: решать нечем, как и было.
+    expect(matchCommunicationToOrder(CUST, at, cands, "other")).toEqual({ matched: false, reason: "ambiguous" });
+  });
+
+  it("последнее исходящее не перебивает явного победителя по дате", () => {
+    const now = new Date("2026-07-20T10:00:00Z");
+    const cands: CommOrderCandidate[] = [
+      { orderId: "today", senderPhoneE164: CUST, recipientPhoneE164: null, deliveryDate: day("2026-07-20"), orderStatus: "CONFIRMED" },
+      { orderId: "next-week", senderPhoneE164: CUST, recipientPhoneE164: null, deliveryDate: day("2026-07-27"), orderStatus: "CONFIRMED" },
+    ];
+    expect(matchCommunicationToOrder(CUST, now, cands, "next-week")).toEqual({ matched: true, orderId: "today", partyRole: "CUSTOMER" });
+  });
+
   it("телефон совпал и как покупатель, и как получатель в одном заказе → CUSTOMER приоритетнее", () => {
     const cands: CommOrderCandidate[] = [{ orderId: "o1", senderPhoneE164: CUST, recipientPhoneE164: CUST, deliveryDate: day("2026-07-20"), orderStatus: "CONFIRMED" }];
     expect(matchCommunicationToOrder(CUST, new Date("2026-07-20T10:00:00Z"), cands)).toEqual({ matched: true, orderId: "o1", partyRole: "CUSTOMER" });

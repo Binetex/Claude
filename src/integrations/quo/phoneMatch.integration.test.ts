@@ -31,7 +31,7 @@ function orderData(siteId: string, n: string, phones: { sender: string; recipien
 }
 
 afterAll(async () => {
-  await prisma.orderCommunication.deleteMany({ where: { externalPhoneNormalized: { in: ["+19495550123", "+19495550456"] }, sendKey: null, providerEventId: { startsWith: `EV-${suffix}` } } });
+  await prisma.orderCommunication.deleteMany({ where: { externalPhoneNormalized: { in: ["+19495550123", "+19495550456", "+19495550789"] }, sendKey: null, providerEventId: { startsWith: `EV-${suffix}` } } });
   await prisma.order.deleteMany({ where: { siteId: { in: siteIds } } });
   await prisma.site.deleteMany({ where: { id: { in: siteIds } } });
 });
@@ -66,5 +66,24 @@ describe("заказ по номеру собеседника", () => {
     const own = await prisma.order.create({ data: orderData(theflow.id, "own", { sender: "9495550456", recipient: "+13105559999" }) as Prisma.OrderUncheckedCreateInput });
     await reprocessUnlinkedCommunications(prisma, { limit: 50 });
     expect(await prisma.orderCommunication.findUnique({ where: { id: comm.id } })).toMatchObject({ orderId: own.id, partyRole: "CUSTOMER" });
+  });
+
+  it("два заказа на один номер и один день — ответ к тому, из которого мы писали последними (THEFLOW-21254)", async () => {
+    const s = await site("PMN", `PN-N-${suffix}`);
+    const day = new Date(Date.UTC(2031, 9, 15));
+    const a = await prisma.order.create({ data: { ...orderData(s.id, "n-a", { sender: "9495550789", recipient: "9495550789" }), deliveryDate: day } as Prisma.OrderUncheckedCreateInput });
+    const b = await prisma.order.create({ data: { ...orderData(s.id, "n-b", { sender: "9495550789", recipient: "+13105559999" }), deliveryDate: day } as Prisma.OrderUncheckedCreateInput });
+    const msg = (n: string, direction: "INBOUND" | "OUTBOUND", at: Date, orderId: string | null) => ({
+      orderId, provider: "QUO", providerEventId: `EV-${suffix}-${n}`, providerPhoneNumberId: `PN-N-${suffix}`, type: "SMS" as const, direction,
+      status: direction === "INBOUND" ? ("RECEIVED" as const) : ("DELIVERED" as const),
+      externalPhone: "+19495550789", externalPhoneNormalized: "+19495550789", messageText: n, occurredAt: at,
+    });
+    // Сначала писали по B, потом владелец написал из карточки A — клиент ответил через 13 секунд.
+    await prisma.orderCommunication.create({ data: msg("out-b", "OUTBOUND", new Date(Date.UTC(2031, 9, 15, 18, 26)), b.id) });
+    await prisma.orderCommunication.create({ data: msg("out-a", "OUTBOUND", new Date(Date.UTC(2031, 9, 15, 19, 1, 20)), a.id) });
+    const reply = await prisma.orderCommunication.create({ data: msg("in", "INBOUND", new Date(Date.UTC(2031, 9, 15, 19, 1, 33)), null) });
+
+    await reprocessUnlinkedCommunications(prisma, { limit: 50 });
+    expect((await prisma.orderCommunication.findUnique({ where: { id: reply.id } }))?.orderId).toBe(a.id);
   });
 });

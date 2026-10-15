@@ -52,7 +52,13 @@ function roleFor(c: CommOrderCandidate, phoneE164: string): "CUSTOMER" | "RECIPI
 export function matchCommunicationToOrder(
   externalPhoneE164: string,
   occurredAt: Date,
-  candidates: CommOrderCandidate[]
+  candidates: CommOrderCandidate[],
+  /**
+   * Заказ, по которому мы ПОСЛЕДНИМИ писали этому номеру. Решает только ничью: на одном номере два
+   * заказа на один день (THEFLOW-21254 и -21256, 15.10.2026) — владелец пишет из карточки одного,
+   * клиент через 13 секунд отвечает, и ответ уходил в «незнакомые номера», а ИИ отвечал вслепую.
+   */
+  lastOutboundOrderId: string | null = null
 ): MatchResult {
   // Только заказы, где телефон реально совпал с одной из ролей.
   const withRole = candidates
@@ -76,8 +82,11 @@ export function matchCommunicationToOrder(
     .map((x) => ({ ...x, dist: Math.abs(x.c.deliveryDate.getTime() - occurredAt.getTime()) }))
     .sort((a, b) => a.dist - b.dist);
 
-  // 4) Неоднозначность: два кандидата одинаково близки → не привязываем автоматически.
+  // 4) Неоднозначность: два кандидата одинаково близки. Ответ на наше сообщение — к тому заказу,
+  // по которому мы писали последними; иначе не привязываем автоматически.
   if (scored.length > 1 && scored[0].dist === scored[1].dist) {
+    const last = scored.find((x) => x.dist === scored[0].dist && x.c.orderId === lastOutboundOrderId);
+    if (last) return { matched: true, orderId: last.c.orderId, partyRole: last.role };
     return { matched: false, reason: "ambiguous" };
   }
   return { matched: true, orderId: scored[0].c.orderId, partyRole: scored[0].role };

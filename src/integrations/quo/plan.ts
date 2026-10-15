@@ -6,8 +6,7 @@ import "server-only";
  */
 import type { PrismaClient } from "@/generated/prisma/client";
 import { toE164 } from "@/lib/phone";
-import { findCandidateOrdersByPhone } from "./ingest";
-import { matchCommunicationToOrder } from "./matching";
+import { findCandidateOrdersByPhone, matchToOrder } from "./ingest";
 import type { NormalizedQuoEvent } from "./types";
 
 export type PlanOutcome = { outcome: "created" | "updated" | "duplicate" | "skipped"; linked: boolean };
@@ -27,7 +26,7 @@ export async function planQuoEvent(prisma: PrismaClient, event: NormalizedQuoEve
   let linked = false;
   if (e164) {
     const candidates = await findCandidateOrdersByPhone(prisma, e164);
-    linked = matchCommunicationToOrder(e164, new Date(event.occurredAt), candidates).matched;
+    linked = (await matchToOrder(prisma, e164, new Date(event.occurredAt), candidates)).matched;
   }
   return { outcome: "created", linked };
 }

@@ -19,8 +19,7 @@ import "server-only";
  */
 import type { PrismaClient } from "@/generated/prisma/client";
 import { toE164 } from "@/lib/phone";
-import { findCandidateOrdersByPhone } from "./ingest";
-import { matchCommunicationToOrder } from "./matching";
+import { findCandidateOrdersByPhone, matchToOrder } from "./ingest";
 
 /** Сколько сирот максимум разбираем за один заказ — защита от неожиданно большой выборки. */
 const MAX_ORPHANS_PER_ORDER = 50;
@@ -71,7 +70,7 @@ export async function adoptOrphanCommunicationsForNewOrder(
       const candidates = candidatesByPhone.get(e164);
       if (!candidates?.length) continue;
 
-      const m = matchCommunicationToOrder(e164, o.occurredAt ?? o.createdAt, candidates);
+      const m = await matchToOrder(prisma, e164, o.occurredAt ?? o.createdAt, candidates);
       if (!m.matched) continue; // ambiguous/no_candidate — оставляем в «Нераспознанных», как и было
 
       // Условие orderId=null — защита от гонки: если событие успели привязать вручную, не перебиваем.

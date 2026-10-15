@@ -11,7 +11,7 @@ import "server-only";
  * Доступ к этим операциям — на уровне вызывающих server actions (любой аутентифицированный).
  */
 import type { PrismaClient, Prisma } from "@/generated/prisma/client";
-import { findCandidateOrdersByPhone, resolveQuoSiteByPhoneNumberId } from "./ingest";
+import { findCandidateOrdersByPhone, matchToOrder, resolveQuoSiteByPhoneNumberId } from "./ingest";
 import { classifyThread, isTopicKey, type TopicKey } from "./otherMessages";
 import { isCallRequest } from "@/modules/assistant/policy";
 import { toE164 } from "@/lib/phone";
@@ -59,7 +59,6 @@ export async function attachUnlinkedCommunicationsToOrder(prisma: PrismaClient, 
   });
   return { attached: r.count };
 }
-import { matchCommunicationToOrder } from "./matching";
 import { computeIndicators, type OrderIndicator } from "./communicationsView";
 
 export type CommAttachment = { url: string; type: string | null };
@@ -502,7 +501,7 @@ export async function suggestOrdersForCommunication(prisma: PrismaClient, commun
   const numbers = await prisma.order.findMany({ where: { id: { in: candidates.map((c) => c.orderId) } }, select: { id: true, orderNumber: true, deliveryDate: true } });
   const numById = new Map(numbers.map((n) => [n.id, n]));
   // Лучший — вперёд (по matcher'у), остальные по близости даты доставки.
-  const best = matchCommunicationToOrder(comm.externalPhoneNormalized, comm.occurredAt, candidates);
+  const best = await matchToOrder(prisma, comm.externalPhoneNormalized, comm.occurredAt, candidates);
   const bestId = best.matched ? best.orderId : null;
   return candidates
     .map((c) => ({ orderId: c.orderId, orderNumber: numById.get(c.orderId)?.orderNumber ?? c.orderId, deliveryDate: numById.get(c.orderId)?.deliveryDate ?? new Date(0), role: (c.senderPhoneE164 === comm.externalPhoneNormalized ? "CUSTOMER" : "RECIPIENT") as "CUSTOMER" | "RECIPIENT" }))
@@ -538,7 +537,7 @@ export async function reprocessUnlinkedCommunications(prisma: PrismaClient, opts
       siteId = known;
     }
     const candidates = await findCandidateOrdersByPhone(prisma, c.externalPhoneNormalized, siteId);
-    const m = matchCommunicationToOrder(c.externalPhoneNormalized, c.occurredAt, candidates);
+    const m = await matchToOrder(prisma, c.externalPhoneNormalized, c.occurredAt, candidates);
     if (m.matched) {
       await prisma.orderCommunication.update({ where: { id: c.id }, data: { orderId: m.orderId, ...(c.partyRole === "UNKNOWN" ? { partyRole: m.partyRole } : {}) } });
       linked++;
