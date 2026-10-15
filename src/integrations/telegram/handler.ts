@@ -151,6 +151,8 @@ export function buildTelegramNotifyHandler(prisma: PrismaClient): OutboxHandler 
       const edited = existing.isPhoto
         ? await sender.editMessageCaption(existing.chatId, existing.messageId, text, buttons)
         : await sender.editMessage(existing.chatId, existing.messageId, text, buttons);
+      // Сообщение лежит в старой группе, ставшей супергруппой: номер — боту, само сообщение — заново.
+      if (existing.chatId === bot.chatId) await followChatMigration(prisma, bot, edited);
       if (edited.ok) {
         await prisma.telegramMessage.update({ where: { dedupeKey }, data: { lastText: text, eventType: p.type } });
         return;
@@ -167,8 +169,7 @@ export function buildTelegramNotifyHandler(prisma: PrismaClient): OutboxHandler 
     if (wantAlbum) {
       await sendAlbumOnce(prisma, sender, {
         dedupeKey,
-        chatId: bot.chatId,
-        botId: bot.id,
+        bot,
         audience: def.audience,
         orderId: order.id,
         eventType: p.type,
@@ -179,10 +180,12 @@ export function buildTelegramNotifyHandler(prisma: PrismaClient): OutboxHandler 
     // Пытаемся отправить с фото; если фото не отправилось (битый URL, недоступно) — откатываемся
     // на текст, чтобы уведомление всё равно дошло. Временный сбой — на повтор через outbox.
     let sent = wantPhoto ? await sender.sendPhoto(bot.chatId, order.imageUrl!, text, buttons) : await sender.sendMessage(bot.chatId, text, buttons);
+    await followChatMigration(prisma, bot, sent);
     let isPhoto = wantPhoto && sent.ok;
     if (wantPhoto && !sent.ok && !sent.retryable) {
       console.warn(`[telegram] фото для заказа ${order.id} не отправлено (${sent.code}) — отправляю текстом`);
       sent = await sender.sendMessage(bot.chatId, text, buttons);
+      await followChatMigration(prisma, bot, sent);
       isPhoto = false;
     }
     // Отказ Telegram в самой карточке (разметка, кнопка — 15.10.2026 так молча пропала карточка
@@ -192,6 +195,7 @@ export function buildTelegramNotifyHandler(prisma: PrismaClient): OutboxHandler 
       const first = sent;
       console.warn(`[telegram] ${p.type} по заказу ${order.id} не принят (${first.code}: ${first.reason ?? "—"}) — отправляю простым текстом`);
       sent = await sender.sendPlain(bot.chatId, text, buttons);
+      await followChatMigration(prisma, bot, sent);
       isPhoto = false;
       if (!sent.ok && !sent.retryable) {
         console.error(`[telegram] send ${p.type} order ${order.id} не удалось: ${sent.code}: ${sent.reason ?? "—"}`);
@@ -220,6 +224,19 @@ export function buildTelegramNotifyHandler(prisma: PrismaClient): OutboxHandler 
       update: { chatId: bot.chatId, messageId: sent.messageId, botId: bot.id, lastText: text, eventType: p.type, isPhoto },
     });
   };
+}
+
+/**
+ * Группа бота стала супергруппой (Telegram делает это сам, например когда в группе открывают историю
+ * новым участникам) — у чата новый номер. Отправитель уже повторил отправку туда; здесь номер
+ * запоминается у бота, иначе каждое следующее сообщение начиналось бы с отказа. 15.10.2026 так
+ * молча пропали карточки Арины по JF-1001447 и JF-1001448: Floremart писал на старый номер.
+ */
+async function followChatMigration(prisma: PrismaClient, bot: ResolvedBot, r: { migratedTo?: string }): Promise<void> {
+  if (!r.migratedTo || r.migratedTo === bot.chatId) return;
+  await prisma.telegramBot.update({ where: { id: bot.id }, data: { chatId: r.migratedTo } });
+  console.warn(`[telegram] чат бота «${bot.label}» стал супергруппой — Chat ID обновлён`);
+  bot.chatId = r.migratedTo;
 }
 
 /**
@@ -269,8 +286,7 @@ async function sendAlbumOnce(
   sender: TelegramSender,
   args: {
     dedupeKey: string;
-    chatId: string;
-    botId: string;
+    bot: ResolvedBot;
     audience: TelegramAudience;
     orderId: string;
     eventType: string;
@@ -281,7 +297,8 @@ async function sendAlbumOnce(
   const already = await prisma.telegramMessage.findUnique({ where: { dedupeKey: albumKey }, select: { id: true } });
   if (already) return;
 
-  const sent = await sender.sendMediaGroup(args.chatId, args.photos);
+  const sent = await sender.sendMediaGroup(args.bot.chatId, args.photos);
+  await followChatMigration(prisma, args.bot, sent);
   if (!sent.ok) {
     console.warn(`[telegram] альбом позиций заказа ${args.orderId} не отправлен: ${sent.code}: ${sent.reason ?? "—"}`);
     return;
@@ -292,9 +309,9 @@ async function sendAlbumOnce(
       data: {
         dedupeKey: albumKey,
         audience: args.audience,
-        chatId: args.chatId,
+        chatId: args.bot.chatId,
         messageId: sent.messageId, // id первого сообщения группы
-        botId: args.botId,
+        botId: args.bot.id,
         orderId: args.orderId,
         eventType: args.eventType,
         isPhoto: true,

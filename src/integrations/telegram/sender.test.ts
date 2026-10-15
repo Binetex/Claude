@@ -145,3 +145,22 @@ describe("отказ Telegram и запасной простой текст (15.
     expect(htmlToPlain("<b>A &lt;B&gt; &amp; C</b>")).toBe("A <B> & C");
   });
 });
+
+describe("группа стала супергруппой (15.10.2026, бот Арины)", () => {
+  it("отправка сама уходит на новый Chat ID и сообщает его", async () => {
+    fetchMock
+      .mockResolvedValueOnce(reply({ ok: false, error_code: 400, description: "Bad Request: group chat was upgraded to a supergroup chat", parameters: { migrate_to_chat_id: -1003001234567 } }, 400))
+      .mockResolvedValueOnce(reply({ ok: true, result: { message_id: 42 } }));
+    const r = await new TelegramSender("t").sendMessage("-4001234567", "hi");
+    expect(r).toEqual({ ok: true, messageId: "42", migratedTo: "-1003001234567" });
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body).chat_id).toBe("-1003001234567");
+  });
+
+  it("правка сообщения из старой группы — нужно новое сообщение, номер сообщается", async () => {
+    fetchMock
+      .mockResolvedValueOnce(reply({ ok: false, error_code: 400, description: "Bad Request: group chat was upgraded to a supergroup chat", parameters: { migrate_to_chat_id: -1003001234567 } }, 400))
+      .mockResolvedValueOnce(reply({ ok: false, error_code: 400, description: "Bad Request: message to edit not found" }, 400));
+    const r = await new TelegramSender("t").editMessage("-4001234567", "5", "hi");
+    expect(r).toEqual({ ok: false, needsResend: true, migratedTo: "-1003001234567" });
+  });
+});

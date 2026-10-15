@@ -26,15 +26,20 @@ export const CAPTION_LIMIT = 1024;
  */
 export type TelegramButton = { text: string; url: string } | { text: string; callbackData: string };
 
+/**
+ * `migratedTo` — группа стала супергруппой, и Telegram сообщил её новый Chat ID; отправка уже
+ * повторена туда. Вызывающий обязан сохранить новый номер у бота, иначе каждая следующая отправка
+ * начиналась бы с отказа (15.10.2026: так молча пропали карточки Арины).
+ */
 export type SendResult =
-  | { ok: true; messageId: string }
+  | { ok: true; messageId: string; migratedTo?: string }
   /** `reason` — текст отказа от самого Telegram («Bad Request: …»): без него «telegram_400» ничего не объясняет. */
-  | { ok: false; retryable: boolean; code: string; reason?: string };
+  | { ok: false; retryable: boolean; code: string; reason?: string; migratedTo?: string };
 
 export type EditResult =
-  | { ok: true }
-  | { ok: false; needsResend: true }
-  | { ok: false; needsResend?: false; retryable: boolean; code: string };
+  | { ok: true; migratedTo?: string }
+  | { ok: false; needsResend: true; migratedTo?: string }
+  | { ok: false; needsResend?: false; retryable: boolean; code: string; migratedTo?: string };
 
 type ApiMessage = { message_id?: number | string };
 
@@ -44,7 +49,8 @@ type ApiResponse = {
   result?: ApiMessage | ApiMessage[];
   error_code?: number;
   description?: string;
-  parameters?: { retry_after?: number };
+  /** migrate_to_chat_id — группа стала супергруппой; писать теперь сюда. */
+  parameters?: { retry_after?: number; migrate_to_chat_id?: number };
 };
 
 /** Сколько фото Telegram принимает в одном альбоме. */
@@ -101,11 +107,20 @@ export class TelegramSender {
   }
 
   private async callWithRetry(method: string, body: Record<string, unknown>) {
-    let last: Awaited<ReturnType<TelegramSender["call"]>> | null = null;
+    let last: (Awaited<ReturnType<TelegramSender["call"]>> & { migratedTo?: string }) | null = null;
+    let migratedTo: string | undefined;
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-      last = await this.call(method, body);
+      last = { ...(await this.call(method, body)), migratedTo };
       const { res, status, networkError } = last;
       if (res?.ok) return last;
+      // Группа стала супергруппой: старый Chat ID больше не принимает сообщения, новый — в ответе.
+      // Один раз переходим туда сами; сохранить номер — дело вызывающего (`migratedTo`).
+      const next = res?.parameters?.migrate_to_chat_id;
+      if (next != null && !migratedTo && body.chat_id != null) {
+        migratedTo = String(next);
+        body = { ...body, chat_id: migratedTo };
+        continue;
+      }
       if (status === 429) {
         const wait = Math.min(res?.parameters?.retry_after ?? 1, 30);
         if (attempt < MAX_ATTEMPTS) { await sleep(wait * 1000); continue; }
@@ -119,22 +134,26 @@ export class TelegramSender {
   private toSend(r: Awaited<ReturnType<TelegramSender["callWithRetry"]>>): SendResult {
     const { res, status, networkError } = r;
     const id = firstMessageId(res?.result);
-    if (res?.ok && id != null) return { ok: true, messageId: id };
+    const moved = r.migratedTo ? { migratedTo: r.migratedTo } : {};
+    if (res?.ok && id != null) return { ok: true, messageId: id, ...moved };
     return {
       ok: false,
       retryable: !!networkError || status === 429 || status >= 500,
       code: safeCode(res, status, networkError),
       ...(res?.description ? { reason: res.description.slice(0, 200) } : {}),
+      ...moved,
     };
   }
 
   private toEdit(r: Awaited<ReturnType<TelegramSender["callWithRetry"]>>): EditResult {
     const { res, status, networkError } = r;
-    if (res?.ok) return { ok: true };
+    const moved = r.migratedTo ? { migratedTo: r.migratedTo } : {};
+    if (res?.ok) return { ok: true, ...moved };
     const desc = (res?.description ?? "").toLowerCase();
-    if (desc.includes(NOT_MODIFIED)) return { ok: true };
-    if (UNEDITABLE.some((m) => desc.includes(m.toLowerCase()))) return { ok: false, needsResend: true };
-    return { ok: false, retryable: !!networkError || status === 429 || status >= 500, code: safeCode(res, status, networkError) };
+    if (desc.includes(NOT_MODIFIED)) return { ok: true, ...moved };
+    // Сообщение осталось в старой группе — править нечего, нужно новое уже в супергруппе.
+    if (r.migratedTo || UNEDITABLE.some((m) => desc.includes(m.toLowerCase()))) return { ok: false, needsResend: true, ...moved };
+    return { ok: false, retryable: !!networkError || status === 429 || status >= 500, code: safeCode(res, status, networkError), ...moved };
   }
 
   /**

@@ -181,6 +181,23 @@ describe("Telegram отказал в карточке — флорист всё 
   });
 });
 
+describe("группа флориста стала супергруппой — номер чата обновляется сам (15.10.2026, Арина)", () => {
+  it("карточка уходит в новый чат, у бота сохраняется новый Chat ID", async () => {
+    const site = await makeSite();
+    const f = await makeFlorist("Арина-супергруппа", { chatId: "-4005550001" });
+    const order = await makeOrder(site.id);
+    fetchMock
+      .mockResolvedValueOnce(reply({ ok: false, error_code: 400, description: "Bad Request: group chat was upgraded to a supergroup chat", parameters: { migrate_to_chat_id: -1005550001 } }, 400))
+      .mockResolvedValueOnce(okSend(911));
+
+    await handler(rec({ type: "order.assigned", orderId: order.id, floristId: f.id, context: {} }));
+
+    expect(bodyOfCall(1).chat_id).toBe("-1005550001");
+    expect((await prisma.telegramBot.findUnique({ where: { floristId: f.id } }))!.chatId).toBe("-1005550001");
+    expect((await tgMessages(order.id)).find((r) => r.dedupeKey.includes(f.id))).toMatchObject({ chatId: "-1005550001", messageId: "911" });
+  });
+});
+
 describe("персональные боты флористов", () => {
   it("назначение → сообщение ботом ЭТОГО флориста в ЕГО чат", async () => {
     const site = await makeSite();
