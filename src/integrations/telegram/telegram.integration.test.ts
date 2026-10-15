@@ -138,6 +138,49 @@ afterAll(async () => {
   await prisma.$disconnect();
 });
 
+describe("Telegram отказал в карточке — флорист всё равно узнаёт о заказе (15.10.2026, JF-1001447)", () => {
+  const fail = (description: string) => reply({ ok: false, error_code: 400, description }, 400);
+
+  it("альбом и карточка отвергнуты — уходит простой текст со ссылками, сообщение записано", async () => {
+    const site = await makeSite();
+    const arina = await makeFlorist("Арина-фолбэк", { chatId: "301" });
+    const order = await makeOrder(site.id, ["https://cdn.example/a.jpg", "https://cdn.example/b.jpg"]);
+    fetchMock
+      .mockResolvedValueOnce(fail("Bad Request: wrong file identifier/HTTP URL specified")) // альбом
+      .mockResolvedValueOnce(fail("Bad Request: can't parse entities")) // карточка
+      .mockResolvedValueOnce(okSend(901)); // простой текст
+
+    await handler(rec({ type: "order.assigned", orderId: order.id, floristId: arina.id, context: { floristName: "Арина" } }));
+
+    const plain = bodyOfCall(2);
+    expect(plain.parse_mode).toBeUndefined();
+    expect(plain.reply_markup).toBeUndefined();
+    expect(plain.text).toContain(order.orderNumber);
+    expect(plain.text).toContain("Open Order: https://");
+    const rows = await tgMessages(order.id);
+    expect(rows.find((r) => r.dedupeKey === `order:${order.id}:florist:${arina.id}`)).toMatchObject({ messageId: "901", isPhoto: false });
+  });
+
+  it("не дошёл и простой текст — владельцу сигнал с причиной от Telegram", async () => {
+    await makeOwnerBot();
+    const site = await makeSite();
+    const f = await makeFlorist("Флорист-немой", { chatId: "302" });
+    const order = await makeOrder(site.id);
+    fetchMock
+      .mockResolvedValueOnce(fail("Bad Request: not enough rights")) // фото
+      .mockResolvedValueOnce(fail("Bad Request: not enough rights")) // текст
+      .mockResolvedValueOnce(fail("Bad Request: not enough rights to send text messages to the chat")) // простой текст
+      .mockResolvedValueOnce(okSend(902)); // сигнал владельцу
+
+    await handler(rec({ type: "order.assigned", orderId: order.id, floristId: f.id, context: {} }));
+
+    expect(tokenOfCall(3)).toBe("token-owner");
+    expect(bodyOfCall(3).text).toContain("Уведомление не доставлено: order.assigned");
+    expect(bodyOfCall(3).text).toContain("not enough rights to send text messages to the chat");
+    expect((await tgMessages(order.id)).filter((r) => r.dedupeKey.includes(f.id))).toHaveLength(0);
+  });
+});
+
 describe("персональные боты флористов", () => {
   it("назначение → сообщение ботом ЭТОГО флориста в ЕГО чат", async () => {
     const site = await makeSite();

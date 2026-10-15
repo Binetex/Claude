@@ -28,7 +28,8 @@ export type TelegramButton = { text: string; url: string } | { text: string; cal
 
 export type SendResult =
   | { ok: true; messageId: string }
-  | { ok: false; retryable: boolean; code: string };
+  /** `reason` — текст отказа от самого Telegram («Bad Request: …»): без него «telegram_400» ничего не объясняет. */
+  | { ok: false; retryable: boolean; code: string; reason?: string };
 
 export type EditResult =
   | { ok: true }
@@ -119,7 +120,12 @@ export class TelegramSender {
     const { res, status, networkError } = r;
     const id = firstMessageId(res?.result);
     if (res?.ok && id != null) return { ok: true, messageId: id };
-    return { ok: false, retryable: !!networkError || status === 429 || status >= 500, code: safeCode(res, status, networkError) };
+    return {
+      ok: false,
+      retryable: !!networkError || status === 429 || status >= 500,
+      code: safeCode(res, status, networkError),
+      ...(res?.description ? { reason: res.description.slice(0, 200) } : {}),
+    };
   }
 
   private toEdit(r: Awaited<ReturnType<TelegramSender["callWithRetry"]>>): EditResult {
@@ -156,6 +162,17 @@ export class TelegramSender {
     return this.toSend(await this.callWithRetry("sendMessage", {
       chat_id: chatId, text, parse_mode: "HTML", disable_web_page_preview: true, ...keyboard(buttons),
     }));
+  }
+
+  /**
+   * Запасной вариант: тот же текст без HTML-разметки и без кнопок. Telegram отказывает в карточке
+   * целиком из-за одной детали (разметка, кнопка), и флорист оставался без заказа — простой текст
+   * доходит почти всегда. Ссылки кнопок дописываются строками: Telegram сам сделает их кликабельными.
+   */
+  async sendPlain(chatId: string, html: string, buttons?: TelegramButton[]): Promise<SendResult> {
+    const links = (buttons ?? []).flatMap((b) => ("url" in b ? [`${b.text}: ${b.url}`] : []));
+    const text = [htmlToPlain(html), ...links].join("\n").slice(0, 4096);
+    return this.toSend(await this.callWithRetry("sendMessage", { chat_id: chatId, text, disable_web_page_preview: true }));
   }
 
   /** Фото по URL — Telegram сам скачивает картинку. `caption` ограничен CAPTION_LIMIT. */
@@ -202,4 +219,9 @@ function safeCode(res: ApiResponse | null, status: number, networkError?: string
   if (networkError) return `network:${networkError}`;
   if (res?.error_code) return `telegram_${res.error_code}`;
   return `http_${status}`;
+}
+
+/** Разметка Telegram-HTML → простой текст: теги прочь, сущности обратно в символы. */
+export function htmlToPlain(html: string): string {
+  return html.replace(/<[^>]+>/g, "").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&amp;/g, "&");
 }

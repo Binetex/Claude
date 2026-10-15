@@ -185,9 +185,22 @@ export function buildTelegramNotifyHandler(prisma: PrismaClient): OutboxHandler 
       sent = await sender.sendMessage(bot.chatId, text, buttons);
       isPhoto = false;
     }
+    // Отказ Telegram в самой карточке (разметка, кнопка — 15.10.2026 так молча пропала карточка
+    // Арины по JF-1001447, а с августа ещё пять у других) — последняя попытка простым текстом:
+    // флорист обязан узнать о заказе, оформление вторично.
+    if (!sent.ok && !sent.retryable) {
+      const first = sent;
+      console.warn(`[telegram] ${p.type} по заказу ${order.id} не принят (${first.code}: ${first.reason ?? "—"}) — отправляю простым текстом`);
+      sent = await sender.sendPlain(bot.chatId, text, buttons);
+      isPhoto = false;
+      if (!sent.ok && !sent.retryable) {
+        console.error(`[telegram] send ${p.type} order ${order.id} не удалось: ${sent.code}: ${sent.reason ?? "—"}`);
+        await alertOwnerUndelivered(prisma, { type: p.type, orderNumber: order.orderNumber, botLabel: bot.label, reason: sent.reason ?? first.reason ?? sent.code });
+        return;
+      }
+    }
     if (!sent.ok) {
       if (sent.retryable) throw new Error(`telegram_send_transient:${sent.code}`);
-      console.error(`[telegram] send ${p.type} order ${order.id} не удалось: ${sent.code}`);
       return;
     }
 
@@ -207,6 +220,32 @@ export function buildTelegramNotifyHandler(prisma: PrismaClient): OutboxHandler 
       update: { chatId: bot.chatId, messageId: sent.messageId, botId: bot.id, lastText: text, eventType: p.type, isPhoto },
     });
   };
+}
+
+/**
+ * Уведомление не дошло совсем — даже простым текстом. Владелец узнаёт сразу: раньше такая карточка
+ * терялась молча, и флорист просто не знал о заказе. Шлём напрямую ботом владельца (как
+ * dead-letter-сигнал); если не дошло и ему — остаётся строка в логе.
+ */
+async function alertOwnerUndelivered(
+  prisma: PrismaClient,
+  a: { type: string; orderNumber: string; botLabel: string; reason: string }
+): Promise<void> {
+  try {
+    const lookup = await resolveOwnerBot(prisma);
+    if (!("bot" in lookup)) return;
+    const text = [
+      `⚠️ Уведомление не доставлено: ${a.type}`,
+      `Заказ: ${a.orderNumber}`,
+      `Бот: ${a.botLabel}`,
+      `Причина от Telegram: ${a.reason}`,
+      "",
+      "Проверьте чат бота и сообщите о заказе вручную.",
+    ].join("\n");
+    await new TelegramSender(lookup.bot.token).sendPlain(lookup.bot.chatId, text);
+  } catch (err) {
+    console.error(`[telegram] сигнал владельцу о недоставке не ушёл:`, err instanceof Error ? err.message : String(err));
+  }
 }
 
 /**
@@ -244,7 +283,7 @@ async function sendAlbumOnce(
 
   const sent = await sender.sendMediaGroup(args.chatId, args.photos);
   if (!sent.ok) {
-    console.warn(`[telegram] альбом позиций заказа ${args.orderId} не отправлен: ${sent.code}`);
+    console.warn(`[telegram] альбом позиций заказа ${args.orderId} не отправлен: ${sent.code}: ${sent.reason ?? "—"}`);
     return;
   }
 

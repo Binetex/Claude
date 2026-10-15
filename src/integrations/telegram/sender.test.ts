@@ -3,7 +3,7 @@
  * обработки ответов, из-за которого уведомления либо дублируются, либо теряются.
  */
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { TelegramSender } from "./sender";
+import { TelegramSender, htmlToPlain } from "./sender";
 
 const fetchMock = vi.fn();
 vi.stubGlobal("fetch", fetchMock);
@@ -122,5 +122,26 @@ describe("editMessage", () => {
     fetchMock.mockRejectedValue(new Error("boom"));
     const r = await new TelegramSender("t").editMessage("-100", "7", "текст");
     expect(r).toMatchObject({ ok: false, retryable: true });
+  });
+});
+
+describe("отказ Telegram и запасной простой текст (15.10.2026, карточка Арины по JF-1001447)", () => {
+  it("причина отказа от Telegram не теряется — по одному «telegram_400» её не узнать", async () => {
+    fetchMock.mockResolvedValueOnce(reply({ ok: false, error_code: 400, description: "Bad Request: can't parse entities" }, 400));
+    const r = await new TelegramSender("t").sendMessage("1", "<b>x");
+    expect(r).toEqual({ ok: false, retryable: false, code: "telegram_400", reason: "Bad Request: can't parse entities" });
+  });
+
+  it("простой текст: без разметки и кнопок, ссылки кнопок — строками", async () => {
+    fetchMock.mockResolvedValueOnce(reply({ ok: true, result: { message_id: 5 } }));
+    await new TelegramSender("t").sendPlain("1", "🌸 <b>Новый заказ</b> · Roses &amp; Vase", [{ text: "Open Order", url: "https://floremart.com/dashboard/f/1" }]);
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.parse_mode).toBeUndefined();
+    expect(body.reply_markup).toBeUndefined();
+    expect(body.text).toBe("🌸 Новый заказ · Roses & Vase\nOpen Order: https://floremart.com/dashboard/f/1");
+  });
+
+  it("htmlToPlain возвращает символы, которые экранировал шаблон", () => {
+    expect(htmlToPlain("<b>A &lt;B&gt; &amp; C</b>")).toBe("A <B> & C");
   });
 });
